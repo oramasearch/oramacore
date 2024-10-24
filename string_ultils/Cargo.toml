@@ -1,0 +1,8 @@
+[package]
+name = "string_ultils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex = "1.11.0"
+rust-stemmers = "1.2.0"

@@ -1,0 +1,25 @@
+[package]
+name = "string_index"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.90"
+bincode = "1.3.3"
+itertools = "0.13.0"
+ordered-float = "4.4.0"
+rayon = "1.10.0"
+rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
+serde = { version = "1.0.210", features = ["derive"] }
+string_ultils = { path = "../string_ultils" }
+radix_trie = "0.2"
+dashmap = { version = "6.1.0", features = ["rayon"] }
+csv = "1.3.0"
+
+
+[[bin]]
+name = "mybin"
+path = "src/bin/test.rs"
+
+[dev-dependencies]
+csv = "1.3.0"
