@@ -1,0 +1,10 @@
+[package]
+name = "llama_vision"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+linkify = "0.10.0"
+url = "2.5.2"
+serde = "1.0.197"
+log = "0.4.22"

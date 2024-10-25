@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "string_index",
     "string_ultils",
+    "llama_vision",
     # "radix_tree",
 ]
