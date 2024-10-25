@@ -2,20 +2,23 @@ extern crate core;
 use url::{Url};
 use linkify::{LinkFinder, LinkKind};
 
+
 struct LlamaVision {
+    tmp_image_bucket: String,
     domains_allow_list: Vec<String>,
     domains_deny_list: Vec<String>,
 }
 
 impl LlamaVision {
-    pub fn new(domains_allow_list: Vec<String>, domains_deny_list: Vec<String>) -> Result<Self, &'static str> {
-        if domains_deny_list.iter().any(|domain| domains_allow_list.contains(domain)) {
+    pub fn new(params: LlamaVision) -> Result<Self, &'static str> {
+        if params.domains_deny_list.iter().any(|domain| params.domains_allow_list.contains(domain)) {
             return Err("Domain allow and deny lists contain common values");
         }
 
         Ok(LlamaVision {
-            domains_allow_list,
-            domains_deny_list,
+            domains_allow_list: params.domains_allow_list,
+            domains_deny_list: params.domains_deny_list,
+            tmp_image_bucket: params.tmp_image_bucket
         })
     }
 
@@ -69,7 +72,11 @@ mod tests {
             Let's also try with paths and query strings: https://myimage.com/v1/foo/bar.png?foo=hello&world=true
         ";
 
-        let llama_vision = LlamaVision::new(vec![], vec![]).unwrap();
+        let llama_vision = LlamaVision::new(LlamaVision{
+            tmp_image_bucket: "".to_string(),
+            domains_allow_list: vec![],
+            domains_deny_list: vec![],
+        }).unwrap();
 
         let links = llama_vision.get_all_links(text);
 
@@ -81,7 +88,11 @@ mod tests {
     #[test]
     fn test_allow_list() {
         let text = "Here's a series of links: https://github.com/oramasearch/orama, https://orama.com, https://twitter.com/oramasearch.";
-        let llama_vision = LlamaVision::new( vec!["github.com".to_string(), "orama.com".to_string()], vec![]).unwrap();
+        let llama_vision = LlamaVision::new( LlamaVision{
+            tmp_image_bucket: "".to_string(),
+            domains_allow_list: vec!["github.com".to_string(), "orama.com".to_string()],
+            domains_deny_list: vec![]
+        }).unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);
@@ -92,7 +103,11 @@ mod tests {
     #[test]
     fn test_deny_list() {
         let text = "Here's a series of links: https://github.com/oramasearch/orama, https://orama.com, https://twitter.com/oramasearch.";
-        let llama_vision = LlamaVision::new(vec![], vec!["twitter.com".to_string()]).unwrap();
+        let llama_vision = LlamaVision::new(LlamaVision{
+            tmp_image_bucket: "".to_string(),
+            domains_allow_list: vec![],
+            domains_deny_list: vec!["twitter.com".to_string()]
+        }).unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);
