@@ -8,3 +8,6 @@ linkify = "0.10.0"
 url = "2.5.2"
 serde = "1.0.197"
 log = "0.4.22"
+reqwest = "0.12.8"
+tokio = { version = "1.41.0", features = ["full"] }
+tempdir = "0.3.7"
