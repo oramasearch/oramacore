@@ -1,10 +1,10 @@
+use anyhow::Context;
 use linkify::{LinkFinder, LinkKind};
 use mistralrs::{IsqType, TextMessageRole, VisionLoaderType, VisionMessages, VisionModelBuilder};
 use url::Url;
-mod fetcher;
-mod prompts;
+use crate::prompts::{get_prompt, Prompts};
 
-const MODEL_ID: &str = "microsoft/Phi-3.5-vision-instruct";
+const VISION_MODEL_ID: &str = "microsoft/Phi-3.5-vision-instruct";
 
 struct UrlParser {
     domains_allow_list: Vec<String>,
@@ -73,8 +73,48 @@ impl UrlParser {
     }
 }
 
+async fn fetch_image(url: String) -> anyhow::Result<Option<Vec<u8>>> {
+    if !is_image(&url).await? {
+        return Ok(None);
+    }
+
+    let client = reqwest::Client::new();
+
+    let http_resp = client
+        .get(url)
+        .send()
+        .await
+        .context("Failed to send request")?;
+
+    let bytes = http_resp
+        .bytes()
+        .await
+        .context("Failed to get response bytes")?;
+
+    Ok(Some(bytes.to_vec()))
+}
+
+async fn is_image(url: &str) -> anyhow::Result<bool> {
+    let client = reqwest::Client::new();
+    let res = client
+        .head(url)
+        .send()
+        .await
+        .context("Failed to send HEAD request")?;
+
+    let content_type = res
+        .headers()
+        .get("Content-Type")
+        .context("No Content-Type header")?
+        .to_str()
+        .context("Invalid Content-Type header")?;
+
+    Ok(content_type.starts_with("image"))
+}
+
+
 pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyhow::Error> {
-    let model = VisionModelBuilder::new(MODEL_ID, VisionLoaderType::Phi3V)
+    let model = VisionModelBuilder::new(VISION_MODEL_ID, VisionLoaderType::Phi3V)
         .with_isq(IsqType::Q4K)
         .with_logging()
         .build()
@@ -84,18 +124,18 @@ pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyh
         domains_allow_list: vec![],
         domains_deny_list: vec![],
     })
-    .unwrap()
-    .get_all_links(&text);
+        .unwrap()
+        .get_all_links(&text);
 
     let futures: Vec<_> = image_links
         .iter()
         .map(|link| async {
-            match fetcher::fetch_image(link.to_string()).await {
+            match fetch_image(link.to_string()).await {
                 Ok(Some(bytes)) => match image::load_from_memory(&bytes) {
                     Ok(image) => {
                         let messages = VisionMessages::new().add_phiv_image_message(
                             TextMessageRole::User,
-                            prompts::Prompts::get_prompt(prompts::Prompts::ECommerce),
+                            get_prompt(Prompts::VisionECommerce),
                             image,
                         );
                         match model.send_chat_request(messages).await {
@@ -121,32 +161,6 @@ pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyh
         .collect();
 
     Ok(results)
-}
-
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    let example_json: &str = "[\
-        {\
-            \"title\": \"Volcom flame hoodie\",\
-            \"price\": 98.99,\
-            \"image\": \"https://img01.ztat.net/article/spp-media-p1/32ab3d77233b4e92a8939cfae29694e4/c31db6a545cf4e548a9e4f5f38ac9c2a.jpg?imwidth=520\"
-        },\
-        {\
-            \"title\": \"Solar Guitars A2.7 Canibalismo+\",\
-            \"price\": 899.99,\
-            \"image\": \"https://thumbs.static-thomann.de/thumb/padthumb600x600/pics/bdb/_54/544771/19211328_800.jpg\"
-        },\
-        {\
-            \"title\": \"Apple AirPods 4 \",\
-            \"price\": 187.99,\
-            \"image\": \"https://m.media-amazon.com/images/I/61DvMw16ITL.__AC_SY445_SX342_QL70_ML2_.jpg\"
-        },\
-    ]";
-
-    let results = describe_images(example_json.to_string()).await?;
-    dbg!(results);
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -181,7 +195,7 @@ mod tests {
             domains_allow_list: vec!["github.com".to_string(), "orama.com".to_string()],
             ..UrlParserConfig::default()
         })
-        .unwrap();
+            .unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);
@@ -196,7 +210,7 @@ mod tests {
             domains_deny_list: vec!["twitter.com".to_string()],
             ..UrlParserConfig::default()
         })
-        .unwrap();
+            .unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);
