@@ -113,7 +113,7 @@ async fn is_image(url: &str) -> anyhow::Result<bool> {
 }
 
 
-pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyhow::Error> {
+pub async fn describe_images(text: String, domain: Prompts) -> Result<Vec<(String, String)>, anyhow::Error> {
     let model = VisionModelBuilder::new(VISION_MODEL_ID, VisionLoaderType::Phi3V)
         .with_isq(IsqType::Q4K)
         .with_logging()
@@ -127,6 +127,7 @@ pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyh
         .unwrap()
         .get_all_links(&text);
 
+    let domain_ref = &domain;
     let futures: Vec<_> = image_links
         .iter()
         .map(|link| async {
@@ -135,7 +136,7 @@ pub async fn describe_images(text: String) -> Result<Vec<(String, String)>, anyh
                     Ok(image) => {
                         let messages = VisionMessages::new().add_phiv_image_message(
                             TextMessageRole::User,
-                            get_prompt(Prompts::VisionECommerce),
+                            get_prompt(domain_ref.clone()),
                             image,
                         );
                         match model.send_chat_request(messages).await {
