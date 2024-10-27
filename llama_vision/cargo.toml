@@ -3,11 +3,20 @@ name = "llama_vision"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "llama_vision"
+path = "src/lib.rs"
+
 [dependencies]
 linkify = "0.10.0"
+anyhow = "1.0.91"
 url = "2.5.2"
 serde = "1.0.197"
 log = "0.4.22"
 reqwest = "0.12.8"
 tokio = { version = "1.41.0", features = ["full"] }
 tempdir = "0.3.7"
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git" }
+image = "0.25.4"
+textwrap = "0.16.1"
+futures-util = "0.3.31"
