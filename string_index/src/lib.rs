@@ -307,10 +307,15 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<(DocumentId, f32)> {
 
 #[cfg(test)]
 mod tests {
+    use tempdir::TempDir;
+
     use crate::{DocumentId, FieldId, StringIndex};
 
     #[test]
     fn test_foo() {
+        let tmp_dir = TempDir::new("string_index_test").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
         let batch = vec![
             (
                 DocumentId(1),
@@ -326,7 +331,7 @@ mod tests {
             ),
         ];
 
-        let mut string_index = StringIndex::new(".".to_owned());
+        let mut string_index = StringIndex::new(tmp_dir);
         string_index.insert_multiple(FieldId(0), batch).unwrap();
 
         let output = string_index.search("welcome", 10, 1.0).unwrap();
