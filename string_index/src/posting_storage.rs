@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{fmt::Debug, sync::atomic::{AtomicUsize, Ordering}};
 
 use anyhow::Result;
-use rocksdb::DB;
+use rocksdb::{DBCommon, MultiThreaded, OptimisticTransactionDB, TransactionDB, DB};
 
 use crate::Posting;
 
@@ -9,16 +9,42 @@ use crate::Posting;
 pub struct PostingListId(usize);
 
 pub struct PostingStorage {
-    db: DB,
+    db: OptimisticTransactionDB::<MultiThreaded>,
     id_generator_counter: AtomicUsize,
+    rl: std::sync::RwLock<()>,
+}
+impl Debug for PostingStorage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output: Vec<_> = self.db.iterator(rocksdb::IteratorMode::Start)
+            .flat_map(|r| {
+                let (key, value) = r.expect("Error on iterator");
+
+                let posting_list_id = PostingListId(usize::from_be_bytes([
+                    key[0], key[1], key[2], key[3],
+                    key[4], key[5], key[6], key[7],
+                ]));
+
+                let value = unserialize(&value)
+                    .expect("Error on deserialize Vec<Posting>");
+
+                Some((posting_list_id, value))
+            })
+            .collect();
+
+        f.debug_struct("PostingStorage")
+            .field("id_generator_counter", &self.id_generator_counter)
+            .field("db_dump", &output)
+            .finish()
+    }
 }
 
 impl PostingStorage {
     pub fn new(base_path: String) -> Result<Self> {
-        let db = DB::open_default(base_path)?;
+        let db = OptimisticTransactionDB::<MultiThreaded>::open_default(base_path)?;
         Ok(PostingStorage {
             db,
             id_generator_counter: AtomicUsize::new(0),
+            rl: std::sync::RwLock::new(()),
         })
     }
 
@@ -52,20 +78,28 @@ impl PostingStorage {
         posting_list_id: PostingListId,
         postings: Vec<Vec<Posting>>,
     ) -> Result<()> {
+        let l = self.rl.write().unwrap();
+
         let key = posting_list_id.0.to_be_bytes();
-        let output = self.db.get_pinned(key)
-            .expect("Error on fetching posting_list_id");
-        match output {
+
+        let transaction = self.db.transaction();
+        match transaction.get_pinned(key)
+            .expect("Error on fetching posting_list_id") {
             None => {
-                let value = serialize(&postings.into_iter().flatten().collect())?;
-                self.db.put(key, value)?;
+                let value = serialize(&postings.clone().into_iter().flatten().collect()).unwrap();
+                transaction.put(key, value).unwrap();
             },
             Some(data) => {
-                let mut deserialized = unserialize(&data)?;
-                deserialized.extend(postings.into_iter().flatten());
-                let value = serialize(&deserialized)?;
-                self.db.put(key, value)?;
+                let mut deserialized = unserialize(&data).unwrap();
+                deserialized.extend(postings.clone().into_iter().flatten());
+                let value = serialize(&deserialized).unwrap();
+                transaction.put(key, value).unwrap();
             }
+        }
+
+        if let Err(e) = transaction.commit() {
+            println!("{:?}, kind: {:?}", e, e.kind());
+            return self.add_or_create(posting_list_id, postings);
         }
 
         Ok(())

@@ -1,22 +1,49 @@
+use atom_box::{
+    domain::{Domain, ReclaimStrategy},
+    AtomBox,
+};
 use smallvec::SmallVec;
-
+use std::sync::atomic::AtomicBool;
 
 struct EncodedKey(SmallVec<[u8; 64]>);
 
-struct Node<K, V> {
+const CUSTOM_DOMAIN_ID: usize = 42;
+static CUSTOM_DOMAIN: Domain<CUSTOM_DOMAIN_ID> = Domain::new(ReclaimStrategy::Eager);
+
+struct Node<'a, K, V> {
     key: EncodedKey,
-    key_value: Option<Box<(K, V)>>,
-    children: [Option<Box<Node<K, V>>>; 16],
+    key_value: Option<AtomBox<'a, i32, CUSTOM_DOMAIN_ID>>,
+    children: [Option<Box<Node<'a, K, V>>>; 16],
 }
 
-impl<K: AsKey, V> Node<K, V> {
+impl<'a, K: AsKey, V> Node<'a, K, V> {
+    fn new() -> Self {
+        let b = AtomBox::new_with_domain(5, &CUSTOM_DOMAIN);
+        Self {
+            v: b,
+            key: EncodedKey(SmallVec::new()),
+            key_value: None,
+            children: Default::default(),
+        }
+    }
+
     fn insert(&self, encoded_key: EncodedKey, key: K, value: V) {
         iterative_insert(self, encoded_key, key, value);
     }
+
+    fn replace_value(&self, key: K, value: V) {
+        self.key_value = Some(Box::new((key, value)));
+    }
 }
 
-fn iterative_insert<K: AsKey, V>(root: &Node<K, V>, encoded_key: EncodedKey, key: K, value: V) {
+fn iterative_insert<'a, K: AsKey, V>(
+    root: &Node<'a, K, V>,
+    encoded_key: EncodedKey,
+    key: K,
+    value: V,
+) {
     if encoded_key.0.len() == 0 {
+        // TODO: decide what to do here
         panic!("Key is empty");
     }
 
@@ -52,23 +79,20 @@ fn iterative_insert<K: AsKey, V>(root: &Node<K, V>, encoded_key: EncodedKey, key
                     return None;
                 }
                 EncodedKeyMatch::SecondPrefix => {
-                    depth += child.key.len();
+                    depth += child.key.0.len();
                     prev = child;
                 }
             }
         } else {
             let node_key = encoded_key.0.split_at(depth);
-            current.add_child(
-                bucket,
-                Box::new(Node::with_key_value(node_key, key, value)),
-            );
+            current.add_child(bucket, Box::new(Node::with_key_value(node_key, key, value)));
             return None;
         }
     }
 }
 
 struct RadixTree<K, V> {
-    node: Node<K, V>,
+    node: Node<'static, K, V>,
 }
 
 impl<K: AsKey, V> RadixTree<K, V> {

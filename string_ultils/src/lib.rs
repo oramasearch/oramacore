@@ -1,5 +1,7 @@
 pub mod tokenizer;
 
+use std::fmt::Debug;
+
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
@@ -23,6 +25,15 @@ impl Parser {
             tokenizer,
             stemmer,
         }
+    }
+}
+
+impl Debug for Parser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Parser")
+            .field("tokenizer", &self.tokenizer)
+            .field("stemmer", &"{}".to_owned())
+            .finish()
     }
 }
 
