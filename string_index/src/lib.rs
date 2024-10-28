@@ -32,7 +32,7 @@ pub struct Posting {
 #[derive(Debug, Clone)]
 pub struct StringIndexValue {
     posting_list_id: PostingListId,
-    term_frequency: usize
+    term_frequency: usize,
 }
 
 pub struct StringIndex {
@@ -93,33 +93,35 @@ impl StringIndex {
         let scores = posting_list_ids_with_freq
             .into_par_iter()
             .filter_map(|string_index_value| {
-                self.posting_storage.get(
-                    string_index_value.posting_list_id,
-                    // BAD: term_frequency is not used inside posting_storage
-                    // But we need after, so here forward it.
-                    // TODO: We need to find a way to avoid this.
-                    string_index_value.term_frequency,
-                ).ok()
+                self.posting_storage
+                    .get(
+                        string_index_value.posting_list_id,
+                        // BAD: term_frequency is not used inside posting_storage
+                        // But we need after, so here forward it.
+                        // TODO: We need to find a way to avoid this.
+                        string_index_value.term_frequency,
+                    )
+                    .ok()
             })
             // Every thread perform on a separated hashmap
-            .fold(HashMap::<DocumentId, f32>::new, |mut acc, (postings, freq)| {
-                let freq = freq as f32;
-                for posting in postings {
-                    let term_frequency = posting.term_frequency;
-                    let doc_length = posting.doc_length as f32;
+            .fold(
+                HashMap::<DocumentId, f32>::new,
+                |mut acc, (postings, freq)| {
+                    let freq = freq as f32;
+                    for posting in postings {
+                        let term_frequency = posting.term_frequency;
+                        let doc_length = posting.doc_length as f32;
 
-                    let idf = ((total_documents - freq + 0.5_f32)
-                        / (freq + 0.5_f32))
-                        .ln_1p();
-                    let score =
-                        calculate_score(term_frequency, idf, doc_length, avg_doc_length, boost);
+                        let idf = ((total_documents - freq + 0.5_f32) / (freq + 0.5_f32)).ln_1p();
+                        let score =
+                            calculate_score(term_frequency, idf, doc_length, avg_doc_length, boost);
 
-                    let doc_score = acc.entry(posting.document_id)
-                        .or_default();
-                    *doc_score += score;
-                }
-                acc
-            })
+                        let doc_score = acc.entry(posting.document_id).or_default();
+                        *doc_score += score;
+                    }
+                    acc
+                },
+            )
             // And later we merge all the hashmaps
             .reduce(HashMap::<DocumentId, f32>::new, |mut acc, item| {
                 for (document_id, score) in item {
@@ -148,71 +150,75 @@ impl StringIndex {
             .into_par_iter()
             // Parallel
             .fold(
-            HashMap::<TermId, Vec<Posting>>::new,
-            |mut acc, (document_id, s)| {
-                let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> = HashMap::new();
+                HashMap::<TermId, Vec<Posting>>::new,
+                |mut acc, (document_id, s)| {
+                    let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> =
+                        HashMap::new();
 
-                for (position, (original, stemmed)) in tokenize_and_stem(&s, parser).enumerate() {
-                    let is_equal = original == stemmed;
+                    for (position, (original, stemmed)) in tokenize_and_stem(&s, parser).enumerate()
+                    {
+                        let is_equal = original == stemmed;
 
-                    let entry = term_freqs.entry(original).or_default();
-                    let field_entry = entry.entry(field_id).or_default();
-                    field_entry.push(position);
-
-                    if !is_equal {
-                        let entry = term_freqs.entry(stemmed).or_default();
+                        let entry = term_freqs.entry(original).or_default();
                         let field_entry = entry.entry(field_id).or_default();
                         field_entry.push(position);
-                    }
-                }
 
-                let doc_length = term_freqs
-                    .values()
-                    .map(|field_freqs| {
-                        field_freqs
-                            .values()
-                            .map(|positions| positions.len())
-                            .sum::<usize>()
-                    })
-                    .sum::<usize>();
-
-                for (term, field_positions) in term_freqs {
-                    let term_id = dictionary.get_or_add(&term);
-                    // println!("Term: {} -> {}", term, term_id.0);
-
-                    let v = acc.entry(term_id).or_default();
-
-                    let posting = field_positions.into_iter().map(|(field_id, positions)| {
-                        let term_frequency = positions.len() as f32;
-
-                        Posting {
-                            document_id,
-                            field_id,
-                            positions,
-                            // original_term: term.clone(),
-                            term_frequency,
-                            doc_length: doc_length as u16,
+                        if !is_equal {
+                            let entry = term_freqs.entry(stemmed).or_default();
+                            let field_entry = entry.entry(field_id).or_default();
+                            field_entry.push(position);
                         }
-                    });
-                    v.extend(posting);
-                }
+                    }
 
-                acc
-            },
-        );
+                    let doc_length = term_freqs
+                        .values()
+                        .map(|field_freqs| {
+                            field_freqs
+                                .values()
+                                .map(|positions| positions.len())
+                                .sum::<usize>()
+                        })
+                        .sum::<usize>();
+
+                    for (term, field_positions) in term_freqs {
+                        let term_id = dictionary.get_or_add(&term);
+                        // println!("Term: {} -> {}", term, term_id.0);
+
+                        let v = acc.entry(term_id).or_default();
+
+                        let posting = field_positions.into_iter().map(|(field_id, positions)| {
+                            let term_frequency = positions.len() as f32;
+
+                            Posting {
+                                document_id,
+                                field_id,
+                                positions,
+                                // original_term: term.clone(),
+                                term_frequency,
+                                doc_length: doc_length as u16,
+                            }
+                        });
+                        v.extend(posting);
+                    }
+
+                    acc
+                },
+            );
 
         let posting_per_term = t.reduce(
             HashMap::<TermId, Vec<Posting>>::new,
             // Merge the hashmap
             |mut acc, item| {
-            for (term_id, postings) in item {
-                let vec = acc.entry(term_id).or_default();
-                vec.extend(postings.into_iter());
-            }
-            acc
-        });
+                for (term_id, postings) in item {
+                    let vec = acc.entry(term_id).or_default();
+                    vec.extend(postings.into_iter());
+                }
+                acc
+            },
+        );
 
-        let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> = HashMap::with_capacity(posting_per_term.len());
+        let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
+            HashMap::with_capacity(posting_per_term.len());
         // NB: We cannot parallelize the tree insertion yet :(
         // We could move the tree into a custom implementation to support parallelism
         // Once we resolve this issue, we StringIndex is thread safe!
@@ -231,19 +237,23 @@ impl StringIndex {
 
             let value = self.index.get_mut(&term);
             if let Some(value) = value {
-                
                 value.term_frequency += number_of_occurence_of_term;
-                let vec = postings_per_posting_list_id.entry(value.posting_list_id)
+                let vec = postings_per_posting_list_id
+                    .entry(value.posting_list_id)
                     .or_default();
                 vec.push(postings);
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
-                self.index.insert(term, StringIndexValue {
-                    posting_list_id,
-                    term_frequency: number_of_occurence_of_term
-                });
+                self.index.insert(
+                    term,
+                    StringIndexValue {
+                        posting_list_id,
+                        term_frequency: number_of_occurence_of_term,
+                    },
+                );
 
-                let vec = postings_per_posting_list_id.entry(posting_list_id)
+                let vec = postings_per_posting_list_id
+                    .entry(posting_list_id)
                     .or_default();
                 vec.push(postings);
             }
@@ -251,11 +261,7 @@ impl StringIndex {
 
         postings_per_posting_list_id
             .into_par_iter()
-            .map(|(k, v)| {
-                self.posting_storage.add_or_create(
-                    k, v
-                )
-            })
+            .map(|(k, v)| self.posting_storage.add_or_create(k, v))
             // TODO: handle error
             .all(|_| true);
 

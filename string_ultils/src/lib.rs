@@ -4,7 +4,6 @@ use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
 
-
 #[derive(Debug)]
 pub enum Language {
     English,
@@ -19,23 +18,26 @@ impl Parser {
         let (tokenizer, stemmer) = match language {
             Language::English => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
         };
-        Self {
-            tokenizer,
-            stemmer,
-        }
+        Self { tokenizer, stemmer }
     }
 }
 
-pub fn tokenize<'a, 'b>(input: &'b str, tokenizer: &'a Tokenizer) -> impl Iterator<Item = String> + 'b
+pub fn tokenize<'a, 'b>(
+    input: &'b str,
+    tokenizer: &'a Tokenizer,
+) -> impl Iterator<Item = String> + 'b
 where
-    'a: 'b
+    'a: 'b,
 {
     tokenizer.tokenize(input)
 }
 
-pub fn tokenize_and_stem<'a, 'b>(input: &'b str, parser: &'a Parser) -> impl Iterator<Item = (String, String)> + 'b
+pub fn tokenize_and_stem<'a, 'b>(
+    input: &'b str,
+    parser: &'a Parser,
+) -> impl Iterator<Item = (String, String)> + 'b
 where
-    'a: 'b
+    'a: 'b,
 {
     parser.tokenizer.tokenize(input).map(move |token| {
         let stemmed = parser.stemmer.stem(&token).to_string();
@@ -63,16 +65,23 @@ mod tests {
         let parser = Parser::from_language(Language::English);
 
         let output = tokenize_and_stem("Hello, world!", &parser).collect::<Vec<(String, String)>>();
-        assert_eq!(output, vec![
-            ("hello".to_string(), "hello".to_string()),
-            ("world".to_string(), "world".to_string())
-        ]);
+        assert_eq!(
+            output,
+            vec![
+                ("hello".to_string(), "hello".to_string()),
+                ("world".to_string(), "world".to_string())
+            ]
+        );
 
-        let output = tokenize_and_stem("Hello, world! fruitlessly", &parser).collect::<Vec<(String, String)>>();
-        assert_eq!(output, vec![
-            ("hello".to_string(), "hello".to_string()),
-            ("world".to_string(), "world".to_string()),
-            ("fruitlessly".to_string(), "fruitless".to_string())
-        ]);
+        let output = tokenize_and_stem("Hello, world! fruitlessly", &parser)
+            .collect::<Vec<(String, String)>>();
+        assert_eq!(
+            output,
+            vec![
+                ("hello".to_string(), "hello".to_string()),
+                ("world".to_string(), "world".to_string()),
+                ("fruitlessly".to_string(), "fruitless".to_string())
+            ]
+        );
     }
 }
