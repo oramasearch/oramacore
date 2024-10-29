@@ -14,7 +14,7 @@ pub struct Dictionary {
     max_term_id: AtomicUsize,
     // This is the reverse of index. This is bad.
     // We should remove this.
-    reverse_index: DashMap<TermId, String>
+    reverse_index: DashMap<TermId, String>,
 }
 
 impl Dictionary {
@@ -33,7 +33,8 @@ impl Dictionary {
                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel),
             )
         });
-        self.reverse_index.entry(*output)
+        self.reverse_index
+            .entry(*output)
             .or_insert(term.to_string());
 
         *output

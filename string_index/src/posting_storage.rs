@@ -33,15 +33,12 @@ impl PostingStorage {
             .expect("Error on fetching posting_list_id")
             .expect("posting_list_id is unnknown");
 
-        let posting_vec = unserialize(&output)
-            .expect("Error on deserialize Vec<Posting>");
-        
+        let posting_vec = unserialize(&output).expect("Error on deserialize Vec<Posting>");
+
         Ok((posting_vec, freq))
     }
 
-    pub fn generate_new_id(
-        &self,
-    ) -> PostingListId {
+    pub fn generate_new_id(&self) -> PostingListId {
         let id = self.id_generator_counter.fetch_add(1, Ordering::SeqCst);
 
         PostingListId(id)
@@ -53,13 +50,15 @@ impl PostingStorage {
         postings: Vec<Vec<Posting>>,
     ) -> Result<()> {
         let key = posting_list_id.0.to_be_bytes();
-        let output = self.db.get_pinned(key)
+        let output = self
+            .db
+            .get_pinned(key)
             .expect("Error on fetching posting_list_id");
         match output {
             None => {
                 let value = serialize(&postings.into_iter().flatten().collect())?;
                 self.db.put(key, value)?;
-            },
+            }
             Some(data) => {
                 let mut deserialized = unserialize(&data)?;
                 deserialized.extend(postings.into_iter().flatten());

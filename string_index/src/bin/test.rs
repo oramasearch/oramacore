@@ -49,7 +49,9 @@ fn main() {
             println!("Inserting batch");
             // I don't like this
             let other = batch.drain(..);
-            string_index.insert_multiple(FieldId(0), other.collect_vec()).unwrap();
+            string_index
+                .insert_multiple(FieldId(0), other.collect_vec())
+                .unwrap();
             let delta = now.elapsed();
             println!("Batch insertion done: {:?}", delta);
         }

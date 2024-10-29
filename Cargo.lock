@@ -3524,6 +3524,7 @@ dependencies = [
  "rocksdb",
  "serde",
  "string_ultils",
+ "tempdir",
 ]
 
 [[package]]
