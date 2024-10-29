@@ -1,0 +1,20 @@
+[package]
+name = "nlp"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test_chunker"
+path = "src/bin/test_chunker.rs"
+
+[dependencies]
+anyhow = "1.0.91"
+dashmap = "6.1.0"
+regex = "1.11.0"
+rust-stemmers = "1.2.0"
+text-splitter = { version = "0.18.1", features = ["tiktoken-rs", "markdown", "code"] }
+tiktoken-rs = "0.6.0"
+tree-sitter-html = "0.23.0"
+tree-sitter-javascript = "0.23.0"
+tree-sitter-language = "0.1.2"
+tree-sitter-typescript = "0.23.0"

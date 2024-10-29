@@ -1,5 +1,3 @@
-use textwrap::dedent;
-
 #[derive(Clone)]
 #[non_exhaustive]
 pub enum Prompts {
@@ -24,7 +22,7 @@ pub fn get_prompt(prompt: Prompts) -> String {
         Prompts::CodeDescriptor => {
             "You'll be given a code block (### Code). Describe how it works, what it does, and the intent behind it.".to_string()
         }
-        Prompts::Custom(value) => { 
+        Prompts::Custom(value) => {
             value
         },
         _ => "".to_string()
