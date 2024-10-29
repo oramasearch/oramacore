@@ -1,11 +1,11 @@
 [package]
-name = "llama_vision"
+name = "content_expander"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "llama_vision"
-path = "src/lib.rs"
+name = "test_image"
+path = "src/bin/test_image.rs"
 
 [dependencies]
 linkify = "0.10.0"
@@ -16,7 +16,12 @@ log = "0.4.22"
 reqwest = "0.12.8"
 tokio = { version = "1.41.0", features = ["full"] }
 tempdir = "0.3.7"
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git" }
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", features = ["metal"] }
 image = "0.25.4"
 textwrap = "0.16.1"
 futures-util = "0.3.31"
+markdown = "0.3.0"
+html_parser = "0.7.0"
+futures = "0.3.31"
+html-escape = "0.2.13"
+

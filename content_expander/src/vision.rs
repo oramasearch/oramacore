@@ -1,8 +1,8 @@
+use crate::prompts::{get_prompt, Prompts};
 use anyhow::Context;
 use linkify::{LinkFinder, LinkKind};
 use mistralrs::{IsqType, TextMessageRole, VisionLoaderType, VisionMessages, VisionModelBuilder};
 use url::Url;
-use crate::prompts::{get_prompt, Prompts};
 
 const VISION_MODEL_ID: &str = "microsoft/Phi-3.5-vision-instruct";
 
@@ -112,8 +112,10 @@ async fn is_image(url: &str) -> anyhow::Result<bool> {
     Ok(content_type.starts_with("image"))
 }
 
-
-pub async fn describe_images(text: String, domain: Prompts) -> Result<Vec<(String, String)>, anyhow::Error> {
+pub async fn describe_images(
+    text: String,
+    domain: Prompts,
+) -> Result<Vec<(String, String)>, anyhow::Error> {
     let model = VisionModelBuilder::new(VISION_MODEL_ID, VisionLoaderType::Phi3V)
         .with_isq(IsqType::Q4K)
         .with_logging()
@@ -124,8 +126,8 @@ pub async fn describe_images(text: String, domain: Prompts) -> Result<Vec<(Strin
         domains_allow_list: vec![],
         domains_deny_list: vec![],
     })
-        .unwrap()
-        .get_all_links(&text);
+    .unwrap()
+    .get_all_links(&text);
 
     let domain_ref = &domain;
     let futures: Vec<_> = image_links
@@ -170,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_get_all_links() {
-        let text = "\
+        let text = r"
             Hello, world. This is an email and shouldn't be included: hello@example.com\
             This is a valid link https://github.com/oramasearch/orama. It should be included.\
             Now this is not a valid link www.foo.bar.baz.com as it misses the protocol\
@@ -196,7 +198,7 @@ mod tests {
             domains_allow_list: vec!["github.com".to_string(), "orama.com".to_string()],
             ..UrlParserConfig::default()
         })
-            .unwrap();
+        .unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);
@@ -211,7 +213,7 @@ mod tests {
             domains_deny_list: vec!["twitter.com".to_string()],
             ..UrlParserConfig::default()
         })
-            .unwrap();
+        .unwrap();
         let links = llama_vision.get_all_links(text);
 
         assert_eq!(links.len(), 2);

@@ -1,12 +1,14 @@
 use textwrap::dedent;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Prompts {
     VisionECommerce,
     VisionGeneric,
-    VisionTechDocumentation
+    VisionTechDocumentation,
+    CodeDescriptor,
+    Custom(String),
 }
-
 
 pub fn get_prompt(prompt: Prompts) -> String {
     match prompt {
@@ -18,6 +20,13 @@ pub fn get_prompt(prompt: Prompts) -> String {
         },
         Prompts::VisionTechDocumentation => {
             "Describe what is shown in this image. For context, it's coming from a technical documentation.".to_string()
+        },
+        Prompts::CodeDescriptor => {
+            "You'll be given a code block (### Code). Describe how it works, what it does, and the intent behind it.".to_string()
         }
+        Prompts::Custom(value) => { 
+            value
+        },
+        _ => "".to_string()
     }
 }
