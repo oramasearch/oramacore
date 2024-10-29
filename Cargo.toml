@@ -3,4 +3,6 @@ resolver = "2"
 members = [
     "string_index",
     "string_ultils",
+    "content_expander",
+    # "radix_tree",
 ]
