@@ -1,3 +1,4 @@
+pub mod chunker;
 pub mod tokenizer;
 
 use rust_stemmers::Algorithm;

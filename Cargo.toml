@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "string_index",
-    "string_ultils",
+    "nlp",
     "content_expander",
     # "radix_tree",
 ]
