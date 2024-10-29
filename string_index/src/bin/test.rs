@@ -1,7 +1,11 @@
-use std::fs::File;
+use std::{fs::File, sync::Arc};
 
 use itertools::Itertools;
+use rocksdb::OptimisticTransactionDB;
+use storage::Storage;
 use string_index::{DocumentId, FieldId, StringIndex};
+use string_utils::{Language, Parser};
+use tempdir::TempDir;
 
 #[derive(Debug, serde::Deserialize)]
 struct Record {
@@ -21,7 +25,13 @@ struct Record {
 const BATCH_SIZE: usize = 10_000;
 
 fn main() {
-    let mut string_index = StringIndex::new(".".to_owned());
+    let tmp_dir = TempDir::new("string_index_test").unwrap();
+    let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+    let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
+    let storage = Arc::new(Storage::new(db));
+    let parser = Parser::from_language(Language::English);
+    
+    let mut string_index = StringIndex::new(storage, parser);
 
     let file = File::open("/Users/allevo/repos/gorama/datasets/song_lyrics.csv").unwrap();
     let mut rdr = csv::Reader::from_reader(file);

@@ -4,5 +4,7 @@ members = [
     "string_index",
     "nlp",
     "content_expander",
-    # "radix_tree",
+    "web_server",
+    "collection_manager",
+    "storage",
 ]

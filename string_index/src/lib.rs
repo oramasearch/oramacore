@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
+    collections::{BinaryHeap, HashMap}, sync::Arc,
 };
 
 use anyhow::Result;
@@ -10,7 +10,8 @@ use posting_storage::{PostingListId, PostingStorage};
 use radix_trie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use string_ultils::{tokenize, tokenize_and_stem, Language, Parser};
+use storage::Storage;
+use string_utils::{tokenize, tokenize_and_stem, Parser};
 
 mod dictionary;
 mod posting_storage;
@@ -36,7 +37,7 @@ pub struct StringIndexValue {
 }
 
 pub struct StringIndex {
-    index: Trie<String, StringIndexValue>,
+    tree: Trie<String, StringIndexValue>,
     posting_storage: PostingStorage,
     parser: Parser,
     dictionary: Dictionary,
@@ -46,11 +47,14 @@ pub struct StringIndex {
 }
 
 impl StringIndex {
-    pub fn new(base_path: String) -> Self {
+    pub fn new(
+        storage: Arc<Storage>,
+        parser: Parser,
+    ) -> Self {
         StringIndex {
-            index: Trie::new(),
-            posting_storage: PostingStorage::new(format!("{}/posting_storage", base_path)).unwrap(),
-            parser: Parser::from_language(Language::English),
+            tree: Trie::new(),
+            posting_storage: PostingStorage::new(storage),
+            parser,
             dictionary: Dictionary::new(),
             total_documents: 0,
             total_document_length: 0,
@@ -81,7 +85,7 @@ impl StringIndex {
 
         let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
         for token in tokens {
-            let string_index_value = self.index.get(&token);
+            let string_index_value = self.tree.get(&token);
 
             if let Some(string_index_value) = string_index_value {
                 posting_list_ids_with_freq.push(string_index_value.clone());
@@ -235,7 +239,7 @@ impl StringIndex {
             // TODO: find a way to avoid this invocation
             let term = dictionary.retrive(term_id);
 
-            let value = self.index.get_mut(&term);
+            let value = self.tree.get_mut(&term);
             if let Some(value) = value {
                 value.term_frequency += number_of_occurence_of_term;
                 let vec = postings_per_posting_list_id
@@ -244,7 +248,7 @@ impl StringIndex {
                 vec.push(postings);
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
-                self.index.insert(
+                self.tree.insert(
                     term,
                     StringIndexValue {
                         posting_list_id,
@@ -307,6 +311,10 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<(DocumentId, f32)> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use rocksdb::OptimisticTransactionDB;
+    use string_utils::{Language, Parser};
     use tempdir::TempDir;
 
     use crate::{DocumentId, FieldId, StringIndex};
@@ -315,6 +323,9 @@ mod tests {
     fn test_foo() {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+        let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
+        let storage = Arc::new(crate::Storage::new(db));
+        let mut string_index = StringIndex::new(storage, Parser::from_language(Language::English));
 
         let batch = vec![
             (
@@ -331,7 +342,6 @@ mod tests {
             ),
         ];
 
-        let mut string_index = StringIndex::new(tmp_dir);
         string_index.insert_multiple(FieldId(0), batch).unwrap();
 
         let output = string_index.search("welcome", 10, 1.0).unwrap();

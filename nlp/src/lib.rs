@@ -5,7 +5,7 @@ use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Language {
     English,
 }
