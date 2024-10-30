@@ -1,5 +1,6 @@
 /target
 
-
 posting_storage
 .idea
+
+Cargo.lock
