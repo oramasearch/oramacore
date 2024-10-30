@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use ms_converter::ms;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fs;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +34,7 @@ pub struct AnalyticsStorageConfig {
     pub offload_to: Option<OffloadTarget>,
 }
 
-pub struct AnalyticsStorage {
+pub struct AnalyticsStorage<T> {
     index_id: String,
     docs_size: usize,
     buffer_size: usize,
@@ -41,12 +42,14 @@ pub struct AnalyticsStorage {
     persistence_dir: String,
     offload_after: usize,
     offload_to: OffloadTarget,
+    write_buffer: VecDeque<T>,
 }
 
 pub enum Version {
     V1_0,
 }
 
+#[derive(Serialize)]
 pub struct VersionV1_0Schema {
     id: String,
     deployment_id: String,
@@ -78,7 +81,7 @@ const ORAMA_ANALYTICS_DEFAULT_DIRNAME: &str = ".orama_analytics";
 const DEFAULT_BUFFER_SIZE: usize = 100;
 const DEFAULT_OFFLOAD_AFTER: usize = 1440; // 60 days in hours
 
-impl AnalyticsStorage {
+impl<T: Serialize + Clone> AnalyticsStorage<T> {
     pub fn try_new(config: AnalyticsStorageConfig) -> Result<Self> {
         let storage = AnalyticsStorage {
             index_id: config.index_id,
@@ -90,6 +93,7 @@ impl AnalyticsStorage {
             persistence_dir: config
                 .persistence_dir
                 .unwrap_or_else(|| ORAMA_ANALYTICS_DEFAULT_DIRNAME.to_string()),
+            write_buffer: VecDeque::new(),
         };
 
         let index_dir = storage.get_index_dir();
@@ -105,6 +109,17 @@ impl AnalyticsStorage {
         }
 
         Ok(storage)
+    }
+
+    pub fn insert(&mut self, data: T) -> Result<()> {
+        self.write_buffer.push_back(data);
+
+        if self.write_buffer.len() >= self.buffer_size {
+            let tmp = std::mem::take(&mut self.write_buffer);
+            self.flush_buffer(tmp)?;
+        }
+
+        Ok(())
     }
 
     pub fn get_block_meta(path: &str) -> Result<TimeBlockMeta> {
@@ -226,5 +241,33 @@ impl AnalyticsStorage {
 
     fn get_index_dir(&self) -> String {
         format!("{}/{}", self.persistence_dir, self.index_id)
+    }
+
+    fn flush_buffer(&mut self, mut tmp: VecDeque<T>) -> Result<()> {
+        let mut retry_vec: Vec<_> = Vec::new();
+        let current_block = self
+            .get_block_path(None)?
+            .with_context(|| "Unable to get the current block path while flushing")?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(current_block)?;
+
+        while let Some(item) = tmp.pop_front() {
+            let formatted_line = self.format_line_for_block(item.clone())?;
+            if let Err(e) = writeln!(file, "{},{}", formatted_line.0, formatted_line.1) {
+                retry_vec.push(item)
+            }
+        }
+
+        Ok(())
+    }
+
+    fn format_line_for_block(&self, data: T) -> Result<(i64, String)> {
+        let mut wtr = csv::Writer::from_writer(Vec::new());
+        wtr.serialize(&data)?;
+        let str = String::from_utf8(wtr.into_inner()?)?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+        Ok((now, str))
     }
 }
