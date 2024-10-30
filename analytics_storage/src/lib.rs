@@ -139,9 +139,13 @@ impl AnalyticsStorage {
         Err(anyhow!("Cannot find header for time block file {}", path))
     }
 
-    fn get_block(&self, timestamp: i64) -> Result<TimeBlockMeta> {
+    fn get_block(&self, timestamp: i64) -> Result<Option<TimeBlockMeta>> {
         let block_path = self.get_block_path(Some(timestamp))?;
-        Self::get_block_meta(&block_path)
+
+        match block_path {
+            Some(path) => Ok(Self::get_block_meta(&path).ok()),
+            None => Ok(None),
+        }
     }
 
     fn get_block_span(&self, timestamp: i64) -> Result<BlockSpan> {
@@ -167,21 +171,24 @@ impl AnalyticsStorage {
 
     fn current_block_exists(&self) -> Result<bool> {
         let path = self.get_block_path(None)?;
-        Ok(Path::new(&path).exists())
+        match path {
+            Some(p) => Ok(Path::new(&p).exists()),
+            None => Ok(false),
+        }
     }
 
-    fn get_block_path(&self, timestamp: Option<i64>) -> Result<Ok(String)> {
+    fn get_block_path(&self, timestamp: Option<i64>) -> Result<Option<String>> {
         let now = timestamp.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("WTF time went backwards")
+                .expect("Time went backwards")
                 .as_millis() as i64
         });
 
         let lifespan = self.get_block_span(now)?;
         let index_dir = self.get_index_dir();
 
-        Ok(fs::read_dir(&index_dir)
+        let result = fs::read_dir(&index_dir)
             .with_context(|| format!("Failed to read directory {}", index_dir))?
             .filter_map(|res| res.ok())
             .map(|entry| entry.path().display().to_string())
@@ -190,13 +197,12 @@ impl AnalyticsStorage {
                     .parse::<i64>()
                     .map(|time| time > lifespan.0 && time < lifespan.1)
                     .unwrap_or(false)
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!("No matching block found in {}", index_dir);
-                return None
-            })?
-            .parse()
-            .context("Failed to parse block path"))
+            });
+
+        match result {
+            Some(path) => Ok(Some(path)),
+            None => Ok(None),
+        }
     }
 
     fn parse_version(version: &str) -> Result<Version> {
