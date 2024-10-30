@@ -164,14 +164,15 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
 
     fn get_block_span(&self, timestamp: i64) -> Result<BlockSpan> {
         let duration: i64 = match self.granularity {
-            Granularity::Hour => 3600,     // 1h in seconds
-            Granularity::Day => 86400,     // 24h in seconds
-            Granularity::Week => 604800,   // 7 days in seconds
-            Granularity::Month => 2592000, // 30 days in seconds
+            Granularity::Hour => 3_600_000,     // 1 hour in milliseconds
+            Granularity::Day => 86_400_000,     // 24 hours in milliseconds
+            Granularity::Week => 604_800_000,   // 7 days in milliseconds
+            Granularity::Month => 2_592_000_000, // 30 days in milliseconds
         };
 
         Ok((timestamp - duration, timestamp + duration))
     }
+
 
     fn current_block_exists(&self) -> Result<bool> {
         let path = self.get_block_path(None)?;
@@ -387,4 +388,5 @@ mod tests {
         assert!(!lines.is_empty());
         assert!(lines[0].contains("test"));
     }
+
 }
