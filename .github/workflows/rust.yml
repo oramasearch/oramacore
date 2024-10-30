@@ -16,16 +16,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Install packages deps
-      run: sudo apt-get update && \
-        sudo apt-get install -y \
-        libssl3 \
-        pkg-config \
-        libssl-dev \
-        g++ \
-        build-essential \
-        ca-certificates \
-        && rm -rf /var/lib/apt/lists/*
+    - name: apt-get update
+      run: sudo apt-get update
+    - name: apt-get install
+      run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
