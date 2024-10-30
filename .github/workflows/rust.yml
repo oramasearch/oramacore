@@ -19,7 +19,8 @@ jobs:
     - name: apt-get update
       run: sudo apt-get update
     - name: apt-get install
-      run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates gobjc++-mingw-w64
+      run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates && sudo apt-get install --reinstall build-essential
+
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
