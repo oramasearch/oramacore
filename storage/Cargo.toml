@@ -1,0 +1,9 @@
+[package]
+name = "storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.91"
+rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
+thiserror = "1.0.65"

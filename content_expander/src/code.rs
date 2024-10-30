@@ -46,7 +46,7 @@ pub async fn describe_code_blocks(
 
     let results = futures_util::future::join_all(futures).await;
 
-    let descriptions: Vec<String> = results.into_iter().filter_map(|opt| opt).collect();
+    let descriptions: Vec<String> = results.into_iter().flatten().collect();
 
     if descriptions.is_empty() {
         None
@@ -112,10 +112,12 @@ fn capture_code_blocks_html(text: String) -> Option<CodeBlockDescriptions> {
     }
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn extract_code_blocks_from_dom(dom: &Dom) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut current_block = String::new();
 
+    #[allow(clippy::if_same_then_else)]
     fn process_node(node: &Node, current_block: &mut String, blocks: &mut Vec<String>) {
         match node {
             Node::Element(element) => {

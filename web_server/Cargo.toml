@@ -1,0 +1,24 @@
+[package]
+name = "web_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.132"
+collection_manager = { path = "../collection_manager" }
+tempdir = "0.3.7"
+rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
+storage = { path = "../storage" }
+types = { path = "../types" }
+oasgen = { version = "0.22", features = ["actix", "swagger-ui"]}
+
+
+[[bin]]
+name = "test"
+path = "src/bin/main.rs"
+
+[dev-dependencies]
+actix-http = "3.9.0"

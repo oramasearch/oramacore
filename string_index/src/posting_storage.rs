@@ -1,46 +1,65 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-use anyhow::Result;
-use rocksdb::DB;
+use storage::{Storage, StorageError};
+use thiserror::Error;
 
 use crate::Posting;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PostingListId(usize);
 
+#[derive(Debug, Error)]
+pub enum PostingStorageError {
+    #[error("PostingListId not found")]
+    PostingListIdNotFound,
+    #[error("Storage error: {0}")]
+    StorageError(#[from] StorageError),
+    #[error("Serialize error")]
+    SerializationError(#[from] bincode::Error),
+}
+
+const POSTING_STORAGE_TAG: u8 = 0;
+
 pub struct PostingStorage {
-    db: DB,
-    id_generator_counter: AtomicUsize,
+    storage: Arc<Storage>,
 }
 
 impl PostingStorage {
-    pub fn new(base_path: String) -> Result<Self> {
-        let db = DB::open_default(base_path)?;
-        Ok(PostingStorage {
-            db,
-            id_generator_counter: AtomicUsize::new(0),
-        })
+    pub fn new(storage: Arc<Storage>) -> Self {
+        PostingStorage { storage }
     }
 
     pub fn get(
         &self,
         posting_list_id: PostingListId,
         freq: usize,
-    ) -> Result<(Vec<Posting>, usize)> {
-        let output = self.db.get_pinned(posting_list_id.0.to_be_bytes());
+    ) -> Result<(Vec<Posting>, usize), PostingStorageError> {
+        let key = posting_list_id.0.to_be_bytes();
+        let key = &[
+            POSTING_STORAGE_TAG,
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            key[6],
+            key[7],
+        ];
+        let output = self.storage.fetch(key)?;
 
-        let output = output
-            .expect("Error on fetching posting_list_id")
-            .expect("posting_list_id is unnknown");
+        let output = match output {
+            None => return Err(PostingStorageError::PostingListIdNotFound),
+            Some(data) => data,
+        };
 
-        let posting_vec = unserialize(&output).expect("Error on deserialize Vec<Posting>");
+        let posting_vec = unserialize(&output)?;
 
         Ok((posting_vec, freq))
     }
 
     pub fn generate_new_id(&self) -> PostingListId {
-        let id = self.id_generator_counter.fetch_add(1, Ordering::SeqCst);
-
+        let id = self.storage.generate_new_id();
         PostingListId(id)
     }
 
@@ -48,35 +67,47 @@ impl PostingStorage {
         &self,
         posting_list_id: PostingListId,
         postings: Vec<Vec<Posting>>,
-    ) -> Result<()> {
+    ) -> Result<(), PostingStorageError> {
         let key = posting_list_id.0.to_be_bytes();
-        let output = self
-            .db
-            .get_pinned(key)
-            .expect("Error on fetching posting_list_id");
-        match output {
-            None => {
-                let value = serialize(&postings.into_iter().flatten().collect())?;
-                self.db.put(key, value)?;
-            }
-            Some(data) => {
-                let mut deserialized = unserialize(&data)?;
-                deserialized.extend(postings.into_iter().flatten());
-                let value = serialize(&deserialized)?;
-                self.db.put(key, value)?;
-            }
-        }
+        let key = &[
+            POSTING_STORAGE_TAG,
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            key[6],
+            key[7],
+        ];
+
+        self.storage.run_in_transaction(|transaction| {
+            let pinned = transaction.get_pinned(key).unwrap();
+
+            match pinned {
+                Some(data) => {
+                    let mut deserialized = unserialize(&data)?;
+                    deserialized.extend(postings.into_iter().flatten());
+                    let value = serialize(&deserialized)?;
+                    transaction.put(key, value)?;
+                }
+                None => {
+                    let value = serialize(&postings.into_iter().flatten().collect())?;
+                    transaction.put(key, value)?;
+                }
+            };
+
+            Result::<(), anyhow::Error>::Ok(())
+        })?;
 
         Ok(())
     }
 }
 
 // TODO: benchmark this and find a more performant way to serialize and deserialize
-fn unserialize(input: &[u8]) -> Result<Vec<Posting>> {
-    let output = bincode::deserialize(input)?;
-    Ok(output)
+fn unserialize(input: &[u8]) -> Result<Vec<Posting>, bincode::Error> {
+    bincode::deserialize(input)
 }
-fn serialize(vec: &Vec<Posting>) -> Result<Vec<u8>> {
-    let output = bincode::serialize(vec)?;
-    Ok(output)
+fn serialize(vec: &Vec<Posting>) -> Result<Vec<u8>, bincode::Error> {
+    bincode::serialize(vec)
 }

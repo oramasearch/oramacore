@@ -160,7 +160,7 @@ pub async fn describe_images(
     let results: Vec<(String, String)> = futures_util::future::join_all(futures)
         .await
         .into_iter()
-        .filter_map(|x| x)
+        .flatten()
         .collect();
 
     Ok(results)
