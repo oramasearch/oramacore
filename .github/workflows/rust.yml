@@ -21,7 +21,6 @@ jobs:
     - name: apt-get install
       run: |
         sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates
-        sudo apt-get install -y libomp-dev gobjc*aarch64*gnu
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
@@ -31,7 +30,7 @@ jobs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/            
+          target/
         key: cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: cargo-
     - name: Install target
@@ -44,4 +43,4 @@ jobs:
         cargo --version
     - name: Build
       run: |
-        cargo build --release --target x86_64-unknown-linux-gnu
+        cargo build --release --target x86_64-unknown-linux-gnu -p rustorama
