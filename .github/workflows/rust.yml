@@ -22,7 +22,10 @@ jobs:
       run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates && sudo apt-get install --reinstall build-essential
 
     - name: Find cc1obj
-      run: find /usr/libexec/gcc -name "cc1plus"
+      run: |
+        sudo ls -lag /usr/
+        sudo ls -lag /usr/libexec/
+        sudo find /usr/libexec -name "cc1plus"
 
     - name: Set up cargo cache
       uses: actions/cache@v3
