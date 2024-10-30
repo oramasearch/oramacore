@@ -21,6 +21,9 @@ jobs:
     - name: apt-get install
       run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates && sudo apt-get install --reinstall build-essential
 
+    - name: Find cc1obj
+      run: find / -name "cc1plus"
+
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
@@ -36,7 +39,9 @@ jobs:
     - name: Install target
       run: rustup target add x86_64-unknown-linux-gnu
     - name: Build
-      run: cargo build --verbose
+      run: |
+        export PATH="/usr/libexec/gcc/aarch64-linux-gnu/13:$PATH";
+        cargo build --verbose
     - name: Lint
       run: |
         cargo fmt --all -- --check
