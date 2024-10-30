@@ -849,6 +849,7 @@ dependencies = [
  "anyhow",
  "cuid",
  "dashmap",
+ "document_storage",
  "nlp",
  "rocksdb",
  "serde",
@@ -857,6 +858,7 @@ dependencies = [
  "string_index",
  "tempdir",
  "thiserror",
+ "types",
 ]
 
 [[package]]
@@ -1314,6 +1316,17 @@ name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
+
+[[package]]
+name = "document_storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "serde_json",
+ "storage",
+ "types",
+]
 
 [[package]]
 name = "dyn-clone"
@@ -2205,6 +2218,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "inventory"
+version = "0.3.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f958d3d68f4167080a18141e10381e7634563984a537f2a49a30fd8e53ac5767"
+
+[[package]]
 name = "ipnet"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2979,6 +2998,61 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
+name = "oasgen"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec65779ae1c81966c5ba82a72bcfc52e2926b6f19636bed1c07e0383a6569df8"
+dependencies = [
+ "actix-web",
+ "futures",
+ "http 1.1.0",
+ "http-body",
+ "http-body-util",
+ "indexmap",
+ "inventory",
+ "oasgen-core",
+ "oasgen-macro",
+ "once_cell",
+ "openapiv3-extended",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "swagger-ui2",
+]
+
+[[package]]
+name = "oasgen-core"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "997846b6e7ad93869478e6a9d7ea08dc7263ea787433b5f2670a1177f1e7c7ce"
+dependencies = [
+ "actix-web",
+ "http 1.1.0",
+ "indexmap",
+ "inventory",
+ "openapiv3-extended",
+ "serde_json",
+ "serde_qs",
+ "structmeta",
+ "syn 2.0.85",
+]
+
+[[package]]
+name = "oasgen-macro"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d84e40b52bfe230f96cdc5fc4ea55d6b7e2875955d06ab6c1a801aa8d64b91d"
+dependencies = [
+ "oasgen-core",
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "structmeta",
+ "syn 2.0.85",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3032,6 +3106,19 @@ checksum = "7b829e3d7e9cc74c7e315ee8edb185bf4190da5acde74afd7fc59c35b1f086e7"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "openapiv3-extended"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756f9fddd9e5264d11c36c405a0b8a16bf7b2037bc8a424a0d14f74fd73dcb7f"
+dependencies = [
+ "anyhow",
+ "http 1.1.0",
+ "indexmap",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3677,6 +3764,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-embed"
+version = "8.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa66af4a4fdd5e7ebc276f115e895611a34739a9c1c01028383d612d550953c0"
+dependencies = [
+ "rust-embed-impl",
+ "rust-embed-utils",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-impl"
+version = "8.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6125dbc8867951125eec87294137f4e9c2c96566e61bf72c45095a7c77761478"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rust-embed-utils",
+ "syn 2.0.85",
+ "walkdir",
+]
+
+[[package]]
+name = "rust-embed-utils"
+version = "8.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5347777e9aacb56039b0e1f28785929a8a3b709e87482e7442c72e7c12529d"
+dependencies = [
+ "sha2",
+ "walkdir",
+]
+
+[[package]]
 name = "rust-stemmers"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3925,6 +4046,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_qs"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd34f36fe4c5ba9654417139a9b3a20d2e1de6012ee678ad14d240c22c78d8d6"
+dependencies = [
+ "actix-web",
+ "futures",
+ "percent-encoding",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4160,9 +4294,11 @@ dependencies = [
  "rayon",
  "rocksdb",
  "serde",
+ "smallvec",
  "storage",
  "tempdir",
  "thiserror",
+ "types",
 ]
 
 [[package]]
@@ -4176,6 +4312,29 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "structmeta"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e1575d8d40908d70f6fd05537266b90ae71b15dbbe7a8b7dffa2b759306d329"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "structmeta-derive",
+ "syn 2.0.85",
+]
+
+[[package]]
+name = "structmeta-derive"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "152a0b65a590ff6c3da95cabe2353ee04e6167c896b28e3b14478c2636c922fc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.85",
+]
 
 [[package]]
 name = "strum"
@@ -4204,6 +4363,19 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "swagger-ui2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "938cfc08661af4a3660f5a009479ac3aacfcecd25698ab325a9c374c33888d35"
+dependencies = [
+ "bytes",
+ "http 1.1.0",
+ "rust-embed",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "syn"
@@ -4795,6 +4967,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
+name = "types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5138,10 +5319,17 @@ dependencies = [
 name = "web_server"
 version = "0.1.0"
 dependencies = [
+ "actix-http",
  "actix-web",
  "anyhow",
+ "collection_manager",
+ "oasgen",
+ "rocksdb",
  "serde",
  "serde_json",
+ "storage",
+ "tempdir",
+ "types",
 ]
 
 [[package]]

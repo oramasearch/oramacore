@@ -7,4 +7,6 @@ members = [
     "web_server",
     "collection_manager",
     "storage",
+    "document_storage",
+    "types",
 ]

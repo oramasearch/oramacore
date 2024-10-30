@@ -1,7 +1,8 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
-use string_utils::Language;
-
-
+use nlp::Language;
+use types::FieldId;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LanguageDTO {
@@ -35,4 +36,11 @@ pub struct CollectionDTO {
     pub id: String,
     pub description: Option<String>,
     pub language: LanguageDTO,
+    pub document_count: usize,
+    pub string_fields: HashMap<String, FieldId>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchParams {
+    pub term: String,
 }

@@ -1,6 +1,10 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap}, sync::Arc,
+    collections::{BinaryHeap, HashMap},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use anyhow::Result;
@@ -11,18 +15,15 @@ use radix_trie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use storage::Storage;
-use string_utils::{tokenize, tokenize_and_stem, Parser};
+use nlp::{tokenize, tokenize_and_stem, Parser};
+use types::{DocumentId, FieldId, TokenScore};
 
 mod dictionary;
 mod posting_storage;
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct DocumentId(pub usize);
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FieldId(pub usize);
+// mod radix_tree;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Posting {
+struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
     pub positions: Vec<usize>,
@@ -37,44 +38,47 @@ pub struct StringIndexValue {
 }
 
 pub struct StringIndex {
-    tree: Trie<String, StringIndexValue>,
+    tree: RwLock<Trie<String, StringIndexValue>>,
     posting_storage: PostingStorage,
     parser: Parser,
     dictionary: Dictionary,
-    // TODO: move those to AtomicUsize
-    total_documents: usize,
-    total_document_length: usize,
+    total_documents: AtomicUsize,
+    total_document_length: AtomicUsize,
 }
 
 impl StringIndex {
-    pub fn new(
-        storage: Arc<Storage>,
-        parser: Parser,
-    ) -> Self {
+    pub fn new(storage: Arc<Storage>, parser: Parser) -> Self {
         StringIndex {
-            tree: Trie::new(),
+            tree: RwLock::new(Trie::new()),
             posting_storage: PostingStorage::new(storage),
             parser,
             dictionary: Dictionary::new(),
-            total_documents: 0,
-            total_document_length: 0,
+            total_documents: AtomicUsize::new(0),
+            total_document_length: AtomicUsize::new(0),
         }
     }
 
-    pub fn search(&self, term: &str, limit: usize, boost: f32) -> Result<Vec<(DocumentId, f32)>> {
-        let total_documents = match self.total_documents {
+    pub fn get_total_documents(&self) -> usize {
+        self.total_documents.load(Ordering::Relaxed)
+    }
+
+    pub fn search(
+        &self,
+        term: &str,
+        limit: usize,
+        boost: Option<HashMap<FieldId, f32>>,
+    ) -> Result<(Vec<TokenScore>, usize)> {
+        let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
-                return {
-                    println!("total_documents == 0");
-                    Ok(vec![])
-                }
+                println!("total_documents == 0");
+                return Ok((vec![], 0));
             }
             total_documents => total_documents as f32,
         };
-        let total_document_length = match self.total_document_length {
+        let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
                 println!("total_document_length == 0");
-                return Ok(vec![]);
+                return Ok((vec![], 0));
             }
             total_document_length => total_document_length as f32,
         };
@@ -84,8 +88,13 @@ impl StringIndex {
         let tokens = tokenize(term, &self.parser.tokenizer);
 
         let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
+        let tree = self
+            .tree
+            .read()
+            // TODO: better error handling
+            .expect("Unable to read");
         for token in tokens {
-            let string_index_value = self.tree.get(&token);
+            let string_index_value = tree.get(&token);
 
             if let Some(string_index_value) = string_index_value {
                 posting_list_ids_with_freq.push(string_index_value.clone());
@@ -93,6 +102,8 @@ impl StringIndex {
                 eprintln!("Token not found inside index: {}", token);
             }
         }
+
+        let boost = boost.unwrap_or_default();
 
         let scores = posting_list_ids_with_freq
             .into_par_iter()
@@ -115,10 +126,16 @@ impl StringIndex {
                     for posting in postings {
                         let term_frequency = posting.term_frequency;
                         let doc_length = posting.doc_length as f32;
+                        let boost_per_field = boost.get(&posting.field_id).unwrap_or(&1.0);
 
                         let idf = ((total_documents - freq + 0.5_f32) / (freq + 0.5_f32)).ln_1p();
-                        let score =
-                            calculate_score(term_frequency, idf, doc_length, avg_doc_length, boost);
+                        let score = calculate_score(
+                            term_frequency,
+                            idf,
+                            doc_length,
+                            avg_doc_length,
+                            *boost_per_field,
+                        );
 
                         let doc_score = acc.entry(posting.document_id).or_default();
                         *doc_score += score;
@@ -134,18 +151,16 @@ impl StringIndex {
                 }
                 acc
             });
+        let total = scores.len();
 
-        let docs = top_n(scores, limit);
+        let docs: Vec<TokenScore> = top_n(scores, limit);
 
-        Ok(docs)
+        Ok((docs, total))
     }
 
-    pub fn insert_multiple(
-        &mut self,
-        field_id: FieldId,
-        data: Vec<(DocumentId, String)>,
-    ) -> Result<()> {
-        self.total_documents += data.len();
+    pub fn insert_multiple(&self, data: HashMap<DocumentId, Vec<(FieldId, String)>>) -> Result<()> {
+        self.total_documents
+            .fetch_add(data.len(), Ordering::Relaxed);
 
         let dictionary = &self.dictionary;
         let parser = &self.parser;
@@ -155,54 +170,58 @@ impl StringIndex {
             // Parallel
             .fold(
                 HashMap::<TermId, Vec<Posting>>::new,
-                |mut acc, (document_id, s)| {
-                    let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> =
-                        HashMap::new();
+                |mut acc, (document_id, strings)| {
+                    for (field_id, s) in strings {
+                        let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> =
+                            HashMap::new();
 
-                    for (position, (original, stemmed)) in tokenize_and_stem(&s, parser).enumerate()
-                    {
-                        let is_equal = original == stemmed;
+                        for (position, (original, stemmed)) in
+                            tokenize_and_stem(&s, parser).enumerate()
+                        {
+                            let is_equal = original == stemmed;
 
-                        let entry = term_freqs.entry(original).or_default();
-                        let field_entry = entry.entry(field_id).or_default();
-                        field_entry.push(position);
-
-                        if !is_equal {
-                            let entry = term_freqs.entry(stemmed).or_default();
+                            let entry = term_freqs.entry(original).or_default();
                             let field_entry = entry.entry(field_id).or_default();
                             field_entry.push(position);
-                        }
-                    }
 
-                    let doc_length = term_freqs
-                        .values()
-                        .map(|field_freqs| {
-                            field_freqs
-                                .values()
-                                .map(|positions| positions.len())
-                                .sum::<usize>()
-                        })
-                        .sum::<usize>();
-
-                    for (term, field_positions) in term_freqs {
-                        let term_id = dictionary.get_or_add(&term);
-                        // println!("Term: {} -> {}", term, term_id.0);
-
-                        let v = acc.entry(term_id).or_default();
-
-                        let posting = field_positions.into_iter().map(|(field_id, positions)| {
-                            let term_frequency = positions.len() as f32;
-
-                            Posting {
-                                document_id,
-                                field_id,
-                                positions,
-                                // original_term: term.clone(),
-                                term_frequency,
-                                doc_length: doc_length as u16,
+                            if !is_equal {
+                                let entry = term_freqs.entry(stemmed).or_default();
+                                let field_entry = entry.entry(field_id).or_default();
+                                field_entry.push(position);
                             }
-                        });
-                        v.extend(posting);
+                        }
+
+                        let doc_length = term_freqs
+                            .values()
+                            .map(|field_freqs| {
+                                field_freqs
+                                    .values()
+                                    .map(|positions| positions.len())
+                                    .sum::<usize>()
+                            })
+                            .sum::<usize>();
+
+                        for (term, field_positions) in term_freqs {
+                            let term_id = dictionary.get_or_add(&term);
+                            // println!("Term: {} -> {}", term, term_id.0);
+
+                            let v = acc.entry(term_id).or_default();
+
+                            let posting =
+                                field_positions.into_iter().map(|(field_id, positions)| {
+                                    let term_frequency = positions.len() as f32;
+
+                                    Posting {
+                                        document_id,
+                                        field_id,
+                                        positions,
+                                        // original_term: term.clone(),
+                                        term_frequency,
+                                        doc_length: doc_length as u16,
+                                    }
+                                });
+                            v.extend(posting);
+                        }
                     }
 
                     acc
@@ -223,13 +242,17 @@ impl StringIndex {
 
         let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
             HashMap::with_capacity(posting_per_term.len());
+        let mut tree = self.tree.write().expect("Unable to write");
         // NB: We cannot parallelize the tree insertion yet :(
         // We could move the tree into a custom implementation to support parallelism
         // Once we resolve this issue, we StringIndex is thread safe!
         // TODO: move to custom implementation
         // For the time being, we can just use the sync tree
         for (term_id, postings) in posting_per_term {
-            self.total_document_length += postings.iter().map(|p| p.positions.len()).sum::<usize>();
+            self.total_document_length.fetch_add(
+                postings.iter().map(|p| p.positions.len()).sum::<usize>(),
+                Ordering::Relaxed,
+            );
             let number_of_occurence_of_term = postings.len();
 
             // Due to this implementation, we have a limitation
@@ -239,7 +262,7 @@ impl StringIndex {
             // TODO: find a way to avoid this invocation
             let term = dictionary.retrive(term_id);
 
-            let value = self.tree.get_mut(&term);
+            let value = tree.get_mut(&term);
             if let Some(value) = value {
                 value.term_frequency += number_of_occurence_of_term;
                 let vec = postings_per_posting_list_id
@@ -248,7 +271,7 @@ impl StringIndex {
                 vec.push(postings);
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
-                self.tree.insert(
+                tree.insert(
                     term,
                     StringIndexValue {
                         posting_list_id,
@@ -281,7 +304,7 @@ fn calculate_score(tf: f32, idf: f32, doc_length: f32, avg_doc_length: f32, boos
     idf * (numerator / denominator) * boost
 }
 
-fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<(DocumentId, f32)> {
+fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
     // A min-heap of size `n` to keep track of the top N elements
     let mut heap: BinaryHeap<Reverse<(NotNan<f32>, DocumentId)>> = BinaryHeap::with_capacity(n);
 
@@ -298,10 +321,13 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<(DocumentId, f32)> {
     }
 
     // Collect results into a sorted Vec (optional sorting based on descending values)
-    let mut result: Vec<(DocumentId, f32)> = heap
+    let mut result: Vec<TokenScore> = heap
         .into_sorted_vec()
         .into_iter()
-        .map(|Reverse((value, key))| (key, value.into_inner()))
+        .map(|Reverse((value, key))| TokenScore {
+            document_id: key,
+            score: value.into_inner(),
+        })
         .collect();
 
     // TODO: check is this `reverse` is needed
@@ -311,10 +337,10 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<(DocumentId, f32)> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
     use rocksdb::OptimisticTransactionDB;
-    use string_utils::{Language, Parser};
+    use nlp::{Language, Parser};
     use tempdir::TempDir;
 
     use crate::{DocumentId, FieldId, StringIndex};
@@ -325,27 +351,46 @@ mod tests {
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
         let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
         let storage = Arc::new(crate::Storage::new(db));
-        let mut string_index = StringIndex::new(storage, Parser::from_language(Language::English));
+        let string_index = StringIndex::new(storage, Parser::from_language(Language::English));
 
-        let batch = vec![
+        let batch: HashMap<_, _> = vec![
             (
                 DocumentId(1),
-                "Yo, I'm from where Nicky Barnes got rich as fuck, welcome!".to_string(),
+                vec![(
+                    FieldId(0),
+                    "Yo, I'm from where Nicky Barnes got rich as fuck, welcome!".to_string(),
+                )],
             ),
             (
                 DocumentId(2),
-                "Welcome to Harlem, where you welcome to problems".to_string(),
+                vec![(
+                    FieldId(0),
+                    "Welcome to Harlem, where you welcome to problems".to_string(),
+                )],
             ),
             (
                 DocumentId(3),
-                "Now bitches, they want to neuter me, niggas, they want to tutor me".to_string(),
+                vec![(
+                    FieldId(0),
+                    "Now bitches, they want to neuter me, niggas, they want to tutor me"
+                        .to_string(),
+                )],
             ),
-        ];
+        ]
+        .into_iter()
+        .collect();
 
-        string_index.insert_multiple(FieldId(0), batch).unwrap();
+        string_index.insert_multiple(batch).unwrap();
 
-        let output = string_index.search("welcome", 10, 1.0).unwrap();
+        let (output, count) = string_index
+            .search(
+                "welcome",
+                10,
+                Some(vec![(FieldId(0), 1.0)].into_iter().collect()),
+            )
+            .unwrap();
 
         assert_eq!(output.len(), 2);
+        assert_eq!(count, 2);
     }
 }

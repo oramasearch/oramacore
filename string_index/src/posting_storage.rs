@@ -18,17 +18,15 @@ pub enum PostingStorageError {
     SerializationError(#[from] bincode::Error),
 }
 
+const POSTING_STORAGE_TAG: u8 = 0;
+
 pub struct PostingStorage {
     storage: Arc<Storage>,
 }
 
 impl PostingStorage {
-    pub fn new(
-        storage: Arc<Storage>,
-    ) -> Self {
-        PostingStorage {
-            storage,
-        }
+    pub fn new(storage: Arc<Storage>) -> Self {
+        PostingStorage { storage }
     }
 
     pub fn get(
@@ -36,7 +34,19 @@ impl PostingStorage {
         posting_list_id: PostingListId,
         freq: usize,
     ) -> Result<(Vec<Posting>, usize), PostingStorageError> {
-        let output = self.storage.fetch(&posting_list_id.0.to_be_bytes())?;
+        let key = posting_list_id.0.to_be_bytes();
+        let key = &[
+            POSTING_STORAGE_TAG,
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            key[6],
+            key[7],
+        ];
+        let output = self.storage.fetch(key)?;
 
         let output = match output {
             None => return Err(PostingStorageError::PostingListIdNotFound),
@@ -59,11 +69,21 @@ impl PostingStorage {
         postings: Vec<Vec<Posting>>,
     ) -> Result<(), PostingStorageError> {
         let key = posting_list_id.0.to_be_bytes();
+        let key = &[
+            POSTING_STORAGE_TAG,
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            key[6],
+            key[7],
+        ];
 
         self.storage.run_in_transaction(|transaction| {
-            let pinned = transaction
-                .get_pinned(key).unwrap();
-            
+            let pinned = transaction.get_pinned(key).unwrap();
+
             match pinned {
                 Some(data) => {
                     let mut deserialized = unserialize(&data)?;

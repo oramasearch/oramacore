@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rocksdb::{DBPinnableSlice, OptimisticTransactionDB};
+use rocksdb::{DBPinnableSlice, Error, OptimisticTransactionDB};
 use thiserror::Error;
 
 pub struct Storage {
@@ -24,20 +24,25 @@ impl Storage {
         Ok(self.db.get_pinned(key)?)
     }
 
+    pub fn fetch_multiple(&self, keys: Vec<Vec<u8>>) -> Result<Vec<Option<Vec<u8>>>, StorageError> {
+        let output: Result<Vec<_>, Error> = self.db.multi_get(&keys).into_iter().collect();
+        Ok(output?)
+    }
+
     pub fn run_in_transaction<R, E>(
         &self,
         f: impl FnOnce(&rocksdb::Transaction<OptimisticTransactionDB>) -> anyhow::Result<R, E>,
     ) -> Result<R, StorageError>
-    where 
-        E: std::convert::Into<anyhow::Error>
+    where
+        E: std::convert::Into<anyhow::Error>,
     {
         let transaction = self.db.transaction();
         let output = match f(&transaction) {
             Ok(output) => output,
             Err(e) => {
                 transaction.rollback()?;
-                return Err(StorageError::GenericError(e.into()))
-            },
+                return Err(StorageError::GenericError(e.into()));
+            }
         };
         transaction.commit()?;
         Ok(output)
