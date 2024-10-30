@@ -34,12 +34,12 @@ jobs:
         restore-keys: cargo-
     - name: Install target
       run: rustup target add x86_64-unknown-linux-gnu
+    - name: Build
+      run: cargo build --verbose
     - name: Lint
       run: |
         cargo fmt --all -- --check
         cargo clippy -- -D warnings 
-    - name: Build
-      run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
     - name: Build release
