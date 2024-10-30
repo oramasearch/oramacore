@@ -24,7 +24,6 @@ pub fn get_prompt(prompt: Prompts) -> String {
         }
         Prompts::Custom(value) => {
             value
-        },
-        _ => "".to_string()
+        }
     }
 }

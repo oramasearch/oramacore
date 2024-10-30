@@ -72,7 +72,7 @@ mod tests {
         http::header::ContentType,
         test,
     };
-    use types::{DocumentId, SearchResult, TokenScore};
+    use types::SearchResult;
 
     #[actix_web::test]
     async fn test_index_get() {
