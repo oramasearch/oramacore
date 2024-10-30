@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix-ci" ]
   pull_request:
     branches: [ "main" ]
 
@@ -16,6 +16,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install packages deps
+      run: apt-get update && \
+        apt-get install -y \
+        libssl3 \
+        pkg-config \
+        libssl-dev \
+        g++ \
+        build-essential \
+        ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
