@@ -23,6 +23,9 @@ jobs:
 
     - name: Find cc1obj
       run: |
+        gcc --version
+        g++ --version
+        which g++
         sudo ls -lag /usr/
         sudo ls -lag /usr/libexec/
         sudo find /usr/libexec -name "cc1plus"
