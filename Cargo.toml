@@ -4,5 +4,6 @@ members = [
     "string_index",
     "nlp",
     "content_expander",
+    "analytics_storage",
     # "radix_tree",
 ]
