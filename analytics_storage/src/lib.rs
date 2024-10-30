@@ -1,3 +1,6 @@
+mod utils;
+
+use crate::utils::date_to_timestamp;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -121,8 +124,16 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
         Ok(())
     }
 
+    pub fn get_from_range(self, from: String, to: String) -> Result<()> {
+        let blocks = self.get_all_blocks_in_range(from, to)?;
+
+        // @todo: implement data retrieval
+
+        Ok(())
+    }
+
     pub fn get_block_meta(path: &str) -> Result<TimeBlockMeta> {
-        let file = fs::File::open(path).with_context(|| anyhow!("Unable to open file {}", path))?;
+        let file = File::open(path).with_context(|| anyhow!("Unable to open file {}", path))?;
         let file_size = file.metadata()?.len();
 
         let reader = BufReader::new(file);
@@ -164,15 +175,32 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
 
     fn get_block_span(&self, timestamp: i64) -> Result<BlockSpan> {
         let duration: i64 = match self.granularity {
-            Granularity::Hour => 3_600_000,     // 1 hour in milliseconds
-            Granularity::Day => 86_400_000,     // 24 hours in milliseconds
-            Granularity::Week => 604_800_000,   // 7 days in milliseconds
+            Granularity::Hour => 3_600_000,      // 1 hour in milliseconds
+            Granularity::Day => 86_400_000,      // 24 hours in milliseconds
+            Granularity::Week => 604_800_000,    // 7 days in milliseconds
             Granularity::Month => 2_592_000_000, // 30 days in milliseconds
         };
 
         Ok((timestamp - duration, timestamp + duration))
     }
 
+    fn get_all_blocks_in_range(&self, from: String, to: String) -> Result<Vec<String>> {
+        let from_timestamp = date_to_timestamp(&from)?;
+        let to_timestamp = date_to_timestamp(&to)?;
+        let index_dir = self.get_index_dir();
+
+        let blocks = fs::read_dir(&index_dir)?
+            .filter_map(|res| res.ok())
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                name.parse::<i64>().ok()
+            })
+            .filter(|&timestamp| timestamp >= from_timestamp && timestamp <= to_timestamp)
+            .map(|timestamp| timestamp.to_string())
+            .collect();
+
+        Ok(blocks)
+    }
 
     fn current_block_exists(&self) -> Result<bool> {
         let path = self.get_block_path(None)?;
@@ -388,5 +416,4 @@ mod tests {
         assert!(!lines.is_empty());
         assert!(lines[0].contains("test"));
     }
-
 }
