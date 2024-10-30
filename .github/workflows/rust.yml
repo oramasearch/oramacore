@@ -44,3 +44,15 @@ jobs:
     - name: Build
       run: |
         cargo build --release --target x86_64-unknown-linux-gnu -p rustorama
+        ls -lha target/
+        ls -lha target/x86_64-unknown-linux-gnu
+        ls -lha target/x86_64-unknown-linux-gnu/release
+
+    - name: Upload Linux x86_64-unknown-linux-gnu
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./target/x86_64-unknown-linux-gnu/release/rustorama
+        asset_name: rustorama-linux-x86_64-unknown-linux-gnu
