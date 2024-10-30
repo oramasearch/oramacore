@@ -21,16 +21,7 @@ jobs:
     - name: apt-get install
       run: |
         sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates
-        sudo apt-get install -y nvidia-cuda-toolkit libomp-dev gobjc*aarch64*gnu
-    - name: Find cc1obj
-      run: |
-        gcc --version
-        g++ --version
-        which g++
-        sudo ls -lag /usr/
-        sudo ls -lag /usr/libexec/
-        sudo find /usr/libexec -name "cc1plus"
-
+        sudo apt-get install -y libomp-dev gobjc*aarch64*gnu
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
@@ -45,6 +36,12 @@ jobs:
         restore-keys: cargo-
     - name: Install target
       run: rustup target add x86_64-unknown-linux-gnu
+    - name: Environment
+      run: |
+        gcc --version
+        g++ --version
+        rustc --version
+        cargo --version
     - name: Build
       run: |
-        RUSTFLAGS="-C target-feature=+fp16" cargo build --verbose --release --target x86_64-unknown-linux-gnu
+        cargo build --release --target x86_64-unknown-linux-gnu
