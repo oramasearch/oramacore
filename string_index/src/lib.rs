@@ -9,13 +9,13 @@ use std::{
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
+use nlp::{tokenize, tokenize_and_stem, Parser};
 use ordered_float::NotNan;
 use posting_storage::{PostingListId, PostingStorage};
 use radix_trie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use storage::Storage;
-use nlp::{tokenize, tokenize_and_stem, Parser};
 use types::{DocumentId, FieldId, TokenScore};
 
 mod dictionary;
@@ -339,8 +339,8 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use rocksdb::OptimisticTransactionDB;
     use nlp::{Language, Parser};
+    use rocksdb::OptimisticTransactionDB;
     use tempdir::TempDir;
 
     use crate::{DocumentId, FieldId, StringIndex};

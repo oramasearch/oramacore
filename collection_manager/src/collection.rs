@@ -6,10 +6,10 @@ use std::{
 use anyhow::anyhow;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
+use nlp::{Language, Parser};
 use serde_json::Value;
 use storage::Storage;
 use string_index::StringIndex;
-use nlp::{Language, Parser};
 use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
     ValueType,

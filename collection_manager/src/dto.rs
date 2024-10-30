@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 use nlp::Language;
+use serde::{Deserialize, Serialize};
 use types::FieldId;
 
 #[derive(Debug, Serialize, Deserialize)]
