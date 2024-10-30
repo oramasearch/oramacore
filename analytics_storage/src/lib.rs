@@ -6,7 +6,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub type TimeSeriesData<T> = Vec<(i64, T)>;
 pub type BlockSpan = (i64, i64);
@@ -34,7 +34,7 @@ pub struct AnalyticsStorageConfig {
     pub offload_to: Option<OffloadTarget>,
 }
 
-pub struct AnalyticsStorage<T> {
+pub struct AnalyticsStorage<T: Serialize + Clone> {
     index_id: String,
     docs_size: usize,
     buffer_size: usize,
@@ -49,20 +49,20 @@ pub enum Version {
     V1_0,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct VersionV1_0Schema {
-    id: String,
-    deployment_id: String,
-    instance_id: String,
-    timestamp: i64,
-    raw_search_string: String,
-    raw_query: String,
-    results_count: usize,
-    referer: String,
-    pop: String,
-    country: String,
-    continent: String,
-    visitor_id: String,
+    pub id: String,
+    pub deployment_id: String,
+    pub instance_id: String,
+    pub timestamp: i64,
+    pub raw_search_string: String,
+    pub raw_query: String,
+    pub results_count: usize,
+    pub referer: String,
+    pub pop: String,
+    pub country: String,
+    pub continent: String,
+    pub visitor_id: String,
 }
 
 pub struct TimeBlockMeta {
@@ -164,24 +164,14 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
     }
 
     fn get_block_span(&self, timestamp: i64) -> Result<BlockSpan> {
-        match self.granularity {
-            Granularity::Hour => {
-                let hour = ms("1 hour")?;
-                Ok((timestamp - hour, timestamp + hour))
-            }
-            Granularity::Day => {
-                let day = ms("1 day")?;
-                Ok((timestamp - day, timestamp + day))
-            }
-            Granularity::Week => {
-                let week = ms("1 week")?;
-                Ok((timestamp - week, timestamp + week))
-            }
-            Granularity::Month => {
-                let month = ms("30 days")?;
-                Ok((timestamp - month, timestamp + month))
-            }
-        }
+        let duration: i64 = match self.granularity {
+            Granularity::Hour => 3600,     // 1h in seconds
+            Granularity::Day => 86400,     // 24h in seconds
+            Granularity::Week => 604800,   // 7 days in seconds
+            Granularity::Month => 2592000, // 30 days in seconds
+        };
+
+        Ok((timestamp - duration, timestamp + duration))
     }
 
     fn current_block_exists(&self) -> Result<bool> {
@@ -196,28 +186,22 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
         let now = timestamp.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
+                .expect("WTF Time went backwards")
                 .as_millis() as i64
         });
 
-        let lifespan = self.get_block_span(now)?;
+        let (start, end) = self.get_block_span(now)?;
         let index_dir = self.get_index_dir();
 
-        let result = fs::read_dir(&index_dir)
-            .with_context(|| format!("Failed to read directory {}", index_dir))?
+        let result = fs::read_dir(&index_dir)?
             .filter_map(|res| res.ok())
-            .map(|entry| entry.path().display().to_string())
-            .find(|file_path| {
-                file_path
-                    .parse::<i64>()
-                    .map(|time| time > lifespan.0 && time < lifespan.1)
-                    .unwrap_or(false)
-            });
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                name.parse::<i64>().ok()
+            })
+            .find(|&timestamp| timestamp >= start && timestamp <= end);
 
-        match result {
-            Some(path) => Ok(Some(path)),
-            None => Ok(None),
-        }
+        Ok(result.map(|ts| format!("{}/{}", index_dir, ts)))
     }
 
     fn parse_version(version: &str) -> Result<Version> {
@@ -233,9 +217,9 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
             .as_millis()
             .to_string();
         let file_path = format!("{}/{}", self.get_index_dir(), now);
-        let file = File::create(file_path);
-        file?.write_all(b"1.0,0")?;
-
+        let mut file = File::create(file_path)?;
+        writeln!(file, "1.0,0")?;
+        file.sync_all()?;
         Ok(())
     }
 
@@ -245,29 +229,165 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
 
     fn flush_buffer(&mut self, mut tmp: VecDeque<T>) -> Result<()> {
         let mut retry_vec: Vec<_> = Vec::new();
+
+        if !self.current_block_exists()? {
+            self.create_new_block_file()?;
+        }
+
         let current_block = self
             .get_block_path(None)?
             .with_context(|| "Unable to get the current block path while flushing")?;
+
         let mut file = OpenOptions::new()
             .write(true)
             .append(true)
-            .open(current_block)?;
+            .open(&current_block)?;
 
         while let Some(item) = tmp.pop_front() {
-            let formatted_line = self.format_line_for_block(item.clone())?;
-            if let Err(e) = writeln!(file, "{},{}", formatted_line.0, formatted_line.1) {
-                retry_vec.push(item)
+            let (timestamp, line) = self.format_line_for_block(item.clone())?;
+            if let Err(e) = writeln!(file, "{},{}", timestamp, line) {
+                eprintln!("Error writing to file: {:?}", e);
+                retry_vec.push(item);
             }
         }
+
+        // @todo: handle retries
 
         Ok(())
     }
 
+    pub fn flush(&mut self) -> Result<()> {
+        if !self.write_buffer.is_empty() {
+            let tmp = std::mem::take(&mut self.write_buffer);
+            self.flush_buffer(tmp)?;
+        }
+        Ok(())
+    }
+
     fn format_line_for_block(&self, data: T) -> Result<(i64, String)> {
-        let mut wtr = csv::Writer::from_writer(Vec::new());
+        let mut wtr = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(Vec::new());
         wtr.serialize(&data)?;
-        let str = String::from_utf8(wtr.into_inner()?)?;
+        let str = String::from_utf8(wtr.into_inner()?)?.trim_end().to_string();
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
         Ok((now, str))
+    }
+}
+
+impl<T: Serialize + Clone> Drop for AnalyticsStorage<T> {
+    fn drop(&mut self) {
+        if !self.write_buffer.is_empty() {
+            let tmp = std::mem::take(&mut self.write_buffer);
+            if let Err(e) = self.flush_buffer(tmp) {
+                eprintln!("Error flushing buffer during drop: {:?}", e);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn setup() -> (AnalyticsStorage<VersionV1_0Schema>, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let config = AnalyticsStorageConfig {
+            index_id: "test_index".to_string(),
+            persistence_dir: Some(temp_dir.path().to_str().unwrap().to_string()),
+            granularity: Some(Granularity::Hour),
+            ..Default::default()
+        };
+        let storage = AnalyticsStorage::try_new(config).unwrap();
+        (storage, temp_dir)
+    }
+
+    #[test]
+    fn test_block_span_hour() {
+        let (storage, _temp) = setup();
+        let timestamp = 3600; // 1 hour in seconds
+        let (start, end) = storage.get_block_span(timestamp).unwrap();
+        assert_eq!(start, 0);
+        assert_eq!(end, 7200);
+    }
+
+    #[test]
+    fn test_block_span_day() {
+        let config = AnalyticsStorageConfig {
+            index_id: "test_index".to_string(),
+            granularity: Some(Granularity::Day),
+            ..Default::default()
+        };
+        let storage: AnalyticsStorage<VersionV1_0Schema> =
+            AnalyticsStorage::try_new(config).unwrap();
+        let timestamp = 86400; // 24 hours in seconds
+        let (start, end) = storage.get_block_span(timestamp).unwrap();
+        assert_eq!(start, 0);
+        assert_eq!(end, 172800);
+    }
+
+    #[test]
+    fn test_insert_and_flush() {
+        let (mut storage, _temp_dir) = setup();
+        let test_data = VersionV1_0Schema {
+            id: "test".to_string(),
+            deployment_id: "test".to_string(),
+            instance_id: "test".to_string(),
+            timestamp: 1000,
+            raw_search_string: "test".to_string(),
+            raw_query: "test".to_string(),
+            results_count: 0,
+            referer: "test".to_string(),
+            pop: "test".to_string(),
+            country: "test".to_string(),
+            continent: "test".to_string(),
+            visitor_id: "test".to_string(),
+        };
+
+        for _ in 0..101 {
+            storage.insert(test_data.clone()).unwrap();
+        }
+
+        let index_dir = storage.get_index_dir();
+        let files: Vec<_> = fs::read_dir(index_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(!files.is_empty());
+    }
+
+    #[test]
+    fn test_insert_and_verify_content() {
+        let (mut storage, _temp_dir) = setup();
+        let test_data = VersionV1_0Schema {
+            id: "test".to_string(),
+            deployment_id: "test".to_string(),
+            instance_id: "test".to_string(),
+            timestamp: 1000,
+            raw_search_string: "test".to_string(),
+            raw_query: "test".to_string(),
+            results_count: 0,
+            referer: "test".to_string(),
+            pop: "test".to_string(),
+            country: "test".to_string(),
+            continent: "test".to_string(),
+            visitor_id: "test".to_string(),
+        };
+
+        storage.insert(test_data.clone()).unwrap();
+
+        let tmp = std::mem::take(&mut storage.write_buffer);
+        storage.flush_buffer(tmp).unwrap();
+
+        let block_path = storage.get_block_path(None).unwrap().unwrap();
+        let file = File::open(block_path).unwrap();
+        let reader = BufReader::new(file);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert!(!lines.is_empty());
+        assert_eq!(lines[0], "1.0,0");
+        assert!(lines[1].contains("test"));
     }
 }
