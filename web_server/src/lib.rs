@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{net::{IpAddr, SocketAddr}, sync::Arc};
 
 use actix_web::{
     body::MessageBody,
@@ -9,8 +9,15 @@ use actix_web::{
 use anyhow::Result;
 use api::api_config;
 use collection_manager::CollectionManager;
+use serde::Deserialize;
 
 mod api;
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpConfig {
+    pub host: IpAddr,
+    pub port: u16,
+}
 
 pub struct WebServer {
     collection_manager: Arc<CollectionManager>,
@@ -21,9 +28,12 @@ impl WebServer {
         Self { collection_manager }
     }
 
-    pub async fn start(self) -> Result<()> {
+    pub async fn start(self,
+        config: HttpConfig,
+    ) -> Result<()> {
+        let addr = SocketAddr::new(config.host, config.port);
         let s = Arc::new(self);
-        let server = HttpServer::new(move || s.get_service()).bind(("127.0.0.1", 8080))?;
+        let server = HttpServer::new(move || s.get_service()).bind(addr)?;
 
         for addr in server.addrs() {
             println!("Started at http://{:?}", addr);

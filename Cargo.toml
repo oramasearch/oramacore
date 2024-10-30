@@ -9,4 +9,5 @@ members = [
     "storage",
     "document_storage",
     "types",
+    "rustorama",
 ]
