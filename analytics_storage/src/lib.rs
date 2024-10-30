@@ -140,7 +140,7 @@ impl AnalyticsStorage {
     }
 
     fn get_block(&self, timestamp: i64) -> Result<TimeBlockMeta> {
-        let block_path = self.get_current_block_path(Some(timestamp))?;
+        let block_path = self.get_block_path(Some(timestamp))?;
         Self::get_block_meta(&block_path)
     }
 
@@ -166,11 +166,11 @@ impl AnalyticsStorage {
     }
 
     fn current_block_exists(&self) -> Result<bool> {
-        let path = self.get_current_block_path(None)?;
+        let path = self.get_block_path(None)?;
         Ok(Path::new(&path).exists())
     }
 
-    fn get_current_block_path(&self, timestamp: Option<i64>) -> Result<String> {
+    fn get_block_path(&self, timestamp: Option<i64>) -> Result<Ok(String)> {
         let now = timestamp.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -181,7 +181,7 @@ impl AnalyticsStorage {
         let lifespan = self.get_block_span(now)?;
         let index_dir = self.get_index_dir();
 
-        fs::read_dir(&index_dir)
+        Ok(fs::read_dir(&index_dir)
             .with_context(|| format!("Failed to read directory {}", index_dir))?
             .filter_map(|res| res.ok())
             .map(|entry| entry.path().display().to_string())
@@ -191,9 +191,12 @@ impl AnalyticsStorage {
                     .map(|time| time > lifespan.0 && time < lifespan.1)
                     .unwrap_or(false)
             })
-            .ok_or_else(|| anyhow::anyhow!("No matching block found in {}", index_dir))?
+            .ok_or_else(|| {
+                anyhow::anyhow!("No matching block found in {}", index_dir);
+                return None
+            })?
             .parse()
-            .context("Failed to parse block path")
+            .context("Failed to parse block path"))
     }
 
     fn parse_version(version: &str) -> Result<Version> {
