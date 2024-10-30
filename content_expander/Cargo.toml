@@ -16,7 +16,7 @@ log = "0.4.22"
 reqwest = "0.12.8"
 tokio = { version = "1.41.0", features = ["full"] }
 tempdir = "0.3.7"
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", features = ["metal"] }
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git" }
 image = "0.25.4"
 textwrap = "0.16.1"
 futures-util = "0.3.31"

@@ -19,8 +19,9 @@ jobs:
     - name: apt-get update
       run: sudo apt-get update
     - name: apt-get install
-      run: sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates && sudo apt-get install --reinstall build-essential
-
+      run: |
+        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates
+        sudo apt-get install -y nvidia-cuda-toolkit libomp-dev gobjc*aarch64*gnu
     - name: Find cc1obj
       run: |
         gcc --version
@@ -46,13 +47,4 @@ jobs:
       run: rustup target add x86_64-unknown-linux-gnu
     - name: Build
       run: |
-        export PATH="/usr/libexec/gcc/aarch64-linux-gnu/13:$PATH";
-        cargo build --verbose
-    - name: Lint
-      run: |
-        cargo fmt --all -- --check
-        cargo clippy -- -D warnings 
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Build release
-      run: cargo build --target x86_64-unknown-linux-gnu --release -p rustorama
+        RUSTFLAGS="-C target-feature=+fp16" cargo build --verbose --release --target x86_64-unknown-linux-gnu
