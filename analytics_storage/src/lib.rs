@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use ms_converter::ms;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
@@ -52,9 +51,9 @@ pub enum Version {
 #[derive(Serialize, Clone)]
 pub struct VersionV1_0Schema {
     pub id: String,
+    pub timestamp: i64,
     pub deployment_id: String,
     pub instance_id: String,
-    pub timestamp: i64,
     pub raw_search_string: String,
     pub raw_query: String,
     pub results_count: usize,
@@ -78,7 +77,7 @@ pub struct TimeBlock<T> {
 }
 
 const ORAMA_ANALYTICS_DEFAULT_DIRNAME: &str = ".orama_analytics";
-const DEFAULT_BUFFER_SIZE: usize = 100;
+const DEFAULT_BUFFER_SIZE: usize = 250;
 const DEFAULT_OFFLOAD_AFTER: usize = 1440; // 60 days in hours
 
 impl<T: Serialize + Clone> AnalyticsStorage<T> {
@@ -218,7 +217,6 @@ impl<T: Serialize + Clone> AnalyticsStorage<T> {
             .to_string();
         let file_path = format!("{}/{}", self.get_index_dir(), now);
         let mut file = File::create(file_path)?;
-        writeln!(file, "1.0,0")?;
         file.sync_all()?;
         Ok(())
     }
@@ -387,7 +385,6 @@ mod tests {
         let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
 
         assert!(!lines.is_empty());
-        assert_eq!(lines[0], "1.0,0");
-        assert!(lines[1].contains("test"));
+        assert!(lines[0].contains("test"));
     }
 }

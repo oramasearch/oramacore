@@ -5,6 +5,7 @@ use rand::distributions::Alphanumeric;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{thread, time::Duration};
 use uuid::Uuid;
 
 fn main() {
@@ -24,37 +25,42 @@ fn main() {
     let countries = vec!["italy", "usa", "brazil", "china"];
     let mut rng = rand::thread_rng();
 
-    for _ in 0..10_000 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_millis() as i64;
+    for _ in 0..3 {
+        for _ in 0..10_000 {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as i64;
 
-        let pop = pops.choose(&mut rand::thread_rng()).unwrap();
-        let continent = continents.choose(&mut rand::thread_rng()).unwrap();
-        let country = countries.choose(&mut rand::thread_rng()).unwrap();
+            let pop = pops.choose(&mut rand::thread_rng()).unwrap();
+            let continent = continents.choose(&mut rand::thread_rng()).unwrap();
+            let country = countries.choose(&mut rand::thread_rng()).unwrap();
 
-        let raw_query: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(7)
-            .map(char::from)
-            .collect();
+            let raw_query: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(7)
+                .map(char::from)
+                .collect();
 
-        storage
-            .insert(VersionV1_0Schema {
-                timestamp: now,
-                pop: pop.to_string(),
-                continent: continent.to_string(),
-                country: country.to_string(),
-                deployment_id: Uuid::new_v4().to_string(),
-                id: Uuid::new_v4().to_string(),
-                instance_id: Uuid::new_v4().to_string(),
-                raw_query: raw_query.clone(),
-                raw_search_string: raw_query,
-                referer: "".to_string(),
-                results_count: rng.gen_range(0..15),
-                visitor_id: Uuid::new_v4().to_string(),
-            })
-            .unwrap();
+            storage
+                .insert(VersionV1_0Schema {
+                    timestamp: now,
+                    pop: pop.to_string(),
+                    continent: continent.to_string(),
+                    country: country.to_string(),
+                    deployment_id: Uuid::new_v4().to_string(),
+                    id: Uuid::new_v4().to_string(),
+                    instance_id: Uuid::new_v4().to_string(),
+                    raw_query: raw_query.clone(),
+                    raw_search_string: raw_query,
+                    referer: "".to_string(),
+                    results_count: rng.gen_range(0..15),
+                    visitor_id: Uuid::new_v4().to_string(),
+                })
+                .unwrap();
+        }
+
+        println!("waiting 20s before resuming...");
+        thread::sleep(Duration::from_secs(20));
     }
 }
