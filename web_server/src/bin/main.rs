@@ -12,10 +12,12 @@ fn main() -> std::io::Result<()> {
         let manager = Arc::new(manager);
         let web_server = WebServer::new(manager);
 
-        web_server.start(HttpConfig {
-            host: IpAddr::from_str("127.0.0.1").unwrap(),
-            port: 8080,
-        }).await
+        web_server
+            .start(HttpConfig {
+                host: IpAddr::from_str("127.0.0.1").unwrap(),
+                port: 8080,
+            })
+            .await
     });
 
     println!("{:?}", err);

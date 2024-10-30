@@ -1,4 +1,7 @@
-use std::{net::{IpAddr, SocketAddr}, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use actix_web::{
     body::MessageBody,
@@ -28,9 +31,7 @@ impl WebServer {
         Self { collection_manager }
     }
 
-    pub async fn start(self,
-        config: HttpConfig,
-    ) -> Result<()> {
+    pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
         let s = Arc::new(self);
         let server = HttpServer::new(move || s.get_service()).bind(addr)?;
