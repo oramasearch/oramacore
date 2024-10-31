@@ -158,7 +158,7 @@ mod tests {
     ) -> ServiceResponse<impl MessageBody> {
         let req = test::TestRequest::post()
             .insert_header(ContentType::json())
-            .uri("/collections/")
+            .uri("/v0/collections/")
             .set_payload(serde_json::to_string(create_collection_dto).unwrap())
             .to_request();
         test::call_service(&app, req).await
@@ -175,7 +175,7 @@ mod tests {
     ) -> Vec<collection_manager::dto::CollectionDTO> {
         let req = test::TestRequest::get()
             .insert_header(ContentType::json())
-            .uri("/collections/")
+            .uri("/v0/collections/")
             .to_request();
         let resp: Vec<collection_manager::dto::CollectionDTO> =
             test::call_and_read_body_json(&app, req).await;
@@ -196,7 +196,7 @@ mod tests {
     ) -> ServiceResponse<impl MessageBody> {
         let req = test::TestRequest::patch()
             .insert_header(ContentType::json())
-            .uri(&format!("/collections/{}/documents", collection_id))
+            .uri(&format!("/v0/collections/{}/documents", collection_id))
             .set_payload(serde_json::to_string(docs).unwrap())
             .to_request();
         test::call_service(&app, req).await
@@ -215,7 +215,7 @@ mod tests {
     ) -> SearchResult {
         let req = test::TestRequest::post()
             .insert_header(ContentType::json())
-            .uri(&format!("/collections/{}/search", collection_id))
+            .uri(&format!("/v0/collections/{}/search", collection_id))
             .set_payload(serde_json::to_string(search_params).unwrap())
             .to_request();
         let resp: SearchResult = test::call_and_read_body_json(&app, req).await;

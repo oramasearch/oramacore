@@ -5,7 +5,7 @@ mod collection;
 
 pub fn api_config(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/collections")
+        web::scope("/v0/collections")
             .service(get_collections)
             .service(get_collection_by_id)
             .service(create_collection)
