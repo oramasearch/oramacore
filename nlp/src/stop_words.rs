@@ -1,13 +1,14 @@
 use crate::locales::Locale;
 use anyhow::Result;
+use include_dir::{include_dir, Dir};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub type StopWords = Vec<String>;
+
+static STOP_WORDS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/stop_words");
 
 static STOP_WORDS_CACHE: Lazy<Mutex<HashMap<String, Option<StopWords>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -20,30 +21,18 @@ pub fn get_stop_words(locale: Locale) -> Result<Option<StopWords>, io::Error> {
         return Ok(cached.clone());
     }
 
-    let stop_words_dir = stop_words_path();
-    let file_path = stop_words_dir.join(format!("{}.txt", locale.to_str()));
-
-    let mut file = match File::open(&file_path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            cache.insert(locale_as_str, None);
-            return Ok(None);
+    let file = STOP_WORDS_DIR.get_file(format!("{}.txt", locale.to_str()));
+    let stop_words = match file {
+        Some(file) => {
+            let contents = file.contents_utf8().unwrap_or_default();
+            let words: StopWords = contents.lines().map(|line| line.to_string()).collect();
+            Some(words)
         }
-        Err(e) => return Err(e),
+        None => None,
     };
 
-    let mut stop_words = String::new();
-    file.read_to_string(&mut stop_words)?;
-
-    let words: StopWords = stop_words.lines().map(|line| line.to_string()).collect();
-
-    cache.insert(locale_as_str, Some(words.clone()));
-    Ok(Some(words))
-}
-
-fn stop_words_path() -> PathBuf {
-    let base_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Path::new(base_dir).join("src/stop_words")
+    cache.insert(locale_as_str, stop_words.clone());
+    Ok(stop_words)
 }
 
 #[cfg(test)]
