@@ -1,4 +1,6 @@
 pub mod chunker;
+mod languages;
+mod stop_words;
 pub mod tokenizer;
 
 use rust_stemmers::Algorithm;
