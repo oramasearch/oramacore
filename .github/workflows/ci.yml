@@ -43,10 +43,14 @@ jobs:
         g++ --version
         rustc --version
         cargo --version
-    - name: Build
+    - name: Check & Fmt & Clippy
       run: |
         cargo check --target x86_64-unknown-linux-gnu
         cargo fmt -- --check
         cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+    - name: Test
+      run: |
         cargo test --target x86_64-unknown-linux-gnu
+    - name: Build
+      run: |
         cargo build --target x86_64-unknown-linux-gnu
