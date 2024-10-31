@@ -14,14 +14,14 @@ static STOP_WORDS_CACHE: Lazy<Mutex<HashMap<String, Option<StopWords>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn get_stop_words(locale: Locale) -> Result<Option<StopWords>> {
-    let locale_as_str = locale.to_str().to_string();
+    let locale_as_str = locale.to_string().to_string();
 
     let mut cache = STOP_WORDS_CACHE.lock().unwrap();
     if let Some(cached) = cache.get(&locale_as_str) {
         return Ok(cached.clone());
     }
 
-    let file = STOP_WORDS_DIR.get_file(format!("{}.txt", locale.to_str()));
+    let file = STOP_WORDS_DIR.get_file(format!("{}.txt", locale.to_string()));
     let stop_words = match file {
         Some(file) => {
             let contents = file.contents_utf8().unwrap_or_default();
