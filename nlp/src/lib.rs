@@ -1,5 +1,5 @@
 pub mod chunker;
-mod languages;
+mod locales;
 mod stop_words;
 pub mod tokenizer;
 
