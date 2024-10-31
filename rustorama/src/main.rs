@@ -54,13 +54,13 @@ fn create_manager(config: RustoramaConfig) -> CollectionManager {
 mod tests {
     use super::*;
 
+    use futures::future::Either;
+    use futures::{future, pin_mut};
+    use hurl::runner;
+    use hurl::runner::{RunnerOptionsBuilder, Value};
+    use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
     use std::collections::HashMap;
     use std::time::Duration;
-    use futures::future::Either;
-    use hurl::runner;
-    use hurl::runner::{Value, RunnerOptionsBuilder};
-    use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
-    use futures::{future, pin_mut};
     use tempdir::TempDir;
     use tokio::time::sleep;
 
@@ -86,24 +86,19 @@ mod tests {
 
             let content = include_str!("../../api-test.hurl");
 
-            let runner_opts = RunnerOptionsBuilder::new()
-                .follow_location(true)
-                .build();
+            let runner_opts = RunnerOptionsBuilder::new().follow_location(true).build();
             let logger_opts = LoggerOptionsBuilder::new()
                 .verbosity(Some(Verbosity::Verbose))
                 .build();
 
-            let variables: HashMap<_, _> = vec![
-                ("base_url".to_string(), Value::String(format!("http://{}:{}", HOST, PORT))),
-            ].into_iter().collect();
+            let variables: HashMap<_, _> = vec![(
+                "base_url".to_string(),
+                Value::String(format!("http://{}:{}", HOST, PORT)),
+            )]
+            .into_iter()
+            .collect();
 
-            let result = runner::run(
-                content,
-                None,
-                &runner_opts,
-                &variables,
-                &logger_opts
-            );
+            let result = runner::run(content, None, &runner_opts, &variables, &logger_opts);
             assert!(result.unwrap().success);
         }
 
