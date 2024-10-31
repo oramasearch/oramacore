@@ -3,7 +3,7 @@ use anyhow::Result;
 use include_dir::{include_dir, Dir};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::io::{self, Read};
+use std::io::Read;
 use std::sync::Mutex;
 
 pub type StopWords = Vec<String>;
@@ -13,7 +13,7 @@ static STOP_WORDS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/src/stop_words");
 static STOP_WORDS_CACHE: Lazy<Mutex<HashMap<String, Option<StopWords>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub fn get_stop_words(locale: Locale) -> Result<Option<StopWords>, io::Error> {
+pub fn get_stop_words(locale: Locale) -> Result<Option<StopWords>> {
     let locale_as_str = locale.to_str().to_string();
 
     let mut cache = STOP_WORDS_CACHE.lock().unwrap();
