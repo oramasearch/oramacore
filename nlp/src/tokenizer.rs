@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::locales::Locale;
+use crate::stop_words::get_stop_words;
 use regex::Regex;
 
 #[derive(Debug, Clone)]
@@ -10,9 +12,10 @@ pub struct Tokenizer {
 
 impl Tokenizer {
     pub fn english() -> Self {
+        let stop_words = get_stop_words(Locale::EN).unwrap().unwrap();
         Tokenizer {
             split_regex: Regex::new(r"[^A-Za-zàèéìòóù0-9_']+").unwrap(),
-            stop_words: STOP_WORDS_ENGLISH.iter().map(|s| s.to_string()).collect(),
+            stop_words: stop_words.into_iter().collect(),
         }
     }
 
