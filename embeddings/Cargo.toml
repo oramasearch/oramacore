@@ -13,8 +13,9 @@ fastembed = { version = "4.1.0", features = ["ort-download-binaries"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1"
 strum = { version = "0.26", features = ["derive"] }
-tokio = { version = "1.41", features = ["rt", "rt-multi-thread"] }
+tokio = { version = "1.41", features = ["rt", "rt-multi-thread", "full"] }
 rayon = "1.8"
 ndarray = "=0.15.6"
-linfa = "=0.6"
-linfa-clustering = "=0.6"
+rand = "0.8.5"
+num-traits = "0.2.19"
+
