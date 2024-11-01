@@ -200,7 +200,7 @@ impl Locale {
 
     pub fn split_regex(&self) -> Option<Regex> {
         match self {
-            Locale::AR => None,
+            Locale::AR => Some(Regex::new(r"(?im)[^a-z0-9أ-ي]+").unwrap()),
             Locale::BG => Some(Regex::new(r"(?im)[^a-z0-9а-яА-Я]+").unwrap()),
             Locale::DA => Some(Regex::new(r"(?im)[^a-z0-9æøåÆØÅ]+").unwrap()),
             Locale::DE => Some(Regex::new(r"(?im)[^a-z0-9A-ZäöüÄÖÜß]+").unwrap()),
