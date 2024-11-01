@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use nlp::Language;
+use nlp::locales::Locale;
 use serde::{Deserialize, Serialize};
 use types::FieldId;
 
@@ -9,17 +9,18 @@ pub enum LanguageDTO {
     English,
 }
 
-impl From<LanguageDTO> for Language {
+impl From<LanguageDTO> for Locale {
     fn from(language: LanguageDTO) -> Self {
         match language {
-            LanguageDTO::English => Language::English,
+            LanguageDTO::English => Locale::EN,
         }
     }
 }
-impl From<Language> for LanguageDTO {
-    fn from(language: Language) -> Self {
+impl From<Locale> for LanguageDTO {
+    fn from(language: Locale) -> Self {
         match language {
-            Language::English => LanguageDTO::English,
+            Locale::EN => LanguageDTO::English,
+            _ => LanguageDTO::English
         }
     }
 }

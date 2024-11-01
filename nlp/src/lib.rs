@@ -1,25 +1,23 @@
 pub mod chunker;
-mod locales;
-mod stop_words;
+pub mod locales;
+pub mod stop_words;
 pub mod tokenizer;
 
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
-
-#[derive(Debug, Clone, Copy)]
-pub enum Language {
-    English,
-}
+use crate::locales::Locale;
 
 pub struct Parser {
     pub tokenizer: Tokenizer,
     stemmer: Stemmer,
 }
 impl Parser {
-    pub fn from_language(language: Language) -> Self {
-        let (tokenizer, stemmer) = match language {
-            Language::English => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
+    pub fn from_language(locale: Locale) -> Self {
+        let (tokenizer, stemmer) = match locale {
+            Locale::EN => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
+            // @todo: manage other locales
+            _ => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
         };
         Self { tokenizer, stemmer }
     }
@@ -65,7 +63,7 @@ mod tests {
 
     #[test]
     fn test_tokenize_and_stem() {
-        let parser = Parser::from_language(Language::English);
+        let parser = Parser::from_language(Locale::EN);
 
         let output = tokenize_and_stem("Hello, world!", &parser).collect::<Vec<(String, String)>>();
         assert_eq!(
