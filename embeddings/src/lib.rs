@@ -1,3 +1,5 @@
+pub mod product_quantization;
+
 use anyhow::{anyhow, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use rayon::prelude::*;
@@ -47,7 +49,7 @@ pub enum OramaModels {
 pub struct LoadedModels(HashMap<OramaModels, TextEmbedding>);
 
 impl LoadedModels {
-    fn embed(&self, model: OramaModels, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    pub fn embed(&self, model: OramaModels, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
         let text_embedding = match self.0.get(&model) {
             Some(model) => model,
             None => return Err(anyhow!("Unable to retrieve embedding model: {model:?}")),
@@ -71,7 +73,7 @@ impl Into<EmbeddingModel> for OramaModels {
 }
 
 impl OramaModels {
-    fn normalize_input(self, intent: EncodingIntent, input: Vec<String>) -> Vec<String> {
+    pub fn normalize_input(self, intent: EncodingIntent, input: Vec<String>) -> Vec<String> {
         match self {
             OramaModels::MultilingualE5Small
             | OramaModels::MultilingualE5Base
@@ -83,7 +85,7 @@ impl OramaModels {
         }
     }
 
-    fn max_input_tokens(self) -> usize {
+    pub fn max_input_tokens(self) -> usize {
         match self {
             OramaModels::GTESmall => 512,
             OramaModels::GTEBase => 512,
@@ -94,7 +96,7 @@ impl OramaModels {
         }
     }
 
-    fn dimensions(self) -> usize {
+    pub fn dimensions(self) -> usize {
         match self {
             OramaModels::GTESmall => 384,
             OramaModels::GTEBase => 768,

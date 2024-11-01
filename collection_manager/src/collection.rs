@@ -6,7 +6,8 @@ use std::{
 use anyhow::anyhow;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use nlp::{Language, Parser};
+use nlp::Parser;
+use nlp::locales::Locale;
 use serde_json::Value;
 use storage::Storage;
 use string_index::StringIndex;
@@ -21,7 +22,7 @@ pub struct Collection {
     pub(crate) id: CollectionId,
     description: Option<String>,
     string_index: StringIndex,
-    language: Language,
+    language: Locale,
     field_id_generator: AtomicU16,
     string_fields: DashMap<String, FieldId>,
     document_storage: Arc<DocumentStorage>,
@@ -32,7 +33,7 @@ impl Collection {
         storage: Arc<Storage>,
         id: CollectionId,
         description: Option<String>,
-        language: Language,
+        language: Locale,
         document_storage: Arc<DocumentStorage>,
     ) -> Self {
         let parser = Parser::from_language(language);
