@@ -10,4 +10,5 @@ members = [
     "document_storage",
     "types",
     "rustorama",
+    "embeddings"
 ]
