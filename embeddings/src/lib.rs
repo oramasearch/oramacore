@@ -1,4 +1,4 @@
-pub mod product_quantization;
+pub mod pq;
 
 use anyhow::{anyhow, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
@@ -6,7 +6,6 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 
@@ -17,7 +16,7 @@ pub struct EmbeddingsParams {
     input: Vec<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum EncodingIntent {
     Query,
@@ -49,13 +48,18 @@ pub enum OramaModels {
 pub struct LoadedModels(HashMap<OramaModels, TextEmbedding>);
 
 impl LoadedModels {
-    pub fn embed(&self, model: OramaModels, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    pub fn embed(
+        &self,
+        model: OramaModels,
+        input: Vec<String>,
+        batch_size: Option<usize>,
+    ) -> Result<Vec<Vec<f32>>> {
         let text_embedding = match self.0.get(&model) {
             Some(model) => model,
             None => return Err(anyhow!("Unable to retrieve embedding model: {model:?}")),
         };
 
-        text_embedding.embed(input, None)
+        text_embedding.embed(input, batch_size)
     }
 }
 
@@ -118,7 +122,14 @@ impl fmt::Display for EncodingIntent {
 }
 
 pub fn load_models() -> LoadedModels {
-    let models: Vec<_> = OramaModels::iter().collect();
+    let models: Vec<_> = vec![
+        OramaModels::MultilingualE5Small,
+        // OramaModels::MultilingualE5Base,
+        // OramaModels::MultilingualE5Large,
+        // OramaModels::GTESmall,
+        // OramaModels::GTEBase,
+        // OramaModels::GTELarge
+    ];
 
     let model_map: HashMap<OramaModels, TextEmbedding> = models
         .into_par_iter()
@@ -133,15 +144,4 @@ pub fn load_models() -> LoadedModels {
         .collect();
 
     LoadedModels(model_map)
-}
-
-pub async fn generate_embeddings(
-    model: Arc<LoadedModels>,
-    orama_model: OramaModels,
-    input: Vec<String>,
-    intent: EncodingIntent,
-) -> Result<Vec<Vec<f32>>> {
-    let normalized_input = orama_model.normalize_input(intent, input);
-
-    tokio::task::spawn_blocking(move || model.embed(orama_model, normalized_input)).await?
 }
