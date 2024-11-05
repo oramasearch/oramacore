@@ -11,7 +11,6 @@ use collection_manager::{
     CollectionManager, CollectionsConfiguration,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, LinkType, Tag, TagEnd};
-use rocksdb::OptimisticTransactionDB;
 use serde::Serialize;
 use serde_json::json;
 use storage::Storage;
@@ -20,10 +19,9 @@ use types::CodeLanguage;
 
 fn main() -> anyhow::Result<()> {
     let storage_dir = "./tanstack";
-
     let _ = fs::remove_dir_all(storage_dir);
-    let db = OptimisticTransactionDB::open_default(storage_dir).unwrap();
-    let storage = Arc::new(Storage::new(db));
+
+    let storage = Arc::new(Storage::from_path(storage_dir));
 
     let manager = CollectionManager::new(CollectionsConfiguration { storage });
 

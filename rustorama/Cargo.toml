@@ -7,7 +7,6 @@ edition = "2021"
 web_server = { path = "../web_server" }
 collection_manager = { path = "../collection_manager" }
 storage = { path = "../storage" }
-rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 config = { version = "0.14.0", features = ["json5"] }
 anyhow = "1.0.91"
 serde = { version = "1.0.214", features = ["derive"] }

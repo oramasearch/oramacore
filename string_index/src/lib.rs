@@ -301,7 +301,6 @@ mod tests {
 
     use nlp::{locales::Locale, TextParser};
 
-    use rocksdb::OptimisticTransactionDB;
     use tempdir::TempDir;
 
     use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
@@ -310,8 +309,7 @@ mod tests {
     fn test_search() {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
-        let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
-        let storage = Arc::new(crate::Storage::new(db));
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);
 

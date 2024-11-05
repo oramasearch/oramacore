@@ -9,7 +9,17 @@ pub struct Storage {
 }
 
 impl Storage {
+    /*
     pub fn new(db: OptimisticTransactionDB) -> Self {
+        Storage {
+            db,
+            id_generator_counter: AtomicUsize::new(0),
+        }
+    }
+    */
+
+    pub fn from_path(storage_dir: &str) -> Self {
+        let db = OptimisticTransactionDB::open_default(storage_dir).unwrap();
         Storage {
             db,
             id_generator_counter: AtomicUsize::new(0),

@@ -98,7 +98,6 @@ impl CollectionManager {
 mod tests {
     use std::{collections::HashSet, sync::Arc};
 
-    use rocksdb::OptimisticTransactionDB;
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
@@ -111,8 +110,7 @@ mod tests {
     fn create_manager() -> CollectionManager {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
-        let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
-        let storage = Arc::new(Storage::new(db));
+        let storage = Arc::new(Storage::from_path(&tmp_dir));
 
         CollectionManager::new(crate::CollectionsConfiguration { storage })
     }

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use collection_manager::{CollectionManager, CollectionsConfiguration};
 use config::Config;
-use rocksdb::OptimisticTransactionDB;
 use serde::Deserialize;
 use storage::Storage;
 use web_server::{HttpConfig, WebServer};
@@ -44,9 +43,7 @@ async fn start(config: RustoramaConfig) -> Result<()> {
 }
 
 fn create_manager(config: RustoramaConfig) -> CollectionManager {
-    let db = OptimisticTransactionDB::open_default(config.data_dir).unwrap();
-    let storage = Arc::new(Storage::new(db));
-
+    let storage = Arc::new(Storage::from_path(&config.data_dir));
     CollectionManager::new(CollectionsConfiguration { storage })
 }
 

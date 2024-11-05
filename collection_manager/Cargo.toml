@@ -7,7 +7,6 @@ edition = "2021"
 dashmap = "6.1.0"
 string_index = { path = "../string_index" }
 nlp = { path = "../nlp" }
-rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 thiserror = "1.0.65"
 anyhow = "1.0.91"
 storage = { path = "../storage" }
