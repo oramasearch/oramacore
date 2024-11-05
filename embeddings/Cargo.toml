@@ -7,6 +7,10 @@ edition = "2021"
 name = "pq"
 path = "./src/bin/pq.rs"
 
+[[bin]]
+name = "embeddings"
+path = "./src/bin/embeddings.rs"
+
 [dependencies]
 anyhow = "1.0.92"
 fastembed = { version = "4.1.0", features = ["ort-download-binaries"] }
@@ -20,3 +24,5 @@ rand = "0.8.5"
 num-traits = "0.2.19"
 reductive = { version = "0.9.0" }
 rand_chacha = "0.3.1"
+reqwest = { version = "0.12.9", features = ["blocking"] }
+strum_macros = "0.26.4"

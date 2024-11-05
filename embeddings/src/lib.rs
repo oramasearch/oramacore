@@ -1,12 +1,18 @@
+pub mod custom_models;
 pub mod pq;
 
-use anyhow::{anyhow, Result};
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use crate::custom_models::{CustomModel, ModelFileConfig};
+use anyhow::{anyhow, Context, Result};
+use fastembed::{
+    EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding, UserDefinedEmbeddingModel,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
+use strum::IntoEnumIterator;
+use strum_macros::{AsRefStr, Display};
 
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
@@ -28,20 +34,29 @@ pub struct EmbeddingsResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-#[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter)]
+#[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter, Display, AsRefStr)]
 pub enum OramaModels {
     #[serde(rename = "gte-small")]
+    #[strum(serialize = "gte-small")]
     GTESmall,
     #[serde(rename = "gte-base")]
+    #[strum(serialize = "gte-base")]
     GTEBase,
     #[serde(rename = "gte-large")]
+    #[strum(serialize = "gte-large")]
     GTELarge,
     #[serde(rename = "multilingual-e5-small")]
+    #[strum(serialize = "multilingual-e5-small")]
     MultilingualE5Small,
     #[serde(rename = "multilingual-e5-base")]
+    #[strum(serialize = "multilingual-e5-base")]
     MultilingualE5Base,
     #[serde(rename = "multilingual-e5-large")]
+    #[strum(serialize = "multilingual-e5-large")]
     MultilingualE5Large,
+    #[serde(rename = "jinaai/jina-embeddings-v2-base-code")]
+    #[strum(serialize = "jinaai/jina-embeddings-v2-base-code")]
+    JinaV2BaseCode,
 }
 
 pub struct LoadedModels(HashMap<OramaModels, TextEmbedding>);
@@ -62,15 +77,18 @@ impl LoadedModels {
     }
 }
 
-impl From<OramaModels> for EmbeddingModel {
-    fn from(val: OramaModels) -> Self {
-        match val {
-            OramaModels::GTESmall => EmbeddingModel::BGESmallENV15,
-            OramaModels::GTEBase => EmbeddingModel::BGEBaseENV15,
-            OramaModels::GTELarge => EmbeddingModel::BGELargeENV15,
-            OramaModels::MultilingualE5Small => EmbeddingModel::MultilingualE5Small,
-            OramaModels::MultilingualE5Base => EmbeddingModel::MultilingualE5Base,
-            OramaModels::MultilingualE5Large => EmbeddingModel::MultilingualE5Large,
+impl TryInto<EmbeddingModel> for OramaModels {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> std::result::Result<EmbeddingModel, Self::Error> {
+        match self {
+            OramaModels::GTESmall => Ok(EmbeddingModel::BGESmallENV15),
+            OramaModels::GTEBase => Ok(EmbeddingModel::BGEBaseENV15),
+            OramaModels::GTELarge => Ok(EmbeddingModel::BGELargeENV15),
+            OramaModels::MultilingualE5Small => Ok(EmbeddingModel::MultilingualE5Small),
+            OramaModels::MultilingualE5Base => Ok(EmbeddingModel::MultilingualE5Base),
+            OramaModels::MultilingualE5Large => Ok(EmbeddingModel::MultilingualE5Large),
+            OramaModels::JinaV2BaseCode => Err(anyhow!("JinaV2BaseCode is a custom model")),
         }
     }
 }
@@ -88,8 +106,16 @@ impl OramaModels {
         }
     }
 
+    pub fn is_custom_model(self) -> bool {
+        match self {
+            OramaModels::JinaV2BaseCode => true,
+            _ => false,
+        }
+    }
+
     pub fn max_input_tokens(self) -> usize {
         match self {
+            OramaModels::JinaV2BaseCode => 512,
             OramaModels::GTESmall => 512,
             OramaModels::GTEBase => 512,
             OramaModels::GTELarge => 512,
@@ -101,12 +127,26 @@ impl OramaModels {
 
     pub fn dimensions(self) -> usize {
         match self {
+            OramaModels::JinaV2BaseCode => 768,
             OramaModels::GTESmall => 384,
             OramaModels::GTEBase => 768,
             OramaModels::GTELarge => 1024,
             OramaModels::MultilingualE5Small => 384,
             OramaModels::MultilingualE5Base => 768,
             OramaModels::MultilingualE5Large => 1024,
+        }
+    }
+
+    pub fn files(self) -> Option<ModelFileConfig> {
+        match self {
+            OramaModels::JinaV2BaseCode => Some(ModelFileConfig {
+                onnx_model: "onnx/model.onnx".to_string(),
+                special_tokens_map: "special_tokens_map.json".to_string(),
+                tokenizer: "tokenizer.json".to_string(),
+                tokenizer_config: "tokenizer_config.json".to_string(),
+                config: "config.json".to_string(),
+            }),
+            _ => None,
         }
     }
 }
@@ -127,15 +167,54 @@ pub fn load_models() -> LoadedModels {
         // OramaModels::MultilingualE5Large,
         OramaModels::GTESmall,
         // OramaModels::GTEBase,
-        // OramaModels::GTELarge
+        // OramaModels::GTELarge,
+        OramaModels::JinaV2BaseCode,
     ];
 
     let model_map: HashMap<OramaModels, TextEmbedding> = models
         .into_par_iter()
         .map(|model| {
-            let initialized_model = TextEmbedding::try_new(
-                InitOptions::new(model.into()).with_show_download_progress(true),
+            if !model.is_custom_model() {
+                let initialized_model = TextEmbedding::try_new(
+                    InitOptions::new(model.try_into().unwrap()).with_show_download_progress(true),
+                )
+                .unwrap();
+
+                return (model, initialized_model);
+            }
+
+            let custom_model = CustomModel::try_new(model.to_string(), model.files().unwrap())
+                .with_context(|| format!("Unable to initialize custom model {}", model.to_string()))
+                .unwrap();
+
+            if custom_model.exists() {
+                custom_model
+                    .download()
+                    .with_context(|| {
+                        format!("Unable to download custom model {}", model.to_string())
+                    })
+                    .unwrap();
+            };
+
+            let init_model = custom_model
+                .load()
+                .with_context(|| {
+                    format!(
+                        "Unable to load local files for custom model {}",
+                        model.to_string()
+                    )
+                })
+                .unwrap();
+            let initialized_model = TextEmbedding::try_new_from_user_defined(
+                init_model,
+                InitOptionsUserDefined::default(),
             )
+            .with_context(|| {
+                format!(
+                    "Unable to initialize a new TextEmbedding instance from custom model {}",
+                    model.to_string()
+                )
+            })
             .unwrap();
 
             (model, initialized_model)

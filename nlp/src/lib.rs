@@ -4,11 +4,9 @@ pub mod stop_words;
 pub mod tokenizer;
 
 use crate::locales::Locale;
-use anyhow::Result;
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
-use types::StringParser;
 
 pub struct TextParser {
     locale: Locale,

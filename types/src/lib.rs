@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectionId(pub String);
