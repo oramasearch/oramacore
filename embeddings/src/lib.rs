@@ -35,21 +35,27 @@ pub struct EmbeddingsResponse {
 }
 
 #[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter, Display, AsRefStr)]
-#[strum(serialize_all = "kebab-case")]
 pub enum OramaModels {
     #[serde(rename = "gte-small")]
+    #[strum(serialize = "gte-small")]
     GTESmall,
     #[serde(rename = "gte-base")]
+    #[strum(serialize = "gte-base")]
     GTEBase,
     #[serde(rename = "gte-large")]
+    #[strum(serialize = "gte-large")]
     GTELarge,
     #[serde(rename = "multilingual-e5-small")]
+    #[strum(serialize = "multilingual-e5-small")]
     MultilingualE5Small,
     #[serde(rename = "multilingual-e5-base")]
+    #[strum(serialize = "multilingual-e5-base")]
     MultilingualE5Base,
     #[serde(rename = "multilingual-e5-large")]
+    #[strum(serialize = "multilingual-e5-large")]
     MultilingualE5Large,
     #[serde(rename = "jinaai/jina-embeddings-v2-base-code")]
+    #[strum(serialize = "jinaai/jina-embeddings-v2-base-code")]
     JinaV2BaseCode,
 }
 
@@ -71,16 +77,18 @@ impl LoadedModels {
     }
 }
 
-impl Into<EmbeddingModel> for OramaModels {
-    fn into(self) -> EmbeddingModel {
+impl TryInto<EmbeddingModel> for OramaModels {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> std::result::Result<EmbeddingModel, Self::Error> {
         match self {
-            OramaModels::JinaV2BaseCode => EmbeddingModel::BGESmallENV15, // @todo: understand how to use other models
-            OramaModels::GTESmall => EmbeddingModel::BGESmallENV15,
-            OramaModels::GTEBase => EmbeddingModel::BGEBaseENV15,
-            OramaModels::GTELarge => EmbeddingModel::BGELargeENV15,
-            OramaModels::MultilingualE5Small => EmbeddingModel::MultilingualE5Small,
-            OramaModels::MultilingualE5Base => EmbeddingModel::MultilingualE5Base,
-            OramaModels::MultilingualE5Large => EmbeddingModel::MultilingualE5Large,
+            OramaModels::GTESmall => Ok(EmbeddingModel::BGESmallENV15),
+            OramaModels::GTEBase => Ok(EmbeddingModel::BGEBaseENV15),
+            OramaModels::GTELarge => Ok(EmbeddingModel::BGELargeENV15),
+            OramaModels::MultilingualE5Small => Ok(EmbeddingModel::MultilingualE5Small),
+            OramaModels::MultilingualE5Base => Ok(EmbeddingModel::MultilingualE5Base),
+            OramaModels::MultilingualE5Large => Ok(EmbeddingModel::MultilingualE5Large),
+            OramaModels::JinaV2BaseCode => Err(anyhow!("JinaV2BaseCode is a custom model")),
         }
     }
 }
@@ -132,7 +140,7 @@ impl OramaModels {
     pub fn files(self) -> Option<ModelFileConfig> {
         match self {
             OramaModels::JinaV2BaseCode => Some(ModelFileConfig {
-                onnx_model: "onnx.model.onnx".to_string(),
+                onnx_model: "onnx/model.onnx".to_string(),
                 special_tokens_map: "special_tokens_map.json".to_string(),
                 tokenizer: "tokenizer.json".to_string(),
                 tokenizer_config: "tokenizer_config.json".to_string(),
@@ -168,7 +176,7 @@ pub fn load_models() -> LoadedModels {
         .map(|model| {
             if !model.is_custom_model() {
                 let initialized_model = TextEmbedding::try_new(
-                    InitOptions::new(model.into()).with_show_download_progress(true),
+                    InitOptions::new(model.try_into().unwrap()).with_show_download_progress(true),
                 )
                 .unwrap();
 

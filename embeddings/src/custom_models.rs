@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use fastembed::{QuantizationMode, TokenizerFiles, UserDefinedEmbeddingModel};
+use fastembed::{TokenizerFiles, UserDefinedEmbeddingModel};
 use reqwest::{
     blocking::Client,
     header::{HeaderMap, HeaderValue, USER_AGENT},
@@ -58,7 +58,8 @@ impl CustomModel {
     }
 
     pub fn load(&self) -> Result<UserDefinedEmbeddingModel> {
-        let full_path = |file: &str| format!("{}/{}", MODEL_BASE_DIR, file);
+        let full_path = |file: &str| format!("{}/{}/{}", MODEL_BASE_DIR, self.model_name, file);
+
         let onnx_file = fs::read(full_path(&self.files.onnx_model))?;
         let tokenizer_files = TokenizerFiles {
             tokenizer_file: fs::read(full_path(&self.files.tokenizer))?,
@@ -106,7 +107,6 @@ impl CustomModel {
         let files_to_download = self.get_file_mappings();
 
         for (url, destination) in files_to_download {
-            // Skip if file already exists
             if self
                 .get_destination_path(&destination)
                 .map(|p| p.exists())
