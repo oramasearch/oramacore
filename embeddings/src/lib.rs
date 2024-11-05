@@ -126,7 +126,7 @@ pub fn load_models() -> LoadedModels {
         OramaModels::MultilingualE5Small,
         // OramaModels::MultilingualE5Base,
         // OramaModels::MultilingualE5Large,
-        // OramaModels::GTESmall,
+        OramaModels::GTESmall,
         // OramaModels::GTEBase,
         // OramaModels::GTELarge
     ];
