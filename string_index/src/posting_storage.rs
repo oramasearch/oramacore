@@ -29,11 +29,7 @@ impl PostingStorage {
         PostingStorage { storage }
     }
 
-    pub fn get(
-        &self,
-        posting_list_id: PostingListId,
-        freq: usize,
-    ) -> Result<(Vec<Posting>, usize), PostingStorageError> {
+    pub fn get(&self, posting_list_id: PostingListId) -> Result<Vec<Posting>, PostingStorageError> {
         let key = posting_list_id.0.to_be_bytes();
         let key = &[
             POSTING_STORAGE_TAG,
@@ -55,7 +51,7 @@ impl PostingStorage {
 
         let posting_vec = unserialize(&output)?;
 
-        Ok((posting_vec, freq))
+        Ok(posting_vec)
     }
 
     pub fn generate_new_id(&self) -> PostingListId {

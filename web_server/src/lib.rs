@@ -139,6 +139,8 @@ mod tests {
             &SearchParams {
                 term: "beatles".to_string(),
                 limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
             },
         )
         .await;

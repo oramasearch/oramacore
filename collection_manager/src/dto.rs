@@ -62,4 +62,8 @@ pub struct SearchParams {
     pub term: String,
     #[serde(default)]
     pub limit: Limit,
+    #[serde(default)]
+    pub boost: HashMap<String, f32>,
+    #[serde(default)]
+    pub properties: Option<Vec<String>>,
 }

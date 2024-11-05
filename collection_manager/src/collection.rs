@@ -11,7 +11,10 @@ use nlp::{locales::Locale, TextParser};
 use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
-use string_index::StringIndex;
+use string_index::{
+    scorer::{bm25::BM25Score, counter::CounterScore},
+    StringIndex,
+};
 use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
     StringParser, TokenScore, ValueType,
@@ -97,7 +100,6 @@ impl Collection {
 
                     let parser = self.parsers.get(&field_id).unwrap_or(&self.default_parser);
 
-                    println!("tokenizing doc {doc:?}");
                     let tokens = parser.tokenize_str_and_stem(&value)?;
 
                     strings
@@ -119,6 +121,24 @@ impl Collection {
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        // TODO: handle search_params.properties
+
+        let boost: HashMap<_, _> = search_params
+            .boost
+            .into_iter()
+            .map(|(field_name, boost)| {
+                let field_id = self.get_field_id(field_name);
+                (field_id, boost)
+            })
+            .collect();
+        let properties: Vec<_> = match search_params.properties {
+            Some(properties) => properties
+                .into_iter()
+                .map(|p| self.get_field_id(p))
+                .collect(),
+            None => self.string_fields.iter().map(|e| *e.value()).collect(),
+        };
+
         let tokens: Vec<_> = self
             .default_parser
             .tokenize_str_and_stem(&search_params.term)?
@@ -129,7 +149,79 @@ impl Collection {
                 terms
             })
             .collect();
-        let token_scores = self.string_index.search(tokens, None, None)?;
+
+        let fields_on_search_with_default_parser: Vec<_> = self
+            .string_fields
+            .iter()
+            .filter(|field_id| !self.parsers.contains_key(field_id.value()))
+            .filter(|field_id| properties.contains(field_id.value()))
+            .map(|field_id| *field_id.value())
+            .collect();
+        println!(
+            "searching for tokens {:?}",
+            fields_on_search_with_default_parser,
+        );
+        let mut token_scores = self.string_index.search(
+            tokens,
+            Some(fields_on_search_with_default_parser),
+            boost.clone(),
+            BM25Score,
+        )?;
+        println!(
+            "Element found with default parser: {:?}",
+            token_scores.len()
+        );
+
+        // Depends on the self.parsers size, this loop can be optimized, parallelizing the search.
+        // But for now, we will keep it simple.
+        // TODO: think about how to parallelize this search
+        for (field_id, parser) in &self.parsers {
+            if !properties.contains(field_id) {
+                continue;
+            }
+            let tokens: Vec<_> = parser
+                .tokenize_str_and_stem(&search_params.term)?
+                .into_iter()
+                .flat_map(|(token, stemmed)| {
+                    let mut terms = vec![token];
+                    terms.extend(stemmed);
+                    terms
+                })
+                .collect();
+
+            let field_token_scores = self.string_index.search(
+                tokens,
+                Some(vec![*field_id]),
+                boost.clone(),
+                CounterScore,
+            )?;
+
+            let field_name = self
+                .string_fields
+                .iter()
+                .find(|v| v.value() == field_id)
+                .unwrap();
+            let field_name = field_name.key();
+            println!(
+                "Element found with parser: {field_id:?} ({:?}) {:?}",
+                field_name,
+                field_token_scores.len()
+            );
+
+            // Merging scores that come from different parsers are hard.
+            // Because we are focused on PoC with tanstack, this case happens only with "code" field.
+            // We use just a simple counter to merge the scores.
+            // Anyway, this it not a good solution for a real-world application.
+            // TODO: think about how to merge scores from different parsers
+            for (document_id, score) in field_token_scores {
+                if let Some(existing_score) = token_scores.get(&document_id) {
+                    token_scores.insert(document_id, existing_score + score);
+                } else {
+                    token_scores.insert(document_id, score);
+                }
+            }
+        }
+
         let count = token_scores.len();
 
         let token_scores = top_n(token_scores, search_params.limit.0);
