@@ -88,7 +88,7 @@ mod tests {
 
             let runner_opts = RunnerOptionsBuilder::new().follow_location(true).build();
             let logger_opts = LoggerOptionsBuilder::new()
-                .verbosity(Some(Verbosity::Verbose))
+                .verbosity(Some(Verbosity::VeryVerbose))
                 .build();
 
             let variables: HashMap<_, _> = vec![(

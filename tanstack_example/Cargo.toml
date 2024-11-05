@@ -1,0 +1,20 @@
+[package]
+name = "tanstack_example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+collection_manager = { path = "../collection_manager" }
+storage = { path = "../storage" }
+rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
+config = { version = "0.14.0", features = ["json5"] }
+anyhow = "1.0.91"
+markdown = "0.3.0"
+comrak = "0.29.0"
+markdown-parser = "0.1.2"
+pulldown-cmark = "0.12.2"
+discord-md = "3.0.0"
+serde_json = "1.0.132"
+serde = { version = "1.0.214", features = ["derive"] }
+types = { path = "../types" }
+path-clean = "1.0.1"

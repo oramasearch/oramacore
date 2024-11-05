@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     for chunk in embeddings.chunks(100) {
         let batch = chunk
             .iter()
-            .map(|(id, embedding)| (id.clone(), embedding.as_slice()))
+            .map(|(id, embedding)| (*id, embedding.as_slice()))
             .collect::<Vec<(DocumentId, &[f32])>>();
         idx.insert_batch(batch).unwrap();
     }

@@ -11,5 +11,7 @@ members = [
     "types",
     "rustorama",
     "embeddings",
-    "vector_index"
+    "tanstack_example",
+    "code_parser",
+    "vector_index",
 ]

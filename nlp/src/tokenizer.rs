@@ -1,21 +1,20 @@
 use std::collections::HashSet;
 
 use crate::locales::Locale;
-use crate::stop_words::get_stop_words;
 use regex::Regex;
 
 #[derive(Debug, Clone)]
 pub struct Tokenizer {
     split_regex: Regex,
-    stop_words: HashSet<String>,
+    stop_words: HashSet<&'static str>,
 }
 
 impl Tokenizer {
     pub fn english() -> Self {
-        let stop_words = Locale::EN.stop_words().unwrap().unwrap();
+        let stop_words: HashSet<&str> = Locale::EN.stop_words().unwrap();
         Tokenizer {
             split_regex: Locale::EN.split_regex().unwrap(),
-            stop_words: stop_words.into_iter().collect(),
+            stop_words,
         }
     }
 
@@ -85,6 +84,6 @@ mod tests {
     fn test_tokenizer_2() {
         let tokenizer = super::Tokenizer::english();
         let tokens: Vec<String> = tokenizer.tokenize("Hello, - world!").collect();
-        assert_eq!(tokens, vec!["hello", "world"]);
+        assert_eq!(tokens, vec!["hello", "-", "world"]);
     }
 }

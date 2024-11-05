@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
-use strum::IntoEnumIterator;
 
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
@@ -63,9 +62,9 @@ impl LoadedModels {
     }
 }
 
-impl Into<EmbeddingModel> for OramaModels {
-    fn into(self) -> EmbeddingModel {
-        match self {
+impl From<OramaModels> for EmbeddingModel {
+    fn from(val: OramaModels) -> Self {
+        match val {
             OramaModels::GTESmall => EmbeddingModel::BGESmallENV15,
             OramaModels::GTEBase => EmbeddingModel::BGEBaseENV15,
             OramaModels::GTELarge => EmbeddingModel::BGELargeENV15,
@@ -139,7 +138,7 @@ pub fn load_models() -> LoadedModels {
             )
             .unwrap();
 
-            return (model, initialized_model);
+            (model, initialized_model)
         })
         .collect();
 
