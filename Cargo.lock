@@ -5992,6 +5992,7 @@ dependencies = [
  "nlp",
  "rocksdb",
  "serde",
+ "serde_json",
  "storage",
  "types",
 ]
