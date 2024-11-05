@@ -1,7 +1,7 @@
 use anyhow::Result;
 use embeddings::OramaModels;
 use hora::core::ann_index::ANNIndex;
-use hora::core::metrics::Metric::Euclidean;
+use hora::core::metrics::Metric::Manhattan;
 use hora::core::node::IdxType;
 use hora::index::hnsw_idx;
 use serde::Serialize;
@@ -40,15 +40,15 @@ impl VectorIndex {
 
     pub fn insert(&mut self, id: DocumentId, vector: &[f32]) -> Result<(), &str> {
         self.idx.add(vector, IdxID(Some(id)))?;
-        self.idx.build(Euclidean)
+        self.idx.build(Manhattan)
     }
 
     pub fn insert_batch(&mut self, data: Vec<(DocumentId, &[f32])>) -> Result<(), &str> {
-        for (id, vector) in data.iter() {
-            self.idx.add(vector, IdxID(Some(id.clone())))?
+        for (id, vector) in data {
+            self.idx.add(vector, IdxID(Some(id)))?
         }
 
-        self.idx.build(Euclidean)
+        self.idx.build(Manhattan)
     }
 
     pub fn search(&mut self, target: &[f32], k: usize) -> Vec<DocumentId> {

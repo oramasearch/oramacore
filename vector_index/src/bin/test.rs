@@ -65,7 +65,7 @@ fn main() -> Result<()> {
         duration_indexing.as_millis()
     );
 
-    let search_query = "A movie about space exploration".to_string();
+    let search_query = "A movie about superheroes".to_string();
     let start_query_embedding = Instant::now();
     let query_embedding_result =
         models.embed(OramaModels::GTESmall, vec![search_query.clone()], Some(1))?;
@@ -86,9 +86,7 @@ fn main() -> Result<()> {
 
     let retrieved_documents: Vec<&Movie> = neighbors
         .iter()
-        .filter_map(|id| {
-            dataset.get(id.0 as usize)
-        })
+        .filter_map(|id| dataset.get(id.0 as usize))
         .collect();
 
     println!(
