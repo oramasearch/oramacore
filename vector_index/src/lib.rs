@@ -1,7 +1,7 @@
 use anyhow::Result;
 use embeddings::OramaModels;
 use hora::core::ann_index::ANNIndex;
-use hora::core::metrics::Metric::CosineSimilarity;
+use hora::core::metrics::Metric::Euclidean;
 use hora::index::hnsw_idx;
 
 pub struct VectorIndex {
@@ -32,7 +32,7 @@ impl VectorIndex {
 
     pub fn insert(&mut self, id: String, vector: &[f32]) -> Result<(), &str> {
         self.idx.add(vector, id)?;
-        self.idx.build(CosineSimilarity)
+        self.idx.build(Euclidean)
     }
 
     pub fn insert_batch(&mut self, data: Vec<(String, &[f32])>) -> Result<(), &str> {
@@ -40,7 +40,7 @@ impl VectorIndex {
             self.idx.add(vector, id.clone())?
         }
 
-        self.idx.build(CosineSimilarity)
+        self.idx.build(Euclidean)
     }
 
     pub fn search(&mut self, target: &[f32], k: usize) -> Vec<String> {
