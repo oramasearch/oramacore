@@ -25,3 +25,4 @@ num-traits = "0.2.19"
 reductive = { version = "0.9.0" }
 rand_chacha = "0.3.1"
 reqwest = { version = "0.12.9", features = ["blocking"] }
+strum_macros = "0.26.4"

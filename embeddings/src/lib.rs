@@ -1,14 +1,18 @@
 pub mod custom_models;
 pub mod pq;
 
-use anyhow::{anyhow, Result};
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use crate::custom_models::{CustomModel, ModelFileConfig};
+use anyhow::{anyhow, Context, Result};
+use fastembed::{
+    EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding, UserDefinedEmbeddingModel,
+};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
+use strum_macros::{AsRefStr, Display};
 
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
@@ -30,7 +34,8 @@ pub struct EmbeddingsResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-#[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter)]
+#[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter, Display, AsRefStr)]
+#[strum(serialize_all = "kebab-case")]
 pub enum OramaModels {
     #[serde(rename = "gte-small")]
     GTESmall,
@@ -123,6 +128,19 @@ impl OramaModels {
             OramaModels::MultilingualE5Large => 1024,
         }
     }
+
+    pub fn files(self) -> Option<ModelFileConfig> {
+        match self {
+            OramaModels::JinaV2BaseCode => Some(ModelFileConfig {
+                onnx_model: "onnx.model.onnx".to_string(),
+                special_tokens_map: "special_tokens_map.json".to_string(),
+                tokenizer: "tokenizer.json".to_string(),
+                tokenizer_config: "tokenizer_config.json".to_string(),
+                config: "config.json".to_string(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for EncodingIntent {
@@ -157,7 +175,39 @@ pub fn load_models() -> LoadedModels {
                 return (model, initialized_model);
             }
 
-            let initialized_model = unimplemented!();
+            let custom_model = CustomModel::try_new(model.to_string(), model.files().unwrap())
+                .with_context(|| format!("Unable to initialize custom model {}", model.to_string()))
+                .unwrap();
+
+            if custom_model.exists() {
+                custom_model
+                    .download()
+                    .with_context(|| {
+                        format!("Unable to download custom model {}", model.to_string())
+                    })
+                    .unwrap();
+            };
+
+            let init_model = custom_model
+                .load()
+                .with_context(|| {
+                    format!(
+                        "Unable to load local files for custom model {}",
+                        model.to_string()
+                    )
+                })
+                .unwrap();
+            let initialized_model = TextEmbedding::try_new_from_user_defined(
+                init_model,
+                InitOptionsUserDefined::default(),
+            )
+            .with_context(|| {
+                format!(
+                    "Unable to initialize a new TextEmbedding instance from custom model {}",
+                    model.to_string()
+                )
+            })
+            .unwrap();
 
             return (model, initialized_model);
         })
