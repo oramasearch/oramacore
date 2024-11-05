@@ -217,7 +217,7 @@ pub fn load_models() -> LoadedModels {
             })
             .unwrap();
 
-            return (model, initialized_model);
+            (model, initialized_model)
         })
         .collect();
 

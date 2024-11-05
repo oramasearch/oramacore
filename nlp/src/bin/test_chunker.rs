@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
-use nlp::chunker::{Chunker, ChunkerConfig, CodeLanguage};
+use nlp::chunker::{Chunker, ChunkerConfig};
+use types::CodeLanguage;
 
 fn main() {
     let text = r#"

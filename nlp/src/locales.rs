@@ -4,7 +4,7 @@ use regex::Regex;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Locale {
     AR,
     BG,
@@ -44,39 +44,39 @@ pub enum Locale {
 impl Display for Locale {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            Locale::AR => write!(f, "{}", "arabic"),
-            Locale::BG => write!(f, "{}", "bulgarian"),
-            Locale::DA => write!(f, "{}", "danish"),
-            Locale::DE => write!(f, "{}", "german"),
-            Locale::EL => write!(f, "{}", "greek"),
-            Locale::EN => write!(f, "{}", "english"),
-            Locale::ET => write!(f, "{}", "estonian"),
-            Locale::ES => write!(f, "{}", "spanish"),
-            Locale::FI => write!(f, "{}", "finnish"),
-            Locale::FR => write!(f, "{}", "french"),
-            Locale::GA => write!(f, "{}", "irish"),
-            Locale::HI => write!(f, "{}", "hindi"),
-            Locale::HU => write!(f, "{}", "hungarian"),
-            Locale::HY => write!(f, "{}", "armenian"),
-            Locale::ID => write!(f, "{}", "indonesian"),
-            Locale::IT => write!(f, "{}", "italian"),
-            Locale::JP => write!(f, "{}", "japanese"),
-            Locale::KO => write!(f, "{}", "korean"),
-            Locale::LT => write!(f, "{}", "lithuanian"),
-            Locale::NE => write!(f, "{}", "nepali"),
-            Locale::NL => write!(f, "{}", "dutch"),
-            Locale::NO => write!(f, "{}", "norwegian"),
-            Locale::PT => write!(f, "{}", "portuguese"),
-            Locale::RO => write!(f, "{}", "romanian"),
-            Locale::RU => write!(f, "{}", "russian"),
-            Locale::SA => write!(f, "{}", "sanskrit"),
-            Locale::SL => write!(f, "{}", "slovenian"),
-            Locale::SR => write!(f, "{}", "serbian"),
-            Locale::SV => write!(f, "{}", "swedish"),
-            Locale::TA => write!(f, "{}", "tamil"),
-            Locale::TR => write!(f, "{}", "turkish"),
-            Locale::UK => write!(f, "{}", "ukrainian"),
-            Locale::ZH => write!(f, "{}", "chinese"),
+            Locale::AR => write!(f, "arabic"),
+            Locale::BG => write!(f, "bulgarian"),
+            Locale::DA => write!(f, "danish"),
+            Locale::DE => write!(f, "german"),
+            Locale::EL => write!(f, "greek"),
+            Locale::EN => write!(f, "english"),
+            Locale::ET => write!(f, "estonian"),
+            Locale::ES => write!(f, "spanish"),
+            Locale::FI => write!(f, "finnish"),
+            Locale::FR => write!(f, "french"),
+            Locale::GA => write!(f, "irish"),
+            Locale::HI => write!(f, "hindi"),
+            Locale::HU => write!(f, "hungarian"),
+            Locale::HY => write!(f, "armenian"),
+            Locale::ID => write!(f, "indonesian"),
+            Locale::IT => write!(f, "italian"),
+            Locale::JP => write!(f, "japanese"),
+            Locale::KO => write!(f, "korean"),
+            Locale::LT => write!(f, "lithuanian"),
+            Locale::NE => write!(f, "nepali"),
+            Locale::NL => write!(f, "dutch"),
+            Locale::NO => write!(f, "norwegian"),
+            Locale::PT => write!(f, "portuguese"),
+            Locale::RO => write!(f, "romanian"),
+            Locale::RU => write!(f, "russian"),
+            Locale::SA => write!(f, "sanskrit"),
+            Locale::SL => write!(f, "slovenian"),
+            Locale::SR => write!(f, "serbian"),
+            Locale::SV => write!(f, "swedish"),
+            Locale::TA => write!(f, "tamil"),
+            Locale::TR => write!(f, "turkish"),
+            Locale::UK => write!(f, "ukrainian"),
+            Locale::ZH => write!(f, "chinese"),
         }
     }
 }
@@ -236,7 +236,7 @@ impl Locale {
         }
     }
 
-    pub fn stop_words(&self) -> Result<Option<StopWords>> {
+    pub fn stop_words(&self) -> Option<StopWords> {
         get_stop_words(*self)
     }
 }

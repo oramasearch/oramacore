@@ -9,7 +9,6 @@ path = "./src/bin/test.rs"
 
 [dependencies]
 anyhow = "1.0.90"
-rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.132"
 nlp = { path = "../nlp" }

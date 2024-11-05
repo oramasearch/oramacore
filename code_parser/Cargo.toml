@@ -1,0 +1,11 @@
+[package]
+name = "code_parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+swc_ecma_parser = "4.0.0"
+swc_common = { version = "3.0.0", features = ["tty-emitter"] }
+types = { path = "../types" }
+regex = "1.11.1"
+anyhow = "1.0.92"

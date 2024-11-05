@@ -2,14 +2,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use text_splitter::{Characters, ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tiktoken_rs::*;
-
-#[derive(Eq, Hash, PartialEq, Copy, Clone)]
-pub enum CodeLanguage {
-    JavaScript,
-    TypeScript,
-    TSX,
-    HTML,
-}
+use types::CodeLanguage;
 
 pub struct Chunker {
     max_tokens: usize,

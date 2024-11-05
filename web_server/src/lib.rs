@@ -69,10 +69,9 @@ mod tests {
     use std::sync::Arc;
 
     use collection_manager::{
-        dto::{CreateCollectionOptionDTO, SearchParams},
+        dto::{CreateCollectionOptionDTO, Limit, SearchParams},
         CollectionManager, CollectionsConfiguration,
     };
-    use rocksdb::OptimisticTransactionDB;
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
@@ -99,6 +98,7 @@ mod tests {
                 id: collection_id.clone(),
                 description: None,
                 language: None,
+                typed_fields: Default::default(),
             },
         )
         .await;
@@ -137,6 +137,9 @@ mod tests {
             &collection_id,
             &SearchParams {
                 term: "beatles".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
             },
         )
         .await;
@@ -225,8 +228,7 @@ mod tests {
     fn create_manager() -> CollectionManager {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
-        let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
-        let storage = Arc::new(Storage::new(db));
+        let storage = Arc::new(Storage::from_path(&tmp_dir));
 
         CollectionManager::new(CollectionsConfiguration { storage })
     }

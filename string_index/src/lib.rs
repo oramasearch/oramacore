@@ -1,6 +1,5 @@
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
+    collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, RwLock,
@@ -9,21 +8,21 @@ use std::{
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
-use nlp::{tokenize, tokenize_and_stem, Parser};
-use ordered_float::NotNan;
 use posting_storage::{PostingListId, PostingStorage};
-use radix_trie::Trie;
+// use radix_trie::Trie;
+use ptrie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use storage::Storage;
-use types::{DocumentId, FieldId, TokenScore};
+use types::{DocumentId, FieldId};
 
 mod dictionary;
 mod posting_storage;
-// mod radix_tree;
+pub mod scorer;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Posting {
+pub struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
     pub positions: Vec<usize>,
@@ -38,20 +37,23 @@ pub struct StringIndexValue {
 }
 
 pub struct StringIndex {
-    tree: RwLock<Trie<String, StringIndexValue>>,
+    tree: RwLock<Trie<u8, StringIndexValue>>,
     posting_storage: PostingStorage,
-    parser: Parser,
     dictionary: Dictionary,
     total_documents: AtomicUsize,
     total_document_length: AtomicUsize,
 }
 
+pub struct GlobalInfo {
+    pub total_documents: usize,
+    pub total_document_length: usize,
+}
+
 impl StringIndex {
-    pub fn new(storage: Arc<Storage>, parser: Parser) -> Self {
+    pub fn new(storage: Arc<Storage>) -> Self {
         StringIndex {
             tree: RwLock::new(Trie::new()),
             posting_storage: PostingStorage::new(storage),
-            parser,
             dictionary: Dictionary::new(),
             total_documents: AtomicUsize::new(0),
             total_document_length: AtomicUsize::new(0),
@@ -62,30 +64,29 @@ impl StringIndex {
         self.total_documents.load(Ordering::Relaxed)
     }
 
-    pub fn search(
+    pub fn search<S: Scorer + Sync>(
         &self,
-        term: &str,
-        limit: usize,
-        boost: Option<HashMap<FieldId, f32>>,
-    ) -> Result<(Vec<TokenScore>, usize)> {
+        tokens: Vec<String>,
+        search_on: Option<Vec<FieldId>>,
+        boost: HashMap<FieldId, f32>,
+        scorer: S,
+    ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
                 println!("total_documents == 0");
-                return Ok((vec![], 0));
+                return Ok(Default::default());
             }
-            total_documents => total_documents as f32,
+            total_documents => total_documents,
         };
         let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
                 println!("total_document_length == 0");
-                return Ok((vec![], 0));
+                return Ok(Default::default());
             }
-            total_document_length => total_document_length as f32,
+            total_document_length => total_document_length,
         };
 
-        let avg_doc_length = total_document_length / total_documents;
-
-        let tokens = tokenize(term, &self.parser.tokenizer);
+        // let avg_doc_length = total_document_length / total_documents;
 
         let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
         let tree = self
@@ -94,51 +95,54 @@ impl StringIndex {
             // TODO: better error handling
             .expect("Unable to read");
         for token in tokens {
-            let string_index_value = tree.get(&token);
-
-            if let Some(string_index_value) = string_index_value {
-                posting_list_ids_with_freq.push(string_index_value.clone());
-            } else {
-                eprintln!("Token not found inside index: {}", token);
-            }
+            let a = tree.find_postfixes(token.bytes());
+            posting_list_ids_with_freq.extend(a.into_iter().cloned());
         }
 
-        let boost = boost.unwrap_or_default();
+        let fields = search_on.as_ref();
+
+        let global_info = GlobalInfo {
+            total_documents,
+            total_document_length,
+        };
 
         let scores = posting_list_ids_with_freq
             .into_par_iter()
             .filter_map(|string_index_value| {
-                self.posting_storage
-                    .get(
-                        string_index_value.posting_list_id,
-                        // BAD: term_frequency is not used inside posting_storage
-                        // But we need after, so here forward it.
-                        // TODO: We need to find a way to avoid this.
-                        string_index_value.term_frequency,
-                    )
-                    .ok()
+                let output = self
+                    .posting_storage
+                    .get(string_index_value.posting_list_id)
+                    .ok();
+                let posting = match output {
+                    Some(v) => v,
+                    None => return None,
+                };
+
+                let posting: Vec<_> = posting
+                    .into_iter()
+                    .filter(move |posting| {
+                        fields
+                            .map(|search_on| search_on.contains(&posting.field_id))
+                            .unwrap_or(true)
+                    })
+                    .collect();
+
+                Some((posting, string_index_value.term_frequency))
             })
             // Every thread perform on a separated hashmap
             .fold(
                 HashMap::<DocumentId, f32>::new,
-                |mut acc, (postings, freq)| {
-                    let freq = freq as f32;
+                |mut acc, (postings, total_token_count)| {
+                    let total_token_count = total_token_count as f32;
                     for posting in postings {
-                        let term_frequency = posting.term_frequency;
-                        let doc_length = posting.doc_length as f32;
-                        let boost_per_field = boost.get(&posting.field_id).unwrap_or(&1.0);
-
-                        let idf = ((total_documents - freq + 0.5_f32) / (freq + 0.5_f32)).ln_1p();
-                        let score = calculate_score(
-                            term_frequency,
-                            idf,
-                            doc_length,
-                            avg_doc_length,
-                            *boost_per_field,
+                        let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+                        scorer.update_score(
+                            acc.entry(posting.document_id).or_default(),
+                            &global_info,
+                            posting,
+                            total_token_count,
+                            boost_per_field,
                         );
-
-                        let doc_score = acc.entry(posting.document_id).or_default();
-                        *doc_score += score;
                     }
                     acc
                 },
@@ -151,19 +155,18 @@ impl StringIndex {
                 }
                 acc
             });
-        let total = scores.len();
 
-        let docs: Vec<TokenScore> = top_n(scores, limit);
-
-        Ok((docs, total))
+        Ok(scores)
     }
 
-    pub fn insert_multiple(&self, data: HashMap<DocumentId, Vec<(FieldId, String)>>) -> Result<()> {
+    pub fn insert_multiple(
+        &self,
+        data: HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>,
+    ) -> Result<()> {
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
 
         let dictionary = &self.dictionary;
-        let parser = &self.parser;
 
         let t = data
             .into_par_iter()
@@ -175,17 +178,13 @@ impl StringIndex {
                         let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> =
                             HashMap::new();
 
-                        for (position, (original, stemmed)) in
-                            tokenize_and_stem(&s, parser).enumerate()
-                        {
-                            let is_equal = original == stemmed;
-
+                        for (position, (original, stemmed)) in s.into_iter().enumerate() {
                             let entry = term_freqs.entry(original).or_default();
                             let field_entry = entry.entry(field_id).or_default();
                             field_entry.push(position);
 
-                            if !is_equal {
-                                let entry = term_freqs.entry(stemmed).or_default();
+                            for s in stemmed {
+                                let entry = term_freqs.entry(s).or_default();
                                 let field_entry = entry.entry(field_id).or_default();
                                 field_entry.push(position);
                             }
@@ -262,7 +261,7 @@ impl StringIndex {
             // TODO: find a way to avoid this invocation
             let term = dictionary.retrive(term_id);
 
-            let value = tree.get_mut(&term);
+            let value = tree.get_mut(term.bytes());
             if let Some(value) = value {
                 value.term_frequency += number_of_occurence_of_term;
                 let vec = postings_per_posting_list_id
@@ -272,7 +271,7 @@ impl StringIndex {
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
                 tree.insert(
-                    term,
+                    term.bytes(),
                     StringIndexValue {
                         posting_list_id,
                         term_frequency: number_of_occurence_of_term,
@@ -296,62 +295,23 @@ impl StringIndex {
     }
 }
 
-fn calculate_score(tf: f32, idf: f32, doc_length: f32, avg_doc_length: f32, boost: f32) -> f32 {
-    let k1 = 1.5;
-    let b = 0.75;
-    let numerator = tf * (k1 + 1.0);
-    let denominator = tf + k1 * (1.0 - b + b * (doc_length / avg_doc_length));
-    idf * (numerator / denominator) * boost
-}
-
-fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    // A min-heap of size `n` to keep track of the top N elements
-    let mut heap: BinaryHeap<Reverse<(NotNan<f32>, DocumentId)>> = BinaryHeap::with_capacity(n);
-
-    for (key, value) in map {
-        // Insert into the heap if it's not full, or replace the smallest element if the current one is larger
-        if heap.len() < n {
-            heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-        } else if let Some(Reverse((min_value, _))) = heap.peek() {
-            if value > *min_value.as_ref() {
-                heap.pop();
-                heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-            }
-        }
-    }
-
-    // Collect results into a sorted Vec (optional sorting based on descending values)
-    let mut result: Vec<TokenScore> = heap
-        .into_sorted_vec()
-        .into_iter()
-        .map(|Reverse((value, key))| TokenScore {
-            document_id: key,
-            score: value.into_inner(),
-        })
-        .collect();
-
-    // TODO: check is this `reverse` is needed
-    result.reverse();
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use nlp::{Language, Parser};
-    use rocksdb::OptimisticTransactionDB;
+    use nlp::{locales::Locale, TextParser};
+
     use tempdir::TempDir;
 
-    use crate::{DocumentId, FieldId, StringIndex};
+    use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
 
     #[test]
-    fn test_foo() {
+    fn test_search() {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
-        let db = OptimisticTransactionDB::open_default(tmp_dir).unwrap();
-        let storage = Arc::new(crate::Storage::new(db));
-        let string_index = StringIndex::new(storage, Parser::from_language(Language::English));
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
 
         let batch: HashMap<_, _> = vec![
             (
@@ -378,19 +338,35 @@ mod tests {
             ),
         ]
         .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
         .collect();
 
         string_index.insert_multiple(batch).unwrap();
 
-        let (output, count) = string_index
+        let output = string_index
             .search(
-                "welcome",
-                10,
-                Some(vec![(FieldId(0), 1.0)].into_iter().collect()),
+                vec!["welcome".to_string()],
+                None,
+                Default::default(),
+                BM25Score,
             )
             .unwrap();
 
         assert_eq!(output.len(), 2);
-        assert_eq!(count, 2);
+
+        let output = string_index
+            .search(vec!["wel".to_string()], None, Default::default(), BM25Score)
+            .unwrap();
+
+        assert_eq!(output.len(), 2);
     }
 }
