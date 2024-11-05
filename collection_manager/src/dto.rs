@@ -20,7 +20,7 @@ impl From<Locale> for LanguageDTO {
     fn from(language: Locale) -> Self {
         match language {
             Locale::EN => LanguageDTO::English,
-            _ => LanguageDTO::English
+            _ => LanguageDTO::English,
         }
     }
 }

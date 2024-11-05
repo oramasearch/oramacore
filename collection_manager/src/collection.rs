@@ -6,8 +6,8 @@ use std::{
 use anyhow::anyhow;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use nlp::Parser;
 use nlp::locales::Locale;
+use nlp::Parser;
 use serde_json::Value;
 use storage::Storage;
 use string_index::StringIndex;

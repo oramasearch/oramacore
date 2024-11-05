@@ -3,10 +3,10 @@ pub mod locales;
 pub mod stop_words;
 pub mod tokenizer;
 
+use crate::locales::Locale;
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
-use crate::locales::Locale;
 
 pub struct Parser {
     pub tokenizer: Tokenizer,

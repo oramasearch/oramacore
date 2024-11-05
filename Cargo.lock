@@ -1501,6 +1501,7 @@ dependencies = [
  "rand_chacha",
  "rayon",
  "reductive",
+ "reqwest",
  "serde",
  "serde_json",
  "strum",

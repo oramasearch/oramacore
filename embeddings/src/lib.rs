@@ -1,3 +1,4 @@
+pub mod custom_models;
 pub mod pq;
 
 use anyhow::{anyhow, Result};
@@ -43,6 +44,8 @@ pub enum OramaModels {
     MultilingualE5Base,
     #[serde(rename = "multilingual-e5-large")]
     MultilingualE5Large,
+    #[serde(rename = "jinaai/jina-embeddings-v2-base-code")]
+    JinaV2BaseCode,
 }
 
 pub struct LoadedModels(HashMap<OramaModels, TextEmbedding>);
@@ -66,6 +69,7 @@ impl LoadedModels {
 impl Into<EmbeddingModel> for OramaModels {
     fn into(self) -> EmbeddingModel {
         match self {
+            OramaModels::JinaV2BaseCode => EmbeddingModel::BGESmallENV15, // @todo: understand how to use other models
             OramaModels::GTESmall => EmbeddingModel::BGESmallENV15,
             OramaModels::GTEBase => EmbeddingModel::BGEBaseENV15,
             OramaModels::GTELarge => EmbeddingModel::BGELargeENV15,
@@ -89,8 +93,16 @@ impl OramaModels {
         }
     }
 
+    pub fn is_custom_model(self) -> bool {
+        match self {
+            OramaModels::JinaV2BaseCode => true,
+            _ => false,
+        }
+    }
+
     pub fn max_input_tokens(self) -> usize {
         match self {
+            OramaModels::JinaV2BaseCode => 512,
             OramaModels::GTESmall => 512,
             OramaModels::GTEBase => 512,
             OramaModels::GTELarge => 512,
@@ -102,6 +114,7 @@ impl OramaModels {
 
     pub fn dimensions(self) -> usize {
         match self {
+            OramaModels::JinaV2BaseCode => 768,
             OramaModels::GTESmall => 384,
             OramaModels::GTEBase => 768,
             OramaModels::GTELarge => 1024,
@@ -128,16 +141,23 @@ pub fn load_models() -> LoadedModels {
         // OramaModels::MultilingualE5Large,
         OramaModels::GTESmall,
         // OramaModels::GTEBase,
-        // OramaModels::GTELarge
+        // OramaModels::GTELarge,
+        OramaModels::JinaV2BaseCode,
     ];
 
     let model_map: HashMap<OramaModels, TextEmbedding> = models
         .into_par_iter()
         .map(|model| {
-            let initialized_model = TextEmbedding::try_new(
-                InitOptions::new(model.into()).with_show_download_progress(true),
-            )
-            .unwrap();
+            if !model.is_custom_model() {
+                let initialized_model = TextEmbedding::try_new(
+                    InitOptions::new(model.into()).with_show_download_progress(true),
+                )
+                .unwrap();
+
+                return (model, initialized_model);
+            }
+
+            let initialized_model = unimplemented!();
 
             return (model, initialized_model);
         })
