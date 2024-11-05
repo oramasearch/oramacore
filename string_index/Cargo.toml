@@ -7,11 +7,9 @@ edition = "2021"
 anyhow = "1.0.90"
 bincode = "1.3.3"
 itertools = "0.13.0"
-ordered-float = "4.4.0"
 rayon = "1.10.0"
 rocksdb = { version = "0.22.0", features = ["multi-threaded-cf"] }
 serde = { version = "1.0.210", features = ["derive"] }
-nlp = { path = "../nlp" }
 radix_trie = "0.2"
 dashmap = { version = "6.1.0", features = ["rayon"] }
 csv = "1.3.0"
@@ -20,6 +18,8 @@ tempdir = "0.3.7"
 thiserror = "1.0.65"
 smallvec = "1.13.2"
 types = { path = "../types" }
+ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expose-get-mut" }
 
 [dev-dependencies]
-csv = "1.3.0"
+nlp = { path = "../nlp" }
+

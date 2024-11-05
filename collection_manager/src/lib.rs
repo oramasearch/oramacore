@@ -1,12 +1,14 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
+use code_parser::CodeParser;
 use collection::Collection;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
+use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO, TypedField};
+use nlp::TextParser;
 use storage::Storage;
 use thiserror::Error;
-use types::CollectionId;
+use types::{CollectionId, StringParser};
 
 mod collection;
 pub mod dto;
@@ -41,6 +43,21 @@ impl CollectionManager {
         collection_option: CreateCollectionOptionDTO,
     ) -> Result<CollectionId, CreateCollectionError> {
         let id = CollectionId(collection_option.id);
+
+        let typed_fields: HashMap<String, Box<dyn StringParser>> = collection_option
+            .typed_fields
+            .into_iter()
+            .map(|(key, value)| {
+                let parser: Box<dyn StringParser> = match value {
+                    TypedField::Text(language) => {
+                        Box::new(TextParser::from_language(language.into()))
+                    }
+                    TypedField::Code(language) => Box::new(CodeParser::from_language(language)),
+                };
+                (key, parser)
+            })
+            .collect();
+
         let collection = Collection::new(
             self.configuration.storage.clone(),
             id.clone(),
@@ -50,6 +67,7 @@ impl CollectionManager {
                 .unwrap_or(LanguageDTO::English)
                 .into(),
             self.document_storage.clone(),
+            typed_fields,
         );
 
         let entry = self.collections.entry(id.clone());
@@ -85,7 +103,7 @@ mod tests {
     use storage::Storage;
     use tempdir::TempDir;
 
-    use crate::dto::{CreateCollectionOptionDTO, SearchParams};
+    use crate::dto::{CreateCollectionOptionDTO, Limit, SearchParams};
 
     use super::CollectionManager;
 
@@ -109,6 +127,7 @@ mod tests {
                 id: collection_id_str.clone(),
                 description: Some("Collection of songs".to_string()),
                 language: None,
+                typed_fields: Default::default(),
             })
             .expect("insertion should be successful");
 
@@ -126,6 +145,7 @@ mod tests {
                 id: collection_id.clone(),
                 description: None,
                 language: None,
+                typed_fields: Default::default(),
             })
             .expect("insertion should be successful");
 
@@ -133,6 +153,7 @@ mod tests {
             id: collection_id.clone(),
             description: None,
             language: None,
+            typed_fields: Default::default(),
         });
 
         assert_eq!(output, Err(super::CreateCollectionError::IdAlreadyExists));
@@ -151,6 +172,7 @@ mod tests {
                     id: id.clone(),
                     description: None,
                     language: None,
+                    typed_fields: Default::default(),
                 })
                 .expect("insertion should be successful");
         }
@@ -173,6 +195,7 @@ mod tests {
                 id: collection_id_str.clone(),
                 description: Some("Collection of songs".to_string()),
                 language: None,
+                typed_fields: Default::default(),
             })
             .expect("insertion should be successful");
 
@@ -208,6 +231,7 @@ mod tests {
                 id: collection_id_str.clone(),
                 description: Some("Collection of songs".to_string()),
                 language: None,
+                typed_fields: Default::default(),
             })
             .expect("insertion should be successful");
 
@@ -235,6 +259,7 @@ mod tests {
         let output = manager.get(collection_id, |collection| {
             let search_params = SearchParams {
                 term: "Tommaso".to_string(),
+                limit: Limit(10),
             };
             collection.search(search_params)
         });
@@ -242,6 +267,109 @@ mod tests {
         assert!(matches!(output, Some(Ok(_))));
         let output = output.unwrap().unwrap();
 
-        println!("{:?}", output);
+        assert_eq!(output.count, 1);
+        assert_eq!(output.hits.len(), 1);
+        assert_eq!(output.hits[0].id, "1");
+    }
+
+    #[test]
+    fn test_search_documents_order() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        let output = manager.get(collection_id.clone(), |collection| {
+            collection.insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "text": "This is a long text with a lot of words",
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "This is a smaller text",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+        });
+
+        assert!(matches!(output, Some(Ok(()))));
+
+        let output = manager.get(collection_id, |collection| {
+            let search_params = SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+            };
+            collection.search(search_params)
+        });
+
+        assert!(matches!(output, Some(Ok(_))));
+        let output = output.unwrap().unwrap();
+
+        assert_eq!(output.count, 2);
+        assert_eq!(output.hits.len(), 2);
+        assert_eq!(output.hits[0].id, "2");
+        assert_eq!(output.hits[1].id, "1");
+    }
+
+    #[test]
+    fn test_search_documents_limit() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        let output = manager.get(collection_id.clone(), |collection| {
+            collection.insert_batch(
+                (0..100)
+                    .map(|i| {
+                        json!({
+                            "id": i.to_string(),
+                            "text": "text ".repeat(i + 1),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+        });
+
+        assert!(matches!(output, Some(Ok(()))));
+
+        let output = manager.get(collection_id, |collection| {
+            let search_params = SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+            };
+            collection.search(search_params)
+        });
+
+        assert!(matches!(output, Some(Ok(_))));
+        let output = output.unwrap().unwrap();
+
+        assert_eq!(output.count, 100);
+        assert_eq!(output.hits.len(), 10);
+        assert_eq!(output.hits[0].id, "99");
+        assert_eq!(output.hits[1].id, "98");
+        assert_eq!(output.hits[2].id, "97");
+        assert_eq!(output.hits[3].id, "96");
+        assert_eq!(output.hits[4].id, "95");
     }
 }

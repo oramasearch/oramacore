@@ -69,7 +69,7 @@ mod tests {
     use std::sync::Arc;
 
     use collection_manager::{
-        dto::{CreateCollectionOptionDTO, SearchParams},
+        dto::{CreateCollectionOptionDTO, Limit, SearchParams},
         CollectionManager, CollectionsConfiguration,
     };
     use rocksdb::OptimisticTransactionDB;
@@ -99,6 +99,7 @@ mod tests {
                 id: collection_id.clone(),
                 description: None,
                 language: None,
+                typed_fields: Default::default(),
             },
         )
         .await;
@@ -137,6 +138,7 @@ mod tests {
             &collection_id,
             &SearchParams {
                 term: "beatles".to_string(),
+                limit: Limit(10),
             },
         )
         .await;

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -189,6 +190,7 @@ impl From<Vec<Document>> for DocumentList {
         DocumentList(docs)
     }
 }
+
 impl TryFrom<Value> for DocumentList {
     type Error = anyhow::Error;
 
@@ -228,4 +230,16 @@ pub struct SearchResultHit {
 pub struct SearchResult {
     pub hits: Vec<SearchResultHit>,
     pub count: usize,
+}
+
+#[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub enum CodeLanguage {
+    JavaScript,
+    TypeScript,
+    TSX,
+    HTML,
+}
+
+pub trait StringParser: Send + Sync {
+    fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>>;
 }

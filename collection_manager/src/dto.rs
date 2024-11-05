@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nlp::locales::Locale;
 use serde::{Deserialize, Serialize};
-use types::FieldId;
+use types::{CodeLanguage, FieldId};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LanguageDTO {
@@ -20,9 +20,15 @@ impl From<Locale> for LanguageDTO {
     fn from(language: Locale) -> Self {
         match language {
             Locale::EN => LanguageDTO::English,
-            _ => LanguageDTO::English
+            _ => LanguageDTO::English,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum TypedField {
+    Text(LanguageDTO),
+    Code(CodeLanguage),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,6 +36,8 @@ pub struct CreateCollectionOptionDTO {
     pub id: String,
     pub description: Option<String>,
     pub language: Option<LanguageDTO>,
+    #[serde(default)]
+    pub typed_fields: HashMap<String, TypedField>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,6 +50,16 @@ pub struct CollectionDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Limit(pub usize);
+impl Default for Limit {
+    fn default() -> Self {
+        Limit(10)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchParams {
     pub term: String,
+    #[serde(default)]
+    pub limit: Limit,
 }

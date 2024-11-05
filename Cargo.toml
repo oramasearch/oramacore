@@ -10,5 +10,7 @@ members = [
     "document_storage",
     "types",
     "rustorama",
-    "embeddings"
+    "embeddings",
+    "tanstack_example",
+    "code_parser",
 ]

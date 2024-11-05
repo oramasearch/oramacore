@@ -1,19 +1,20 @@
 use std::{
-    collections::HashMap,
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
     sync::{atomic::AtomicU16, Arc},
 };
 
 use anyhow::anyhow;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use nlp::Parser;
-use nlp::locales::Locale;
+use nlp::{locales::Locale, TextParser};
+use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
 use string_index::StringIndex;
 use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
-    ValueType,
+    StringParser, TokenScore, ValueType,
 };
 
 use crate::dto::{CollectionDTO, SearchParams};
@@ -26,6 +27,8 @@ pub struct Collection {
     field_id_generator: AtomicU16,
     string_fields: DashMap<String, FieldId>,
     document_storage: Arc<DocumentStorage>,
+    parsers: HashMap<FieldId, Box<dyn StringParser>>,
+    default_parser: Box<dyn StringParser>,
 }
 
 impl Collection {
@@ -35,17 +38,28 @@ impl Collection {
         description: Option<String>,
         language: Locale,
         document_storage: Arc<DocumentStorage>,
+        parsers: HashMap<String, Box<dyn StringParser>>,
     ) -> Self {
-        let parser = Parser::from_language(language);
-        Collection {
+        let default_parser = TextParser::from_language(Locale::EN);
+
+        let mut collection = Collection {
             id,
             description,
-            string_index: StringIndex::new(storage, parser),
             language,
             string_fields: Default::default(),
             field_id_generator: AtomicU16::new(0),
             document_storage,
+            string_index: StringIndex::new(storage.clone()),
+            parsers: Default::default(),
+            default_parser: Box::new(default_parser),
+        };
+
+        for (field_name, parser) in parsers {
+            let field_id = collection.get_field_id(field_name.clone());
+            collection.parsers.insert(field_id, parser);
         }
+
+        collection
     }
 
     pub fn as_dto(&self) -> CollectionDTO {
@@ -63,7 +77,7 @@ impl Collection {
     }
 
     pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
-        let mut strings: HashMap<DocumentId, Vec<(FieldId, String)>> =
+        let mut strings: HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>> =
             HashMap::with_capacity(self.string_fields.len());
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
@@ -79,15 +93,17 @@ impl Collection {
                         Some(Value::String(value)) => value,
                         _ => Err(anyhow!("value is not string. This should never happen"))?,
                     };
-                    let field_id = self
-                        .string_fields
-                        .entry(key.clone())
-                        .or_insert_with(|| self.create_field());
+                    let field_id = self.get_field_id(key.clone());
+
+                    let parser = self.parsers.get(&field_id).unwrap_or(&self.default_parser);
+
+                    println!("tokenizing doc {doc:?}");
+                    let tokens = parser.tokenize_str_and_stem(&value)?;
 
                     strings
                         .entry(internal_document_id)
                         .or_default()
-                        .push((*field_id, value));
+                        .push((field_id, tokens));
                 }
             }
 
@@ -96,19 +112,31 @@ impl Collection {
 
         // TODO: if the insert_multiple fails, should we rollback the `add_documents`?
         self.document_storage.add_documents(documents)?;
+
         self.string_index.insert_multiple(strings)?;
 
         Ok(())
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
-        let (token_scores, count) = self.string_index.search(&search_params.term, 10, None)?;
+        let tokens: Vec<_> = self
+            .default_parser
+            .tokenize_str_and_stem(&search_params.term)?
+            .into_iter()
+            .flat_map(|(token, stemmed)| {
+                let mut terms = vec![token];
+                terms.extend(stemmed);
+                terms
+            })
+            .collect();
+        let token_scores = self.string_index.search(tokens, None, None)?;
+        let count = token_scores.len();
+
+        let token_scores = top_n(token_scores, search_params.limit.0);
 
         let docs = self
             .document_storage
             .get_all(token_scores.iter().map(|m| m.document_id).collect())?;
-
-        println!("{:#?}", docs);
 
         let hits: Vec<_> = token_scores
             .into_iter()
@@ -135,10 +163,47 @@ impl Collection {
         self.document_storage.generate_document_id()
     }
 
-    fn create_field(&self) -> FieldId {
-        let field_id = self
-            .field_id_generator
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        FieldId(field_id)
+    fn get_field_id(&self, field_name: String) -> FieldId {
+        if let Some(field_id) = self.string_fields.get(&field_name) {
+            return *field_id;
+        }
+
+        let field_id = self.string_fields.entry(field_name).or_insert_with(|| {
+            let field_id = self
+                .field_id_generator
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            FieldId(field_id)
+        });
+
+        *field_id
     }
+}
+
+fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
+    // A min-heap of size `n` to keep track of the top N elements
+    let mut heap: BinaryHeap<Reverse<(NotNan<f32>, DocumentId)>> = BinaryHeap::with_capacity(n);
+
+    for (key, value) in map {
+        // Insert into the heap if it's not full, or replace the smallest element if the current one is larger
+        if heap.len() < n {
+            heap.push(Reverse((NotNan::new(value).unwrap(), key)));
+        } else if let Some(Reverse((min_value, _))) = heap.peek() {
+            if value > *min_value.as_ref() {
+                heap.pop();
+                heap.push(Reverse((NotNan::new(value).unwrap(), key)));
+            }
+        }
+    }
+
+    // Collect results into a sorted Vec (optional sorting based on descending values)
+    let mut result: Vec<TokenScore> = heap
+        .into_sorted_vec()
+        .into_iter()
+        .map(|Reverse((value, key))| TokenScore {
+            document_id: key,
+            score: value.into_inner(),
+        })
+        .collect();
+
+    result
 }
