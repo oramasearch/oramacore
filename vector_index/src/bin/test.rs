@@ -3,6 +3,7 @@ use embeddings::{load_models, OramaModels};
 use serde::Deserialize;
 use std::fs;
 use std::time::Instant;
+use types::DocumentId;
 use vector_index::{VectorIndex, VectorIndexConfig};
 
 #[derive(Deserialize, Debug)]
@@ -37,9 +38,9 @@ fn main() -> Result<()> {
                 .unwrap()
                 .first()
                 .cloned()?;
-            Some((i.to_string(), embedding))
+            Some((DocumentId(i as u64), embedding))
         })
-        .collect::<Vec<(String, Vec<f32>)>>();
+        .collect::<Vec<(DocumentId, Vec<f32>)>>();
 
     let duration_embeddings = start_embeddings.elapsed();
     println!(
@@ -53,7 +54,7 @@ fn main() -> Result<()> {
         let batch = chunk
             .iter()
             .map(|(id, embedding)| (id.clone(), embedding.as_slice()))
-            .collect::<Vec<(String, &[f32])>>();
+            .collect::<Vec<(DocumentId, &[f32])>>();
         idx.insert_batch(batch).unwrap();
     }
 
@@ -86,8 +87,7 @@ fn main() -> Result<()> {
     let retrieved_documents: Vec<&Movie> = neighbors
         .iter()
         .filter_map(|id| {
-            let index: usize = id.parse().ok()?;
-            dataset.get(index)
+            dataset.get(id.0 as usize)
         })
         .collect();
 

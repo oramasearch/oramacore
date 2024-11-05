@@ -2,23 +2,31 @@ use anyhow::Result;
 use embeddings::OramaModels;
 use hora::core::ann_index::ANNIndex;
 use hora::core::metrics::Metric::Euclidean;
+use hora::core::node::IdxType;
 use hora::index::hnsw_idx;
+use serde::Serialize;
+use types::DocumentId;
+
+#[derive(Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash)]
+struct IdxID(Option<DocumentId>);
 
 pub struct VectorIndex {
     pub embeddings_model: OramaModels,
     pub dimensions: usize,
-    pub idx: hnsw_idx::HNSWIndex<f32, String>,
+    pub idx: hnsw_idx::HNSWIndex<f32, IdxID>,
 }
 
 pub struct VectorIndexConfig {
     pub embeddings_model: OramaModels,
 }
 
+impl IdxType for IdxID {}
+
 impl VectorIndex {
     pub fn new(config: VectorIndexConfig) -> Self {
         let dimensions = config.embeddings_model.dimensions();
 
-        let idx = hnsw_idx::HNSWIndex::<f32, String>::new(
+        let idx = hnsw_idx::HNSWIndex::<f32, IdxID>::new(
             dimensions,
             &hora::index::hnsw_params::HNSWParams::<f32>::default(),
         );
@@ -30,20 +38,24 @@ impl VectorIndex {
         }
     }
 
-    pub fn insert(&mut self, id: String, vector: &[f32]) -> Result<(), &str> {
-        self.idx.add(vector, id)?;
+    pub fn insert(&mut self, id: DocumentId, vector: &[f32]) -> Result<(), &str> {
+        self.idx.add(vector, IdxID(Some(id)))?;
         self.idx.build(Euclidean)
     }
 
-    pub fn insert_batch(&mut self, data: Vec<(String, &[f32])>) -> Result<(), &str> {
+    pub fn insert_batch(&mut self, data: Vec<(DocumentId, &[f32])>) -> Result<(), &str> {
         for (id, vector) in data.iter() {
-            self.idx.add(vector, id.clone())?
+            self.idx.add(vector, IdxID(Some(id.clone())))?
         }
 
         self.idx.build(Euclidean)
     }
 
-    pub fn search(&mut self, target: &[f32], k: usize) -> Vec<String> {
-        self.idx.search(target, k)
+    pub fn search(&mut self, target: &[f32], k: usize) -> Vec<DocumentId> {
+        self.idx
+            .search(target, k)
+            .into_iter()
+            .map(|id| id.0.unwrap())
+            .collect()
     }
 }
