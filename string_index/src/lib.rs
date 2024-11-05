@@ -294,7 +294,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use nlp::{locales::Locale, TextParser};
-    use ptrie::Trie;
+
     use rocksdb::OptimisticTransactionDB;
     use tempdir::TempDir;
 

@@ -196,7 +196,7 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
     }
 
     // Collect results into a sorted Vec (optional sorting based on descending values)
-    let mut result: Vec<TokenScore> = heap
+    let result: Vec<TokenScore> = heap
         .into_sorted_vec()
         .into_iter()
         .map(|Reverse((value, key))| TokenScore {
