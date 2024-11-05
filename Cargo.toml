@@ -13,4 +13,5 @@ members = [
     "embeddings",
     "tanstack_example",
     "code_parser",
+    "vector_index",
 ]

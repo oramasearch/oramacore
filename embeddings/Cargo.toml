@@ -18,4 +18,5 @@ rayon = "1.8"
 ndarray = "=0.15.6"
 rand = "0.8.5"
 num-traits = "0.2.19"
-
+reductive = { version = "0.9.0" }
+rand_chacha = "0.3.1"
