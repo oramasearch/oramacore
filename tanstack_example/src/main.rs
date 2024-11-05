@@ -19,7 +19,10 @@ use storage::Storage;
 use types::CodeLanguage;
 
 fn main() -> anyhow::Result<()> {
-    let db = OptimisticTransactionDB::open_default("./tanstack").unwrap();
+    let storage_dir = "./tanstack";
+
+    let _ = fs::remove_dir_all(storage_dir);
+    let db = OptimisticTransactionDB::open_default(storage_dir).unwrap();
     let storage = Arc::new(Storage::new(db));
 
     let manager = CollectionManager::new(CollectionsConfiguration { storage });
@@ -52,8 +55,15 @@ fn main() -> anyhow::Result<()> {
                     continue;
                 }
 
+                let url = path_clean::clean(file.path().to_str().unwrap());
+                let id = if let Some(heading) = &section.heading {
+                    format!("{url:?}#{}", heading.text)
+                } else {
+                    url.to_string_lossy().to_string()
+                };
                 orama_documents.push(json!({
-                    "url": path_clean::clean(file.path().to_str().unwrap()),
+                    "id": id,
+                    "url": url,
                     "language": "tsx",
                     "code": code,
                     "section": section.heading.clone(),
@@ -69,10 +79,23 @@ fn main() -> anyhow::Result<()> {
         collection.insert_batch(orama_documents.try_into().unwrap())
     });
 
+    let term = "SelectionTableState";
+
+    println!(
+        r###"
+
+--- SEARCH EXAMPLE ---
+term: {term}
+
+"###
+    );
+
     let output = manager.get(collection_id, |collection| {
         collection.search(SearchParams {
-            term: "PreFilteredRowModel".to_string(),
+            term: term.to_string(),
             limit: Limit(10),
+            boost: Default::default(),
+            properties: Some(vec!["code".to_string()]),
         })
     });
 

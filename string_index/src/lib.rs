@@ -12,15 +12,17 @@ use posting_storage::{PostingListId, PostingStorage};
 // use radix_trie::Trie;
 use ptrie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use storage::Storage;
 use types::{DocumentId, FieldId};
 
 mod dictionary;
 mod posting_storage;
+pub mod scorer;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Posting {
+pub struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
     pub positions: Vec<usize>,
@@ -42,6 +44,11 @@ pub struct StringIndex {
     total_document_length: AtomicUsize,
 }
 
+pub struct GlobalInfo {
+    pub total_documents: usize,
+    pub total_document_length: usize,
+}
+
 impl StringIndex {
     pub fn new(storage: Arc<Storage>) -> Self {
         StringIndex {
@@ -57,28 +64,29 @@ impl StringIndex {
         self.total_documents.load(Ordering::Relaxed)
     }
 
-    pub fn search(
+    pub fn search<S: Scorer + Sync>(
         &self,
         tokens: Vec<String>,
         search_on: Option<Vec<FieldId>>,
-        boost: Option<HashMap<FieldId, f32>>,
+        boost: HashMap<FieldId, f32>,
+        scorer: S,
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
                 println!("total_documents == 0");
                 return Ok(Default::default());
             }
-            total_documents => total_documents as f32,
+            total_documents => total_documents,
         };
         let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
                 println!("total_document_length == 0");
                 return Ok(Default::default());
             }
-            total_document_length => total_document_length as f32,
+            total_document_length => total_document_length,
         };
 
-        let avg_doc_length = total_document_length / total_documents;
+        // let avg_doc_length = total_document_length / total_documents;
 
         let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
         let tree = self
@@ -88,47 +96,53 @@ impl StringIndex {
             .expect("Unable to read");
         for token in tokens {
             let a = tree.find_postfixes(token.bytes());
-            println!("token: {} {:?}", token, a);
-
             posting_list_ids_with_freq.extend(a.into_iter().cloned());
         }
 
-        let boost = boost.unwrap_or_default();
+        let fields = search_on.as_ref();
+
+        let global_info = GlobalInfo {
+            total_documents,
+            total_document_length,
+        };
 
         let scores = posting_list_ids_with_freq
             .into_par_iter()
             .filter_map(|string_index_value| {
-                self.posting_storage
-                    .get(
-                        string_index_value.posting_list_id,
-                        // BAD: term_frequency is not used inside posting_storage
-                        // But we need after, so here forward it.
-                        // TODO: We need to find a way to avoid this.
-                        string_index_value.term_frequency,
-                    )
-                    .ok()
+                let output = self
+                    .posting_storage
+                    .get(string_index_value.posting_list_id)
+                    .ok();
+                let posting = match output {
+                    Some(v) => v,
+                    None => return None,
+                };
+
+                let posting: Vec<_> = posting
+                    .into_iter()
+                    .filter(move |posting| {
+                        fields
+                            .map(|search_on| search_on.contains(&posting.field_id))
+                            .unwrap_or(true)
+                    })
+                    .collect();
+
+                Some((posting, string_index_value.term_frequency))
             })
             // Every thread perform on a separated hashmap
             .fold(
                 HashMap::<DocumentId, f32>::new,
-                |mut acc, (postings, freq)| {
-                    let freq = freq as f32;
+                |mut acc, (postings, total_token_count)| {
+                    let total_token_count = total_token_count as f32;
                     for posting in postings {
-                        let term_frequency = posting.term_frequency;
-                        let doc_length = posting.doc_length as f32;
-                        let boost_per_field = boost.get(&posting.field_id).unwrap_or(&1.0);
-
-                        let idf = ((total_documents - freq + 0.5_f32) / (freq + 0.5_f32)).ln_1p();
-                        let score = calculate_score(
-                            term_frequency,
-                            idf,
-                            doc_length,
-                            avg_doc_length,
-                            *boost_per_field,
+                        let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+                        scorer.update_score(
+                            acc.entry(posting.document_id).or_default(),
+                            &global_info,
+                            posting,
+                            total_token_count,
+                            boost_per_field,
                         );
-
-                        let doc_score = acc.entry(posting.document_id).or_default();
-                        *doc_score += score;
                     }
                     acc
                 },
@@ -281,14 +295,6 @@ impl StringIndex {
     }
 }
 
-fn calculate_score(tf: f32, idf: f32, doc_length: f32, avg_doc_length: f32, boost: f32) -> f32 {
-    let k1 = 1.5;
-    let b = 0.75;
-    let numerator = tf * (k1 + 1.0);
-    let denominator = tf + k1 * (1.0 - b + b * (doc_length / avg_doc_length));
-    idf * (numerator / denominator) * boost
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
@@ -298,7 +304,7 @@ mod tests {
     use rocksdb::OptimisticTransactionDB;
     use tempdir::TempDir;
 
-    use crate::{DocumentId, FieldId, StringIndex};
+    use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
 
     #[test]
     fn test_search() {
@@ -349,13 +355,18 @@ mod tests {
         string_index.insert_multiple(batch).unwrap();
 
         let output = string_index
-            .search(vec!["welcome".to_string()], None, None)
+            .search(
+                vec!["welcome".to_string()],
+                None,
+                Default::default(),
+                BM25Score,
+            )
             .unwrap();
 
         assert_eq!(output.len(), 2);
 
         let output = string_index
-            .search(vec!["wel".to_string()], None, None)
+            .search(vec!["wel".to_string()], None, Default::default(), BM25Score)
             .unwrap();
 
         assert_eq!(output.len(), 2);

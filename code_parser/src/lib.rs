@@ -65,8 +65,8 @@ impl CodeParser {
         let _module = parser.parse_module();
         // We ignore errors, so we can parse as much as possible
         // TODO: should we collect this information and return it to the user?
-        // .map_err(|e| e.into_diagnostic(&handler).emit())
-        // .expect("Failed to parse module.");
+        //   .map_err(|e| e.into_diagnostic(&handler).emit())
+        //   .expect("Failed to parse module.");
 
         let tokens: Vec<_> = parser.input().take();
 
@@ -262,6 +262,36 @@ export default function RootLayout({ children }) {
         assert_eq!(
             t,
             vec![("th".to_string(), vec![]), ("key".to_string(), vec![])]
+        );
+    }
+
+    #[test]
+    fn test_1() {
+        // This code is not parsable from swc.
+        // The parser stops and returns only "initialState"
+        let code = r###"initialState?: Partial<
+  VisibilityTableState &
+  ColumnOrderTableState &
+  ColumnPinningTableState &
+  FiltersTableState &
+  SortingTableState &
+  ExpandedTableState &
+  GroupingTableState &
+  ColumnSizingTableState &
+  PaginationTableState &
+  RowSelectionTableState
+>"###;
+
+        let parser = CodeParser::from_language(CodeLanguage::TSX);
+
+        let t = parser.tokenize_and_stem(code).unwrap();
+
+        assert_eq!(
+            t,
+            vec![(
+                "initialstate".to_string(),
+                vec!["initial".to_string(), "state".to_string()]
+            )]
         );
     }
 }

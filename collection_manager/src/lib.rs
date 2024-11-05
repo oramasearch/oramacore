@@ -102,8 +102,9 @@ mod tests {
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
+    use types::CodeLanguage;
 
-    use crate::dto::{CreateCollectionOptionDTO, Limit, SearchParams};
+    use crate::dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField};
 
     use super::CollectionManager;
 
@@ -260,6 +261,8 @@ mod tests {
             let search_params = SearchParams {
                 term: "Tommaso".to_string(),
                 limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
             };
             collection.search(search_params)
         });
@@ -309,6 +312,8 @@ mod tests {
             let search_params = SearchParams {
                 term: "text".to_string(),
                 limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
             };
             collection.search(search_params)
         });
@@ -357,6 +362,8 @@ mod tests {
             let search_params = SearchParams {
                 term: "text".to_string(),
                 limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
             };
             collection.search(search_params)
         });
@@ -371,5 +378,87 @@ mod tests {
         assert_eq!(output.hits[2].id, "97");
         assert_eq!(output.hits[3].id, "96");
         assert_eq!(output.hits[4].id, "95");
+    }
+
+    #[test]
+    fn test_foo() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: vec![("code".to_string(), TypedField::Code(CodeLanguage::TSX))]
+                    .into_iter()
+                    .collect(),
+            })
+            .expect("insertion should be successful");
+
+        manager.get(collection_id.clone(), |collection| {
+            collection.insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "code": r#"
+import { TableController, type SortingState } from '@tanstack/lit-table'
+//...
+@state()
+private _sorting: SortingState = [
+  {
+    id: 'age', //you should get autocomplete for the `id` and `desc` properties
+    desc: true,
+  }
+]
+"#,
+                    }),
+                    json!({
+                        "id": "2",
+                        "code": r#"export type RowSelectionState = Record<string, boolean>
+
+export type RowSelectionTableState = {
+  rowSelection: RowSelectionState
+}"#,
+                    }),
+                    json!({
+                        "id": "3",
+                        "code": r#"initialState?: Partial<
+  VisibilityTableState &
+  ColumnOrderTableState &
+  ColumnPinningTableState &
+  FiltersTableState &
+  SortingTableState &
+  ExpandedTableState &
+  GroupingTableState &
+  ColumnSizingTableState &
+  PaginationTableState &
+  RowSelectionTableState
+>"#,
+                    }),
+                    json!({
+                        "id": "4",
+                        "code": r#"setColumnVisibility: (updater: Updater<VisibilityState>) => void"#,
+                    })
+                ]
+                .try_into()
+                .unwrap(),
+            )
+        });
+
+        let output = manager
+            .get(collection_id, |collection| {
+                let search_params = SearchParams {
+                    term: "SelectionTableState".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                };
+                collection.search(search_params)
+            })
+            .unwrap()
+            .unwrap();
+
+        println!("{:#?}", output);
     }
 }
