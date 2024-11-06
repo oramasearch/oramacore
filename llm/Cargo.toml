@@ -1,11 +1,19 @@
 [package]
-name = "content_expander"
+name = "llm"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
 name = "test_image"
-path = "src/bin/test_image.rs"
+path = "../llm/src/bin/test_image.rs"
+
+[[bin]]
+name = "test_code"
+path = "../llm/src/bin/test_code.rs"
+
+[[bin]]
+name = "questions"
+path = "../llm/src/bin/questions.rs"
 
 [dependencies]
 linkify = "0.10.0"
@@ -23,6 +31,11 @@ markdown = "0.3.0"
 html_parser = "0.7.0"
 futures = "0.3.31"
 html-escape = "0.2.13"
+utils = { path = "../utils" }
+serde_json = "1.0.132"
+strum = "0.26.3"
+async-std = "1.13.0"
+async-once-cell = "0.5.4"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git" }

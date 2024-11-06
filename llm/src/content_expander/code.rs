@@ -1,6 +1,7 @@
-use crate::prompts::{get_prompt, Prompts};
+use crate::content_expander::prompts::{get_prompt, Prompts};
+use crate::LocalLLM;
 use html_parser::{Dom, Node};
-use mistralrs::{IsqType, TextMessageRole, TextMessages, TextModelBuilder};
+use mistralrs::{TextMessageRole, TextMessages};
 
 type CodeBlockDescriptions = Vec<String>;
 
@@ -11,18 +12,11 @@ pub enum TextFormat {
     Plaintext,
 }
 
-const TEXT_MODEL_ID: &str = "microsoft/Phi-3.5-mini-instruct";
-
 pub async fn describe_code_blocks(
     text: String,
     format: TextFormat,
 ) -> Option<CodeBlockDescriptions> {
-    let model = TextModelBuilder::new(TEXT_MODEL_ID)
-        .with_isq(IsqType::Q8_0)
-        .with_logging()
-        .build()
-        .await
-        .unwrap();
+    let model = LocalLLM::Phi3_5MiniInstruct.try_new().await.unwrap();
 
     let code_blocks = capture_code_blocks(text, format)?;
 
