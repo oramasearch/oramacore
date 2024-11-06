@@ -1,4 +1,4 @@
-use crate::prompts::{get_prompt, Prompts};
+use crate::content_expander::prompts::{get_prompt, Prompts};
 use html_parser::{Dom, Node};
 use mistralrs::{IsqType, TextMessageRole, TextMessages, TextModelBuilder};
 

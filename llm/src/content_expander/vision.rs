@@ -1,4 +1,4 @@
-use crate::prompts::{get_prompt, Prompts};
+use crate::content_expander::prompts::{get_prompt, Prompts};
 use anyhow::Context;
 use linkify::{LinkFinder, LinkKind};
 use mistralrs::{IsqType, TextMessageRole, VisionLoaderType, VisionMessages, VisionModelBuilder};

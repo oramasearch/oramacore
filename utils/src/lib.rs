@@ -2,7 +2,7 @@ use anyhow::Result;
 use regex::Regex;
 use serde_json::Value;
 
-pub fn parse_json_safely(input_str: &str) -> Result<Value> {
+pub fn parse_json_safely(input_str: String) -> Result<Value> {
     if let Ok(parsed) = serde_json::from_str(input_str.trim()) {
         return Ok(parsed);
     }
@@ -30,7 +30,7 @@ mod tests {
 
     #[test]
     fn test_parse_valid_json() {
-        let input = r#"{"key": "value"}"#;
+        let input = r#"{"key": "value"}"#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"key": "value"}));
@@ -43,7 +43,7 @@ mod tests {
             "name": "John",
             "age": 30
         }
-        ```"#;
+        ```"#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"name": "John", "age": 30}));
@@ -55,7 +55,7 @@ mod tests {
         {
             "status": "ok"
         }
-        ```"#;
+        ```"#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"status": "ok"}));
@@ -69,7 +69,7 @@ mod tests {
             "foo": "bar"
         }
         Some text after
-        "#;
+        "#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"foo": "bar"}));
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_invalid_json_returns_error() {
-        let input = r#"Invalid JSON string"#;
+        let input = r#"Invalid JSON string"#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_err());
     }
@@ -87,7 +87,7 @@ mod tests {
         let input = r#"
         {
             "incomplete": true,
-        "#;
+        "#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_err());
     }
@@ -100,7 +100,7 @@ mod tests {
             "key": "value"
         }
         Followed by more text.
-        "#;
+        "#.to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"key": "value"}));

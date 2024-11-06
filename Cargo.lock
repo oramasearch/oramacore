@@ -3147,10 +3147,12 @@ dependencies = [
  "mistralrs",
  "reqwest",
  "serde",
+ "serde_json",
  "tempdir",
  "textwrap",
  "tokio",
  "url",
+ "utils",
 ]
 
 [[package]]
