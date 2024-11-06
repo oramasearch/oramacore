@@ -21,6 +21,8 @@ mod dictionary;
 mod posting_storage;
 pub mod scorer;
 
+pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Posting {
     pub document_id: DocumentId,
@@ -106,7 +108,7 @@ impl StringIndex {
             total_document_length,
         };
 
-        let scores = posting_list_ids_with_freq
+        posting_list_ids_with_freq
             .into_par_iter()
             .filter_map(|string_index_value| {
                 let output = self
@@ -130,38 +132,27 @@ impl StringIndex {
                 Some((posting, string_index_value.term_frequency))
             })
             // Every thread perform on a separated hashmap
-            .fold(
-                HashMap::<DocumentId, f32>::new,
-                |mut acc, (postings, total_token_count)| {
-                    let total_token_count = total_token_count as f32;
-                    for posting in postings {
-                        let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                        scorer.update_score(
-                            acc.entry(posting.document_id).or_default(),
-                            &global_info,
-                            posting,
-                            total_token_count,
-                            boost_per_field,
-                        );
-                    }
-                    acc
-                },
-            )
-            // And later we merge all the hashmaps
-            .reduce(HashMap::<DocumentId, f32>::new, |mut acc, item| {
-                for (document_id, score) in item {
-                    let doc_score = acc.entry(document_id).or_default();
-                    *doc_score += score;
+            .for_each(|(postings, total_token_count)| {
+                let total_token_count = total_token_count as f32;
+                for posting in postings {
+                    let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+                    scorer.add_entry(
+                        &global_info,
+                        posting,
+                        total_token_count,
+                        boost_per_field,
+                    );
                 }
-                acc
             });
+
+        let scores = scorer.get_scores();
 
         Ok(scores)
     }
 
     pub fn insert_multiple(
         &self,
-        data: HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>,
+        data: DocumentBatch,
     ) -> Result<()> {
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
@@ -357,14 +348,14 @@ mod tests {
                 vec!["welcome".to_string()],
                 None,
                 Default::default(),
-                BM25Score,
+                BM25Score::default(),
             )
             .unwrap();
 
         assert_eq!(output.len(), 2);
 
         let output = string_index
-            .search(vec!["wel".to_string()], None, Default::default(), BM25Score)
+            .search(vec!["wel".to_string()], None, Default::default(), BM25Score::default())
             .unwrap();
 
         assert_eq!(output.len(), 2);

@@ -17,3 +17,6 @@ serde_json = "1.0.132"
 serde = { version = "1.0.214", features = ["derive"] }
 types = { path = "../types" }
 path-clean = "1.0.1"
+code_parser = { path = "../code_parser" }
+ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expose-find-postfixes-with-current" }
+itertools = "0.13.0"

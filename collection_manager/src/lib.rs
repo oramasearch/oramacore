@@ -44,20 +44,6 @@ impl CollectionManager {
     ) -> Result<CollectionId, CreateCollectionError> {
         let id = CollectionId(collection_option.id);
 
-        let typed_fields: HashMap<String, Box<dyn StringParser>> = collection_option
-            .typed_fields
-            .into_iter()
-            .map(|(key, value)| {
-                let parser: Box<dyn StringParser> = match value {
-                    TypedField::Text(language) => {
-                        Box::new(TextParser::from_language(language.into()))
-                    }
-                    TypedField::Code(language) => Box::new(CodeParser::from_language(language)),
-                };
-                (key, parser)
-            })
-            .collect();
-
         let collection = Collection::new(
             self.configuration.storage.clone(),
             id.clone(),
@@ -67,7 +53,7 @@ impl CollectionManager {
                 .unwrap_or(LanguageDTO::English)
                 .into(),
             self.document_storage.clone(),
-            typed_fields,
+            collection_option.typed_fields,
         );
 
         let entry = self.collections.entry(id.clone());

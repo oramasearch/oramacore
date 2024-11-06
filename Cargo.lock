@@ -901,6 +901,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "code_index"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "code_parser",
+ "csv",
+ "dashmap",
+ "itertools 0.13.0",
+ "nlp",
+ "ptrie 0.7.1 (git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-find-postfixes-with-current)",
+ "radix_trie",
+ "rayon",
+ "serde",
+ "smallvec",
+ "storage",
+ "tempdir",
+ "thiserror",
+ "types",
+]
+
+[[package]]
 name = "code_parser"
 version = "0.1.0"
 dependencies = [
@@ -916,6 +938,7 @@ name = "collection_manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "code_index",
  "code_parser",
  "cuid",
  "dashmap",
@@ -4353,6 +4376,11 @@ dependencies = [
 [[package]]
 name = "ptrie"
 version = "0.7.1"
+source = "git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-find-postfixes-with-current#44a1c1824702334a2dba9c86219889ecad7579a0"
+
+[[package]]
+name = "ptrie"
+version = "0.7.1"
 source = "git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-get-mut#2c4019efe20c02714731848f6f457efc6f5838af"
 
 [[package]]
@@ -5471,7 +5499,7 @@ dependencies = [
  "dashmap",
  "itertools 0.13.0",
  "nlp",
- "ptrie",
+ "ptrie 0.7.1 (git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-get-mut)",
  "radix_trie",
  "rayon",
  "serde",
@@ -5827,13 +5855,16 @@ name = "tanstack_example"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "code_parser",
  "collection_manager",
  "comrak",
  "config",
  "discord-md",
+ "itertools 0.13.0",
  "markdown",
  "markdown-parser",
  "path-clean",
+ "ptrie 0.7.1 (git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-find-postfixes-with-current)",
  "pulldown-cmark",
  "serde",
  "serde_json",

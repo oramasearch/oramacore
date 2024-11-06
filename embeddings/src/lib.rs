@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 use strum::EnumIter;
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
     model: OramaModels,

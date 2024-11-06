@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use code_index::CodeIndex;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
 use nlp::{locales::Locale, TextParser};
@@ -12,26 +13,31 @@ use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
 use string_index::{
-    scorer::{bm25::BM25Score, counter::CounterScore},
-    StringIndex,
+    scorer::{bm25::BM25Score, code::CodeScore}, DocumentBatch, StringIndex
 };
 use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
     StringParser, TokenScore, ValueType,
 };
 
-use crate::dto::{CollectionDTO, SearchParams};
+use crate::dto::{CollectionDTO, SearchParams, TypedField};
 
 pub struct Collection {
     pub(crate) id: CollectionId,
     description: Option<String>,
-    string_index: StringIndex,
+
     language: Locale,
     field_id_generator: AtomicU16,
-    string_fields: DashMap<String, FieldId>,
+
     document_storage: Arc<DocumentStorage>,
-    parsers: HashMap<FieldId, Box<dyn StringParser>>,
     default_parser: Box<dyn StringParser>,
+
+    // Strings
+    string_index: StringIndex,
+    string_fields: DashMap<String, FieldId>,
+    // Code
+    code_index: CodeIndex,
+    code_fields: DashMap<String, FieldId>,
 }
 
 impl Collection {
@@ -41,7 +47,7 @@ impl Collection {
         description: Option<String>,
         language: Locale,
         document_storage: Arc<DocumentStorage>,
-        parsers: HashMap<String, Box<dyn StringParser>>,
+        typed_fields: HashMap<String, TypedField>,
     ) -> Self {
         let default_parser = TextParser::from_language(Locale::EN);
 
@@ -53,13 +59,23 @@ impl Collection {
             field_id_generator: AtomicU16::new(0),
             document_storage,
             string_index: StringIndex::new(storage.clone()),
-            parsers: Default::default(),
             default_parser: Box::new(default_parser),
+            code_index: CodeIndex::new(),
+            code_fields: Default::default(),
         };
 
-        for (field_name, parser) in parsers {
+        for (field_name, field_type) in typed_fields {
             let field_id = collection.get_field_id(field_name.clone());
-            collection.parsers.insert(field_id, parser);
+            match field_type {
+                // TODO: handle text language
+                TypedField::Text(_) => {
+                    collection.string_fields.insert(field_name, field_id);
+                }
+                // TODO: handle code language
+                TypedField::Code(_) => {
+                    collection.code_fields.insert(field_name, field_id);
+                }
+            }
         }
 
         collection
@@ -76,12 +92,18 @@ impl Collection {
                 .iter()
                 .map(|e| (e.key().clone(), *e.value()))
                 .collect(),
+            code_fields: self
+                .code_fields
+                .iter()
+                .map(|e| (e.key().clone(), *e.value()))
+                .collect(),
         }
     }
 
     pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
-        let mut strings: HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>> =
-            HashMap::with_capacity(self.string_fields.len());
+        let mut strings: DocumentBatch =
+            HashMap::with_capacity(document_list.len());
+        let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
             let mut flatten = doc.into_flatten();
@@ -90,7 +112,19 @@ impl Collection {
             let internal_document_id = self.generate_document_id();
 
             for (key, field_type) in schema {
-                if field_type == ValueType::Scalar(ScalarType::String) {
+
+                if self.code_fields.contains_key(&key) {
+                    let value = match flatten.remove(&key) {
+                        Some(Value::String(value)) => value,
+                        _ => Err(anyhow!("value is not string. This should never happen"))?,
+                    };
+                    let field_id = self.get_field_id(key.clone());
+
+                    codes
+                        .entry(internal_document_id)
+                        .or_default()
+                        .push((field_id, value));
+                } else if field_type == ValueType::Scalar(ScalarType::String) {
                     // flatten is a copy of the document, so we can remove the key
                     let value = match flatten.remove(&key) {
                         Some(Value::String(value)) => value,
@@ -98,9 +132,7 @@ impl Collection {
                     };
                     let field_id = self.get_field_id(key.clone());
 
-                    let parser = self.parsers.get(&field_id).unwrap_or(&self.default_parser);
-
-                    let tokens = parser.tokenize_str_and_stem(&value)?;
+                    let tokens = self.default_parser.tokenize_str_and_stem(&value)?;
 
                     strings
                         .entry(internal_document_id)
@@ -116,6 +148,7 @@ impl Collection {
         self.document_storage.add_documents(documents)?;
 
         self.string_index.insert_multiple(strings)?;
+        self.code_index.insert_multiple(codes)?;
 
         Ok(())
     }
@@ -139,47 +172,10 @@ impl Collection {
             None => self.string_fields.iter().map(|e| *e.value()).collect(),
         };
 
-        let tokens: Vec<_> = self
-            .default_parser
-            .tokenize_str_and_stem(&search_params.term)?
-            .into_iter()
-            .flat_map(|(token, stemmed)| {
-                let mut terms = vec![token];
-                terms.extend(stemmed);
-                terms
-            })
-            .collect();
 
-        let fields_on_search_with_default_parser: Vec<_> = self
-            .string_fields
-            .iter()
-            .filter(|field_id| !self.parsers.contains_key(field_id.value()))
-            .filter(|field_id| properties.contains(field_id.value()))
-            .map(|field_id| *field_id.value())
-            .collect();
-        println!(
-            "searching for tokens {:?}",
-            fields_on_search_with_default_parser,
-        );
-        let mut token_scores = self.string_index.search(
-            tokens,
-            Some(fields_on_search_with_default_parser),
-            boost.clone(),
-            BM25Score,
-        )?;
-        println!(
-            "Element found with default parser: {:?}",
-            token_scores.len()
-        );
-
-        // Depends on the self.parsers size, this loop can be optimized, parallelizing the search.
-        // But for now, we will keep it simple.
-        // TODO: think about how to parallelize this search
-        for (field_id, parser) in &self.parsers {
-            if !properties.contains(field_id) {
-                continue;
-            }
-            let tokens: Vec<_> = parser
+        let string_token_scores = {
+            let tokens: Vec<_> = self
+                .default_parser
                 .tokenize_str_and_stem(&search_params.term)?
                 .into_iter()
                 .flat_map(|(token, stemmed)| {
@@ -189,38 +185,44 @@ impl Collection {
                 })
                 .collect();
 
-            let field_token_scores = self.string_index.search(
-                tokens,
-                Some(vec![*field_id]),
-                boost.clone(),
-                CounterScore,
-            )?;
-
-            let field_name = self
+            let fields_on_search_with_default_parser: Vec<_> = self
                 .string_fields
                 .iter()
-                .find(|v| v.value() == field_id)
-                .unwrap();
-            let field_name = field_name.key();
+                .filter(|field_id| properties.contains(field_id.value()))
+                .map(|field_id| *field_id.value())
+                .collect();
             println!(
-                "Element found with parser: {field_id:?} ({:?}) {:?}",
-                field_name,
-                field_token_scores.len()
+                "searching for tokens {:?}",
+                fields_on_search_with_default_parser,
             );
 
-            // Merging scores that come from different parsers are hard.
-            // Because we are focused on PoC with tanstack, this case happens only with "code" field.
-            // We use just a simple counter to merge the scores.
-            // Anyway, this it not a good solution for a real-world application.
-            // TODO: think about how to merge scores from different parsers
-            for (document_id, score) in field_token_scores {
-                if let Some(existing_score) = token_scores.get(&document_id) {
-                    token_scores.insert(document_id, existing_score + score);
-                } else {
-                    token_scores.insert(document_id, score);
-                }
+            self.string_index.search(
+                tokens,
+                Some(fields_on_search_with_default_parser),
+                boost.clone(),
+                BM25Score::default(),
+            )
+        }?;
+
+        let code_token_scores = {
+            self.code_index.search(
+                search_params.term.clone(),
+                Some(properties),
+                boost,
+            )
+        };
+
+        let token_scores = {
+            let mut token_scores = string_token_scores;
+            for (document_id, score) in code_token_scores {
+                token_scores
+                    .entry(document_id)
+                    .and_modify(|s| *s += score)
+                    .or_insert(score);
             }
-        }
+
+            token_scores
+        };
 
         let count = token_scores.len();
 

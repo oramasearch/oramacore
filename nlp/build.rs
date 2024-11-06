@@ -49,11 +49,8 @@ fn main() {
             r"
 {modules}
 
-use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::collections::HashMap;
-use std::sync::RwLock;
-use once_cell::sync::Lazy;
 use std::sync::OnceLock;
 
 pub type StopWords = HashSet<&'static str>;
