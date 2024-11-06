@@ -3,10 +3,9 @@ use embeddings::custom_models::{CustomModel, ModelFileConfig};
 use embeddings::{load_models, OramaModels};
 
 fn main() -> Result<()> {
-    let models = load_models();
+    let model = OramaModels::JinaV2BaseCode.try_new()?;
 
-    let embedding = models.embed(
-        OramaModels::JinaV2BaseCode,
+    let embedding = model.embed(
         vec![r"
             /**
              * This method is needed to used because of issues like: https://github.com/askorama/orama/issues/301

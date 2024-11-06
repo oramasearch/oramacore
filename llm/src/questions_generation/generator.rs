@@ -3,7 +3,7 @@ use crate::questions_generation::prompts::{
 };
 use crate::LocalLLM;
 use anyhow::{Context, Result};
-use mistralrs::{IsqType, TextMessageRole, TextMessages, TextModelBuilder};
+use mistralrs::{TextMessageRole, TextMessages};
 use serde_json::Value;
 use textwrap::dedent;
 use utils::parse_json_safely;

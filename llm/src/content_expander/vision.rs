@@ -2,10 +2,9 @@ use crate::content_expander::prompts::{get_prompt, Prompts};
 use crate::LocalLLM;
 use anyhow::Context;
 use linkify::{LinkFinder, LinkKind};
-use mistralrs::{IsqType, TextMessageRole, VisionLoaderType, VisionMessages, VisionModelBuilder};
+use mistralrs::{TextMessageRole, VisionMessages};
 use url::Url;
 
-const VISION_MODEL_ID: &str = "microsoft/Phi-3.5-vision-instruct";
 
 struct UrlParser {
     domains_allow_list: Vec<String>,

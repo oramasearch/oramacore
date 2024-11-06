@@ -1696,9 +1696,11 @@ name = "embeddings"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-once-cell",
  "fastembed",
  "ndarray 0.15.6",
  "num-traits",
+ "once_cell",
  "rand 0.8.5",
  "rand_chacha",
  "rayon",

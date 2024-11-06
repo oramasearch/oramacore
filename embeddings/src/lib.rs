@@ -3,16 +3,18 @@ pub mod pq;
 
 use crate::custom_models::{CustomModel, ModelFileConfig};
 use anyhow::{anyhow, Context, Result};
-use fastembed::{
-    EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding, UserDefinedEmbeddingModel,
-};
+use fastembed::{EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding};
+use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, RwLock};
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, Display};
+
+static MODELS: OnceCell<RwLock<HashMap<OramaModels, Arc<TextEmbedding>>>> = OnceCell::new();
 
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
@@ -94,6 +96,53 @@ impl TryInto<EmbeddingModel> for OramaModels {
 }
 
 impl OramaModels {
+    pub fn try_new(&self) -> Result<Arc<TextEmbedding>> {
+        MODELS.get_or_init(|| RwLock::new(HashMap::new()));
+
+        let mut models_map = MODELS
+            .get()
+            .unwrap()
+            .write()
+            .map_err(|_| anyhow!("Failed to acquire write lock on the models map"))?;
+
+        if let Some(existing_model) = models_map.get(self) {
+            return Ok(existing_model.clone());
+        }
+
+        let new_model = if !self.is_custom_model() {
+            let embedding_model = (*self).try_into()?;
+            TextEmbedding::try_new(
+                InitOptions::new(embedding_model).with_show_download_progress(true),
+            )
+            .with_context(|| format!("Failed to initialize the model: {}", self))
+        } else {
+            let custom_model = CustomModel::try_new(
+                self.to_string(),
+                self.files().ok_or_else(|| {
+                    anyhow!("Missing file configuration for custom model {}", self)
+                })?,
+            )
+            .with_context(|| format!("Unable to initialize custom model {}", self))?;
+
+            if custom_model.exists() {
+                custom_model
+                    .download()
+                    .with_context(|| format!("Unable to download custom model {}", self))?;
+            }
+
+            let init_model = custom_model
+                .load()
+                .with_context(|| format!("Unable to load local files for custom model {}", self))?;
+
+            TextEmbedding::try_new_from_user_defined(init_model, InitOptionsUserDefined::default())
+                .with_context(|| format!("Unable to initialize custom model {}", self))
+        }?;
+
+        let arc_model = Arc::new(new_model);
+        models_map.insert(self.clone(), arc_model.clone());
+        Ok(arc_model)
+    }
+
     pub fn normalize_input(self, intent: EncodingIntent, input: Vec<String>) -> Vec<String> {
         match self {
             OramaModels::MultilingualE5Small
@@ -158,68 +207,4 @@ impl fmt::Display for EncodingIntent {
             EncodingIntent::Passage => write!(f, "passage"),
         }
     }
-}
-
-pub fn load_models() -> LoadedModels {
-    let models: Vec<_> = vec![
-        OramaModels::MultilingualE5Small,
-        // OramaModels::MultilingualE5Base,
-        // OramaModels::MultilingualE5Large,
-        OramaModels::GTESmall,
-        // OramaModels::GTEBase,
-        // OramaModels::GTELarge,
-        OramaModels::JinaV2BaseCode,
-    ];
-
-    let model_map: HashMap<OramaModels, TextEmbedding> = models
-        .into_par_iter()
-        .map(|model| {
-            if !model.is_custom_model() {
-                let initialized_model = TextEmbedding::try_new(
-                    InitOptions::new(model.try_into().unwrap()).with_show_download_progress(true),
-                )
-                .unwrap();
-
-                return (model, initialized_model);
-            }
-
-            let custom_model = CustomModel::try_new(model.to_string(), model.files().unwrap())
-                .with_context(|| format!("Unable to initialize custom model {}", model.to_string()))
-                .unwrap();
-
-            if custom_model.exists() {
-                custom_model
-                    .download()
-                    .with_context(|| {
-                        format!("Unable to download custom model {}", model.to_string())
-                    })
-                    .unwrap();
-            };
-
-            let init_model = custom_model
-                .load()
-                .with_context(|| {
-                    format!(
-                        "Unable to load local files for custom model {}",
-                        model.to_string()
-                    )
-                })
-                .unwrap();
-            let initialized_model = TextEmbedding::try_new_from_user_defined(
-                init_model,
-                InitOptionsUserDefined::default(),
-            )
-            .with_context(|| {
-                format!(
-                    "Unable to initialize a new TextEmbedding instance from custom model {}",
-                    model.to_string()
-                )
-            })
-            .unwrap();
-
-            (model, initialized_model)
-        })
-        .collect();
-
-    LoadedModels(model_map)
 }
