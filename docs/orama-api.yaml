@@ -1,0 +1,579 @@
+openapi: 3.0.3
+info:
+  title: Orama
+  version: 1.0.0
+  contact: {}
+servers:
+  - url: http://localhost
+paths:
+  /v1/index/create:
+    post:
+      tags:
+        - v1
+        - index
+      summary: create
+      description: >-
+        This API endpoint allows you to create a new index. The request should
+        be sent as an HTTP POST to the specified URL. The request body should be
+        in raw format and include the following parameters:
+
+
+        - `name`: The name of the new index (string)
+        
+        - `language`: The language of the index (string)
+        
+        - `schema`: An object containing the schema for the index, including
+        title, description, meta, and isFavorite fields
+        
+            - `title`: The title field type (string)
+        
+            - `description`: The description field type (string)
+        
+            - `meta`: An object with author field type (string)
+        
+            - `isFavorite`: The isFavorite field type (boolean)
+        
+        - `embeddings`: An object containing the model and fields for embeddings
+        
+            - `model`: The model for embeddings (string)
+        
+            - `fields`: An array of fields for embeddings (array of strings)
+        
+        - `tokenizer`: An object containing the stemming and stop_words
+        parameters
+        
+            - `stemming`: A boolean value for stemming
+        
+            - `stop_words`: An array of stop words
+        
+        
+        The response to this request will include the details of the newly
+        created index.
+      operationId: create
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language:
+                  type: string
+                  example: en
+                name:
+                  type: string
+                  example: my new index
+            examples:
+              create:
+                value:
+                  language: en
+                  name: my new index
+      responses:
+        '200':
+          description: success / default properties
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: boolean
+                    example: true
+                  embeddings:
+                    type: object
+                    properties:
+                      fields:
+                        type: string
+                        example: strings[*]
+                      model:
+                        type: string
+                        example: multilingual-e5-small
+                  schema:
+                    type: object
+                    properties: {}
+                  tokenizer:
+                    type: object
+                    properties:
+                      stemming:
+                        type: boolean
+                        example: true
+                      stop_words:
+                        type: array
+                        items: {}
+                        example: []
+              examples:
+                default properties:
+                  value:
+                    created: true
+                    embeddings:
+                      fields: strings[*]
+                      model: multilingual-e5-small
+                    schema: {}
+                    tokenizer:
+                      stemming: true
+                      stop_words: []
+                success:
+                  value:
+                    created: true
+        '422':
+          description: invalid language
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      "english" is not a valid language. Please use ISO 639
+                      language codes.
+              examples:
+                invalid language:
+                  value:
+                    error: >-
+                      "english" is not a valid language. Please use ISO 639
+                      language codes.
+  /v1/index/update:
+    patch:
+      tags:
+        - v1
+        - index
+      summary: update
+      description: update
+      operationId: update
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language:
+                  type: string
+                  example: it
+                name:
+                  type: string
+                  example: my new index
+            examples:
+              update:
+                value:
+                  language: it
+                  name: my new index
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: boolean
+                    example: true
+              examples:
+                success:
+                  value:
+                    updated: true
+        '422':
+          description: update language
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: >-
+                      Unable to change index language after initialization.
+                      Create a new index.
+              examples:
+                update language:
+                  value:
+                    error: >-
+                      Unable to change index language after initialization.
+                      Create a new index.
+  /v1/index/info:
+    get:
+      tags:
+        - v1
+        - index
+      summary: info
+      description: info
+      operationId: info
+      responses:
+        '200':
+          description: info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configuration:
+                    type: object
+                    properties:
+                      embeddings:
+                        type: object
+                        properties:
+                          fields:
+                            type: array
+                            items:
+                              type: string
+                              example: title
+                            example:
+                              - title
+                              - description
+                              - meta.author
+                          model:
+                            type: string
+                            example: multilingual-e5-small
+                      language:
+                        type: string
+                        example: en
+                      schema:
+                        type: object
+                        properties:
+                          description:
+                            type: string
+                            example: string
+                          isFavorite:
+                            type: string
+                            example: boolean
+                          meta:
+                            type: object
+                            properties:
+                              author:
+                                type: string
+                                example: string
+                          title:
+                            type: string
+                            example: string
+                      tokenizer:
+                        type: object
+                        properties:
+                          stemming:
+                            type: boolean
+                            example: true
+                          stop_words:
+                            type: array
+                            items: {}
+                            example: []
+                  meta:
+                    type: object
+                    properties:
+                      created_at:
+                        type: string
+                        example: 2024-11-06, 12:05:20 PM
+                      docs_count:
+                        type: number
+                        example: 193281
+                      'embeddings:':
+                        type: object
+                        properties:
+                          avg_chunks_per_doc:
+                            type: number
+                            example: 4.2
+                          chunks:
+                            type: number
+                            example: 8117802
+                          size_mb:
+                            type: number
+                            example: 3912.139
+                      size_mb:
+                        type: number
+                        example: 471.29
+                  name:
+                    type: string
+                    example: my new index
+              examples:
+                info:
+                  value:
+                    configuration:
+                      embeddings:
+                        fields:
+                          - title
+                          - description
+                          - meta.author
+                        model: multilingual-e5-small
+                      language: en
+                      schema:
+                        description: string
+                        isFavorite: boolean
+                        meta:
+                          author: string
+                        title: string
+                      tokenizer:
+                        stemming: true
+                        stop_words: []
+                    meta:
+                      created_at: 2024-11-06, 12:05:20 PM
+                      docs_count: 193281
+                      'embeddings:':
+                        avg_chunks_per_doc: 4.2
+                        chunks: 8117802
+                        size_mb: 3912.139
+                      size_mb: 471.29
+                    name: my new index
+  /v1/index/delete:
+    delete:
+      tags:
+        - v1
+        - index
+      summary: delete
+      description: delete
+      operationId: delete
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                  example: 921d1722-7832-4fd9-8d47-0af2d34e51a0
+            examples:
+              delete:
+                value:
+                  id: 921d1722-7832-4fd9-8d47-0af2d34e51a0
+      responses:
+        '200':
+          description: ''
+  /v1/search:
+    post:
+      tags:
+        - v1
+      summary: search
+      description: search
+      operationId: search
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                facets:
+                  type: object
+                  properties:
+                    price:
+                      type: object
+                      properties:
+                        ranges:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              from:
+                                type: number
+                                example: 19.99
+                              to:
+                                type: number
+                                example: 20.99
+                          example:
+                            - from: 19.99
+                              to: 20.99
+                            - from: 20.99
+                              to: 49.99
+                            - from: 49.99
+                limit:
+                  type: number
+                  example: 10
+                mode:
+                  type: string
+                  example: hybrid
+                offset:
+                  type: number
+                  example: 0
+                properties:
+                  type: string
+                  example: '*'
+                query:
+                  type: string
+                  example: The quick brown fox jumps over the lazy dog
+                where:
+                  type: object
+                  properties:
+                    location:
+                      type: object
+                      properties:
+                        radius:
+                          type: object
+                          properties:
+                            coordinates:
+                              type: array
+                              items:
+                                type: number
+                                example: 45.4648
+                              example:
+                                - 45.4648
+                                - 9.18998
+                            unit:
+                              type: string
+                              example: km
+                            value:
+                              type: number
+                              example: 1
+                    price:
+                      type: object
+                      properties:
+                        gte:
+                          type: number
+                          example: 19.99
+            examples:
+              search:
+                value:
+                  facets:
+                    price:
+                      ranges:
+                        - from: 19.99
+                          to: 20.99
+                        - from: 20.99
+                          to: 49.99
+                        - from: 49.99
+                  limit: 10
+                  mode: hybrid
+                  offset: 0
+                  properties: '*'
+                  query: The quick brown fox jumps over the lazy dog
+                  where:
+                    location:
+                      radius:
+                        coordinates:
+                          - 45.4648
+                          - 9.18998
+                        unit: km
+                        value: 1
+                    price:
+                      gte: 19.99
+      responses:
+        '200':
+          description: search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: number
+                    example: 10239
+                  elapsed:
+                    type: object
+                    properties:
+                      formatted:
+                        type: string
+                        example: 3.192ms
+                      raw:
+                        type: number
+                        example: 3192
+                  hits:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        document:
+                          type: object
+                          properties:
+                            description:
+                              type: string
+                              example: ''
+                            title:
+                              type: string
+                              example: ''
+                        id:
+                          type: string
+                          example: 2871b7b6-67d5-4df8-bb6a-bc9181458074
+                        score:
+                          type: number
+                          example: 9.91823
+                    example:
+                      - document:
+                          description: ''
+                          title: ''
+                        id: 2871b7b6-67d5-4df8-bb6a-bc9181458074
+                        score: 9.91823
+                      - document:
+                          description: ''
+                          title: ''
+                        id: d487088a-dd54-4200-8b8e-a4cc5f058579
+                        score: 9.812371
+              examples:
+                search results:
+                  value:
+                    count: 10239
+                    elapsed:
+                      formatted: 3.192ms
+                      raw: 3192
+                    hits:
+                      - document:
+                          description: ''
+                          title: ''
+                        id: 2871b7b6-67d5-4df8-bb6a-bc9181458074
+                        score: 9.91823
+                      - document:
+                          description: ''
+                          title: ''
+                        id: d487088a-dd54-4200-8b8e-a4cc5f058579
+                        score: 9.812371
+  /v1/multi_search:
+    post:
+      tags:
+        - v1
+      summary: multi_search
+      description: multi_search
+      operationId: multiSearch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  example: distinct
+                queries:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: string
+                        example: 56ece3b2-aed6-49a9-96e6-f371a54d696e
+                      mode:
+                        type: string
+                        example: hybrid
+                      query:
+                        type: string
+                        example: The quick brown fox jumps over the lazy dog
+                  example:
+                    - index: 56ece3b2-aed6-49a9-96e6-f371a54d696e
+                      mode: hybrid
+                      query: The quick brown fox jumps over the lazy dog
+                    - index: 01197be2-1c56-4213-a602-15d1f10c3e57
+                      mode: vector
+                      query: Headphones jack
+                    - index: ca6bef0c-80aa-4661-9dd3-8e1774005275
+                      mode: fulltext
+                      query: Run JavaScript on the server
+            examples:
+              multi_search:
+                value:
+                  mode: distinct
+                  queries:
+                    - index: 56ece3b2-aed6-49a9-96e6-f371a54d696e
+                      mode: hybrid
+                      query: The quick brown fox jumps over the lazy dog
+                    - index: 01197be2-1c56-4213-a602-15d1f10c3e57
+                      mode: vector
+                      query: Headphones jack
+                    - index: ca6bef0c-80aa-4661-9dd3-8e1774005275
+                      mode: fulltext
+                      query: Run JavaScript on the server
+      responses:
+        '200':
+          description: ''
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - bearerAuth: []
+tags:
+  - name: v1
+  - name: index
