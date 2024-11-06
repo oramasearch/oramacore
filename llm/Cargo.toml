@@ -1,11 +1,11 @@
 [package]
-name = "content_expander"
+name = "llm"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
 name = "test_image"
-path = "src/bin/test_image.rs"
+path = "../llm/src/bin/test_image.rs"
 
 [dependencies]
 linkify = "0.10.0"

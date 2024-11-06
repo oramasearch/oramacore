@@ -1027,28 +1027,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "content_expander"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures",
- "futures-util",
- "html-escape",
- "html_parser",
- "image",
- "linkify",
- "log",
- "markdown",
- "mistralrs",
- "reqwest",
- "serde",
- "tempdir",
- "textwrap",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3152,6 +3130,28 @@ name = "litemap"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "643cb0b8d4fcc284004d5fd0d67ccf61dfffadb7f75e1e71bc420f4688a3a704"
+
+[[package]]
+name = "llm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "futures-util",
+ "html-escape",
+ "html_parser",
+ "image",
+ "linkify",
+ "log",
+ "markdown",
+ "mistralrs",
+ "reqwest",
+ "serde",
+ "tempdir",
+ "textwrap",
+ "tokio",
+ "url",
+]
 
 [[package]]
 name = "local-channel"

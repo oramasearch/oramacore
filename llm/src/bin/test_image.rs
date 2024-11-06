@@ -1,5 +1,5 @@
-use content_expander::prompts::Prompts;
-use content_expander::vision::describe_images;
+use llm::content_expander::prompts::Prompts;
+use llm::content_expander::vision::describe_images;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
