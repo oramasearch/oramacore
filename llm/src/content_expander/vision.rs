@@ -1,4 +1,5 @@
 use crate::content_expander::prompts::{get_prompt, Prompts};
+use crate::LocalLLM;
 use anyhow::Context;
 use linkify::{LinkFinder, LinkKind};
 use mistralrs::{IsqType, TextMessageRole, VisionLoaderType, VisionMessages, VisionModelBuilder};
@@ -116,11 +117,7 @@ pub async fn describe_images(
     text: String,
     domain: Prompts,
 ) -> Result<Vec<(String, String)>, anyhow::Error> {
-    let model = VisionModelBuilder::new(VISION_MODEL_ID, VisionLoaderType::Phi3V)
-        .with_isq(IsqType::Q4K)
-        .with_logging()
-        .build()
-        .await?;
+    let model = LocalLLM::Phi3_5VisionInstruct.try_new().await?;
 
     let image_links = UrlParser::try_new(UrlParserConfig {
         domains_allow_list: vec![],

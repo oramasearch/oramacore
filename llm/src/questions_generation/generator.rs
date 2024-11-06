@@ -1,21 +1,15 @@
 use crate::questions_generation::prompts::{
     get_questions_generation_prompt, QUESTIONS_GENERATION_SYSTEM_PROMPT,
 };
+use crate::LocalLLM;
 use anyhow::{Context, Result};
 use mistralrs::{IsqType, TextMessageRole, TextMessages, TextModelBuilder};
 use serde_json::Value;
 use textwrap::dedent;
 use utils::parse_json_safely;
 
-const TEXT_MODEL_ID: &str = "microsoft/Phi-3.5-mini-instruct";
-
 pub async fn generate_questions(context: String) -> Result<Vec<String>> {
-    let model = TextModelBuilder::new(TEXT_MODEL_ID)
-        .with_isq(IsqType::Q8_0)
-        .with_logging()
-        .build()
-        .await
-        .context("Failed to build the text model")?;
+    let model = LocalLLM::Phi3_5MiniInstruct.try_new().await?;
 
     let messages = TextMessages::new()
         .add_message(
