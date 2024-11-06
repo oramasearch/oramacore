@@ -14,4 +14,5 @@ members = [
     "tanstack_example",
     "code_parser",
     "vector_index",
+    "utils"
 ]
