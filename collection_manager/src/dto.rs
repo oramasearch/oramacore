@@ -32,6 +32,19 @@ pub enum TypedField {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum SearchMode {
+    FullText,
+    Vector,
+    Hybrid,
+}
+
+impl Default for SearchMode {
+    fn default() -> Self {
+        SearchMode::FullText
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateCollectionOptionDTO {
     pub id: String,
     pub description: Option<String>,
@@ -66,4 +79,6 @@ pub struct SearchParams {
     pub boost: HashMap<String, f32>,
     #[serde(default)]
     pub properties: Option<Vec<String>>,
+    #[serde(default)]
+    pub mode: SearchMode,
 }

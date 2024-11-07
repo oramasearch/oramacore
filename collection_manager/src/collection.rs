@@ -1,4 +1,4 @@
-use crate::dto::{CollectionDTO, SearchParams};
+use crate::dto::{CollectionDTO, SearchMode, SearchParams};
 use crate::embeddings_management::get_embeddable_string;
 use anyhow::{anyhow, Context};
 use dashmap::DashMap;
@@ -162,10 +162,7 @@ impl Collection {
         let query_as_embedding = self
             .embedding_model
             .embed(vec![search_params.term], Some(1))?;
-        let mut vector_index = self
-            .vector_index
-            .write()
-            .unwrap();
+        let mut vector_index = self.vector_index.write().unwrap();
 
         let knn = vector_index.search(query_as_embedding[0].as_slice(), search_params.limit.0);
         let hits = knn
@@ -189,6 +186,13 @@ impl Collection {
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        match search_params.mode {
+            SearchMode::Vector => {
+                return self.vector_search(search_params);
+            }
+            _ => (),
+        }
+
         // TODO: handle search_params.properties
 
         let boost: HashMap<_, _> = search_params
