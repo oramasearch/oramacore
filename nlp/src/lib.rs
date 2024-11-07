@@ -7,6 +7,8 @@ use crate::locales::Locale;
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
+use types::StringParser;
+use anyhow::Result;
 
 pub struct TextParser {
     locale: Locale,
