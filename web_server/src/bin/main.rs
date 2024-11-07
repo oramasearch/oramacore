@@ -1,25 +1,24 @@
 use std::{net::IpAddr, str::FromStr, sync::Arc};
 
+use anyhow::Result;
 use collection_manager::{CollectionManager, CollectionsConfiguration};
 use storage::Storage;
 use tempdir::TempDir;
 use web_server::{HttpConfig, WebServer};
 
-fn main() -> std::io::Result<()> {
-    let err = ::actix_web::rt::System::new().block_on(async move {
-        let manager = create_manager();
-        let manager = Arc::new(manager);
-        let web_server = WebServer::new(manager);
+#[tokio::main]
+async fn main() -> Result<()> {
+    let manager = create_manager();
+    let manager = Arc::new(manager);
+    let web_server = WebServer::new(manager);
 
-        web_server
-            .start(HttpConfig {
-                host: IpAddr::from_str("127.0.0.1").unwrap(),
-                port: 8080,
-            })
-            .await
-    });
-
-    println!("{:?}", err);
+    web_server
+        .start(HttpConfig {
+            host: IpAddr::from_str("127.0.0.1").unwrap(),
+            port: 8080,
+            allow_cors: true,
+        })
+        .await?;
 
     Ok(())
 }

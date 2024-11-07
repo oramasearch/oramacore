@@ -14,8 +14,7 @@ pub enum TextFormat {
 const TEXT_MODEL_ID: &str = "microsoft/Phi-3.5-mini-instruct";
 
 pub async fn describe_code_blocks(
-    text: String,
-    format: TextFormat,
+    code_blocks: Vec<String>,
 ) -> Option<CodeBlockDescriptions> {
     let model = TextModelBuilder::new(TEXT_MODEL_ID)
         .with_isq(IsqType::Q8_0)
@@ -24,7 +23,6 @@ pub async fn describe_code_blocks(
         .await
         .unwrap();
 
-    let code_blocks = capture_code_blocks(text, format)?;
 
     let futures: Vec<_> = code_blocks
         .into_iter()
@@ -53,6 +51,15 @@ pub async fn describe_code_blocks(
     } else {
         Some(descriptions)
     }
+} 
+
+pub async fn extrapolate_and_describe_code_blocks(
+    text: String,
+    format: TextFormat,
+) -> Option<CodeBlockDescriptions> {
+    let code_blocks = capture_code_blocks(text, format)?;
+
+    describe_code_blocks(code_blocks).await
 }
 
 fn capture_code_blocks(text: String, format: TextFormat) -> Option<CodeBlockDescriptions> {

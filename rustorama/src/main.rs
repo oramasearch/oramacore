@@ -74,6 +74,7 @@ mod tests {
                 http: HttpConfig {
                     host: HOST.parse().unwrap(),
                     port: PORT,
+                    allow_cors: true,
                 },
             };
             start(config).await.unwrap();

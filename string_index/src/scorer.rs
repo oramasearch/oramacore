@@ -90,7 +90,6 @@ pub mod code {
     use std::collections::HashMap;
 
     use dashmap::DashMap;
-    use rayon::iter::{ParallelBridge, ParallelIterator};
     use types::DocumentId;
 
     use super::Scorer;

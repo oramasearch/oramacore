@@ -13,7 +13,7 @@ use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
 use string_index::{
-    scorer::{bm25::BM25Score, code::CodeScore}, DocumentBatch, StringIndex
+    scorer::bm25::BM25Score, DocumentBatch, StringIndex
 };
 use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
@@ -51,15 +51,15 @@ impl Collection {
     ) -> Self {
         let default_parser = TextParser::from_language(Locale::EN);
 
-        let mut collection = Collection {
+        let collection = Collection {
             id,
             description,
             language,
-            string_fields: Default::default(),
+            default_parser: Box::new(default_parser),
             field_id_generator: AtomicU16::new(0),
             document_storage,
             string_index: StringIndex::new(storage.clone()),
-            default_parser: Box::new(default_parser),
+            string_fields: Default::default(),
             code_index: CodeIndex::new(),
             code_fields: Default::default(),
         };
@@ -154,8 +154,6 @@ impl Collection {
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
-        // TODO: handle search_params.properties
-
         let boost: HashMap<_, _> = search_params
             .boost
             .into_iter()
@@ -205,11 +203,20 @@ impl Collection {
         }?;
 
         let code_token_scores = {
-            self.code_index.search(
-                search_params.term.clone(),
-                Some(properties),
-                boost,
-            )
+            let properties_on_code = self.code_fields.iter()
+                .map(|e| *e.value())
+                .filter(|field_name| properties.contains(field_name))
+                .collect::<Vec<_>>();
+
+            if !properties_on_code.is_empty() {
+                self.code_index.search(
+                    search_params.term.clone(),
+                    Some(properties_on_code),
+                    boost,
+                )
+            } else {
+                Default::default()
+            }
         };
 
         let token_scores = {
