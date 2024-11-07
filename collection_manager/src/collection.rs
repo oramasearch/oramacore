@@ -6,9 +6,10 @@ use std::{
 
 use anyhow::anyhow;
 use dashmap::DashMap;
+use ordered_float::NotNan;
 use document_storage::DocumentStorage;
 use nlp::locales::Locale;
-use nlp::Parser;
+use nlp::TextParser;
 use serde_json::Value;
 use storage::Storage;
 use string_index::{
