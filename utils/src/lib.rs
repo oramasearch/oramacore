@@ -43,7 +43,8 @@ mod tests {
             "name": "John",
             "age": 30
         }
-        ```"#.to_string();
+        ```"#
+            .to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"name": "John", "age": 30}));
@@ -55,7 +56,8 @@ mod tests {
         {
             "status": "ok"
         }
-        ```"#.to_string();
+        ```"#
+            .to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"status": "ok"}));
@@ -69,7 +71,8 @@ mod tests {
             "foo": "bar"
         }
         Some text after
-        "#.to_string();
+        "#
+        .to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"foo": "bar"}));
@@ -87,7 +90,8 @@ mod tests {
         let input = r#"
         {
             "incomplete": true,
-        "#.to_string();
+        "#
+        .to_string();
         let result = parse_json_safely(input);
         assert!(result.is_err());
     }
@@ -100,7 +104,8 @@ mod tests {
             "key": "value"
         }
         Followed by more text.
-        "#.to_string();
+        "#
+        .to_string();
         let result = parse_json_safely(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), json!({"key": "value"}));

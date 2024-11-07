@@ -5,7 +5,6 @@ use linkify::{LinkFinder, LinkKind};
 use mistralrs::{TextMessageRole, VisionMessages};
 use url::Url;
 
-
 struct UrlParser {
     domains_allow_list: Vec<String>,
     domains_deny_list: Vec<String>,

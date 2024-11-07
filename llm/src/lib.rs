@@ -8,6 +8,7 @@ use std::sync::Arc;
 use strum::{Display, EnumIter};
 
 pub mod content_expander;
+pub mod conversational;
 pub mod questions_generation;
 
 static MODELS: OnceCell<RwLock<HashMap<LocalLLM, Arc<Model>>>> = OnceCell::new();
