@@ -1,6 +1,5 @@
 use anyhow::Result;
-use embeddings::custom_models::{CustomModel, ModelFileConfig};
-use embeddings::{load_models, OramaModels};
+use embeddings::OramaModels;
 
 fn main() -> Result<()> {
     let model = OramaModels::JinaV2BaseCode.try_new()?;
