@@ -15,6 +15,10 @@ path = "../llm/src/bin/test_code.rs"
 name = "questions"
 path = "../llm/src/bin/questions.rs"
 
+[[bin]]
+name = "query_translator"
+path = "../llm/src/bin/query_translator.rs"
+
 [dependencies]
 linkify = "0.10.0"
 anyhow = "1.0.91"

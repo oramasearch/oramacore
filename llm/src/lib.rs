@@ -9,6 +9,7 @@ use strum::{Display, EnumIter};
 
 pub mod content_expander;
 pub mod conversational;
+pub mod query_translator;
 pub mod questions_generation;
 
 static MODELS: OnceCell<RwLock<HashMap<LocalLLM, Arc<Model>>>> = OnceCell::new();
