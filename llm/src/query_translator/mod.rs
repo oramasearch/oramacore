@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::string::ToString;
 use std::sync::Arc;
 use textwrap::dedent;
+use utils::parse_json_safely;
 
 pub struct QueryTranslator {
     pub llm: Arc<Model>,
@@ -32,34 +33,40 @@ impl QueryTranslator {
 	        Let me show you what you need to do with some examples.
 
             Example:
-                - Query: \`"What are the red wines that cost less than 20 dollars?"\`
-                - Schema: \`{ name: 'string', content: 'string', price: 'number', tags: 'enum[]' }\`
-                - Generated query: \`{ "term": "", "where": { "tags": { "containsAll": ["red", "wine"] }, "price": { "lt": 20 } } }\`
+                - Query: `"What are the red wines that cost less than 20 dollars?"`
+                - Schema: `{ name: 'string', content: 'string', price: 'number', tags: 'enum[]' }`
+                - Generated query: `{ "term": "", "where": { "tags": { "containsAll": ["red", "wine"] }, "price": { "lt": 20 } } }`
         
             Another example:
-                - Query: \`"Show me 5 prosecco wines good for aperitif"\`
-                - Schema: \`{ name: 'string', content: 'string', price: 'number', tags: 'enum[]' }\`
-                - Generated query: \`{ "term": "prosecco aperitif", "limit": 5 }\`
+                - Query: `"Show me 5 prosecco wines good for aperitif"`
+                - Schema: `{ name: 'string', content: 'string', price: 'number', tags: 'enum[]' }`
+                - Generated query: `{ "term": "prosecco aperitif", "limit": 5 }`
+                
+            One example without schema:
+            - Query: `"What are the best headphones under $200 for listening to hi-fi music?"`
+            - Schema: There is no schema for this query.
+            - Generated query: `{ "term": "best headphones hi-fi under $200" }`
         
             One last example:
-                - Query: \`"Show me some wine reviews with a score greater than 4.5 and less than 5.0."\`
-                - Schema: \`{ title: 'string', content: 'string', reviews: { score: 'number', text: 'string' } }]\`
-                - Generated query: \`{ "term": "", "where": { "reviews.score": { "between": [4.5, 5.0] } } }\`
+                - Query: `"Show me some wine reviews with a score greater than 4.5 and less than 5.0."`
+                - Schema: `{ title: 'string', content: 'string', reviews: { score: 'number', text: 'string' } }]`
+                - Generated query: `{ "term": "", "where": { "reviews.score": { "between": [4.5, 5.0] } } }`
         
             The rules to generate the query are:
         
             - Never use the "embedding" field.
             - Every query has a "term" field that is a string. It represents the full-text search terms. Can be empty (will match all documents).
             - You can use a "where" field that is an object. It represents the filters to apply to the documents. Its keys and values depend on the schema of the database:
-                - If the field is a "string", you should not use operators. Example: \`{ "where": { "title": "champagne" } }\`.
-                - If the field is a "number", you can use the following operators: "gt", "gte", "lt", "lte", "eq", "between". Example: \`{ "where": { "price": { "between": [20, 100] } } }\`. Another example: \`{ "where": { "price": { "lt": 20 } } }\`.
-                - If the field is an "enum", you can use the following operators: "eq", "in", "nin". Example: \`{ "where": { "tags": { "containsAll": ["red", "wine"] } } }\`.
-                - If the field is an "string[]", it's gonna be just like the "string" field, but you can use an array of values. Example: \`{ "where": { "title": ["champagne", "montagne"] } }\`.
-                - If the field is a "boolean", you can use the following operators: "eq". Example: \`{ "where": { "isAvailable": true } }\`. Another example: \`{ "where": { "isAvailable": false } }\`.
-                - If the field is a "enum[]", you can use the following operators: "containsAll". Example: \`{ "where": { "tags": { "containsAll": ["red", "wine"] } } }\`.
-                - Nested properties are supported. Just translate them into dot notation. Example: \`{ "where": { "author.name": "John" } }\`.
+                - If the field is a "string", you should not use operators. Example: `{ "where": { "title": "champagne" } }`.
+                - If the field is a "number", you can use the following operators: "gt", "gte", "lt", "lte", "eq", "between". Example: `{ "where": { "price": { "between": [20, 100] } } }`. Another example: `{ "where": { "price": { "lt": 20 } } }`.
+                - If the field is an "enum", you can use the following operators: "eq", "in", "nin". Example: `{ "where": { "tags": { "containsAll": ["red", "wine"] } } }`.
+                - If the field is an "string[]", it's gonna be just like the "string" field, but you can use an array of values. Example: `{ "where": { "title": ["champagne", "montagne"] } }`.
+                - If the field is a "boolean", you can use the following operators: "eq". Example: `{ "where": { "isAvailable": true } }`. Another example: `{ "where": { "isAvailable": false } }`.
+                - If the field is a "enum[]", you can use the following operators: "containsAll". Example: `{ "where": { "tags": { "containsAll": ["red", "wine"] } } }`.
+                - Nested properties are supported. Just translate them into dot notation. Example: `{ "where": { "author.name": "John" } }`.
                 - Array of numbers are not supported.
                 - Array of booleans are not supported.
+            - If there is no schema, just use the "term" field.
         
             Reply with the generated query in a valid JSON format only. Nothing else.
         "#,
@@ -157,7 +164,13 @@ impl QueryTranslator {
         let response = self.llm.send_chat_request(messages).await?;
         let message = &response.choices[0].message;
 
-        Ok(message.clone().content)
+        match message.clone().content {
+            Some(content) => {
+                let json_value = parse_json_safely(content)?;
+                Ok(Some(json_value.to_string()))
+            }
+            None => Ok(None),
+        }
     }
 
     fn generate_user_prompt(query: String, schema: Option<String>) -> String {

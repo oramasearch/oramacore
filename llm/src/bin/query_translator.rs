@@ -13,12 +13,18 @@ async fn main() -> Result<()> {
         "tags": "enum[]"
     }"#;
 
-    let result = qt
+    let result1 = qt
         .translate(q1.to_string(), Some(schema.to_string()))
         .await?
         .unwrap();
 
-    dbg!(result);
+    println!("{}", result1);
+
+    let q2 = "What are the best headphones under $200 for listening to hi-fi music?";
+
+    let result2 = qt.translate(q2.to_string(), None).await?.unwrap();
+
+    print!("{}", result2);
 
     Ok(())
 }
