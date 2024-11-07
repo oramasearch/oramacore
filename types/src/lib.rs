@@ -162,7 +162,7 @@ impl FlattenDocument {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DocumentList(Vec<Document>);
 impl DocumentList {
     #[inline]

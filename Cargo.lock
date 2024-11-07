@@ -1052,6 +1052,8 @@ dependencies = [
  "cuid",
  "dashmap",
  "document_storage",
+ "embeddings",
+ "fastembed",
  "nlp",
  "ordered-float 4.5.0",
  "serde",
@@ -1061,6 +1063,7 @@ dependencies = [
  "tempdir",
  "thiserror",
  "types",
+ "vector_index",
 ]
 
 [[package]]

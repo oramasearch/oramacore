@@ -1,16 +1,21 @@
+use crate::dto::{CollectionDTO, SearchParams};
+use crate::embeddings_management::get_embeddable_string;
+use anyhow::{anyhow, Context};
+use dashmap::DashMap;
+use document_storage::DocumentStorage;
+use embeddings::OramaModels;
+use fastembed::TextEmbedding;
+use nlp::locales::Locale;
+use nlp::TextParser;
+use ordered_float::NotNan;
+use serde_json::Value;
+use std::any::Any;
+use std::sync::RwLock;
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap},
     sync::{atomic::AtomicU16, Arc},
 };
-
-use anyhow::anyhow;
-use dashmap::DashMap;
-use document_storage::DocumentStorage;
-use nlp::locales::Locale;
-use nlp::TextParser;
-use ordered_float::NotNan;
-use serde_json::Value;
 use storage::Storage;
 use string_index::{
     scorer::{bm25::BM25Score, counter::CounterScore},
@@ -20,8 +25,7 @@ use types::{
     CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
     StringParser, TokenScore, ValueType,
 };
-
-use crate::dto::{CollectionDTO, SearchParams};
+use vector_index::{VectorIndex, VectorIndexConfig};
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -31,6 +35,8 @@ pub struct Collection {
     field_id_generator: AtomicU16,
     string_fields: DashMap<String, FieldId>,
     document_storage: Arc<DocumentStorage>,
+    vector_index: RwLock<VectorIndex>,
+    embedding_model: Arc<TextEmbedding>,
     parsers: HashMap<FieldId, Box<dyn StringParser>>,
     default_parser: Box<dyn StringParser>,
 }
@@ -44,7 +50,19 @@ impl Collection {
         document_storage: Arc<DocumentStorage>,
         parsers: HashMap<String, Box<dyn StringParser>>,
     ) -> Self {
+        // @todo: make the language configurable
         let default_parser = TextParser::from_language(Locale::EN);
+
+        let vector_index = VectorIndex::new(VectorIndexConfig {
+            // @todo: make the embeddings model configurable
+            embeddings_model: OramaModels::JinaV2BaseCode,
+        });
+
+        let embedding_model = vector_index
+            .embeddings_model
+            .try_new()
+            .with_context(|| "Unable to initialize embedding model when creating the collection")
+            .unwrap();
 
         let mut collection = Collection {
             id,
@@ -56,6 +74,8 @@ impl Collection {
             string_index: StringIndex::new(storage.clone()),
             parsers: Default::default(),
             default_parser: Box::new(default_parser),
+            vector_index: RwLock::new(vector_index),
+            embedding_model,
         };
 
         for (field_name, parser) in parsers {
@@ -84,11 +104,25 @@ impl Collection {
         let mut strings: HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>> =
             HashMap::with_capacity(self.string_fields.len());
         let mut documents = Vec::with_capacity(document_list.len());
+        let mut vector_index = self.vector_index.write().unwrap();
+
         for doc in document_list {
             let mut flatten = doc.into_flatten();
             let schema = flatten.get_field_schema();
 
             let internal_document_id = self.generate_document_id();
+
+            let embeddable_string = get_embeddable_string(&doc);
+            let embedding = self
+                .embedding_model
+                .embed(vec![embeddable_string], Some(1))
+                .with_context(|| {
+                    "An error occurred while generating the embeddings for a document"
+                })?;
+
+            vector_index
+                .insert(internal_document_id, embedding[0].to_vec().as_slice())
+                .unwrap();
 
             for (key, field_type) in schema {
                 if field_type == ValueType::Scalar(ScalarType::String) {
@@ -119,6 +153,39 @@ impl Collection {
         self.string_index.insert_multiple(strings)?;
 
         Ok(())
+    }
+
+    pub fn vector_search(
+        &self,
+        search_params: SearchParams,
+    ) -> Result<SearchResult, anyhow::Error> {
+        let query_as_embedding = self
+            .embedding_model
+            .embed(vec![search_params.term], Some(1))?;
+        let mut vector_index = self
+            .vector_index
+            .write()
+            .unwrap();
+
+        let knn = vector_index.search(query_as_embedding[0].as_slice(), search_params.limit.0);
+        let hits = knn
+            .iter()
+            .map(|id| {
+                let full_document = self
+                    .document_storage
+                    .get_all(vec![id.clone()])
+                    .with_context(|| "Unable to fetch full document")
+                    .unwrap();
+
+                SearchResultHit {
+                    id: "".to_string(),
+                    score: 0.0,
+                    document: full_document[0].clone(),
+                }
+            })
+            .collect();
+
+        Ok(SearchResult { count: 0, hits })
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {

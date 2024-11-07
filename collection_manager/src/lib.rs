@@ -12,6 +12,7 @@ use types::{CollectionId, StringParser};
 
 mod collection;
 pub mod dto;
+mod embeddings_management;
 
 pub struct CollectionsConfiguration {
     pub storage: Arc<Storage>,
