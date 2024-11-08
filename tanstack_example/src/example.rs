@@ -1,4 +1,4 @@
-use std::fs;
+use std::{env::var, fs};
 
 use serde_json::Value;
 use sha2::{Sha256, Digest};
@@ -42,7 +42,7 @@ impl CodeDescriptionGenerator {
 pub async fn parse_example(path: &str) -> Vec<Value> {
     let all_files = get_files(path.parse().unwrap(), vec!["tsx".to_string()]);
 
-    let client = Client::with_config(OpenAIConfig::new().with_api_key("...."));
+    let client = Client::with_config(OpenAIConfig::new().with_api_key(var("OPEN_API_KEY").unwrap()));
     let example_cache_dir = "./example_cache";
     let generator = &CodeDescriptionGenerator::new(example_cache_dir.to_string(), client);
 

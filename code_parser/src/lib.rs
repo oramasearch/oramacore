@@ -14,6 +14,8 @@ use swc_ecma_parser::{
 };
 use types::{CodeLanguage, StringParser};
 
+pub mod treesitter;
+
 pub struct CodeParser {
     // language: CodeLanguage,
 }

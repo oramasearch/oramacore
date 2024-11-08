@@ -1,58 +1,51 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
-use code_parser::CodeParser;
+use code_parser::{treesitter::CodeToken, CodeParser};
+use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
 use ptrie::Trie;
 use types::{CodeLanguage, DocumentId, FieldId};
 
 pub struct CodeIndex {
     tree: RwLock<Trie<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>>,
+    new_parser: NewParser,
 }
 
 impl CodeIndex {
     pub fn new() -> Self {
+        let new_parser = NewParser::new();
         Self {
             tree: RwLock::new(Trie::<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>::new()),
+            new_parser,
         }
     }
 
     pub fn insert_multiple(&self, documents: HashMap<DocumentId, Vec<(FieldId, String)>>) -> Result<()> {
         let mut tree = self.tree.write().unwrap();
 
-        let code_parser = CodeParser::from_language(CodeLanguage::TSX);
-
         for (doc_id, properties) in documents {
 
+            let mut a = HashMap::<String, HashMap<FieldId, CodePosting>>::new();
+
             for (field_id, code) in properties {
-                let tokens = code_parser.tokenize_and_stem(&code).unwrap();
+                let extracted_tokens = self.new_parser.parse(CodeLanguage::TSX, &code).unwrap();
+                let token_with_weight = get_tokens_from_code_tokens(extracted_tokens);
 
-                for (i, (token, _)) in tokens.into_iter().enumerate() {
-                    if let Some(posting) = tree.get_mut(token.bytes()) {
-                        let r = posting.entry(doc_id)
-                            .or_default();
-                        let r = r.entry(field_id)
-                            .or_insert(CodePosting {
-                                token: token.clone(),
-                                document_id: doc_id,
-                                positions: HashMap::new(),
-                            });
-
-                        r.positions.entry(Position(i))
-                            .or_default()
-                            .push(TokenType::Token);
-                    } else {
-                        let code_posting = CodePosting {
-                            token: token.clone(),
-                            document_id: doc_id,
-                            positions: vec![
-                                (Position(i), vec![TokenType::Token])
-                            ].into_iter().collect(),
-                        };
-                        let mut field_postings = HashMap::new();
-                        field_postings.insert(field_id, code_posting);
-                        tree.insert(token.bytes(), vec![(doc_id, field_postings)].into_iter().collect());
-                    }
+                for (token, weight) in token_with_weight {
+                    let entry = a.entry(token)
+                        .or_default();
+                    let code_posting = entry.entry(field_id)
+                        .or_insert(CodePosting {
+                            weight: 0.0,
+                        });
+                    code_posting.weight += weight.0;
                 }
+            }
+
+            for (token, field_postings) in a {
+                let mut b = HashMap::<DocumentId, HashMap<FieldId, CodePosting>>::new();
+                b.insert(doc_id, field_postings);
+                tree.insert(token.bytes(), b);
             }
         }
 
@@ -107,15 +100,58 @@ impl CodeIndex {
     }
 }
 
+struct TokenWeight(f32);
+
+fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, TokenWeight)> {
+    code_tokens.into_iter()
+        .flat_map(|code_token| match code_token {
+            CodeToken::Comment(comment) => {
+                vec![(comment, TokenWeight(0.5))]
+            },
+            CodeToken::Imported(imported) => {
+                let ImportedTokens{ package, identifiers } = imported;
+
+                vec![(package, TokenWeight(0.5))]
+                    .into_iter()
+                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.5))))
+                    .collect()
+            },
+            CodeToken::GlobalIdentifier(global_identifier) => {
+                vec![(global_identifier, TokenWeight(0.5))]
+            },
+            CodeToken::GlobalJsx(global_jsx) => {
+                let JsxElement{ tag, attribute_keys } = global_jsx;
+                vec![(tag, TokenWeight(0.5))]
+                    .into_iter()
+                    .chain(attribute_keys.into_iter().map(|attribute_key| (attribute_key, TokenWeight(0.5))))
+                    .collect()
+            },
+            CodeToken::FunctionDeclaration(function_declaration) => {
+                let FunctionDeclaration { name, params, jsx, comments, identifiers } = function_declaration;
+                vec![(name, TokenWeight(0.5))]
+                    .into_iter()
+                    .chain(params.into_iter().map(|param| (param, TokenWeight(0.5))))
+                    .chain(jsx.into_iter().flat_map(|jsx| {
+                        let JsxElement{ tag, attribute_keys } = jsx;
+                        vec![(tag, TokenWeight(0.5))]
+                            .into_iter()
+                            .chain(attribute_keys.into_iter().map(|attribute_key| (attribute_key, TokenWeight(0.5))))
+                    }))
+                    .chain(comments.into_iter().map(|comment| (comment, TokenWeight(0.5))))
+                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.5))))
+                    .collect()
+            },
+        })
+        .collect()
+}
+
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 struct Position(usize);
 
 #[derive(Debug, Clone)]
 struct CodePosting {
-    token: String,
-    document_id: DocumentId,
-    positions: HashMap<Position, Vec<TokenType>>,
+    weight: f32,
 }
 
 #[derive(Debug, Clone)]
