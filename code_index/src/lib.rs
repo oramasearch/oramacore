@@ -70,14 +70,13 @@ impl CodeIndex {
     
         for (token, stemmeds) in tokens.into_iter() {
             let (exact_match, _) = tree.find_postfixes_with_current(token.bytes());
-    
             println!("exact_match: {:#?}", exact_match);
-    
             if let Some(c) = exact_match {
                 for (doc_id, code_posting) in c {
                     let v = output.entry(*doc_id)
                         .or_default();
 
+                        /*
                     let position_len = if let Some(field_ids) = field_ids.as_ref() {
                         field_ids.into_iter()
                             .filter_map(|field_id| {
@@ -92,6 +91,7 @@ impl CodeIndex {
                     };
 
                     *v = 10.0 * position_len as f32;
+                    */
                 }
             }
         }
