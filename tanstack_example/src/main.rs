@@ -13,6 +13,7 @@ use collection_manager::{
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, LinkType, Tag, TagEnd};
 use serde::Serialize;
 use serde_json::json;
+use collection_manager::dto::SearchMode;
 use storage::Storage;
 
 use types::CodeLanguage;
@@ -94,6 +95,7 @@ term: {term}
             limit: Limit(10),
             boost: Default::default(),
             properties: Some(vec!["code".to_string()]),
+            mode: SearchMode::FullText
         })
     });
 

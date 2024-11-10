@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "test"
-path = "./src/bin/test.rs"
+name = "vector_test"
+path = "./src/bin/vector_test.rs"
 
 [dependencies]
 anyhow = "1.0.90"
