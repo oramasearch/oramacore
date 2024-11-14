@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, RwLock};
 use strum::EnumIter;
-use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, Display};
 
 static MODELS: OnceCell<RwLock<HashMap<OramaModels, Arc<TextEmbedding>>>> = OnceCell::new();
@@ -141,7 +140,7 @@ impl OramaModels {
         }?;
 
         let arc_model = Arc::new(new_model);
-        models_map.insert(self.clone(), arc_model.clone());
+        models_map.insert(*self, arc_model.clone());
         Ok(arc_model)
     }
 

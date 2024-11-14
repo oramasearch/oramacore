@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
 use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
-use code_parser::{treesitter::CodeToken, CodeParser};
+use code_parser::treesitter::CodeToken;
 use nlp::tokenizer::Tokenizer;
 use ptrie::Trie;
 use regex::Regex;
@@ -12,6 +12,12 @@ pub struct CodeIndex {
     tree: RwLock<Trie<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>>,
     new_parser: NewParser,
     english_tokenizer: Tokenizer,
+}
+
+impl Default for CodeIndex {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CodeIndex {

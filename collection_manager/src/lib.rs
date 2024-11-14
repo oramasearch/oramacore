@@ -1,14 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use code_parser::CodeParser;
 use collection::Collection;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO, TypedField};
-use nlp::TextParser;
+use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use storage::Storage;
 use thiserror::Error;
-use types::{CollectionId, StringParser};
+use types::CollectionId;
 
 mod collection;
 pub mod dto;
