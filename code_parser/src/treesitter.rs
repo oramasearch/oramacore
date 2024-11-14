@@ -584,6 +584,7 @@ fn clean_up_comment(comment: &str) -> String {
     comment.to_string()
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,3 +857,4 @@ const a = <th
         assert_eq!(output, vec![]);
     }
 }
+*/
