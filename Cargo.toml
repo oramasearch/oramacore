@@ -13,6 +13,7 @@ members = [
     "tanstack_example",
     "code_parser",
     "vector_index",
+    "code_index",
     "utils",
-    "llm"
+    "llm",
 ]

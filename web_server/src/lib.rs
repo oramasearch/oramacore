@@ -3,16 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use actix_web::{
-    body::MessageBody,
-    dev::{ServiceFactory, ServiceRequest, ServiceResponse},
-    web::Data,
-    App, HttpServer,
-};
 use anyhow::Result;
-use api::api_config;
 use collection_manager::CollectionManager;
 use serde::Deserialize;
+use tower_http::cors::CorsLayer;
 
 mod api;
 
@@ -20,6 +14,7 @@ mod api;
 pub struct HttpConfig {
     pub host: IpAddr,
     pub port: u16,
+    pub allow_cors: bool,
 }
 
 pub struct WebServer {
@@ -33,34 +28,29 @@ impl WebServer {
 
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
-        let s = Arc::new(self);
-        let server = HttpServer::new(move || s.get_service()).bind(addr)?;
 
-        for addr in server.addrs() {
-            println!("Started at http://{:?}", addr);
-        }
+        let router = api::api_config().with_state(self.collection_manager.clone());
+        let router = if config.allow_cors {
+            let cors_layer = CorsLayer::new()
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+                .allow_origin(tower_http::cors::Any);
 
-        let output = server.run().await;
+            router.layer(cors_layer)
+        } else {
+            router
+        };
+
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+        println!("Started at http://{:?}", listener.local_addr().unwrap());
+
+        let output = axum::serve(listener, router).await;
 
         match output {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
-    }
-
-    fn get_service(
-        &self,
-    ) -> App<
-        impl ServiceFactory<
-            ServiceRequest,
-            Response = ServiceResponse<impl MessageBody>,
-            Config = (),
-            InitError = (),
-            Error = actix_web::error::Error,
-        >,
-    > {
-        let data: Data<_> = self.collection_manager.clone().into();
-        App::new().app_data(data.clone()).configure(api_config)
     }
 }
 
@@ -68,32 +58,47 @@ impl WebServer {
 mod tests {
     use std::sync::Arc;
 
+    use axum::{
+        body::Body,
+        http::{self, Request, StatusCode},
+        Router,
+    };
     use collection_manager::{
         dto::{CreateCollectionOptionDTO, Limit, SearchParams},
         CollectionManager, CollectionsConfiguration,
     };
-    use serde_json::json;
+    use serde_json::{json, Value};
     use storage::Storage;
     use tempdir::TempDir;
 
-    use actix_web::{
-        body::MessageBody,
-        dev::{Service, ServiceResponse},
-        http::header::ContentType,
-        test,
-    };
     use types::SearchResult;
 
-    #[actix_web::test]
-    async fn test_index_get() {
-        let web_server = super::WebServer::new(Arc::new(create_manager()));
+    use crate::api;
 
-        let app = test::init_service(web_server.get_service()).await;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    use tower_http::trace::TraceLayer;
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    #[tokio::test]
+    async fn test_index_get() {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                    format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
+                }),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+
+        let mut router = api::api_config()
+            .with_state(Arc::new(create_manager()))
+            .layer(TraceLayer::new_for_http());
 
         let collection_id = "test".to_string();
 
-        let resp = create_collection(
-            &app,
+        let (status_code, output) = create_collection(
+            &mut router,
             &CreateCollectionOptionDTO {
                 id: collection_id.clone(),
                 description: None,
@@ -103,16 +108,19 @@ mod tests {
         )
         .await;
 
-        assert!(resp.status().is_success());
-        assert_eq!(resp.status().as_u16(), 201);
+        assert_eq!(status_code, 201);
+        assert_eq!(output, json!({ "collection_id": collection_id }));
 
-        let resp = list_collections(&app).await;
+        let (status_code, value) = list_collections(&mut router).await;
 
+        assert_eq!(status_code, 200);
+        let resp: Vec<collection_manager::dto::CollectionDTO> =
+            serde_json::from_value(value).unwrap();
         assert_eq!(resp.len(), 1);
         assert_eq!(resp[0].id, collection_id);
         assert_eq!(resp[0].document_count, 0);
 
-        let resp = add_documents(&app, &collection_id, &vec![
+        let (status_code, value) = add_documents(&mut router, &collection_id, &vec![
             json!({
                 "id": "1",
                 "title": "The Beatles",
@@ -124,16 +132,19 @@ mod tests {
                 "content": "The Rolling Stones are an English rock band formed in London in 1962. The first settled line-up consisted of Brian Jones, Ian Stewart, Mick Jagger, Keith Richards, Bill Wyman, and Charlie Watts.",
             }),
         ]).await;
-        assert!(resp.status().is_success());
-        assert_eq!(resp.status().as_u16(), 200);
+        assert_eq!(status_code, 200);
+        println!("{:#?}", value);
 
-        let resp = list_collections(&app).await;
+        let (status_code, value) = list_collections(&mut router).await;
+        assert_eq!(status_code, 200);
+        let resp: Vec<collection_manager::dto::CollectionDTO> =
+            serde_json::from_value(value).unwrap();
         assert_eq!(resp.len(), 1);
         assert_eq!(resp[0].id, collection_id);
         assert_eq!(resp[0].document_count, 2);
 
-        let resp = search(
-            &app,
+        let (status_code, value) = search(
+            &mut router,
             &collection_id,
             &SearchParams {
                 term: "beatles".to_string(),
@@ -143,86 +154,93 @@ mod tests {
             },
         )
         .await;
-        println!("{:#?}", resp);
+
+        assert_eq!(status_code, 200);
+        let resp: SearchResult = serde_json::from_value(value).unwrap();
+
         assert_eq!(resp.count, 1);
         assert_eq!(resp.hits.len(), 1);
         assert_eq!(resp.hits[0].id, "1");
     }
 
-    async fn create_collection<
-        App: Service<
-            actix_http::Request,
-            Response = ServiceResponse<impl MessageBody>,
-            Error = actix_web::error::Error,
-        >,
-    >(
-        app: &App,
+    async fn create_collection(
+        router: &mut Router,
         create_collection_dto: &CreateCollectionOptionDTO,
-    ) -> ServiceResponse<impl MessageBody> {
-        let req = test::TestRequest::post()
-            .insert_header(ContentType::json())
-            .uri("/v0/collections/")
-            .set_payload(serde_json::to_string(create_collection_dto).unwrap())
-            .to_request();
-        test::call_service(&app, req).await
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri("/v0/collections")
+            .method(http::Method::POST)
+            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .body(Body::from(
+                serde_json::to_string(create_collection_dto).unwrap(),
+            ))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+
+        let status_code = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+
+        (status_code, output)
     }
 
-    async fn list_collections<
-        App: Service<
-            actix_http::Request,
-            Response = ServiceResponse<impl MessageBody>,
-            Error = actix_web::error::Error,
-        >,
-    >(
-        app: &App,
-    ) -> Vec<collection_manager::dto::CollectionDTO> {
-        let req = test::TestRequest::get()
-            .insert_header(ContentType::json())
-            .uri("/v0/collections/")
-            .to_request();
-        let resp: Vec<collection_manager::dto::CollectionDTO> =
-            test::call_and_read_body_json(&app, req).await;
+    async fn list_collections(router: &mut Router) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri("/v0/collections")
+            .method(http::Method::GET)
+            .body(Body::empty())
+            .unwrap();
 
-        resp
+        let resp = router.oneshot(req).await.unwrap();
+
+        let status_code = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+
+        (status_code, output)
     }
 
-    async fn add_documents<
-        App: Service<
-            actix_http::Request,
-            Response = ServiceResponse<impl MessageBody>,
-            Error = actix_web::error::Error,
-        >,
-    >(
-        app: &App,
+    async fn add_documents(
+        router: &mut Router,
         collection_id: &str,
         docs: &Vec<serde_json::Value>,
-    ) -> ServiceResponse<impl MessageBody> {
-        let req = test::TestRequest::patch()
-            .insert_header(ContentType::json())
-            .uri(&format!("/v0/collections/{}/documents", collection_id))
-            .set_payload(serde_json::to_string(docs).unwrap())
-            .to_request();
-        test::call_service(&app, req).await
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri(&format!("/v0/collections/{collection_id}/documents"))
+            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .method(http::Method::PATCH)
+            .body(Body::from(serde_json::to_string(docs).unwrap()))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+
+        let status_code = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+
+        (status_code, output)
     }
 
-    async fn search<
-        App: Service<
-            actix_http::Request,
-            Response = ServiceResponse<impl MessageBody>,
-            Error = actix_web::error::Error,
-        >,
-    >(
-        app: &App,
+    async fn search(
+        router: &mut Router,
         collection_id: &str,
         search_params: &SearchParams,
-    ) -> SearchResult {
-        let req = test::TestRequest::post()
-            .insert_header(ContentType::json())
-            .uri(&format!("/v0/collections/{}/search", collection_id))
-            .set_payload(serde_json::to_string(search_params).unwrap())
-            .to_request();
-        let resp: SearchResult = test::call_and_read_body_json(&app, req).await;
-        resp
+    ) -> (StatusCode, Value) {
+        let req = Request::builder()
+            .uri(&format!("/v0/collections/{collection_id}/search"))
+            .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+            .method(http::Method::POST)
+            .body(Body::from(serde_json::to_string(search_params).unwrap()))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+
+        let status_code = resp.status();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+
+        (status_code, output)
     }
 
     fn create_manager() -> CollectionManager {

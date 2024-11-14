@@ -1,14 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use code_parser::CodeParser;
 use collection::Collection;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
-use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO, TypedField};
-use nlp::TextParser;
+use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use storage::Storage;
 use thiserror::Error;
-use types::{CollectionId, StringParser};
+use types::CollectionId;
 
 mod collection;
 pub mod dto;
@@ -44,20 +42,6 @@ impl CollectionManager {
     ) -> Result<CollectionId, CreateCollectionError> {
         let id = CollectionId(collection_option.id);
 
-        let typed_fields: HashMap<String, Box<dyn StringParser>> = collection_option
-            .typed_fields
-            .into_iter()
-            .map(|(key, value)| {
-                let parser: Box<dyn StringParser> = match value {
-                    TypedField::Text(language) => {
-                        Box::new(TextParser::from_language(language.into()))
-                    }
-                    TypedField::Code(language) => Box::new(CodeParser::from_language(language)),
-                };
-                (key, parser)
-            })
-            .collect();
-
         let collection = Collection::new(
             self.configuration.storage.clone(),
             id.clone(),
@@ -67,7 +51,7 @@ impl CollectionManager {
                 .unwrap_or(LanguageDTO::English)
                 .into(),
             self.document_storage.clone(),
-            typed_fields,
+            collection_option.typed_fields,
         );
 
         let entry = self.collections.entry(id.clone());

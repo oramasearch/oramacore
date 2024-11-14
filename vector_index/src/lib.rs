@@ -13,7 +13,7 @@ struct IdxID(Option<DocumentId>);
 pub struct VectorIndex {
     pub embeddings_model: OramaModels,
     pub dimensions: usize,
-    pub idx: hnsw_idx::HNSWIndex<f32, IdxID>,
+    idx: hnsw_idx::HNSWIndex<f32, IdxID>,
 }
 
 pub struct VectorIndexConfig {

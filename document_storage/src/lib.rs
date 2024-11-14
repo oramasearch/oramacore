@@ -53,6 +53,35 @@ impl DocumentStorage {
         Ok(())
     }
 
+    pub fn get(&self, id: DocumentId) -> Result<Option<Document>, anyhow::Error> {
+        let key = id.0.to_be_bytes();
+        let key = vec![
+            DOCUMENT_STORAGE_TAG,
+            key[0],
+            key[1],
+            key[2],
+            key[3],
+            key[4],
+            key[5],
+            key[6],
+            key[7],
+        ];
+
+        let serialized_document = self.storage.fetch(&key)?;
+        let doc = match serialized_document {
+            Some(serialized_document) => dbg!(match unserialize(&serialized_document) {
+                Ok(document) => Some(document),
+                Err(e) => {
+                    eprintln!("Failed to deserialize document: {:?}", e);
+                    return Err(e.context("Failed to deserialize document"));
+                }
+            }),
+            None => return Ok(None),
+        };
+
+        Ok(doc)
+    }
+
     pub fn get_all(&self, ids: Vec<DocumentId>) -> Result<Vec<Option<Document>>, anyhow::Error> {
         let keys: Vec<Vec<u8>> = ids
             .iter()

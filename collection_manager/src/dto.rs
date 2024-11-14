@@ -47,6 +47,7 @@ pub struct CollectionDTO {
     pub language: LanguageDTO,
     pub document_count: usize,
     pub string_fields: HashMap<String, FieldId>,
+    pub code_fields: HashMap<String, FieldId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
