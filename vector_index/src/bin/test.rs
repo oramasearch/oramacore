@@ -1,5 +1,5 @@
 use anyhow::Result;
-use embeddings::{load_models, OramaModels};
+use embeddings::OramaModels;
 use serde::Deserialize;
 use std::fs;
 use std::time::Instant;
@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     };
 
     let mut idx = VectorIndex::new(config);
-    let models = load_models();
+    let model = OramaModels::GTESmall.try_new()?;
     let dataset = read_json_file()?;
 
     let start_embeddings = Instant::now();
@@ -33,11 +33,7 @@ fn main() -> Result<()> {
         .enumerate()
         .filter_map(|(i, movie)| {
             let str = format!("{}. {}", movie.title, movie.plot);
-            let embedding = models
-                .embed(OramaModels::GTESmall, vec![str], Some(1))
-                .unwrap()
-                .first()
-                .cloned()?;
+            let embedding = model.embed(vec![str], Some(1)).unwrap().first().cloned()?;
             Some((DocumentId(i as u64), embedding))
         })
         .collect::<Vec<(DocumentId, Vec<f32>)>>();
@@ -67,8 +63,7 @@ fn main() -> Result<()> {
 
     let search_query = "A movie about superheroes".to_string();
     let start_query_embedding = Instant::now();
-    let query_embedding_result =
-        models.embed(OramaModels::GTESmall, vec![search_query.clone()], Some(1))?;
+    let query_embedding_result = model.embed(vec![search_query.clone()], Some(1))?;
     let query_embedding = query_embedding_result.first().unwrap();
     let duration_query_embedding = start_query_embedding.elapsed();
     println!(

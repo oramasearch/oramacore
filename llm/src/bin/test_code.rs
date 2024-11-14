@@ -1,4 +1,4 @@
-use content_expander::code;
+use llm::content_expander::code;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

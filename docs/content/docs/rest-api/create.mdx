@@ -1,0 +1,87 @@
+---
+title: create
+description: >-
+  This API endpoint allows you to create a new index. The request should be sent
+  as an HTTP POST to the specified URL. The request body should be in raw format
+  and include the following parameters:
+
+
+  - `name`: The name of the new index (string)
+
+  - `language`: The language of the index (string)
+
+  - `schema`: An object containing the schema for the index, including title,
+  description, meta, and isFavorite fields
+
+      - `title`: The title field type (string)
+
+      - `description`: The description field type (string)
+
+      - `meta`: An object with author field type (string)
+
+      - `isFavorite`: The isFavorite field type (boolean)
+
+  - `embeddings`: An object containing the model and fields for embeddings
+
+      - `model`: The model for embeddings (string)
+
+      - `fields`: An array of fields for embeddings (array of strings)
+
+  - `tokenizer`: An object containing the stemming and stop_words parameters
+
+      - `stemming`: A boolean value for stemming
+
+      - `stop_words`: An array of stop words
+
+
+  The response to this request will include the details of the newly created
+  index.
+full: true
+_openapi:
+  method: POST
+  route: /v1/index/create
+  toc: []
+  structuredData:
+    headings: []
+    contents:
+      - content: >-
+          This API endpoint allows you to create a new index. The request should
+          be sent as an HTTP POST to the specified URL. The request body should
+          be in raw format and include the following parameters:
+
+
+          - `name`: The name of the new index (string)
+
+          - `language`: The language of the index (string)
+
+          - `schema`: An object containing the schema for the index, including
+          title, description, meta, and isFavorite fields
+
+              - `title`: The title field type (string)
+
+              - `description`: The description field type (string)
+
+              - `meta`: An object with author field type (string)
+
+              - `isFavorite`: The isFavorite field type (boolean)
+
+          - `embeddings`: An object containing the model and fields for
+          embeddings
+
+              - `model`: The model for embeddings (string)
+
+              - `fields`: An array of fields for embeddings (array of strings)
+
+          - `tokenizer`: An object containing the stemming and stop_words
+          parameters
+
+              - `stemming`: A boolean value for stemming
+
+              - `stop_words`: An array of stop words
+
+
+          The response to this request will include the details of the newly
+          created index.
+---
+
+<APIPage document={"./orama-api.yaml"} operations={[{"path":"/v1/index/create","method":"post"}]} hasHead={false} />

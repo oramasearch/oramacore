@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "string_index",
     "nlp",
-    "content_expander",
     "web_server",
     "collection_manager",
     "storage",
@@ -15,4 +14,6 @@ members = [
     "code_parser",
     "vector_index",
     "code_index",
+    "utils",
+    "llm",
 ]

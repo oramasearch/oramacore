@@ -1,5 +1,5 @@
-use content_expander::prompts::Prompts;
-use content_expander::vision::describe_images;
+use llm::content_expander::prompts::Prompts;
+use llm::content_expander::vision::describe_images;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -9,9 +9,8 @@ async fn main() -> Result<(), anyhow::Error> {
         Foo bar baz.
     ";
 
-    let results = describe_images(example_text.to_string(), Prompts::VisionECommerce)
-        .await
-        .unwrap();
+    let results = describe_images(example_text.to_string(), Prompts::VisionECommerce).await?;
+
     dbg!(results);
 
     Ok(())

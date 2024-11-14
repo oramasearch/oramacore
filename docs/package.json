@@ -1,0 +1,33 @@
+{
+  "name": "docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run generate-openapi && next build",
+    "dev": "npm run generate-openapi && next dev",
+    "start": "npm run generate-openapi && next start",
+    "postinstall": "fumadocs-mdx",
+    "generate-openapi": "node scripts/generate-docs.mjs"
+  },
+  "dependencies": {
+    "fumadocs-core": "14.2.1",
+    "fumadocs-mdx": "11.1.1",
+    "fumadocs-openapi": "^5.5.7",
+    "fumadocs-ui": "14.2.1",
+    "next": "15.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rimraf": "^6.0.1",
+    "shiki": "^1.22.2"
+  },
+  "devDependencies": {
+    "@types/mdx": "^2.0.13",
+    "@types/node": "22.8.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3"
+  }
+}

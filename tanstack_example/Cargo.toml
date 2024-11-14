@@ -20,7 +20,7 @@ path-clean = "1.0.1"
 code_parser = { path = "../code_parser" }
 ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expose-find-postfixes-with-current" }
 itertools = "0.13.0"
-content_expander = { path = "../content_expander" }
+# content_expander = { path = "../content_expander" }
 tokio = { version = "1.41.0", features = ["full"] }
 sha2 = "0.10.8"
 openai_api_rust = "0.1.9"
