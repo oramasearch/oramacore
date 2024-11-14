@@ -1035,6 +1035,7 @@ dependencies = [
  "ptrie 0.7.1 (git+https://github.com/oramasearch/ptrie.git?branch=feat/expose-find-postfixes-with-current)",
  "radix_trie",
  "rayon",
+ "regex",
  "serde",
  "smallvec",
  "storage",

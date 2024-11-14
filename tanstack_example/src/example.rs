@@ -58,10 +58,12 @@ pub async fn parse_example(path: &str) -> Vec<Value> {
 - You can use jargon language
 - Explain only what the user can do with the output of the code
 - Starts with "In this example"
+- Use only one paragraph
+- Be concise
 - Don't split the explaination in multiple paragraph.
 - Don't explain how the code is structured.
 - Don't describe the import.
-- Don't describe what TanStack is.
+- Don't describe what TanStack or React are.
 
 ```tsx
 {content}

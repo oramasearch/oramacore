@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::AtomicU16, Arc},
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use code_index::CodeIndex;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
@@ -16,8 +16,7 @@ use string_index::{
     scorer::bm25::BM25Score, DocumentBatch, StringIndex
 };
 use types::{
-    CollectionId, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit,
-    StringParser, TokenScore, ValueType,
+    CollectionId, Document, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType
 };
 
 use crate::dto::{CollectionDTO, SearchParams, TypedField};
@@ -125,19 +124,35 @@ impl Collection {
                         .or_default()
                         .push((field_id, value));
                 } else if field_type == ValueType::Scalar(ScalarType::String) {
-                    // flatten is a copy of the document, so we can remove the key
-                    let value = match flatten.remove(&key) {
-                        Some(Value::String(value)) => value,
-                        _ => Err(anyhow!("value is not string. This should never happen"))?,
-                    };
-                    let field_id = self.get_field_id(key.clone());
 
-                    let tokens = self.default_parser.tokenize_str_and_stem(&value)?;
+                    // TODO: avoid this "id" hard coded
+                    if key == "id" {
+                        let value = match flatten.remove(&key) {
+                            Some(Value::String(value)) => value,
+                            _ => Err(anyhow!("value is not string. This should never happen"))?,
+                        };
 
-                    strings
-                        .entry(internal_document_id)
-                        .or_default()
-                        .push((field_id, tokens));
+                        let field_id = self.get_field_id(key.clone());
+
+                        strings
+                            .entry(internal_document_id)
+                            .or_default()
+                            .push((field_id, vec![(value, vec![])]));
+                    } else {
+                        // flatten is a copy of the document, so we can remove the key
+                        let value = match flatten.remove(&key) {
+                            Some(Value::String(value)) => value,
+                            _ => Err(anyhow!("value is not string. This should never happen"))?,
+                        };
+                        let field_id = self.get_field_id(key.clone());
+
+                        let tokens = self.default_parser.tokenize_str_and_stem(&value)?;
+
+                        strings
+                            .entry(internal_document_id)
+                            .or_default()
+                            .push((field_id, tokens));
+                    }
                 }
             }
 
@@ -170,7 +185,6 @@ impl Collection {
             None => self.string_fields.iter().map(|e| *e.value()).collect(),
         };
 
-
         let string_token_scores = {
             let tokens: Vec<_> = self
                 .default_parser
@@ -186,20 +200,36 @@ impl Collection {
             let fields_on_search_with_default_parser: Vec<_> = self
                 .string_fields
                 .iter()
+                .filter(|field_id| field_id.key() != "id") // TODO: remove this
                 .filter(|field_id| properties.contains(field_id.value()))
                 .map(|field_id| *field_id.value())
                 .collect();
-            println!(
-                "searching for tokens {:?}",
-                fields_on_search_with_default_parser,
-            );
 
-            self.string_index.search(
+            let mut output = self.string_index.search(
                 tokens,
                 Some(fields_on_search_with_default_parser),
                 boost.clone(),
                 BM25Score::default(),
-            )
+            )?;
+
+            let id_field_id = self.get_field_id("id".to_string());
+            if properties.contains(&id_field_id) {
+                let id_output = self.string_index.search(
+                    vec![search_params.term.clone()],
+                    Some(vec![id_field_id]),
+                    boost.clone(),
+                    BM25Score::default(),
+                )?;
+
+                for (key, v) in id_output {
+                    let vv = output.entry(key)
+                        .or_default();
+                    *vv += v;
+                }
+
+            }
+
+            Result::<HashMap<_, _>, anyhow::Error>::Ok(output)
         }?;
 
         let code_token_scores = {
@@ -213,7 +243,7 @@ impl Collection {
                     search_params.term.clone(),
                     Some(properties_on_code),
                     boost,
-                )
+                )?
             } else {
                 Default::default()
             }
@@ -277,6 +307,26 @@ impl Collection {
         });
 
         *field_id
+    }
+
+    pub fn get_doc_by_unique_field(&self, field_name: String, value: String) -> Result<Option<Document>> {
+        let field_id = match self.string_fields.get(&field_name) {
+            Some(field_id) => *field_id,
+            None => return Ok(None),
+        };
+
+        println!("field_id: {field_id:?}");
+
+        let output = dbg!(self.string_index.search(vec![value], Some(vec![field_id]), Default::default(), BM25Score::default())?);
+
+        let doc_id = dbg!(match output.into_keys().next() {
+            Some(doc_id ) => doc_id,
+            None => return Ok(None),
+        });
+
+        self
+            .document_storage
+            .get(doc_id)
     }
 }
 

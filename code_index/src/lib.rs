@@ -3,12 +3,15 @@ use std::{collections::HashMap, sync::RwLock};
 use anyhow::Result;
 use code_parser::{treesitter::CodeToken, CodeParser};
 use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
+use nlp::tokenizer::Tokenizer;
 use ptrie::Trie;
+use regex::Regex;
 use types::{CodeLanguage, DocumentId, FieldId};
 
 pub struct CodeIndex {
     tree: RwLock<Trie<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>>,
     new_parser: NewParser,
+    english_tokenizer: Tokenizer,
 }
 
 impl CodeIndex {
@@ -17,6 +20,7 @@ impl CodeIndex {
         Self {
             tree: RwLock::new(Trie::<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>::new()),
             new_parser,
+            english_tokenizer: Tokenizer::english(),
         }
     }
 
@@ -57,52 +61,55 @@ impl CodeIndex {
         term: String,
         field_ids: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
-    ) -> HashMap<DocumentId, f32> {
-
-        let code_parser = CodeParser::from_language(CodeLanguage::TSX);
-        let tokens = code_parser.tokenize_and_stem(&term).unwrap();
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let tokens = self.new_parser.parse(CodeLanguage::TSX, &term)?;
+        let tokens = tokens.into_iter()
+            .flat_map(|code_token| get_tokens_from_code_tokens(vec![code_token]))
+            .map(|(token, _)| token)
+            .chain(self.english_tokenizer.tokenize(&term))
+            .collect::<Vec<_>>();
 
         let tree = self.tree.read().unwrap();
-    
-        println!("tokenize_and_stem {term}: {:#?}", tokens);
-    
+
         let mut output = HashMap::<DocumentId, f32>::new();
-    
-        for (token, stemmeds) in tokens.into_iter() {
-            let (exact_match, _) = tree.find_postfixes_with_current(token.bytes());
-            println!("exact_match: {:#?}", exact_match);
+
+        for token in tokens {
+            let (exact_match, postfix_matches) = tree.find_postfixes_with_current(token.bytes());
+
             if let Some(c) = exact_match {
                 for (doc_id, code_posting) in c {
                     let v = output.entry(*doc_id)
                         .or_default();
 
-                        /*
-                    let position_len = if let Some(field_ids) = field_ids.as_ref() {
-                        field_ids.into_iter()
-                            .filter_map(|field_id| {
-                                let code_posting = code_posting.get(field_id)?;
-                                Some(code_posting.positions.len())
-                            })
-                            .sum::<usize>()
-                    } else {
-                        code_posting.values()
-                            .map(|code_posting| code_posting.positions.len())
-                            .sum::<usize>()
-                    };
+                    for (field_id, code_posting) in code_posting {
+                        let boost = boost.get(field_id).unwrap_or(&1.0);
+                        *v += code_posting.weight * boost;
+                    }
+                }
+            }
 
-                    *v = 10.0 * position_len as f32;
-                    */
+            for c in postfix_matches {
+                for (doc_id, code_posting) in c {
+                    let v = output.entry(*doc_id)
+                        .or_default();
+
+                    for (field_id, code_posting) in code_posting {
+                        let boost = boost.get(field_id).unwrap_or(&1.0);
+                        *v += code_posting.weight * boost * 0.1;
+                    }
                 }
             }
         }
 
-        output
+        Ok(output)
     }
 }
 
 struct TokenWeight(f32);
 
 fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, TokenWeight)> {
+    let re = Regex::new(r"[A-Z][a-z]*|[a-z]+").unwrap();
+
     code_tokens.into_iter()
         .flat_map(|code_token| match code_token {
             CodeToken::Comment(comment) => {
@@ -111,13 +118,28 @@ fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, Toke
             CodeToken::Imported(imported) => {
                 let ImportedTokens{ package, identifiers } = imported;
 
-                vec![(package, TokenWeight(0.5))]
+                let single = identifiers
+                    .iter()
+                    .flat_map(|identifier| {
+                        return re.find_iter(identifier)
+                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1)))
+                    })
+                    .collect::<Vec<_>>();
+
+                vec![(package, TokenWeight(1.0))]
                     .into_iter()
-                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.5))))
+                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.7))))
+                    .chain(single)
                     .collect()
             },
             CodeToken::GlobalIdentifier(global_identifier) => {
-                vec![(global_identifier, TokenWeight(0.5))]
+                vec![(global_identifier.clone(), TokenWeight(0.5))]
+                    .into_iter()
+                    .chain(
+                        re.find_iter(&global_identifier)
+                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1)))
+                    )
+                    .collect()
             },
             CodeToken::GlobalJsx(global_jsx) => {
                 let JsxElement{ tag, attribute_keys } = global_jsx;
@@ -128,17 +150,24 @@ fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, Toke
             },
             CodeToken::FunctionDeclaration(function_declaration) => {
                 let FunctionDeclaration { name, params, jsx, comments, identifiers } = function_declaration;
-                vec![(name, TokenWeight(0.5))]
+                vec![(name, TokenWeight(0.3))]
                     .into_iter()
                     .chain(params.into_iter().map(|param| (param, TokenWeight(0.5))))
                     .chain(jsx.into_iter().flat_map(|jsx| {
                         let JsxElement{ tag, attribute_keys } = jsx;
-                        vec![(tag, TokenWeight(0.5))]
+
+                        let has_uppercase = tag.chars().any(|c| c.is_uppercase());
+                        let weight = if has_uppercase { 0.5 } else { 0.1 };
+                        vec![(tag, TokenWeight(weight))]
                             .into_iter()
                             .chain(attribute_keys.into_iter().map(|attribute_key| (attribute_key, TokenWeight(0.5))))
                     }))
-                    .chain(comments.into_iter().map(|comment| (comment, TokenWeight(0.5))))
-                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.5))))
+                    .chain(comments.into_iter().map(|comment| (comment, TokenWeight(0.2))))
+                    .chain(identifiers.into_iter().map(|identifier| {
+                        let has_uppercase = identifier.chars().any(|c| c.is_uppercase());
+                        let weight = if has_uppercase { 0.5 } else { 0.1 };
+                        (identifier, TokenWeight(weight))
+                    }))
                     .collect()
             },
         })
@@ -146,17 +175,7 @@ fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, Toke
 }
 
 
-#[derive(Hash, PartialEq, Eq, Debug, Clone)]
-struct Position(usize);
-
 #[derive(Debug, Clone)]
 struct CodePosting {
     weight: f32,
-}
-
-#[derive(Debug, Clone)]
-enum TokenType {
-    Token,
-    ComposedSubwords(u8),
-    Subword,
 }

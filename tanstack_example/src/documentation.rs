@@ -17,16 +17,23 @@ pub fn parse_documentation(
 
     let mut orama_documents = vec![];
     for file in all_files {
-        let page = parse_from_file(file.path().to_path_buf());
+        let file_path = file.path().to_path_buf();
+        let file_content = std::fs::read_to_string(file_path.clone()).unwrap();
+        let page = parse(&file_content, file_path);
+
+        let url = path_clean::clean(file.path().to_str().unwrap());
+
+        let parent_id = url.clone();
+        orama_documents.push(json!({
+            "id": parent_id,
+            "content": file_content,
+            "type": "page",
+        }));
 
         let page_header = page.heading.clone();
         for section in page.sections {
-            for (language, code) in section.codes {
-                if language != "tsx" {
-                    continue;
-                }
 
-                let url = path_clean::clean(file.path().to_str().unwrap());
+            for content in section.content {
                 let id = if let Some(heading) = &section.heading {
                     format!("{url:?}#{}", heading.text)
                 } else {
@@ -35,11 +42,34 @@ pub fn parse_documentation(
                 orama_documents.push(json!({
                     "id": id,
                     "url": url,
+                    "content": content,
+                    "section": section.heading.clone(),
+                    "page": page_header.clone(),
+                    "type": "documentation",
+                    "parent_id": parent_id,
+                }));
+            }
+
+            for (language, code) in section.codes {
+                if language != "tsx" {
+                    continue;
+                }
+
+                let url = path_clean::clean(file.path().to_str().unwrap());
+                // let id = if let Some(heading) = &section.heading {
+                //     format!("{url:?}#code-{}", heading.text)
+                // } else {
+                //     url.to_string_lossy().to_string()
+                // };
+                orama_documents.push(json!({
+                    // "id": id,
+                    "url": url,
                     "language": "tsx",
                     "code": code,
                     "section": section.heading.clone(),
                     "page": page_header.clone(),
                     "type": "documentation",
+                    "parent_id": parent_id,
                 }));
             }
         }
@@ -103,11 +133,6 @@ struct Link {
 struct Page {
     heading: Option<PageHeading>,
     sections: Vec<Section>,
-}
-
-fn parse_from_file(file_path: PathBuf) -> Page {
-    let file_content = std::fs::read_to_string(file_path.clone()).unwrap();
-    parse(&file_content, file_path)
 }
 
 fn parse(file_content: &str, file_path: PathBuf) -> Page {

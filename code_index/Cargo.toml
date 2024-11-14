@@ -19,7 +19,5 @@ smallvec = "1.13.2"
 types = { path = "../types" }
 ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expose-find-postfixes-with-current" }
 code_parser = { path = "../code_parser" }
-
-[dev-dependencies]
 nlp = { path = "../nlp" }
-
+regex = "1.11.1"

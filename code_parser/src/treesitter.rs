@@ -66,12 +66,12 @@ impl NewParser {
         }
     }
 
+    // The parse algorithm is inneficient because it traverses the tree multiple times
+    // and allocates a lot of memory
+    // This is mainly because the tree-sitter API is not very ergonomic
+    // but, now, we don't care about performance
+    // TODO: care about performance
     pub fn parse(&self, language: CodeLanguage, code: &str) -> Result<Vec<CodeToken>> {
-        // The parse algorithm is inneficient because it traverses the tree multiple times
-        // and allocates a lot of memory
-        // This is mainly because the tree-sitter API is not very ergonomic
-        // and, now, we don't care about performance
-        // TODO: care about performance
         let tree = self.get(language, |parser| parser.parse(code, None))?;
         let tree = match tree {
             Some(tree) => tree,
@@ -116,6 +116,10 @@ impl NewParser {
         }
 
         Ok(tokens)
+    }
+
+    pub fn parse_text(&self) -> Result<Vec<String>> {
+        Ok(vec![])
     }
 
     fn get<R>(&self, language: CodeLanguage, f: impl FnOnce(&mut Parser) -> R) -> Result<R> {
@@ -291,7 +295,7 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
     });
     let jsxs: Vec<_> = all_jsx
         .into_iter()
-        .map(|jsx| {
+        .filter_map(|jsx| {
             let html_tag = flat(jsx, |node| {
                 if node.kind_id() == TSX_IDENTIFIER {
                     TraverseOption::KeepAndStopTraverse
@@ -322,9 +326,14 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
                 })
                 .collect::<Vec<String>>();
 
-            JsxElement {
-                tag: html_tag[0].clone(),
-                attribute_keys: attributes,
+            if let Some(tag) = html_tag.first() {
+                Some(JsxElement {
+                    tag: tag.clone(),
+                    attribute_keys: attributes,
+                })
+            } else {
+                println!("--- No tag found {}", &code[jsx.start_byte()..jsx.end_byte()]);
+                None
             }
         })
         .collect();
@@ -446,11 +455,6 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
             fn_name.into_iter().chain(arguments)
         })
         .collect();
-
-    println!("function_name: {:?}", function_name);
-    println!("identifiers: {:?}", identifiers);
-    println!("other_identifiers: {:?}", other_identifiers);
-    println!("call_expressions: {:?}", call_expressions);
 
     let identifiers = identifiers.into_iter()
         .chain(other_identifiers)
@@ -837,5 +841,15 @@ const a = <th
                 ],
             }),
         ]);
+    }
+
+    #[test]
+    fn test_parser_simple8() {
+        let code = r#"useQuery"#;
+
+        let parser = NewParser::new();
+        let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
+
+        assert_eq!(output, vec![]);
     }
 }

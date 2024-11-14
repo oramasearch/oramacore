@@ -9,7 +9,6 @@ use collection_manager::{
 use serde_json::json;
 use types::{CollectionId, DocumentList};
 
-
 pub fn apis() -> Router<Arc<CollectionManager>> {
     Router::<Arc<CollectionManager>>::new()
         .route("/", get(get_collections))
@@ -17,6 +16,7 @@ pub fn apis() -> Router<Arc<CollectionManager>> {
         .route("/", post(create_collection))
         .route("/:id/documents", patch(add_documents))
         .route("/:id/search", post(search))
+        .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
 }
 
 async fn get_collections(manager: State<Arc<CollectionManager>>) -> Json<Vec<CollectionDTO>> {
@@ -79,6 +79,23 @@ async fn search(
 
     match output {
         Some(Ok(data)) => Ok((StatusCode::OK, Json(data))),
+        Some(Err(e)) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))),
+        None => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "collection not found" })))),
+    }
+}
+
+async fn get_doc_by_id(
+    Path((collection_id, document_id)): Path<(String, String)>,
+    manager: State<Arc<CollectionManager>>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let collection_id = CollectionId(collection_id);
+    let output = manager.get(collection_id, |collection| {
+        collection.get_doc_by_unique_field("id".to_string(), document_id)
+    });
+
+    match output {
+        Some(Ok(Some(data))) => Ok((StatusCode::OK, Json(data))),
+        Some(Ok(None)) => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "document not found" })))),
         Some(Err(e)) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))),
         None => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "collection not found" })))),
     }
