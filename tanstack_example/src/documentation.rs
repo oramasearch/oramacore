@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, LinkType, Tag, TagEnd};
 use serde::Serialize;
@@ -10,9 +7,7 @@ use serde_json::{json, Value};
 use crate::fs_utils::get_files;
 
 #[allow(dead_code)]
-pub fn parse_documentation(
-    base_dir: &str,
-) -> Vec<Value> {
+pub fn parse_documentation(base_dir: &str) -> Vec<Value> {
     let all_files = get_files(base_dir.into(), vec!["md".to_string()]);
 
     let mut orama_documents = vec![];
@@ -32,7 +27,6 @@ pub fn parse_documentation(
 
         let page_header = page.heading.clone();
         for section in page.sections {
-
             for content in section.content {
                 let id = if let Some(heading) = &section.heading {
                     format!("{url:?}#{}", heading.text)
@@ -77,9 +71,6 @@ pub fn parse_documentation(
 
     orama_documents
 }
-
-
-
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 enum Level {
@@ -386,7 +377,6 @@ fn parse(file_content: &str, file_path: PathBuf) -> Page {
             .collect(),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

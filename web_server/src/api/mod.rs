@@ -5,7 +5,6 @@ use collection_manager::CollectionManager;
 mod collection;
 
 pub fn api_config() -> Router<Arc<CollectionManager>> {
-
     // build our application with a route
     let router = Router::new()
         .route("/", get(index))

@@ -42,9 +42,12 @@ async fn main() -> Result<(), anyhow::Error> {
     Then, pass the state down from `MyApp` to each `MyButton`, together with the shared click handler. You can pass information to MyButton using the JSX curly braces, just like you previously did with built-in tags like <img>:
     ";
 
-    let results = code::extrapolate_and_describe_code_blocks(example_text.to_string(), code::TextFormat::Markdown)
-        .await
-        .unwrap();
+    let results = code::extrapolate_and_describe_code_blocks(
+        example_text.to_string(),
+        code::TextFormat::Markdown,
+    )
+    .await
+    .unwrap();
     dbg!(results);
 
     Ok(())

@@ -136,12 +136,7 @@ impl StringIndex {
                 let total_token_count = total_token_count as f32;
                 for posting in postings {
                     let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                    scorer.add_entry(
-                        &global_info,
-                        posting,
-                        total_token_count,
-                        boost_per_field,
-                    );
+                    scorer.add_entry(&global_info, posting, total_token_count, boost_per_field);
                 }
             });
 
@@ -150,10 +145,7 @@ impl StringIndex {
         Ok(scores)
     }
 
-    pub fn insert_multiple(
-        &self,
-        data: DocumentBatch,
-    ) -> Result<()> {
+    pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
 
@@ -355,7 +347,12 @@ mod tests {
         assert_eq!(output.len(), 2);
 
         let output = string_index
-            .search(vec!["wel".to_string()], None, Default::default(), BM25Score::default())
+            .search(
+                vec!["wel".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
             .unwrap();
 
         assert_eq!(output.len(), 2);

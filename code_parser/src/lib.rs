@@ -2,11 +2,7 @@ use core::panic;
 
 use anyhow::Result;
 use regex::Regex;
-use swc_common::{
-    self,
-    sync::Lrc,
-    FileName, SourceMap,
-};
+use swc_common::{self, sync::Lrc, FileName, SourceMap};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 use swc_ecma_parser::{
     token::{IdentLike, Token, Word},
@@ -98,7 +94,7 @@ impl CodeParser {
 
                 if lower_case_token.len() > 20 {
                     // We ignore long tokens
-                    return None
+                    return None;
                 }
 
                 let stemmed = calculate_stemmed(&token)
@@ -527,16 +523,17 @@ const t = (
 
         let mut t = parser.tokenize_and_stem(code).unwrap();
         t.sort_by_key(|(t, _)| t.to_string());
-        assert_eq!(t, vec![
-            ("notice:".to_string(), vec![
-                "notice".to_string()
-            ]),
-            ("p".to_string(), vec![]),
-            ("p".to_string(), vec![]),
-            ("strong".to_string(), vec![]),
-            ("strong".to_string(), vec![]),
-            ("t".to_string(), vec![]),
-        ]);
+        assert_eq!(
+            t,
+            vec![
+                ("notice:".to_string(), vec!["notice".to_string()]),
+                ("p".to_string(), vec![]),
+                ("p".to_string(), vec![]),
+                ("strong".to_string(), vec![]),
+                ("strong".to_string(), vec![]),
+                ("t".to_string(), vec![]),
+            ]
+        );
     }
 
     #[test]

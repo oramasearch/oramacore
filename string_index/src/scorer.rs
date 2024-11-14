@@ -75,8 +75,7 @@ pub mod bm25 {
                 _boost_per_field,
             );
 
-            let mut previous = self.scores.entry(posting.document_id)
-                .or_insert(0.0);
+            let mut previous = self.scores.entry(posting.document_id).or_insert(0.0);
             *previous += score;
         }
 
@@ -114,22 +113,14 @@ pub mod code {
 
         fn calculate_score(pos: DashMap<Position, usize>, boost: f32, doc_lenth: u16) -> f32 {
             let mut foo: Vec<_> = pos.into_iter().map(|(p, v)| (p.0, v)).collect();
-            foo.sort_by_key(|(p, _) | (*p as isize));
+            foo.sort_by_key(|(p, _)| (*p as isize));
 
             let pos_len = foo.len();
 
             let mut score = 0.0;
             for i in 0..foo.len() {
-                let before_before = if i > 1 {
-                    foo.get(i - 2)
-                } else {
-                    None
-                };
-                let before = if i > 0 {
-                    foo.get(i - 1)
-                } else {
-                    None
-                };
+                let before_before = if i > 1 { foo.get(i - 2) } else { None };
+                let before = if i > 0 { foo.get(i - 1) } else { None };
                 let current = foo.get(i).unwrap();
                 let after = foo.get(i + 1);
                 let after_after = foo.get(i + 2);
@@ -156,7 +147,8 @@ pub mod code {
                 let current_after = 1.0 / (current_after_distance as f32 + 1.0);
                 let after_after_current = 1.0 / (after_after_current_distance as f32 + 1.0);
 
-                let score_for_position = before_before_current + before_current + current_after + after_after_current;
+                let score_for_position =
+                    before_before_current + before_current + current_after + after_after_current;
 
                 score += score_for_position;
             }
@@ -175,18 +167,26 @@ pub mod code {
             boost_per_field: f32,
         ) {
             let document_id = posting.document_id;
-            let previous = self.scores.entry(document_id)
-                .or_insert_with(|| (DashMap::new(), boost_per_field, DocumentLength(posting.doc_length)));
+            let previous = self.scores.entry(document_id).or_insert_with(|| {
+                (
+                    DashMap::new(),
+                    boost_per_field,
+                    DocumentLength(posting.doc_length),
+                )
+            });
 
             for position in posting.positions {
-                previous.0.entry(Position(position))
+                previous
+                    .0
+                    .entry(Position(position))
                     .and_modify(|e| *e += 1)
                     .or_insert(1);
             }
         }
 
         fn get_scores(self) -> HashMap<types::DocumentId, f32> {
-            self.scores.into_iter()
+            self.scores
+                .into_iter()
                 // .par_bridge()
                 .map(|(document_id, (pos, boost, doc_length))| {
                     let score = Self::calculate_score(pos, boost, doc_length.0);

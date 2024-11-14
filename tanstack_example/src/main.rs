@@ -1,6 +1,4 @@
-use std::{
-    fs, sync::Arc
-};
+use std::{fs, sync::Arc};
 
 use collection_manager::{
     dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
@@ -37,8 +35,12 @@ async fn main() -> anyhow::Result<()> {
         })
         .expect("unable to create collection");
 
-    let orama_documentation_documents = parse_documentation("/Users/allevo/repos/rustorama/tanstack_example/tanstack_table/docs");
-    let orama_example_documents = parse_example("/Users/allevo/repos/rustorama/tanstack_example/tanstack_table/examples/react").await;
+    let orama_documentation_documents =
+        parse_documentation("/Users/allevo/repos/rustorama/tanstack_example/tanstack_table/docs");
+    let orama_example_documents = parse_example(
+        "/Users/allevo/repos/rustorama/tanstack_example/tanstack_table/examples/react",
+    )
+    .await;
 
     let orama_documents = orama_documentation_documents
         .into_iter()
@@ -65,14 +67,15 @@ async fn main() -> anyhow::Result<()> {
         })
     });
 
-    
     let web_server = WebServer::new(Arc::new(manager));
 
-    web_server.start(HttpConfig {
-        port: 8080,
-        host: "127.0.0.1".parse().unwrap(),
-        allow_cors: true,
-    }).await?;
+    web_server
+        .start(HttpConfig {
+            port: 8080,
+            host: "127.0.0.1".parse().unwrap(),
+            allow_cors: true,
+        })
+        .await?;
 
     Ok(())
 }

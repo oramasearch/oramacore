@@ -1,10 +1,14 @@
 use std::{env::var, fs};
 
 use serde_json::Value;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 use crate::fs_utils::get_files;
-use async_openai::{config::OpenAIConfig, types::{CreateCompletionRequest, CreateCompletionRequestArgs}, Client};
+use async_openai::{
+    config::OpenAIConfig,
+    types::{CreateCompletionRequest, CreateCompletionRequestArgs},
+    Client,
+};
 
 struct CodeDescriptionGenerator {
     cache_folder: String,
@@ -14,7 +18,10 @@ impl CodeDescriptionGenerator {
     fn new(cache_folder: String, client: Client<OpenAIConfig>) -> Self {
         let _ = fs::create_dir_all(&cache_folder);
 
-        Self { cache_folder, client }
+        Self {
+            cache_folder,
+            client,
+        }
     }
 
     async fn describe_as_text(&self, request: CreateCompletionRequest) -> String {
@@ -38,11 +45,11 @@ impl CodeDescriptionGenerator {
     }
 }
 
-
 pub async fn parse_example(path: &str) -> Vec<Value> {
     let all_files = get_files(path.parse().unwrap(), vec!["tsx".to_string()]);
 
-    let client = Client::with_config(OpenAIConfig::new().with_api_key(var("OPEN_API_KEY").unwrap()));
+    let client =
+        Client::with_config(OpenAIConfig::new().with_api_key(var("OPEN_API_KEY").unwrap()));
     let example_cache_dir = "./example_cache";
     let generator = &CodeDescriptionGenerator::new(example_cache_dir.to_string(), client);
 
@@ -106,7 +113,6 @@ pub async fn parse_example(path: &str) -> Vec<Value> {
 
     examples
 }
-
 
 fn capitalize(s: &str) -> String {
     let mut c = s.chars();

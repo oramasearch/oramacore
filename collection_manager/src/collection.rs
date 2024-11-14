@@ -13,11 +13,10 @@ use nlp::TextParser;
 use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
-use string_index::{
-    scorer::bm25::BM25Score, DocumentBatch, StringIndex
-};
+use string_index::{scorer::bm25::BM25Score, DocumentBatch, StringIndex};
 use types::{
-    CollectionId, Document, DocumentId, DocumentList, FieldId, ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType
+    CollectionId, Document, DocumentId, DocumentList, FieldId, ScalarType, SearchResult,
+    SearchResultHit, StringParser, TokenScore, ValueType,
 };
 
 use crate::dto::{CollectionDTO, SearchParams, TypedField};
@@ -101,8 +100,7 @@ impl Collection {
     }
 
     pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
-        let mut strings: DocumentBatch =
-            HashMap::with_capacity(document_list.len());
+        let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
@@ -112,7 +110,6 @@ impl Collection {
             let internal_document_id = self.generate_document_id();
 
             for (key, field_type) in schema {
-
                 if self.code_fields.contains_key(&key) {
                     let value = match flatten.remove(&key) {
                         Some(Value::String(value)) => value,
@@ -125,7 +122,6 @@ impl Collection {
                         .or_default()
                         .push((field_id, value));
                 } else if field_type == ValueType::Scalar(ScalarType::String) {
-
                     // TODO: avoid this "id" hard coded
                     if key == "id" {
                         let value = match flatten.remove(&key) {
@@ -223,18 +219,18 @@ impl Collection {
                 )?;
 
                 for (key, v) in id_output {
-                    let vv = output.entry(key)
-                        .or_default();
+                    let vv = output.entry(key).or_default();
                     *vv += v;
                 }
-
             }
 
             Result::<HashMap<_, _>, anyhow::Error>::Ok(output)
         }?;
 
         let code_token_scores = {
-            let properties_on_code = self.code_fields.iter()
+            let properties_on_code = self
+                .code_fields
+                .iter()
                 .map(|e| *e.value())
                 .filter(|field_name| properties.contains(field_name))
                 .collect::<Vec<_>>();
@@ -310,7 +306,11 @@ impl Collection {
         *field_id
     }
 
-    pub fn get_doc_by_unique_field(&self, field_name: String, value: String) -> Result<Option<Document>> {
+    pub fn get_doc_by_unique_field(
+        &self,
+        field_name: String,
+        value: String,
+    ) -> Result<Option<Document>> {
         let field_id = match self.string_fields.get(&field_name) {
             Some(field_id) => *field_id,
             None => return Ok(None),
@@ -318,16 +318,19 @@ impl Collection {
 
         println!("field_id: {field_id:?}");
 
-        let output = dbg!(self.string_index.search(vec![value], Some(vec![field_id]), Default::default(), BM25Score::default())?);
+        let output = dbg!(self.string_index.search(
+            vec![value],
+            Some(vec![field_id]),
+            Default::default(),
+            BM25Score::default()
+        )?);
 
         let doc_id = dbg!(match output.into_keys().next() {
-            Some(doc_id ) => doc_id,
+            Some(doc_id) => doc_id,
             None => return Ok(None),
         });
 
-        self
-            .document_storage
-            .get(doc_id)
+        self.document_storage.get(doc_id)
     }
 }
 

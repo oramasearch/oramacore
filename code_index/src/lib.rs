@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
-use code_parser::{treesitter::CodeToken, CodeParser};
 use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
+use code_parser::{treesitter::CodeToken, CodeParser};
 use nlp::tokenizer::Tokenizer;
 use ptrie::Trie;
 use regex::Regex;
@@ -18,17 +18,21 @@ impl CodeIndex {
     pub fn new() -> Self {
         let new_parser = NewParser::new();
         Self {
-            tree: RwLock::new(Trie::<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>::new()),
+            tree: RwLock::new(
+                Trie::<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>::new(),
+            ),
             new_parser,
             english_tokenizer: Tokenizer::english(),
         }
     }
 
-    pub fn insert_multiple(&self, documents: HashMap<DocumentId, Vec<(FieldId, String)>>) -> Result<()> {
+    pub fn insert_multiple(
+        &self,
+        documents: HashMap<DocumentId, Vec<(FieldId, String)>>,
+    ) -> Result<()> {
         let mut tree = self.tree.write().unwrap();
 
         for (doc_id, properties) in documents {
-
             let mut a = HashMap::<String, HashMap<FieldId, CodePosting>>::new();
 
             for (field_id, code) in properties {
@@ -36,12 +40,8 @@ impl CodeIndex {
                 let token_with_weight = get_tokens_from_code_tokens(extracted_tokens);
 
                 for (token, weight) in token_with_weight {
-                    let entry = a.entry(token)
-                        .or_default();
-                    let code_posting = entry.entry(field_id)
-                        .or_insert(CodePosting {
-                            weight: 0.0,
-                        });
+                    let entry = a.entry(token).or_default();
+                    let code_posting = entry.entry(field_id).or_insert(CodePosting { weight: 0.0 });
                     code_posting.weight += weight.0;
                 }
             }
@@ -57,13 +57,14 @@ impl CodeIndex {
     }
 
     pub fn search(
-        &self, 
+        &self,
         term: String,
         field_ids: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let tokens = self.new_parser.parse(CodeLanguage::TSX, &term)?;
-        let tokens = tokens.into_iter()
+        let tokens = tokens
+            .into_iter()
             .flat_map(|code_token| get_tokens_from_code_tokens(vec![code_token]))
             .map(|(token, _)| token)
             .chain(self.english_tokenizer.tokenize(&term))
@@ -78,8 +79,7 @@ impl CodeIndex {
 
             if let Some(c) = exact_match {
                 for (doc_id, code_posting) in c {
-                    let v = output.entry(*doc_id)
-                        .or_default();
+                    let v = output.entry(*doc_id).or_default();
 
                     for (field_id, code_posting) in code_posting {
                         let boost = boost.get(field_id).unwrap_or(&1.0);
@@ -90,8 +90,7 @@ impl CodeIndex {
 
             for c in postfix_matches {
                 for (doc_id, code_posting) in c {
-                    let v = output.entry(*doc_id)
-                        .or_default();
+                    let v = output.entry(*doc_id).or_default();
 
                     for (field_id, code_posting) in code_posting {
                         let boost = boost.get(field_id).unwrap_or(&1.0);
@@ -110,70 +109,100 @@ struct TokenWeight(f32);
 fn get_tokens_from_code_tokens(code_tokens: Vec<CodeToken>) -> Vec<(String, TokenWeight)> {
     let re = Regex::new(r"[A-Z][a-z]*|[a-z]+").unwrap();
 
-    code_tokens.into_iter()
+    code_tokens
+        .into_iter()
         .flat_map(|code_token| match code_token {
             CodeToken::Comment(comment) => {
                 vec![(comment, TokenWeight(0.5))]
-            },
+            }
             CodeToken::Imported(imported) => {
-                let ImportedTokens{ package, identifiers } = imported;
+                let ImportedTokens {
+                    package,
+                    identifiers,
+                } = imported;
 
                 let single = identifiers
                     .iter()
                     .flat_map(|identifier| {
-                        return re.find_iter(identifier)
-                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1)))
+                        return re
+                            .find_iter(identifier)
+                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1)));
                     })
                     .collect::<Vec<_>>();
 
                 vec![(package, TokenWeight(1.0))]
                     .into_iter()
-                    .chain(identifiers.into_iter().map(|identifier| (identifier, TokenWeight(0.7))))
+                    .chain(
+                        identifiers
+                            .into_iter()
+                            .map(|identifier| (identifier, TokenWeight(0.7))),
+                    )
                     .chain(single)
                     .collect()
-            },
+            }
             CodeToken::GlobalIdentifier(global_identifier) => {
                 vec![(global_identifier.clone(), TokenWeight(0.5))]
                     .into_iter()
                     .chain(
                         re.find_iter(&global_identifier)
-                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1)))
+                            .map(|m| (m.as_str().to_string(), TokenWeight(0.1))),
                     )
                     .collect()
-            },
+            }
             CodeToken::GlobalJsx(global_jsx) => {
-                let JsxElement{ tag, attribute_keys } = global_jsx;
+                let JsxElement {
+                    tag,
+                    attribute_keys,
+                } = global_jsx;
                 vec![(tag, TokenWeight(0.5))]
                     .into_iter()
-                    .chain(attribute_keys.into_iter().map(|attribute_key| (attribute_key, TokenWeight(0.5))))
+                    .chain(
+                        attribute_keys
+                            .into_iter()
+                            .map(|attribute_key| (attribute_key, TokenWeight(0.5))),
+                    )
                     .collect()
-            },
+            }
             CodeToken::FunctionDeclaration(function_declaration) => {
-                let FunctionDeclaration { name, params, jsx, comments, identifiers } = function_declaration;
+                let FunctionDeclaration {
+                    name,
+                    params,
+                    jsx,
+                    comments,
+                    identifiers,
+                } = function_declaration;
                 vec![(name, TokenWeight(0.3))]
                     .into_iter()
                     .chain(params.into_iter().map(|param| (param, TokenWeight(0.5))))
                     .chain(jsx.into_iter().flat_map(|jsx| {
-                        let JsxElement{ tag, attribute_keys } = jsx;
+                        let JsxElement {
+                            tag,
+                            attribute_keys,
+                        } = jsx;
 
                         let has_uppercase = tag.chars().any(|c| c.is_uppercase());
                         let weight = if has_uppercase { 0.5 } else { 0.1 };
-                        vec![(tag, TokenWeight(weight))]
-                            .into_iter()
-                            .chain(attribute_keys.into_iter().map(|attribute_key| (attribute_key, TokenWeight(0.5))))
+                        vec![(tag, TokenWeight(weight))].into_iter().chain(
+                            attribute_keys
+                                .into_iter()
+                                .map(|attribute_key| (attribute_key, TokenWeight(0.5))),
+                        )
                     }))
-                    .chain(comments.into_iter().map(|comment| (comment, TokenWeight(0.2))))
+                    .chain(
+                        comments
+                            .into_iter()
+                            .map(|comment| (comment, TokenWeight(0.2))),
+                    )
                     .chain(identifiers.into_iter().map(|identifier| {
                         let has_uppercase = identifier.chars().any(|c| c.is_uppercase());
                         let weight = if has_uppercase { 0.5 } else { 0.1 };
                         (identifier, TokenWeight(weight))
                     }))
                     .collect()
-            },
+            }
         })
         .collect()
 }
-
 
 #[derive(Debug, Clone)]
 struct CodePosting {

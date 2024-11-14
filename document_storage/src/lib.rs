@@ -73,7 +73,7 @@ impl DocumentStorage {
                 Ok(document) => Some(document),
                 Err(e) => {
                     eprintln!("Failed to deserialize document: {:?}", e);
-                    return Err(e.context("Failed to deserialize document"))
+                    return Err(e.context("Failed to deserialize document"));
                 }
             }),
             None => return Ok(None),

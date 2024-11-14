@@ -1,8 +1,16 @@
-use std::{fs::{self, DirEntry}, io, path::{Path, PathBuf}};
+use std::{
+    fs::{self, DirEntry},
+    io,
+    path::{Path, PathBuf},
+};
 
 pub fn get_files(dir: PathBuf, allowed_extensions: Vec<String>) -> Vec<DirEntry> {
     let mut files = vec![];
-    fn visit_dirs(dir: &Path, files: &mut Vec<DirEntry>, allowed_extensions: &Vec<String>) -> io::Result<()> {
+    fn visit_dirs(
+        dir: &Path,
+        files: &mut Vec<DirEntry>,
+        allowed_extensions: &Vec<String>,
+    ) -> io::Result<()> {
         if dir.is_dir() {
             for entry in fs::read_dir(dir)? {
                 let entry = entry?;

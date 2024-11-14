@@ -29,8 +29,7 @@ impl WebServer {
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        let router = api::api_config()
-            .with_state(self.collection_manager.clone());
+        let router = api::api_config().with_state(self.collection_manager.clone());
         let router = if config.allow_cors {
             let cors_layer = CorsLayer::new()
                 .allow_methods(tower_http::cors::Any)
@@ -42,10 +41,8 @@ impl WebServer {
             router
         };
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .unwrap();
-        
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
         println!("Started at http://{:?}", listener.local_addr().unwrap());
 
         let output = axum::serve(listener, router).await;
@@ -61,7 +58,11 @@ impl WebServer {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{body::Body, http::{self, Request, StatusCode}, Router};
+    use axum::{
+        body::Body,
+        http::{self, Request, StatusCode},
+        Router,
+    };
     use collection_manager::{
         dto::{CreateCollectionOptionDTO, Limit, SearchParams},
         CollectionManager, CollectionsConfiguration,
@@ -74,9 +75,9 @@ mod tests {
 
     use crate::api;
 
-    use tower_http::trace::TraceLayer;
-    use tower::ServiceExt;
     use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    use tower_http::trace::TraceLayer;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
     #[tokio::test]
@@ -89,9 +90,6 @@ mod tests {
             )
             .with(tracing_subscriber::fmt::layer())
             .init();
-
-
-
 
         let mut router = api::api_config()
             .with_state(Arc::new(create_manager()))
@@ -116,7 +114,8 @@ mod tests {
         let (status_code, value) = list_collections(&mut router).await;
 
         assert_eq!(status_code, 200);
-        let resp: Vec<collection_manager::dto::CollectionDTO> = serde_json::from_value(value).unwrap();
+        let resp: Vec<collection_manager::dto::CollectionDTO> =
+            serde_json::from_value(value).unwrap();
         assert_eq!(resp.len(), 1);
         assert_eq!(resp[0].id, collection_id);
         assert_eq!(resp[0].document_count, 0);
@@ -138,7 +137,8 @@ mod tests {
 
         let (status_code, value) = list_collections(&mut router).await;
         assert_eq!(status_code, 200);
-        let resp: Vec<collection_manager::dto::CollectionDTO> = serde_json::from_value(value).unwrap();
+        let resp: Vec<collection_manager::dto::CollectionDTO> =
+            serde_json::from_value(value).unwrap();
         assert_eq!(resp.len(), 1);
         assert_eq!(resp[0].id, collection_id);
         assert_eq!(resp[0].document_count, 2);
@@ -171,39 +171,33 @@ mod tests {
             .uri("/v0/collections")
             .method(http::Method::POST)
             .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
-            .body(Body::from(serde_json::to_string(create_collection_dto).unwrap()))
+            .body(Body::from(
+                serde_json::to_string(create_collection_dto).unwrap(),
+            ))
             .unwrap();
 
-        let resp = router
-            .oneshot(req)
-            .await
-            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
 
         let status_code = resp.status();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-        
+
         (status_code, output)
     }
 
-    async fn list_collections(
-        router: &mut Router,
-    ) -> (StatusCode, Value) {
+    async fn list_collections(router: &mut Router) -> (StatusCode, Value) {
         let req = Request::builder()
             .uri("/v0/collections")
             .method(http::Method::GET)
             .body(Body::empty())
             .unwrap();
 
-        let resp = router
-            .oneshot(req)
-            .await
-            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
 
         let status_code = resp.status();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-        
+
         (status_code, output)
     }
 
@@ -219,15 +213,12 @@ mod tests {
             .body(Body::from(serde_json::to_string(docs).unwrap()))
             .unwrap();
 
-        let resp = router
-            .oneshot(req)
-            .await
-            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
 
         let status_code = resp.status();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-        
+
         (status_code, output)
     }
 
@@ -243,15 +234,12 @@ mod tests {
             .body(Body::from(serde_json::to_string(search_params).unwrap()))
             .unwrap();
 
-            let resp = router
-            .oneshot(req)
-            .await
-            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
 
         let status_code = resp.status();
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
-        
+
         (status_code, output)
     }
 

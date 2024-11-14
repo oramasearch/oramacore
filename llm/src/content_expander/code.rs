@@ -12,11 +12,8 @@ pub enum TextFormat {
     Plaintext,
 }
 
-pub async fn describe_code_blocks(
-    code_blocks: Vec<String>,
-) -> Option<CodeBlockDescriptions> {
+pub async fn describe_code_blocks(code_blocks: Vec<String>) -> Option<CodeBlockDescriptions> {
     let model = LocalLLM::Phi3_5MiniInstruct.try_new().await.unwrap();
-
 
     let futures: Vec<_> = code_blocks
         .into_iter()
@@ -45,7 +42,7 @@ pub async fn describe_code_blocks(
     } else {
         Some(descriptions)
     }
-} 
+}
 
 pub async fn extrapolate_and_describe_code_blocks(
     text: String,

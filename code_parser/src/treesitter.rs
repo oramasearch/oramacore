@@ -332,7 +332,10 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
                     attribute_keys: attributes,
                 })
             } else {
-                println!("--- No tag found {}", &code[jsx.start_byte()..jsx.end_byte()]);
+                println!(
+                    "--- No tag found {}",
+                    &code[jsx.start_byte()..jsx.end_byte()]
+                );
                 None
             }
         })
@@ -352,7 +355,9 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
             let identifiers = flat(variable_declarator, move |node| {
                 if node.kind_id() == TSX_IDENTIFIER {
                     TraverseOption::KeepAndStopTraverse
-                } else if node.kind_id() == TSX_CALL_EXPRESSION || node.kind_id() == TSX_NEW_EXPRESSION {
+                } else if node.kind_id() == TSX_CALL_EXPRESSION
+                    || node.kind_id() == TSX_NEW_EXPRESSION
+                {
                     // Handled later
                     TraverseOption::SkipAndStopTraverse
                 } else {
@@ -391,7 +396,7 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
                     t.to_string()
                 })
                 .collect::<Vec<String>>();
-    
+
             let params = flat(new_expression, move |node| {
                 if node.kind_id() == TSX_PROPERTY_IDENTIFIER {
                     TraverseOption::KeepAndStopTraverse
@@ -428,14 +433,16 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
                     TraverseOption::SkipAndTraverse
                 }
             });
-            let fn_name: Vec<_> = fn_name_or_argument.iter()
+            let fn_name: Vec<_> = fn_name_or_argument
+                .iter()
                 .filter(|node| node.kind_id() == TSX_IDENTIFIER)
                 .map(|node| {
                     let t = &code[node.start_byte()..node.end_byte()];
                     t.to_string()
                 })
                 .collect();
-            let arguments: Vec<_> = fn_name_or_argument.iter()
+            let arguments: Vec<_> = fn_name_or_argument
+                .iter()
                 .filter(|node| node.kind_id() == TSX_ARGUMENTS)
                 .flat_map(|arguments| {
                     let argument_identifiers = flat(*arguments, move |node| {
@@ -456,7 +463,8 @@ fn handle_function_declaration(node: Node<'_>, code: &str, nodes: &mut Vec<CodeT
         })
         .collect();
 
-    let identifiers = identifiers.into_iter()
+    let identifiers = identifiers
+        .into_iter()
         .chain(other_identifiers)
         .chain(call_expressions)
         .collect();
@@ -623,10 +631,7 @@ export default function MyComponent({ children, todo }) {
                     comments: vec!["Another comment".to_string()],
                     params: vec![],
                     jsx: vec![],
-                    identifiers: vec![
-                        "console".to_string(),
-                        "console".to_string(),
-                    ]
+                    identifiers: vec!["console".to_string(), "console".to_string(),]
                 }),
                 CodeToken::FunctionDeclaration(FunctionDeclaration {
                     name: "MyComponent".to_string(),
@@ -636,7 +641,11 @@ export default function MyComponent({ children, todo }) {
                         tag: "div".to_string(),
                         attribute_keys: vec!["id".to_string()]
                     }],
-                    identifiers: vec!["state".to_string(), "setState".to_string(), "useState".to_string()]
+                    identifiers: vec![
+                        "state".to_string(),
+                        "setState".to_string(),
+                        "useState".to_string()
+                    ]
                 })
             ]
         );
@@ -662,31 +671,24 @@ export default function RootLayout({ children }) {
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::Comment(
-                "In Next.js, this file would be called: app/layout.jsx".to_string(),
-            ),
-            CodeToken::Imported(
-                ImportedTokens {
+        assert_eq!(
+            output,
+            vec![
+                CodeToken::Comment(
+                    "In Next.js, this file would be called: app/layout.jsx".to_string(),
+                ),
+                CodeToken::Imported(ImportedTokens {
                     package: "./providers".to_string(),
-                    identifiers: vec![
-                        "Providers".to_string(),
-                    ],
-                },
-            ),
-            CodeToken::FunctionDeclaration(
-                FunctionDeclaration {
-                    name:"RootLayout".to_string(),
+                    identifiers: vec!["Providers".to_string(),],
+                },),
+                CodeToken::FunctionDeclaration(FunctionDeclaration {
+                    name: "RootLayout".to_string(),
                     comments: vec![],
-                    params: vec![
-                        "children".to_string(),
-                    ],
+                    params: vec!["children".to_string(),],
                     jsx: vec![
                         JsxElement {
                             tag: "html".to_string(),
-                            attribute_keys: vec![
-                                "lang".to_string(),
-                            ],
+                            attribute_keys: vec!["lang".to_string(),],
                         },
                         JsxElement {
                             tag: "head".to_string(),
@@ -702,9 +704,9 @@ export default function RootLayout({ children }) {
                         },
                     ],
                     identifiers: vec![],
-                },
-            ),
-        ]);
+                },),
+            ]
+        );
     }
 
     #[test]
@@ -723,22 +725,21 @@ function makeQueryClient() {
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::FunctionDeclaration(
-                FunctionDeclaration {
-                    name: "makeQueryClient".to_string(),
-                    comments: vec![],
-                    params: vec![],
-                    jsx: vec![],
-                    identifiers: vec![
-                        "QueryClient".to_string(),
-                        "defaultOptions".to_string(),
-                        "queries".to_string(),
-                        "staleTime".to_string(),
-                    ],
-                },
-            ),
-        ])
+        assert_eq!(
+            output,
+            vec![CodeToken::FunctionDeclaration(FunctionDeclaration {
+                name: "makeQueryClient".to_string(),
+                comments: vec![],
+                params: vec![],
+                jsx: vec![],
+                identifiers: vec![
+                    "QueryClient".to_string(),
+                    "defaultOptions".to_string(),
+                    "queries".to_string(),
+                    "staleTime".to_string(),
+                ],
+            },),]
+        )
     }
 
     #[test]
@@ -755,21 +756,20 @@ function getQueryClient() {
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::FunctionDeclaration(
-                FunctionDeclaration {
-                    name: "getQueryClient".to_string(),
-                    comments: vec![],
-                    params: vec![],
-                    jsx: vec![],
-                    identifiers: vec![
-                        "makeQueryClient".to_string(),
-                        "makeQueryClient".to_string(),
-                        "foo".to_string(),
-                    ],
-                },
-            ),
-        ]);
+        assert_eq!(
+            output,
+            vec![CodeToken::FunctionDeclaration(FunctionDeclaration {
+                name: "getQueryClient".to_string(),
+                comments: vec![],
+                params: vec![],
+                jsx: vec![],
+                identifiers: vec![
+                    "makeQueryClient".to_string(),
+                    "makeQueryClient".to_string(),
+                    "foo".to_string(),
+                ],
+            },),]
+        );
     }
 
     #[test]
@@ -784,13 +784,16 @@ const a = <th
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::GlobalIdentifier("a".to_string()),
-            CodeToken::GlobalIdentifier("th".to_string()),
-            CodeToken::GlobalIdentifier("header".to_string()),
-            CodeToken::GlobalIdentifier("header".to_string()),
-            CodeToken::GlobalIdentifier("header".to_string()),
-        ]);
+        assert_eq!(
+            output,
+            vec![
+                CodeToken::GlobalIdentifier("a".to_string()),
+                CodeToken::GlobalIdentifier("th".to_string()),
+                CodeToken::GlobalIdentifier("header".to_string()),
+                CodeToken::GlobalIdentifier("header".to_string()),
+                CodeToken::GlobalIdentifier("header".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -805,16 +808,17 @@ const a = <th
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::GlobalJsx(JsxElement {
+        assert_eq!(
+            output,
+            vec![CodeToken::GlobalJsx(JsxElement {
                 tag: "th".to_string(),
                 attribute_keys: vec![
                     "key".to_string(),
                     "colSpan".to_string(),
                     "style".to_string(),
                 ],
-            }),
-        ]);
+            }),]
+        );
     }
 
     #[test]
@@ -827,20 +831,19 @@ const a = <th
         let parser = NewParser::new();
         let output: Vec<CodeToken> = parser.parse(CodeLanguage::TSX, code).unwrap();
 
-        assert_eq!(output, vec![
-            CodeToken::GlobalJsx(JsxElement {
-                tag: "tr".to_string(),
-                attribute_keys: vec![
-                    "id".to_string(),
-                ],
-            }),
-            CodeToken::GlobalJsx(JsxElement {
-                tag: "th".to_string(),
-                attribute_keys: vec![
-                    "scope".to_string(),
-                ],
-            }),
-        ]);
+        assert_eq!(
+            output,
+            vec![
+                CodeToken::GlobalJsx(JsxElement {
+                    tag: "tr".to_string(),
+                    attribute_keys: vec!["id".to_string(),],
+                }),
+                CodeToken::GlobalJsx(JsxElement {
+                    tag: "th".to_string(),
+                    attribute_keys: vec!["scope".to_string(),],
+                }),
+            ]
+        );
     }
 
     #[test]
