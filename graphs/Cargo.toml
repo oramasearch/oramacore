@@ -1,0 +1,9 @@
+[package]
+name = "graphs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.215", features = ["derive"] }
+string_index = { path = "../string_index" }
+types = { path = "../types" }

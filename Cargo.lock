@@ -614,9 +614,9 @@ dependencies = [
 
 [[package]]
 name = "axum"
-version = "0.7.7"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "504e3947307ac8326a5437504c517c4b56716c9d98fac0028c2acc7ca47d70ae"
+checksum = "49c41b948da08fb481a94546cd874843adc1142278b0af4badf9b1b78599d68d"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -971,8 +971,8 @@ dependencies = [
 
 [[package]]
 name = "candle-core"
-version = "0.7.2"
-source = "git+https://github.com/EricLBuehler/candle.git?rev=11495ab#11495abeba0c1d27b680168edd0cd52189a7ca30"
+version = "0.8.0"
+source = "git+https://github.com/EricLBuehler/candle.git?rev=6be03dd#6be03dd112d42a71b64b51416c3d44dbd1362ef8"
 dependencies = [
  "byteorder",
  "candle-metal-kernels",
@@ -996,8 +996,8 @@ dependencies = [
 
 [[package]]
 name = "candle-metal-kernels"
-version = "0.7.2"
-source = "git+https://github.com/EricLBuehler/candle.git?rev=11495ab#11495abeba0c1d27b680168edd0cd52189a7ca30"
+version = "0.8.0"
+source = "git+https://github.com/EricLBuehler/candle.git?rev=6be03dd#6be03dd112d42a71b64b51416c3d44dbd1362ef8"
 dependencies = [
  "metal 0.27.0",
  "once_cell",
@@ -1007,8 +1007,8 @@ dependencies = [
 
 [[package]]
 name = "candle-nn"
-version = "0.7.2"
-source = "git+https://github.com/EricLBuehler/candle.git?rev=11495ab#11495abeba0c1d27b680168edd0cd52189a7ca30"
+version = "0.8.0"
+source = "git+https://github.com/EricLBuehler/candle.git?rev=6be03dd#6be03dd112d42a71b64b51416c3d44dbd1362ef8"
 dependencies = [
  "candle-core",
  "candle-metal-kernels",
@@ -2594,6 +2594,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "string_index",
+ "types",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3396,9 +3405,9 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 
 [[package]]
 name = "libc"
-version = "0.2.162"
+version = "0.2.163"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18d287de67fe55fd7e1581fe933d965a5a9477b38e949cfa9f8574ef01506398"
+checksum = "1fdaeca4cf44ed4ac623e86ef41f056e848dbeab7ec043ecb7326ba300b36fd0"
 
 [[package]]
 name = "libflate"
@@ -3853,7 +3862,7 @@ dependencies = [
 [[package]]
 name = "mistralrs"
 version = "0.3.2"
-source = "git+https://github.com/EricLBuehler/mistral.rs.git#ddc63f1e0433356789cd875c3e39df16df0d0a43"
+source = "git+https://github.com/EricLBuehler/mistral.rs.git#6c708006f6ec06f1bb30ea42fdf7b36ba9a5e416"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -3872,7 +3881,7 @@ dependencies = [
 [[package]]
 name = "mistralrs-core"
 version = "0.3.2"
-source = "git+https://github.com/EricLBuehler/mistral.rs.git#ddc63f1e0433356789cd875c3e39df16df0d0a43"
+source = "git+https://github.com/EricLBuehler/mistral.rs.git#6c708006f6ec06f1bb30ea42fdf7b36ba9a5e416"
 dependencies = [
  "akin",
  "anyhow",
@@ -3939,7 +3948,7 @@ dependencies = [
 [[package]]
 name = "mistralrs-quant"
 version = "0.3.2"
-source = "git+https://github.com/EricLBuehler/mistral.rs.git#ddc63f1e0433356789cd875c3e39df16df0d0a43"
+source = "git+https://github.com/EricLBuehler/mistral.rs.git#6c708006f6ec06f1bb30ea42fdf7b36ba9a5e416"
 dependencies = [
  "byteorder",
  "candle-core",
@@ -3958,7 +3967,7 @@ dependencies = [
 [[package]]
 name = "mistralrs-vision"
 version = "0.3.2"
-source = "git+https://github.com/EricLBuehler/mistral.rs.git#ddc63f1e0433356789cd875c3e39df16df0d0a43"
+source = "git+https://github.com/EricLBuehler/mistral.rs.git#6c708006f6ec06f1bb30ea42fdf7b36ba9a5e416"
 dependencies = [
  "candle-core",
  "image",

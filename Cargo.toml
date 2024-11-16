@@ -16,4 +16,5 @@ members = [
     "code_index",
     "utils",
     "llm",
+    "graphs"
 ]
