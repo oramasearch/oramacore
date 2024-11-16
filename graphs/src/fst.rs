@@ -1,186 +1,200 @@
-use serde::{Deserialize, Serialize};
+use dashmap::DashMap;
+use std::{mem::size_of, sync::Arc};
 use string_index::Posting;
-use types::{DocumentId, FieldId};
 
-#[derive(Serialize, Deserialize)]
-struct Transition {
-    input: char,
-    output: Option<Posting>,
-    next_state: usize,
+const MAX_TRANSITIONS: usize = 32;
+const CACHE_LINE: usize = 64;
+
+#[repr(C, align(64))]
+#[derive(Clone)]
+struct TransitionBlock {
+    count: u16,
+    _pad1: [u8; 2],
+    chars: [u8; MAX_TRANSITIONS],
+    _pad2: [u8; 28],
+    next_states: [u32; MAX_TRANSITIONS],
+    posting_ids: [u32; MAX_TRANSITIONS],
 }
 
-#[derive(Serialize, Deserialize)]
-struct State {
-    transitions: Vec<Transition>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct FST {
-    states: Vec<State>,
-}
-
-impl FST {
-    pub fn new() -> Self {
+impl TransitionBlock {
+    #[inline(always)]
+    fn new() -> Self {
         Self {
-            states: vec![State {
-                transitions: Vec::new(),
-            }],
+            count: 0,
+            _pad1: [0; 2],
+            chars: [0; MAX_TRANSITIONS],
+            _pad2: [0; 28],
+            next_states: [0; MAX_TRANSITIONS],
+            posting_ids: [0; MAX_TRANSITIONS],
         }
     }
 
-    pub fn insert(&mut self, word: &str, posting: Posting) {
-        let mut current_state = 0;
-        let chars: Vec<char> = word.chars().collect();
-
-        for (i, &c) in chars.iter().enumerate() {
-            let mut next_state = None;
-
-            if let Some(transition) = self.states[current_state]
-                .transitions
-                .iter()
-                .find(|t| t.input == c)
-            {
-                next_state = Some(transition.next_state);
+    #[inline(always)]
+    fn find_char(&self, b: u8) -> Option<usize> {
+        if self.count <= 4 {
+            if self.count >= 1 && self.chars[0] == b {
+                return Some(0);
             }
-
-            let next_state = match next_state {
-                Some(state) => state,
-                None => {
-                    let new_state = self.add_state();
-                    self.states[current_state].transitions.push(Transition {
-                        input: c,
-                        output: None,
-                        next_state: new_state,
-                    });
-                    new_state
-                }
-            };
-
-            if i == chars.len() - 1 {
-                self.states[current_state]
-                    .transitions
-                    .retain(|t| t.input != c);
-                self.states[current_state].transitions.push(Transition {
-                    input: c,
-                    output: Some(posting.clone()),
-                    next_state,
-                });
+            if self.count >= 2 && self.chars[1] == b {
+                return Some(1);
             }
-
-            current_state = next_state;
+            if self.count >= 3 && self.chars[2] == b {
+                return Some(2);
+            }
+            if self.count >= 4 && self.chars[3] == b {
+                return Some(3);
+            }
+            return None;
         }
 
-        if word.is_empty() {
-            self.states[0].transitions.push(Transition {
-                input: '\0',
-                output: Some(posting),
-                next_state: 0,
-            });
-        }
-    }
-
-    pub fn search(&self, input: &str) -> Option<Posting> {
-        let mut current_state = 0;
-        let chars: Vec<char> = input.chars().collect();
-
-        if input.is_empty() {
-            return self.states[0]
-                .transitions
-                .iter()
-                .find(|t| t.input == '\0')
-                .and_then(|t| t.output.clone());
-        }
-
-        for (i, &c) in chars.iter().enumerate() {
-            if let Some(transition) = self.states[current_state]
-                .transitions
-                .iter()
-                .find(|t| t.input == c)
-            {
-                if i == chars.len() - 1 {
-                    return transition.output.clone();
-                }
-                current_state = transition.next_state;
-            } else {
-                return None;
+        for i in 0..self.count as usize {
+            if self.chars[i] == b {
+                return Some(i);
             }
         }
         None
     }
 
-    fn add_state(&mut self) -> usize {
-        self.states.push(State {
-            transitions: Vec::new(),
-        });
-        self.states.len() - 1
+    #[inline(always)]
+    fn add_transition(&mut self, b: u8, next_state: u32) -> usize {
+        debug_assert!(self.count < MAX_TRANSITIONS as u16);
+        let pos = self.count as usize;
+        self.chars[pos] = b;
+        self.next_states[pos] = next_state;
+        self.count += 1;
+        pos
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct FST {
+    transitions: Vec<TransitionBlock>,
+    postings: Box<DashMap<u32, Arc<Posting>>>,
+    free_blocks: Vec<u32>,
+}
 
-    fn create_test_posting(
-        document_id: u32,
-        field_id: u32,
-        positions: Vec<usize>,
-        term_frequency: f32,
-        doc_length: u16,
-    ) -> Posting {
-        Posting {
-            document_id: DocumentId(document_id as u64),
-            field_id: FieldId(field_id as u16),
-            positions,
-            term_frequency,
-            doc_length,
+impl FST {
+    pub fn new() -> Self {
+        let mut transitions = Vec::with_capacity(1_000_000);
+        transitions.push(TransitionBlock::new());
+
+        Self {
+            transitions,
+            postings: Box::new(DashMap::with_capacity_and_shard_amount(1_000_000, 32)),
+            free_blocks: Vec::with_capacity(10_000),
         }
     }
 
-    #[test]
-    fn test_insert_and_search_posting() {
-        let mut fst = FST::new();
-        let pst = create_test_posting(1, 101, vec![3, 10, 42], 2.5, 120);
+    #[inline]
+    pub fn insert(&mut self, word: &str, posting: Posting) -> u32 {
+        let bytes = word.as_bytes();
+        if bytes.is_empty() {
+            return 0;
+        }
 
-        fst.insert("example", pst.clone());
-        let result = fst.search("example");
-        assert!(result.is_some());
-        let found_posting = result.unwrap();
-        assert_eq!(found_posting.document_id, pst.document_id);
-        assert_eq!(found_posting.field_id, pst.field_id);
-        assert_eq!(found_posting.positions, pst.positions);
-        assert_eq!(found_posting.term_frequency, pst.term_frequency);
-        assert_eq!(found_posting.doc_length, pst.doc_length);
+        let posting_id = self.store_posting(posting);
+        let mut current_block = 0;
+
+        if bytes.len() == 1 {
+            let block = &mut self.transitions[current_block];
+            let pos = if let Some(pos) = block.find_char(bytes[0]) {
+                pos
+            } else {
+                block.add_transition(bytes[0], 0)
+            };
+            block.posting_ids[pos] = posting_id;
+            return posting_id;
+        }
+
+        let last_idx = bytes.len() - 1;
+        for (i, &b) in bytes[..last_idx].iter().enumerate() {
+            let block = &self.transitions[current_block];
+            let (next_block, create_new) = if let Some(pos) = block.find_char(b) {
+                (block.next_states[pos] as usize, false)
+            } else {
+                (self.allocate_block(), true)
+            };
+
+            if create_new {
+                let block = &mut self.transitions[current_block];
+                block.add_transition(b, next_block as u32);
+            }
+
+            current_block = next_block;
+        }
+
+        let b = bytes[last_idx];
+        let block = &mut self.transitions[current_block];
+        let pos = if let Some(pos) = block.find_char(b) {
+            pos
+        } else {
+            block.add_transition(b, 0)
+        };
+        block.posting_ids[pos] = posting_id;
+
+        posting_id
     }
 
-    #[test]
-    fn test_search_nonexistent_word() {
-        let mut fst = FST::new();
-        let posting = create_test_posting(2, 102, vec![5, 15, 25], 1.8, 100);
+    #[inline]
+    pub fn search(&self, word: &str) -> Option<Arc<Posting>> {
+        let bytes = word.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
 
-        fst.insert("word", posting);
-        let result = fst.search("nonexistent");
-        assert!(result.is_none());
+        if bytes.len() == 1 {
+            let block = &self.transitions[0];
+            let pos = block.find_char(bytes[0])?;
+            return self
+                .postings
+                .get(&block.posting_ids[pos])
+                .map(|p| Arc::clone(&p));
+        }
+
+        let mut current_block = 0;
+        let last_idx = bytes.len() - 1;
+
+        for &b in &bytes[..last_idx] {
+            let block = &self.transitions[current_block];
+            let pos = block.find_char(b)?;
+            current_block = block.next_states[pos] as usize;
+        }
+
+        let block = &self.transitions[current_block];
+        let pos = block.find_char(bytes[last_idx])?;
+        self.postings
+            .get(&block.posting_ids[pos])
+            .map(|p| Arc::clone(&p))
     }
 
-    #[test]
-    fn test_insert_with_overlapping_prefixes() {
-        let mut fst = FST::new();
-        let posting1 = create_test_posting(3, 103, vec![1, 2, 3], 3.0, 80);
-        let posting2 = create_test_posting(4, 104, vec![4, 5, 6], 2.0, 90);
+    #[inline]
+    pub fn batch_insert(&mut self, entries: Vec<(&str, Posting)>) {
+        self.transitions
+            .reserve(entries.iter().map(|(w, _)| w.len()).sum());
 
-        fst.insert("test", posting1.clone());
-        fst.insert("testing", posting2.clone());
+        let mut entries = entries;
+        entries.sort_unstable_by_key(|(w, _)| w.len());
 
-        let result1 = fst.search("test");
-        let result2 = fst.search("testing");
+        for (word, posting) in entries {
+            self.insert(word, posting);
+        }
+    }
 
-        assert!(result1.is_some());
-        assert!(result2.is_some());
+    #[inline(always)]
+    fn allocate_block(&mut self) -> usize {
+        self.free_blocks
+            .pop()
+            .map(|id| id as usize)
+            .unwrap_or_else(|| {
+                let id = self.transitions.len();
+                self.transitions.push(TransitionBlock::new());
+                id
+            })
+    }
 
-        let found_posting1 = result1.unwrap();
-        let found_posting2 = result2.unwrap();
-
-        assert_eq!(found_posting1.document_id, posting1.document_id);
-        assert_eq!(found_posting2.document_id, posting2.document_id);
+    #[inline(always)]
+    fn store_posting(&mut self, posting: Posting) -> u32 {
+        let id = self.postings.len() as u32;
+        self.postings.insert(id, Arc::new(posting));
+        id
     }
 }

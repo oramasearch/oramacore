@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+criterion = "0.5.1"
 serde = { version = "1.0.215", features = ["derive"] }
 string_index = { path = "../string_index" }
 types = { path = "../types" }
+dashmap = "6.1.0"
+memmap2 = "0.9.5"
+
+[[bench]]
+name = "fst_bench"
+harness = false
+path = "benches/fst_bench.rs"
