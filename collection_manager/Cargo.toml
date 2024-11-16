@@ -19,7 +19,7 @@ vector_index = { path = "../vector_index" }
 embeddings = { path = "../embeddings" }
 code_parser = { path = "../code_parser" }
 ordered-float = "4.4.0"
-fastembed = "4.1.0"
+fastembed = { git = "https://github.com/micheleriva/fastembed-rs" }
 
 [dev-dependencies]
 tempdir = "0.3.7"

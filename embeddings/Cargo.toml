@@ -22,7 +22,7 @@ path = "./src/bin/selector.rs"
 [dependencies]
 anyhow = "1.0.92"
 types = { path = "../types" }
-fastembed = { version = "4.1.0", features = ["ort-download-binaries"] }
+fastembed = { git = "https://github.com/micheleriva/fastembed-rs" , features = ["ort-download-binaries"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1"
 strum = { version = "0.26", features = ["derive"] }

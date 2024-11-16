@@ -13,8 +13,8 @@ WORKDIR /app
 
 COPY . .
 
+EXPOSE 8080
+
 RUN cargo build --release
 
-WORKDIR /app/rustorama
-
-CMD ["cargo", "run", "--release"]
+CMD ["./target/release/rustorama"]
