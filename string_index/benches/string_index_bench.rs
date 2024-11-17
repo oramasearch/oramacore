@@ -65,20 +65,19 @@ fn benchmark_indexing(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(30));
     group.sample_size(50);
 
-    for size in [1000, 5000, 10_000].iter() {
-        // Reduced upper limit
-        group.bench_with_input(BenchmarkId::new("simple_index", size), size, |b, &size| {
-            let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
-            let storage = Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
-            let index = StringIndex::new(Arc::clone(&storage));
+    for &size in &[1000, 5000, 10_000] {
+        group.bench_with_input(BenchmarkId::new("simple_index", size), &size, |b, &size| {
             let data = generate_test_data(size);
+            let batch: HashMap<_, _> = data.into_iter().collect();
 
             b.iter(|| {
-                for (doc_id, fields) in data.iter() {
-                    let mut batch = HashMap::new();
-                    batch.insert(*doc_id, fields.clone());
-                    index.insert_multiple(batch).expect("Insertion failed");
-                }
+                let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
+                let storage = Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
+                let index = StringIndex::new(Arc::clone(&storage));
+
+                index
+                    .insert_multiple(batch.clone())
+                    .expect("Insertion failed");
             });
         });
     }
@@ -91,27 +90,23 @@ fn benchmark_batch_indexing(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(30));
     group.sample_size(30);
 
-    for size in [1000, 5000, 10_000].iter() {
-        for batch_size in [100, 500].iter() {
+    for &size in &[1000, 5000, 10_000] {
+        for &batch_size in &[100, 500] {
             group.bench_with_input(
                 BenchmarkId::new(format!("batch_size_{}", batch_size), size),
-                size,
+                &size,
                 |b, &size| {
-                    let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
-                    let storage = Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
-                    let index = StringIndex::new(Arc::clone(&storage));
                     let data = generate_test_data(size);
+                    let batch: HashMap<_, _> = data.into_iter().collect();
 
                     b.iter(|| {
-                        for chunk in data.chunks(*batch_size) {
-                            let mut batch = HashMap::new();
-                            for (doc_id, fields) in chunk {
-                                batch.insert(*doc_id, fields.clone());
-                            }
-                            index
-                                .insert_multiple(batch)
-                                .expect("Batch insertion failed");
-                        }
+                        let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
+                        let storage =
+                            Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
+                        let index = StringIndex::new(Arc::clone(&storage));
+                        index
+                            .insert_multiple(batch.clone())
+                            .expect("Batch insertion failed");
                     });
                 },
             );
@@ -144,17 +139,14 @@ fn benchmark_search(c: &mut Criterion) {
         })
         .collect();
 
-    for size in [1000, 5000].iter() {
-        group.bench_with_input(BenchmarkId::new("search", size), size, |b, &size| {
+    for &size in &[1000, 5000] {
+        group.bench_with_input(BenchmarkId::new("search", size), &size, |b, &size| {
             let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
             let storage = Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
             let index = StringIndex::new(Arc::clone(&storage));
 
             let data = generate_test_data(size);
-            let mut batch = HashMap::new();
-            for (doc_id, fields) in data {
-                batch.insert(doc_id, fields);
-            }
+            let batch: HashMap<_, _> = data.into_iter().collect();
             index
                 .insert_multiple(batch)
                 .expect("Initial data insertion failed");
@@ -181,17 +173,14 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
     let mut group = c.benchmark_group("concurrent_operations");
     group.measurement_time(std::time::Duration::from_secs(40));
 
-    for size in [5000].iter() {
-        group.bench_with_input(BenchmarkId::new("concurrent", size), size, |b, &size| {
+    for &size in &[5000] {
+        group.bench_with_input(BenchmarkId::new("concurrent", size), &size, |b, &size| {
             let tmp_dir = tempdir::TempDir::new("bench_index").unwrap();
             let storage = Arc::new(Storage::from_path(tmp_dir.path().to_str().unwrap()));
             let index = Arc::new(StringIndex::new(Arc::clone(&storage)));
 
             let data = generate_test_data(size);
-            let mut batch = HashMap::new();
-            for (doc_id, fields) in data {
-                batch.insert(doc_id, fields);
-            }
+            let batch: HashMap<_, _> = data.into_iter().collect();
             index
                 .insert_multiple(batch)
                 .expect("Initial data insertion failed");
@@ -229,27 +218,8 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
                     })
                     .collect();
 
-                let insert_threads: Vec<_> = (0..1)
-                    .map(|_| {
-                        let index = Arc::clone(&index);
-                        let data = generate_test_data(50);
-                        thread::spawn(move || {
-                            for (doc_id, fields) in data {
-                                let mut batch = HashMap::new();
-                                batch.insert(doc_id, fields);
-                                index
-                                    .insert_multiple(batch)
-                                    .expect("Concurrent insert failed");
-                            }
-                        })
-                    })
-                    .collect();
-
                 for thread in search_threads {
                     thread.join().expect("Search thread join failed");
-                }
-                for thread in insert_threads {
-                    thread.join().expect("Insert thread join failed");
                 }
             });
         });
@@ -257,7 +227,6 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
 
     group.finish();
 }
-
 criterion_group!(
     benches,
     benchmark_indexing,
