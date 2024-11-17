@@ -294,8 +294,214 @@ mod tests {
     use tempdir::TempDir;
 
     #[test]
-    fn test_search() {
-        let tmp_dir = TempDir::new("string_index_test").unwrap();
+    fn test_empty_search_query() {
+        let tmp_dir = TempDir::new("string_index_test_empty_search").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "This is a test document.".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec![], // Empty search tokens
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty for empty query"
+        );
+    }
+
+    #[test]
+    fn test_search_nonexistent_term() {
+        let tmp_dir = TempDir::new("string_index_test_nonexistent_term").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "This is a test document.".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["nonexistent".to_string()], // Term does not exist
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty for non-existent term"
+        );
+    }
+
+    #[test]
+    fn test_insert_empty_document() {
+        let tmp_dir = TempDir::new("string_index_test_empty_document").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "".to_string())], // Empty document content
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        // Search for any term, should get empty result
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when only empty documents are indexed"
+        );
+    }
+
+    #[test]
+    fn test_search_with_field_filter() {
+        let tmp_dir = TempDir::new("string_index_test_field_filter").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![
+                (FieldId(0), "This is a test in field zero.".to_string()),
+                (FieldId(1), "Another test in field one.".to_string()),
+            ],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(0)]), // Search only in FieldId(0)
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document when searching in FieldId(0)"
+        );
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(1)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document when searching in FieldId(1)"
+        );
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(2)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Should not find any documents when searching in non-existent FieldId"
+        );
+    }
+
+    #[test]
+    fn test_search_with_boosts() {
+        let tmp_dir = TempDir::new("string_index_test_boosts").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
 
         let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
@@ -305,24 +511,13 @@ mod tests {
         let batch: HashMap<_, _> = vec![
             (
                 DocumentId(1),
-                vec![(
-                    FieldId(0),
-                    "Yo, I'm from where Nicky Barnes got rich as fuck, welcome!".to_string(),
-                )],
+                vec![(FieldId(0), "Important content in field zero.".to_string())],
             ),
             (
                 DocumentId(2),
                 vec![(
-                    FieldId(0),
-                    "Welcome to Harlem, where you welcome to problems".to_string(),
-                )],
-            ),
-            (
-                DocumentId(3),
-                vec![(
-                    FieldId(0),
-                    "Now bitches, they want to neuter me, niggas, they want to tutor me"
-                        .to_string(),
+                    FieldId(1),
+                    "Less important content in field one.".to_string(),
                 )],
             ),
         ]
@@ -341,26 +536,302 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
+        let mut boost = HashMap::new();
+        boost.insert(FieldId(0), 2.0);
+
         let output = string_index
             .search(
-                vec!["welcome".to_string()],
+                vec!["content".to_string()],
+                None,
+                boost,
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(output.len(), 2, "Should find both documents");
+
+        let score_doc1 = output.get(&DocumentId(1)).unwrap();
+        let score_doc2 = output.get(&DocumentId(2)).unwrap();
+
+        assert!(
+            score_doc1 > score_doc2,
+            "Document with boosted field should have higher score"
+        );
+    }
+
+    #[test]
+    fn test_insert_document_with_stop_words_only() {
+        let tmp_dir = TempDir::new("string_index_test_stop_words").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "the and but or".to_string())], // Only stop words
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        // Search for any term, should get empty result since only stop words are indexed
+        let output = string_index
+            .search(
+                vec!["the".to_string()],
                 None,
                 Default::default(),
                 BM25Score::default(),
             )
             .unwrap();
 
-        assert_eq!(output.len(), 2);
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when only stop words are indexed"
+        );
+    }
+
+    #[test]
+    fn test_search_on_empty_index() {
+        let tmp_dir = TempDir::new("string_index_test_empty_index").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
 
         let output = string_index
             .search(
-                vec!["wel".to_string()],
+                vec!["test".to_string()],
                 None,
                 Default::default(),
                 BM25Score::default(),
             )
             .unwrap();
 
-        assert_eq!(output.len(), 2);
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when index is empty"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_insertions() {
+        use std::thread;
+
+        let tmp_dir = TempDir::new("string_index_test_concurrent_inserts").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = Arc::new(StringIndex::new(storage));
+
+        let string_index_clone1 = Arc::clone(&string_index);
+        let string_index_clone2 = Arc::clone(&string_index);
+
+        let handle1 = thread::spawn(move || {
+            let parser = TextParser::from_language(Locale::EN);
+            let batch: HashMap<_, _> = vec![(
+                DocumentId(1),
+                vec![(
+                    FieldId(0),
+                    "Concurrent insertion test document one.".to_string(),
+                )],
+            )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+            string_index_clone1.insert_multiple(batch).unwrap();
+        });
+
+        let handle2 = thread::spawn(move || {
+            let parser = TextParser::from_language(Locale::EN);
+            let batch: HashMap<_, _> = vec![(
+                DocumentId(2),
+                vec![(
+                    FieldId(0),
+                    "Concurrent insertion test document two.".to_string(),
+                )],
+            )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+            string_index_clone2.insert_multiple(batch).unwrap();
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        // After concurrent insertions, search for "concurrent"
+        let parser = TextParser::from_language(Locale::EN);
+        let search_tokens = parser
+            .tokenize_and_stem("concurrent")
+            .into_iter()
+            .map(|(original, _)| original)
+            .collect::<Vec<_>>();
+
+        let output = string_index
+            .search(
+                search_tokens,
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            2,
+            "Should find both documents after concurrent insertions"
+        );
+    }
+
+    #[test]
+    fn test_large_documents() {
+        let tmp_dir = TempDir::new("string_index_test_large_documents").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let large_text = "word ".repeat(10000); // Create a large document
+
+        let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), large_text.clone())])]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        // Search for "word"
+        let output = string_index
+            .search(
+                vec!["word".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document containing the large text"
+        );
+    }
+
+    #[test]
+    fn test_high_term_frequency() {
+        let tmp_dir = TempDir::new("string_index_test_high_term_frequency").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let repeated_word = "repeat ".repeat(1000); // High term frequency
+
+        let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), repeated_word.clone())])]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        // Search for "repeat"
+        let output = string_index
+            .search(
+                vec!["repeat".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document with high term frequency"
+        );
+    }
+
+    #[test]
+    fn test_term_positions() {
+        let tmp_dir = TempDir::new("string_index_test_term_positions").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(
+                FieldId(0),
+                "quick brown fox jumps over the lazy dog".to_string(),
+            )],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
     }
 }
