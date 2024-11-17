@@ -64,25 +64,31 @@ impl StringIndex {
     }
 
     fn build_fst(&self) -> Result<Map<Vec<u8>>> {
-        let temp_map = self.temp_map.read().unwrap();
+        let entries: Vec<_> = {
+            let temp_map = self.temp_map.read().unwrap();
+            temp_map
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
+                    )
+                })
+                .collect()
+        };
 
-        let mut entries: Vec<_> = temp_map
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
-                )
-            })
-            .collect();
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let mut sorted_entries = entries;
+        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         let mut builder = MapBuilder::memory();
-        for (key, value) in entries {
-            builder.insert(key, value)?;
+
+        for (key, value) in sorted_entries {
+            builder.insert(key.as_bytes(), value)?;
         }
 
-        Ok(builder.into_map())
+        let fst = builder.into_map();
+
+        Ok(fst)
     }
 
     pub fn get_total_documents(&self) -> usize {
@@ -98,78 +104,66 @@ impl StringIndex {
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
-                println!("total_documents == 0");
                 return Ok(Default::default());
             }
             total_documents => total_documents,
         };
+
         let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
-                println!("total_document_length == 0");
                 return Ok(Default::default());
             }
             total_document_length => total_document_length,
         };
 
-        let mut posting_list_ids_with_freq = Vec::new();
+        let mut all_postings = Vec::new();
 
         if let Some(fst) = self.fst_map.read().unwrap().as_ref() {
-            for token in tokens {
-                let automaton = fst::automaton::Str::new(&token).starts_with();
+            for token in &tokens {
+                let automaton = fst::automaton::Str::new(token).starts_with();
                 let mut stream = fst.search(automaton).into_stream();
 
                 while let Some(result) = stream.next() {
                     let (_, packed_value) = result;
-                    let posting_list_id = PostingListId((packed_value >> 32).try_into().unwrap());
-                    let term_frequency = packed_value & 0xFFFFFFFF;
+                    let posting_list_id = PostingListId(((packed_value >> 32) as u32) as usize);
+                    let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
 
-                    posting_list_ids_with_freq.push(StringIndexValue {
-                        posting_list_id: PostingListId(posting_list_id.0),
-                        term_frequency: term_frequency as usize,
-                    });
+                    match self.posting_storage.get(posting_list_id) {
+                        Ok(postings) => {
+                            all_postings.push((postings, term_frequency));
+                        }
+                        Err(e) => {}
+                    }
                 }
             }
         }
 
         let fields = search_on.as_ref();
-
         let global_info = GlobalInfo {
             total_documents,
             total_document_length,
         };
 
-        posting_list_ids_with_freq
-            .into_par_iter()
-            .filter_map(|string_index_value| {
-                let output = self
-                    .posting_storage
-                    .get(string_index_value.posting_list_id)
-                    .ok();
-                let posting = match output {
-                    Some(v) => v,
-                    None => return None,
-                };
-
-                let posting: Vec<_> = posting
-                    .into_iter()
-                    .filter(move |posting| {
-                        fields
-                            .map(|search_on| search_on.contains(&posting.field_id))
-                            .unwrap_or(true)
-                    })
-                    .collect();
-
-                Some((posting, string_index_value.term_frequency))
-            })
-            .for_each(|(postings, total_token_count)| {
-                let total_token_count = total_token_count as f32;
-                for posting in postings {
-                    let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                    scorer.add_entry(&global_info, posting, total_token_count, boost_per_field);
+        let mut filtered_postings = Vec::new();
+        for (postings, term_freq) in all_postings {
+            for posting in postings {
+                if fields
+                    .map(|search_on| search_on.contains(&posting.field_id))
+                    .unwrap_or(true)
+                {
+                    filtered_postings.push((posting, term_freq));
                 }
-            });
+            }
+        }
 
-        Ok(scorer.get_scores())
+        for (posting, term_freq) in filtered_postings {
+            let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+            scorer.add_entry(&global_info, posting, term_freq as f32, boost_per_field);
+        }
+
+        let scores = scorer.get_scores();
+
+        Ok(scores)
     }
 
     pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
@@ -242,7 +236,6 @@ impl StringIndex {
 
         let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
             HashMap::with_capacity(posting_per_term.len());
-
         let mut temp_map = self.temp_map.write().unwrap();
 
         for (term_id, postings) in posting_per_term {
@@ -277,13 +270,17 @@ impl StringIndex {
             }
         }
 
+        drop(temp_map);
         let new_fst = self.build_fst()?;
-        *self.fst_map.write().unwrap() = Some(new_fst);
 
-        postings_per_posting_list_id
-            .into_par_iter()
-            .map(|(k, v)| self.posting_storage.add_or_create(k, v))
-            .all(|_| true);
+        {
+            let mut fst_map = self.fst_map.write().unwrap();
+            *fst_map = Some(new_fst);
+        }
+
+        for (k, v) in postings_per_posting_list_id {
+            self.posting_storage.add_or_create(k, v)?;
+        }
 
         Ok(())
     }
@@ -300,6 +297,7 @@ mod tests {
     fn test_search() {
         let tmp_dir = TempDir::new("string_index_test").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
         let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);

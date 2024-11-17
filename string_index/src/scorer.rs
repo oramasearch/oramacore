@@ -54,32 +54,33 @@ pub mod bm25 {
         #[inline]
         fn add_entry(
             &self,
-            _global_info: &crate::GlobalInfo,
+            global_info: &crate::GlobalInfo,
             posting: crate::Posting,
-            _total_token_count: f32,
-            _boost_per_field: f32,
+            total_token_count: f32,
+            boost_per_field: f32,
         ) {
             let term_frequency = posting.term_frequency;
             let doc_length = posting.doc_length as f32;
-            let freq = 1.0;
+            let total_documents = global_info.total_documents as f32;
+            let avg_doc_length = global_info.total_document_length as f32 / total_documents;
 
-            let total_documents = 1.0;
-            let avg_doc_length = total_documents / 1.0;
-
-            let idf = ((total_documents - freq + 0.5_f32) / (freq + 0.5_f32)).ln_1p();
+            let idf =
+                ((total_documents - total_token_count + 0.5) / (total_token_count + 0.5)).ln_1p();
             let score = Self::calculate_score(
                 term_frequency,
                 idf,
                 doc_length,
                 avg_doc_length,
-                _boost_per_field,
+                boost_per_field,
             );
 
-            let mut previous = self.scores.entry(posting.document_id).or_insert(0.0);
-            *previous += score;
+            self.scores
+                .entry(posting.document_id)
+                .and_modify(|e| *e += score)
+                .or_insert(score);
         }
 
-        fn get_scores(self) -> HashMap<types::DocumentId, f32> {
+        fn get_scores(self) -> HashMap<DocumentId, f32> {
             self.scores.into_iter().collect()
         }
     }
