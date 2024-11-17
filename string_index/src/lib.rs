@@ -8,9 +8,8 @@ use std::{
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
+use fst::{Automaton, IntoStreamer, Map, MapBuilder, Streamer};
 use posting_storage::{PostingListId, PostingStorage};
-// use radix_trie::Trie;
-use ptrie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
@@ -32,14 +31,15 @@ pub struct Posting {
     pub doc_length: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StringIndexValue {
-    posting_list_id: PostingListId,
-    term_frequency: usize,
+    pub posting_list_id: PostingListId,
+    pub term_frequency: usize,
 }
 
 pub struct StringIndex {
-    tree: RwLock<Trie<u8, StringIndexValue>>,
+    fst_map: RwLock<Option<Map<Vec<u8>>>>,
+    temp_map: RwLock<HashMap<String, StringIndexValue>>,
     posting_storage: PostingStorage,
     dictionary: Dictionary,
     total_documents: AtomicUsize,
@@ -54,12 +54,35 @@ pub struct GlobalInfo {
 impl StringIndex {
     pub fn new(storage: Arc<Storage>) -> Self {
         StringIndex {
-            tree: RwLock::new(Trie::new()),
+            fst_map: RwLock::new(None),
+            temp_map: RwLock::new(HashMap::new()),
             posting_storage: PostingStorage::new(storage),
             dictionary: Dictionary::new(),
             total_documents: AtomicUsize::new(0),
             total_document_length: AtomicUsize::new(0),
         }
+    }
+
+    fn build_fst(&self) -> Result<Map<Vec<u8>>> {
+        let temp_map = self.temp_map.read().unwrap();
+
+        let mut entries: Vec<_> = temp_map
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
+                )
+            })
+            .collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let mut builder = MapBuilder::memory();
+        for (key, value) in entries {
+            builder.insert(key, value)?;
+        }
+
+        Ok(builder.into_map())
     }
 
     pub fn get_total_documents(&self) -> usize {
@@ -88,17 +111,24 @@ impl StringIndex {
             total_document_length => total_document_length,
         };
 
-        // let avg_doc_length = total_document_length / total_documents;
+        let mut posting_list_ids_with_freq = Vec::new();
 
-        let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
-        let tree = self
-            .tree
-            .read()
-            // TODO: better error handling
-            .expect("Unable to read");
-        for token in tokens {
-            let a = tree.find_postfixes(token.bytes());
-            posting_list_ids_with_freq.extend(a.into_iter().cloned());
+        if let Some(fst) = self.fst_map.read().unwrap().as_ref() {
+            for token in tokens {
+                let automaton = fst::automaton::Str::new(&token).starts_with();
+                let mut stream = fst.search(automaton).into_stream();
+
+                while let Some(result) = stream.next() {
+                    let (_, packed_value) = result;
+                    let posting_list_id = PostingListId((packed_value >> 32).try_into().unwrap());
+                    let term_frequency = packed_value & 0xFFFFFFFF;
+
+                    posting_list_ids_with_freq.push(StringIndexValue {
+                        posting_list_id: PostingListId(posting_list_id.0),
+                        term_frequency: term_frequency as usize,
+                    });
+                }
+            }
         }
 
         let fields = search_on.as_ref();
@@ -131,7 +161,6 @@ impl StringIndex {
 
                 Some((posting, string_index_value.term_frequency))
             })
-            // Every thread perform on a separated hashmap
             .for_each(|(postings, total_token_count)| {
                 let total_token_count = total_token_count as f32;
                 for posting in postings {
@@ -140,9 +169,7 @@ impl StringIndex {
                 }
             });
 
-        let scores = scorer.get_scores();
-
-        Ok(scores)
+        Ok(scorer.get_scores())
     }
 
     pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
@@ -151,9 +178,8 @@ impl StringIndex {
 
         let dictionary = &self.dictionary;
 
-        let t = data
+        let posting_per_term = data
             .into_par_iter()
-            // Parallel
             .fold(
                 HashMap::<TermId, Vec<Posting>>::new,
                 |mut acc, (document_id, strings)| {
@@ -185,8 +211,6 @@ impl StringIndex {
 
                         for (term, field_positions) in term_freqs {
                             let term_id = dictionary.get_or_add(&term);
-                            // println!("Term: {} -> {}", term, term_id.0);
-
                             let v = acc.entry(term_id).or_default();
 
                             let posting =
@@ -197,7 +221,6 @@ impl StringIndex {
                                         document_id,
                                         field_id,
                                         positions,
-                                        // original_term: term.clone(),
                                         term_frequency,
                                         doc_length: doc_length as u16,
                                     }
@@ -208,28 +231,20 @@ impl StringIndex {
 
                     acc
                 },
-            );
-
-        let posting_per_term = t.reduce(
-            HashMap::<TermId, Vec<Posting>>::new,
-            // Merge the hashmap
-            |mut acc, item| {
+            )
+            .reduce(HashMap::<TermId, Vec<Posting>>::new, |mut acc, item| {
                 for (term_id, postings) in item {
                     let vec = acc.entry(term_id).or_default();
                     vec.extend(postings.into_iter());
                 }
                 acc
-            },
-        );
+            });
 
         let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
             HashMap::with_capacity(posting_per_term.len());
-        let mut tree = self.tree.write().expect("Unable to write");
-        // NB: We cannot parallelize the tree insertion yet :(
-        // We could move the tree into a custom implementation to support parallelism
-        // Once we resolve this issue, we StringIndex is thread safe!
-        // TODO: move to custom implementation
-        // For the time being, we can just use the sync tree
+
+        let mut temp_map = self.temp_map.write().unwrap();
+
         for (term_id, postings) in posting_per_term {
             self.total_document_length.fetch_add(
                 postings.iter().map(|p| p.positions.len()).sum::<usize>(),
@@ -237,15 +252,9 @@ impl StringIndex {
             );
             let number_of_occurence_of_term = postings.len();
 
-            // Due to this implementation, we have a limitation
-            // because we "forgot" the term. Here we have just the term_id
-            // This invocation shouldn't exist at all:
-            // we have the term on the top of this function
-            // TODO: find a way to avoid this invocation
             let term = dictionary.retrive(term_id);
 
-            let value = tree.get_mut(term.bytes());
-            if let Some(value) = value {
+            if let Some(value) = temp_map.get_mut(&term) {
                 value.term_frequency += number_of_occurence_of_term;
                 let vec = postings_per_posting_list_id
                     .entry(value.posting_list_id)
@@ -253,8 +262,8 @@ impl StringIndex {
                 vec.push(postings);
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
-                tree.insert(
-                    term.bytes(),
+                temp_map.insert(
+                    term,
                     StringIndexValue {
                         posting_list_id,
                         term_frequency: number_of_occurence_of_term,
@@ -268,10 +277,12 @@ impl StringIndex {
             }
         }
 
+        let new_fst = self.build_fst()?;
+        *self.fst_map.write().unwrap() = Some(new_fst);
+
         postings_per_posting_list_id
             .into_par_iter()
             .map(|(k, v)| self.posting_storage.add_or_create(k, v))
-            // TODO: handle error
             .all(|_| true);
 
         Ok(())
@@ -280,13 +291,10 @@ impl StringIndex {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use nlp::{locales::Locale, TextParser};
-
-    use tempdir::TempDir;
-
     use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
+    use nlp::{locales::Locale, TextParser};
+    use std::{collections::HashMap, sync::Arc};
+    use tempdir::TempDir;
 
     #[test]
     fn test_search() {
