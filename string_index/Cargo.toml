@@ -3,6 +3,11 @@ name = "string_index"
 version = "0.1.0"
 edition = "2021"
 
+[[bench]]
+name = "string_index_bench"
+harness = false
+path = "benches/string_index_bench.rs"
+
 [dependencies]
 anyhow = "1.0.90"
 bincode = "1.3.3"
@@ -19,7 +24,9 @@ smallvec = "1.13.2"
 types = { path = "../types" }
 ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expose-get-mut" }
 fst = "0.4.7"
+rand = "0.8.5"
 
 [dev-dependencies]
+criterion = "0.5.1"
 nlp = { path = "../nlp" }
-
+tempdir = "0.3.7"
