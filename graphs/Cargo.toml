@@ -10,6 +10,8 @@ string_index = { path = "../string_index" }
 types = { path = "../types" }
 dashmap = "6.1.0"
 memmap2 = "0.9.5"
+bloomfilter = "2.0.0"
+parking_lot = "0.12.3"
 
 [[bench]]
 name = "fst_bench"
