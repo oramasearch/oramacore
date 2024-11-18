@@ -1,4 +1,3 @@
-
 pub const QUESTIONS_GENERATION_SYSTEM_PROMPT: &str = r#"
         Pretend you're a user searching on Google, a forum, or a blog. Your task is to generate a list of questions that relates to the the context (### Context).
 

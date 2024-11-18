@@ -460,31 +460,42 @@ export type RowSelectionTableState = {
             })
             .expect("insertion should be successful");
 
-        manager.get(collection_id.clone(), |collection| {
-            collection.insert_batch(
-                (0..100)
-                    .map(|i| {
-                        json!({
-                            "id": i.to_string(),
-                            "text": "text ".repeat(i + 1),
-                            "number": i,
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    (0..100)
+                        .map(|i| {
+                            json!({
+                                "id": i.to_string(),
+                                "text": "text ".repeat(i + 1),
+                                "number": i,
+                            })
                         })
-                    })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap(),
-            )
-        }).unwrap().unwrap();
-
-        let output = manager.get(collection_id.clone(), |collection| {
-            collection.search(SearchParams {
-                term: "text".to_string(),
-                limit: Limit(10),
-                boost: Default::default(),
-                properties: Default::default(),
-                where_filter: vec![("number".to_string(), Filter::Number(NumberFilter::Equal(50.into())))].into_iter().collect(),
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
             })
-        }).unwrap().unwrap();
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: vec![(
+                        "number".to_string(),
+                        Filter::Number(NumberFilter::Equal(50.into())),
+                    )]
+                    .into_iter()
+                    .collect(),
+                })
+            })
+            .unwrap()
+            .unwrap();
 
         assert_eq!(output.count, 1);
         assert_eq!(output.hits.len(), 1);

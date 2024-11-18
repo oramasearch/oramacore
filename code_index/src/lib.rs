@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
-use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
 use code_parser::treesitter::CodeToken;
+use code_parser::treesitter::{FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
 use nlp::tokenizer::Tokenizer;
 use ptrie::Trie;
 use regex::Regex;
@@ -87,7 +87,6 @@ impl CodeIndex {
 
             if let Some(c) = exact_match {
                 for (doc_id, code_posting) in c {
-
                     if let Some(filtered_doc_ids) = filtered_doc_ids {
                         if !filtered_doc_ids.contains(doc_id) {
                             continue;

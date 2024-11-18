@@ -243,7 +243,6 @@ pub trait StringParser: Send + Sync {
     fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>>;
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NumberFilter {
     Equal(Number),
@@ -283,7 +282,7 @@ impl PartialEq for Number {
                     return true;
                 }
                 a == b
-            },
+            }
             (Number::F32(a), Number::I32(b)) => *a == *b as f32,
         }
     }
@@ -303,15 +302,9 @@ impl Ord for Number {
         // See `total_cmp` method in f32
         match (self, other) {
             (Number::I32(a), Number::I32(b)) => a.cmp(b),
-            (Number::I32(a), Number::F32(b)) => {
-                (*a as f32).total_cmp(b)
-            },
-            (Number::F32(a), Number::F32(b)) => {
-                a.total_cmp(b)
-            },
-            (Number::F32(a), Number::I32(b)) => {
-                a.total_cmp(&(*b as f32))
-            },
+            (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
+            (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
+            (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
         }
     }
 }

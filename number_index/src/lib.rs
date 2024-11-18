@@ -3,8 +3,6 @@ use std::collections::{BTreeMap, HashSet};
 use dashmap::DashMap;
 use types::{DocumentId, FieldId, Number, NumberFilter};
 
-
-
 #[derive(Debug, Default)]
 pub struct NumberIndex {
     maps: DashMap<FieldId, BTreeMap<Number, Vec<DocumentId>>>,
@@ -41,35 +39,29 @@ impl NumberIndex {
                     HashSet::new()
                 }
             }
-            NumberFilter::LessThan(value) => {
-                btree.range((Bound::Unbounded, Bound::Excluded(&value)))
-                    .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                    .collect()
-            }
-            NumberFilter::LessThanOrEqual(value) => {
-                btree.range((Bound::Unbounded, Bound::Included(&value)))
-                    .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                    .collect()
-            }
-            NumberFilter::GreaterThan(value) => {
-                btree.range((Bound::Excluded(&value), Bound::Unbounded))
-                    .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                    .collect()
-            }
-            NumberFilter::GreaterThanOrEqual(value) => {
-                btree.range((Bound::Included(&value), Bound::Unbounded))
-                    .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                    .collect()
-            }
-            NumberFilter::Between(min, max) => {
-                btree.range((Bound::Included(&min), Bound::Included(&max)))
-                    .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                    .collect()
-            }
+            NumberFilter::LessThan(value) => btree
+                .range((Bound::Unbounded, Bound::Excluded(&value)))
+                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
+                .collect(),
+            NumberFilter::LessThanOrEqual(value) => btree
+                .range((Bound::Unbounded, Bound::Included(&value)))
+                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
+                .collect(),
+            NumberFilter::GreaterThan(value) => btree
+                .range((Bound::Excluded(&value), Bound::Unbounded))
+                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
+                .collect(),
+            NumberFilter::GreaterThanOrEqual(value) => btree
+                .range((Bound::Included(&value), Bound::Unbounded))
+                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
+                .collect(),
+            NumberFilter::Between(min, max) => btree
+                .range((Bound::Included(&min), Bound::Included(&max)))
+                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
+                .collect(),
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -176,7 +168,8 @@ mod tests {
         assert!(a > Number::from(f32::NEG_INFINITY));
         assert!(a == Number::from(f32::NAN));
 
-        let v = [Number::from(1),
+        let v = [
+            Number::from(1),
             Number::from(1.0),
             Number::from(2),
             Number::from(2.0),
@@ -186,7 +179,8 @@ mod tests {
             Number::from(-2.0),
             Number::from(f32::INFINITY),
             Number::from(f32::NEG_INFINITY),
-            Number::from(f32::NAN)];
+            Number::from(f32::NAN),
+        ];
 
         for i in 0..v.len() {
             for j in 0..v.len() {
@@ -197,7 +191,6 @@ mod tests {
                 assert_eq!(way.reverse(), other_way);
             }
         }
-
     }
 
     macro_rules! test_number_filter {
@@ -217,31 +210,59 @@ mod tests {
 
                 a(index);
             }
-        }
+        };
     }
 
     test_number_filter!(test_number_index_filter_eq, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::Equal(2.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(2), DocumentId(5)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
+        );
     });
     test_number_filter!(test_number_index_filter_lt, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::LessThan(2.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(0), DocumentId(1)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(0), DocumentId(1)])
+        );
     });
     test_number_filter!(test_number_index_filter_lt_equal, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::LessThanOrEqual(2.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(0), DocumentId(1), DocumentId(2), DocumentId(5)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![
+                DocumentId(0),
+                DocumentId(1),
+                DocumentId(2),
+                DocumentId(5)
+            ])
+        );
     });
     test_number_filter!(test_number_index_filter_gt, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::GreaterThan(2.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(3), DocumentId(4)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(3), DocumentId(4)])
+        );
     });
     test_number_filter!(test_number_index_filter_gt_equal, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::GreaterThanOrEqual(2.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(3), DocumentId(4), DocumentId(2), DocumentId(5)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![
+                DocumentId(3),
+                DocumentId(4),
+                DocumentId(2),
+                DocumentId(5)
+            ])
+        );
     });
     test_number_filter!(test_number_index_filter_between, |index: NumberIndex| {
         let output = index.filter(FieldId(0), NumberFilter::Between(2.into(), 3.into()));
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(3), DocumentId(2), DocumentId(5)]));
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(3), DocumentId(2), DocumentId(5)])
+        );
     });
 }

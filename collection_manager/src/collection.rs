@@ -17,7 +17,8 @@ use serde_json::Value;
 use storage::Storage;
 use string_index::{scorer::bm25::BM25Score, DocumentBatch, StringIndex};
 use types::{
-    CollectionId, Document, DocumentId, DocumentList, FieldId, Number, ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType
+    CollectionId, Document, DocumentId, DocumentList, FieldId, Number, ScalarType, SearchResult,
+    SearchResultHit, StringParser, TokenScore, ValueType,
 };
 
 use crate::dto::{CollectionDTO, Filter, SearchParams, TypedField};
@@ -161,11 +162,11 @@ impl Collection {
                         _ => Err(anyhow!("value is not string. This should never happen"))?,
                     };
 
-                    let v: Option<Number> = value.as_i64()
+                    let v: Option<Number> = value
+                        .as_i64()
                         .and_then(|v| v.to_i32())
                         .map(Number::from)
-                        .or_else(|| value.as_f64().and_then(|v| v.to_f32()).map(Number::from))
-                        ;
+                        .or_else(|| value.as_f64().and_then(|v| v.to_f32()).map(Number::from));
                     let v = match v {
                         Some(v) => v,
                         // TODO: handle better the error
@@ -197,18 +198,20 @@ impl Collection {
         let filtered_doc_ids = if search_params.where_filter.is_empty() {
             None
         } else {
-            let mut filters: Vec<_> = search_params.where_filter
+            let mut filters: Vec<_> = search_params
+                .where_filter
                 .into_iter()
                 .map(|(field_name, value)| {
                     let field_id = self.get_field_id(field_name);
                     (field_id, value)
-                }).collect();
-            let (field_id, filter) = filters.pop().expect("where condition has to not be empty here.");
+                })
+                .collect();
+            let (field_id, filter) = filters
+                .pop()
+                .expect("where condition has to not be empty here.");
 
             let mut doc_ids = match filter {
-                Filter::Number(filter_number) => {
-                    self.number_index.filter(field_id, filter_number)
-                }
+                Filter::Number(filter_number) => self.number_index.filter(field_id, filter_number),
             };
             for (field_id, filter) in filters {
                 let doc_ids_ = match filter {
