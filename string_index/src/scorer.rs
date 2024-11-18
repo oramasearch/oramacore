@@ -28,7 +28,7 @@ pub mod bm25 {
         scores: DashMap<DocumentId, f32>,
     }
     impl BM25Score {
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self {
                 scores: DashMap::new(),
             }
@@ -42,10 +42,20 @@ pub mod bm25 {
             avg_doc_length: f32,
             boost: f32,
         ) -> f32 {
+            if tf == 0.0 || doc_length == 0.0 || avg_doc_length == 0.0 {
+                return 0.0;
+            }
+
             let k1 = 1.5;
             let b = 0.75;
             let numerator = tf * (k1 + 1.0);
             let denominator = tf + k1 * (1.0 - b + b * (doc_length / avg_doc_length));
+
+            // @todo: find a better way to avoid division by 0
+            if denominator == 0.0 {
+                return 0.0;
+            }
+
             idf * (numerator / denominator) * boost
         }
     }
@@ -62,8 +72,13 @@ pub mod bm25 {
             let term_frequency = posting.term_frequency;
             let doc_length = posting.doc_length as f32;
             let total_documents = global_info.total_documents as f32;
-            let avg_doc_length = global_info.total_document_length as f32 / total_documents;
 
+            if total_documents == 0.0 {
+                self.scores.insert(posting.document_id, 0.0);
+                return;
+            }
+
+            let avg_doc_length = global_info.total_document_length as f32 / total_documents;
             let idf =
                 ((total_documents - total_token_count + 0.5) / (total_token_count + 0.5)).ln_1p();
             let score = Self::calculate_score(
@@ -106,14 +121,20 @@ pub mod code {
     }
 
     impl CodeScore {
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self {
                 scores: DashMap::new(),
             }
         }
 
-        fn calculate_score(pos: DashMap<Position, usize>, boost: f32, doc_lenth: u16) -> f32 {
+        #[inline]
+        fn calculate_score(pos: DashMap<Position, usize>, boost: f32, doc_length: u16) -> f32 {
             let mut foo: Vec<_> = pos.into_iter().map(|(p, v)| (p.0, v)).collect();
+
+            if foo.is_empty() || doc_length == 0 {
+                return 0.0;
+            }
+
             foo.sort_by_key(|(p, _)| (*p as isize));
 
             let pos_len = foo.len();
@@ -154,7 +175,12 @@ pub mod code {
                 score += score_for_position;
             }
 
-            score / (pos_len * (doc_lenth as usize)) as f32
+            let denominator = (pos_len * (doc_length as usize)) as f32;
+            if denominator == 0.0 {
+                0.0
+            } else {
+                score / denominator
+            }
         }
     }
 
@@ -195,5 +221,208 @@ pub mod code {
                 })
                 .collect()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GlobalInfo;
+    use types::FieldId;
+
+    #[test]
+    fn test_bm25_basic_scoring() {
+        let scorer = bm25::BM25Score::new();
+        let global_info = GlobalInfo {
+            total_documents: 10,
+            total_document_length: 1000,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 5.0,
+            doc_length: 100,
+            positions: vec![1, 2, 3, 4, 5],
+        };
+
+        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+        let scores = scorer.get_scores();
+        assert!(scores.contains_key(&DocumentId(1)));
+        assert!(scores[&DocumentId(1)] > 0.0);
+    }
+
+    #[test]
+    fn test_bm25_empty_document() {
+        let scorer = bm25::BM25Score::new();
+        let global_info = GlobalInfo {
+            total_documents: 1,
+            total_document_length: 0,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 0.0,
+            doc_length: 0,
+            positions: vec![],
+        };
+
+        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+        let scores = scorer.get_scores();
+        assert_eq!(scores[&DocumentId(1)], 0.0);
+    }
+
+    #[test]
+    fn test_bm25_boost_effect() {
+        let scorer = bm25::BM25Score::new();
+        let global_info = GlobalInfo {
+            total_documents: 10,
+            total_document_length: 1000,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 5.0,
+            doc_length: 100,
+            positions: vec![1, 2, 3, 4, 5],
+        };
+
+        // Test with different boost values
+        scorer.add_entry(&global_info, posting.clone(), 1.0, 1.0);
+        let normal_scores = scorer.get_scores();
+
+        let scorer = bm25::BM25Score::new();
+        scorer.add_entry(&global_info, posting, 1.0, 2.0);
+        let boosted_scores = scorer.get_scores();
+
+        assert!(boosted_scores[&DocumentId(1)] > normal_scores[&DocumentId(1)]);
+    }
+
+    #[test]
+    fn test_code_score_basic() {
+        let scorer = code::CodeScore::new();
+        let global_info = GlobalInfo {
+            total_documents: 10,
+            total_document_length: 1000,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 3.0,
+            doc_length: 100,
+            positions: vec![1, 3, 5],
+        };
+
+        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+        let scores = scorer.get_scores();
+        assert!(scores.contains_key(&DocumentId(1)));
+        assert!(scores[&DocumentId(1)] > 0.0);
+    }
+
+    #[test]
+    fn test_code_score_adjacent_positions() {
+        let scorer = code::CodeScore::new();
+        let global_info = GlobalInfo {
+            total_documents: 10,
+            total_document_length: 1000,
+        };
+
+        let posting_adjacent = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 3.0,
+            doc_length: 100,
+            positions: vec![1, 2, 3],
+        };
+
+        let posting_spread = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(2),
+            term_frequency: 3.0,
+            doc_length: 100,
+            positions: vec![1, 10, 20],
+        };
+
+        scorer.add_entry(&global_info, posting_adjacent, 1.0, 1.0);
+        scorer.add_entry(&global_info, posting_spread, 1.0, 1.0);
+        let scores = scorer.get_scores();
+
+        assert!(scores[&DocumentId(1)] > scores[&DocumentId(2)]);
+    }
+
+    #[test]
+    fn test_code_score_empty_positions() {
+        let scorer = code::CodeScore::new();
+        let global_info = GlobalInfo {
+            total_documents: 1,
+            total_document_length: 100,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 0.0,
+            doc_length: 100,
+            positions: vec![],
+        };
+
+        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+        let scores = scorer.get_scores();
+        assert_eq!(scores[&DocumentId(1)], 0.0);
+    }
+
+    #[test]
+    fn test_code_score_single_position() {
+        let scorer = code::CodeScore::new();
+        let global_info = GlobalInfo {
+            total_documents: 1,
+            total_document_length: 100,
+        };
+
+        let posting = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 1.0,
+            doc_length: 100,
+            positions: vec![1],
+        };
+
+        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+        let scores = scorer.get_scores();
+        assert!(scores[&DocumentId(1)] > 0.0);
+    }
+
+    #[test]
+    fn test_multiple_entries_same_document() {
+        let scorer = code::CodeScore::new();
+        let global_info = GlobalInfo {
+            total_documents: 1,
+            total_document_length: 100,
+        };
+
+        let posting1 = Posting {
+            field_id: FieldId(1),
+            document_id: DocumentId(1),
+            term_frequency: 2.0,
+            doc_length: 100,
+            positions: vec![1, 2],
+        };
+
+        let posting2 = Posting {
+            field_id: FieldId(2),
+            document_id: DocumentId(1),
+            term_frequency: 2.0,
+            doc_length: 100,
+            positions: vec![3, 4],
+        };
+
+        scorer.add_entry(&global_info, posting1, 1.0, 1.0);
+        scorer.add_entry(&global_info, posting2, 1.0, 1.0);
+
+        let scores = scorer.get_scores();
+        assert!(scores[&DocumentId(1)] > 0.0);
     }
 }

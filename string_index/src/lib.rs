@@ -22,7 +22,7 @@ pub mod scorer;
 
 pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
