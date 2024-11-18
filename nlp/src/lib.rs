@@ -34,6 +34,7 @@ impl Clone for TextParser {
 impl TextParser {
     pub fn from_language(locale: Locale) -> Self {
         let (tokenizer, stemmer) = match locale {
+            Locale::IT => (Tokenizer::italian(), Stemmer::create(Algorithm::Italian)),
             Locale::EN => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
             // @todo: manage other locales
             _ => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
