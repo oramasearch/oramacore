@@ -2,15 +2,14 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, RwLock,
+        Arc, RwLock, Mutex
     },
 };
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
+use fst::{Automaton, IntoStreamer, Map, MapBuilder, Streamer};
 use posting_storage::{PostingListId, PostingStorage};
-// use radix_trie::Trie;
-use ptrie::Trie;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
@@ -23,7 +22,7 @@ pub mod scorer;
 
 pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
@@ -32,18 +31,20 @@ pub struct Posting {
     pub doc_length: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct StringIndexValue {
-    posting_list_id: PostingListId,
-    term_frequency: usize,
+    pub posting_list_id: PostingListId,
+    pub term_frequency: usize,
 }
 
 pub struct StringIndex {
-    tree: RwLock<Trie<u8, StringIndexValue>>,
+    fst_map: RwLock<Option<Map<Vec<u8>>>>,
+    temp_map: RwLock<HashMap<String, StringIndexValue>>,
     posting_storage: PostingStorage,
     dictionary: Dictionary,
     total_documents: AtomicUsize,
     total_document_length: AtomicUsize,
+    insert_mutex: Mutex<()>,
 }
 
 pub struct GlobalInfo {
@@ -54,12 +55,42 @@ pub struct GlobalInfo {
 impl StringIndex {
     pub fn new(storage: Arc<Storage>) -> Self {
         StringIndex {
-            tree: RwLock::new(Trie::new()),
+            fst_map: RwLock::new(None),
+            temp_map: RwLock::new(HashMap::new()),
             posting_storage: PostingStorage::new(storage),
             dictionary: Dictionary::new(),
             total_documents: AtomicUsize::new(0),
             total_document_length: AtomicUsize::new(0),
+            insert_mutex: Mutex::new(()),
         }
+    }
+
+    fn build_fst(&self) -> Result<Map<Vec<u8>>> {
+        let entries: Vec<_> = {
+            let temp_map = self.temp_map.read().unwrap();
+            temp_map
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
+                    )
+                })
+                .collect()
+        };
+
+        let mut sorted_entries = entries;
+        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let mut builder = MapBuilder::memory();
+
+        for (key, value) in sorted_entries {
+            builder.insert(key.as_bytes(), value)?;
+        }
+
+        let fst = builder.into_map();
+
+        Ok(fst)
     }
 
     pub fn get_total_documents(&self) -> usize {
@@ -75,85 +106,105 @@ impl StringIndex {
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
-                println!("total_documents == 0");
                 return Ok(Default::default());
             }
             total_documents => total_documents,
         };
+
         let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
-                println!("total_document_length == 0");
                 return Ok(Default::default());
             }
             total_document_length => total_document_length,
         };
 
-        // let avg_doc_length = total_document_length / total_documents;
+        let mut all_postings = Vec::new();
 
-        let mut posting_list_ids_with_freq = Vec::<StringIndexValue>::new();
-        let tree = self
-            .tree
-            .read()
-            // TODO: better error handling
-            .expect("Unable to read");
-        for token in tokens {
-            let a = tree.find_postfixes(token.bytes());
-            posting_list_ids_with_freq.extend(a.into_iter().cloned());
+        if let Some(fst) = self.fst_map.read().unwrap().as_ref() {
+            for token in &tokens {
+                let automaton = fst::automaton::Str::new(token).starts_with();
+                let mut stream = fst.search(automaton).into_stream();
+
+                while let Some(result) = stream.next() {
+                    let (_, packed_value) = result;
+                    let posting_list_id = PostingListId(((packed_value >> 32) as u32) as usize);
+                    let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
+
+                    if let Ok(postings) = self.posting_storage.get(posting_list_id) {
+                        all_postings.push((postings, term_frequency));
+                    }
+                }
+            }
         }
 
         let fields = search_on.as_ref();
-
         let global_info = GlobalInfo {
             total_documents,
             total_document_length,
         };
 
-        posting_list_ids_with_freq
-            .into_par_iter()
-            .filter_map(|string_index_value| {
-                let output = self
-                    .posting_storage
-                    .get(string_index_value.posting_list_id)
-                    .ok();
-                let posting = match output {
-                    Some(v) => v,
-                    None => return None,
-                };
-
-                let posting: Vec<_> = posting
-                    .into_iter()
-                    .filter(move |posting| {
-                        fields
-                            .map(|search_on| search_on.contains(&posting.field_id))
-                            .unwrap_or(true)
-                    })
-                    .collect();
-
-                Some((posting, string_index_value.term_frequency))
-            })
-            // Every thread perform on a separated hashmap
-            .for_each(|(postings, total_token_count)| {
-                let total_token_count = total_token_count as f32;
-                for posting in postings {
-                    let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                    scorer.add_entry(&global_info, posting, total_token_count, boost_per_field);
+        let mut filtered_postings: HashMap<DocumentId, Vec<(Posting, usize)>> = HashMap::new();
+        for (postings, term_freq) in all_postings {
+            for posting in postings {
+                if fields
+                    .map(|search_on| search_on.contains(&posting.field_id))
+                    .unwrap_or(true)
+                {
+                    filtered_postings
+                        .entry(posting.document_id)
+                        .or_insert_with(Vec::new)
+                        .push((posting, term_freq));
                 }
-            });
+            }
+        }
 
-        let scores = scorer.get_scores();
+        let mut exact_match_documents = Vec::new();
+
+        for (document_id, postings) in &filtered_postings {
+            let mut token_positions: Vec<Vec<usize>> = postings
+                .iter()
+                .map(|(posting, _)| posting.positions.clone())
+                .collect();
+
+            token_positions.iter_mut().for_each(|positions| positions.sort_unstable());
+
+            if self.is_phrase_match(&token_positions) {
+                exact_match_documents.push(*document_id);
+            }
+
+            for (posting, term_freq) in postings {
+                let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+                scorer.add_entry(
+                    &global_info,
+                    posting.clone(),
+                    *term_freq as f32,
+                    boost_per_field,
+                );
+            }
+        }
+
+        let mut scores = scorer.get_scores();
+
+        let exact_match_boost = 25.0; // @todo: make this configurable.
+        for document_id in exact_match_documents {
+            if let Some(score) = scores.get_mut(&document_id) {
+                *score *= exact_match_boost;
+            }
+        }
 
         Ok(scores)
     }
 
     pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
+        let _lock = self.insert_mutex.lock().unwrap();
+
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
 
         let dictionary = &self.dictionary;
 
-        let t = data
+        let posting_per_term = data
             .into_par_iter()
-            // Parallel
             .fold(
                 HashMap::<TermId, Vec<Posting>>::new,
                 |mut acc, (document_id, strings)| {
@@ -185,8 +236,6 @@ impl StringIndex {
 
                         for (term, field_positions) in term_freqs {
                             let term_id = dictionary.get_or_add(&term);
-                            // println!("Term: {} -> {}", term, term_id.0);
-
                             let v = acc.entry(term_id).or_default();
 
                             let posting =
@@ -197,7 +246,6 @@ impl StringIndex {
                                         document_id,
                                         field_id,
                                         positions,
-                                        // original_term: term.clone(),
                                         term_frequency,
                                         doc_length: doc_length as u16,
                                     }
@@ -208,28 +256,19 @@ impl StringIndex {
 
                     acc
                 },
-            );
-
-        let posting_per_term = t.reduce(
-            HashMap::<TermId, Vec<Posting>>::new,
-            // Merge the hashmap
-            |mut acc, item| {
+            )
+            .reduce(HashMap::<TermId, Vec<Posting>>::new, |mut acc, item| {
                 for (term_id, postings) in item {
                     let vec = acc.entry(term_id).or_default();
                     vec.extend(postings.into_iter());
                 }
                 acc
-            },
-        );
+            });
 
         let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
             HashMap::with_capacity(posting_per_term.len());
-        let mut tree = self.tree.write().expect("Unable to write");
-        // NB: We cannot parallelize the tree insertion yet :(
-        // We could move the tree into a custom implementation to support parallelism
-        // Once we resolve this issue, we StringIndex is thread safe!
-        // TODO: move to custom implementation
-        // For the time being, we can just use the sync tree
+        let mut temp_map = self.temp_map.write().unwrap();
+
         for (term_id, postings) in posting_per_term {
             self.total_document_length.fetch_add(
                 postings.iter().map(|p| p.positions.len()).sum::<usize>(),
@@ -237,15 +276,9 @@ impl StringIndex {
             );
             let number_of_occurence_of_term = postings.len();
 
-            // Due to this implementation, we have a limitation
-            // because we "forgot" the term. Here we have just the term_id
-            // This invocation shouldn't exist at all:
-            // we have the term on the top of this function
-            // TODO: find a way to avoid this invocation
             let term = dictionary.retrive(term_id);
 
-            let value = tree.get_mut(term.bytes());
-            if let Some(value) = value {
+            if let Some(value) = temp_map.get_mut(&term) {
                 value.term_frequency += number_of_occurence_of_term;
                 let vec = postings_per_posting_list_id
                     .entry(value.posting_list_id)
@@ -253,8 +286,8 @@ impl StringIndex {
                 vec.push(postings);
             } else {
                 let posting_list_id = self.posting_storage.generate_new_id();
-                tree.insert(
-                    term.bytes(),
+                temp_map.insert(
+                    term,
                     StringIndexValue {
                         posting_list_id,
                         term_frequency: number_of_occurence_of_term,
@@ -268,30 +301,274 @@ impl StringIndex {
             }
         }
 
-        postings_per_posting_list_id
-            .into_par_iter()
-            .map(|(k, v)| self.posting_storage.add_or_create(k, v))
-            // TODO: handle error
-            .all(|_| true);
+        drop(temp_map);
+        let new_fst = self.build_fst()?;
+
+        {
+            let mut fst_map = self.fst_map.write().unwrap();
+            *fst_map = Some(new_fst);
+        }
+
+        for (k, v) in postings_per_posting_list_id {
+            self.posting_storage.add_or_create(k, v)?;
+        }
 
         Ok(())
     }
+
+    fn is_phrase_match(&self, token_positions: &Vec<Vec<usize>>) -> bool {
+        if token_positions.is_empty() {
+            return false;
+        }
+
+        let position_sets: Vec<std::collections::HashSet<usize>> = token_positions
+            .iter()
+            .skip(1)
+            .map(|positions| positions.iter().copied().collect())
+            .collect();
+
+        for &start_pos in &token_positions[0] {
+            let mut current_pos = start_pos;
+            let mut matched = true;
+
+            for positions in &position_sets {
+                let next_pos = current_pos + 1;
+                if positions.contains(&next_pos) {
+                    current_pos = next_pos;
+                } else {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if matched {
+                return true;
+            }
+        }
+
+        false
+    }
+
+
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
+    use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
     use nlp::{locales::Locale, TextParser};
-
+    use std::{collections::HashMap, sync::Arc};
     use tempdir::TempDir;
 
-    use crate::{scorer::bm25::BM25Score, DocumentId, FieldId, StringIndex};
+    #[test]
+    fn test_empty_search_query() {
+        let tmp_dir = TempDir::new("string_index_test_empty_search").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "This is a test document.".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec![],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty for empty query"
+        );
+    }
 
     #[test]
-    fn test_search() {
-        let tmp_dir = TempDir::new("string_index_test").unwrap();
+    fn test_search_nonexistent_term() {
+        let tmp_dir = TempDir::new("string_index_test_nonexistent_term").unwrap();
         let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "This is a test document.".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["nonexistent".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty for non-existent term"
+        );
+    }
+
+    #[test]
+    fn test_insert_empty_document() {
+        let tmp_dir = TempDir::new("string_index_test_empty_document").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when only empty documents are indexed"
+        );
+    }
+
+    #[test]
+    fn test_search_with_field_filter() {
+        let tmp_dir = TempDir::new("string_index_test_field_filter").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![
+                (FieldId(0), "This is a test in field zero.".to_string()),
+                (FieldId(1), "Another test in field one.".to_string()),
+            ],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(0)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document when searching in FieldId(0)"
+        );
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(1)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document when searching in FieldId(1)"
+        );
+
+        let output = string_index
+            .search(
+                vec!["test".to_string()],
+                Some(vec![FieldId(2)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert!(
+            output.is_empty(),
+            "Should not find any documents when searching in non-existent FieldId"
+        );
+    }
+
+    #[test]
+    fn test_search_with_boosts() {
+        let tmp_dir = TempDir::new("string_index_test_boosts").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
         let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);
@@ -299,24 +576,13 @@ mod tests {
         let batch: HashMap<_, _> = vec![
             (
                 DocumentId(1),
-                vec![(
-                    FieldId(0),
-                    "Yo, I'm from where Nicky Barnes got rich as fuck, welcome!".to_string(),
-                )],
+                vec![(FieldId(0), "Important content in field zero.".to_string())],
             ),
             (
                 DocumentId(2),
                 vec![(
-                    FieldId(0),
-                    "Welcome to Harlem, where you welcome to problems".to_string(),
-                )],
-            ),
-            (
-                DocumentId(3),
-                vec![(
-                    FieldId(0),
-                    "Now bitches, they want to neuter me, niggas, they want to tutor me"
-                        .to_string(),
+                    FieldId(1),
+                    "Less important content in field one.".to_string(),
                 )],
             ),
         ]
@@ -335,26 +601,347 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
+        let mut boost = HashMap::new();
+        boost.insert(FieldId(0), 2.0);
+
         let output = string_index
             .search(
-                vec!["welcome".to_string()],
+                vec!["content".to_string()],
+                None,
+                boost,
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(output.len(), 2, "Should find both documents");
+
+        let score_doc1 = output.get(&DocumentId(1)).unwrap();
+        let score_doc2 = output.get(&DocumentId(2)).unwrap();
+
+        assert!(
+            score_doc1 > score_doc2,
+            "Document with boosted field should have higher score"
+        );
+    }
+
+    #[test]
+    fn test_insert_document_with_stop_words_only() {
+        let tmp_dir = TempDir::new("string_index_test_stop_words").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "the and but or".to_string())],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["the".to_string()],
                 None,
                 Default::default(),
                 BM25Score::default(),
             )
             .unwrap();
 
-        assert_eq!(output.len(), 2);
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when only stop words are indexed"
+        );
+    }
+
+    #[test]
+    fn test_search_on_empty_index() {
+        let tmp_dir = TempDir::new("string_index_test_empty_index").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
 
         let output = string_index
             .search(
-                vec!["wel".to_string()],
+                vec!["test".to_string()],
                 None,
                 Default::default(),
                 BM25Score::default(),
             )
             .unwrap();
 
-        assert_eq!(output.len(), 2);
+        assert!(
+            output.is_empty(),
+            "Search results should be empty when index is empty"
+        );
+    }
+
+    #[test]
+    fn test_concurrent_insertions() {
+        use std::thread;
+
+        let tmp_dir = TempDir::new("string_index_test_concurrent_inserts").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = Arc::new(StringIndex::new(storage));
+
+        let string_index_clone1 = Arc::clone(&string_index);
+        let string_index_clone2 = Arc::clone(&string_index);
+
+        let handle1 = thread::spawn(move || {
+            let parser = TextParser::from_language(Locale::EN);
+            let batch: HashMap<_, _> = vec![(
+                DocumentId(1),
+                vec![(
+                    FieldId(0),
+                    "Concurrent insertion test document one.".to_string(),
+                )],
+            )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+            string_index_clone1.insert_multiple(batch).unwrap();
+        });
+
+        let handle2 = thread::spawn(move || {
+            let parser = TextParser::from_language(Locale::EN);
+            let batch: HashMap<_, _> = vec![(
+                DocumentId(2),
+                vec![(
+                    FieldId(0),
+                    "Concurrent insertion test document two.".to_string(),
+                )],
+            )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+            string_index_clone2.insert_multiple(batch).unwrap();
+        });
+
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        let parser = TextParser::from_language(Locale::EN);
+        let search_tokens = parser
+            .tokenize_and_stem("concurrent")
+            .into_iter()
+            .map(|(original, _)| original)
+            .collect::<Vec<_>>();
+
+        let output = string_index
+            .search(
+                search_tokens,
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            2,
+            "Should find both documents after concurrent insertions"
+        );
+    }
+
+    #[test]
+    fn test_large_documents() {
+        let tmp_dir = TempDir::new("string_index_test_large_documents").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let large_text = "word ".repeat(10000);
+
+        let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), large_text.clone())])]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["word".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document containing the large text"
+        );
+    }
+
+    #[test]
+    fn test_high_term_frequency() {
+        let tmp_dir = TempDir::new("string_index_test_high_term_frequency").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let repeated_word = "repeat ".repeat(1000);
+
+        let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), repeated_word.clone())])]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["repeat".to_string()],
+                None,
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document with high term frequency"
+        );
+    }
+
+    #[test]
+    fn test_term_positions() {
+        let tmp_dir = TempDir::new("string_index_test_term_positions").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(
+                FieldId(0),
+                "quick brown fox jumps over the lazy dog".to_string(),
+            )],
+        )]
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+    }
+
+    #[test]
+    fn test_exact_phrase_match() {
+        let tmp_dir = TempDir::new("string_index_test_exact_phrase").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "5200 mAh battery in disguise".to_string())],
+        )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["5200".to_string(), "mAh".to_string(), "battery".to_string(), "in".to_string(), "disguise".to_string()],
+                Some(vec![FieldId(0)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document containing the exact phrase"
+        );
+
+        assert!(
+            output.contains_key(&DocumentId(1)),
+            "Document with ID 1 should be found"
+        );
     }
 }

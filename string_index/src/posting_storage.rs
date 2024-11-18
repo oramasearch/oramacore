@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::Posting;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct PostingListId(usize);
+pub struct PostingListId(pub usize);
 
 #[derive(Debug, Error)]
 pub enum PostingStorageError {
