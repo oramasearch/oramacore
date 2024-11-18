@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, RwLock,
+        Arc, RwLock, Mutex
     },
 };
 
@@ -44,6 +44,7 @@ pub struct StringIndex {
     dictionary: Dictionary,
     total_documents: AtomicUsize,
     total_document_length: AtomicUsize,
+    insert_mutex: Mutex<()>,
 }
 
 pub struct GlobalInfo {
@@ -60,6 +61,7 @@ impl StringIndex {
             dictionary: Dictionary::new(),
             total_documents: AtomicUsize::new(0),
             total_document_length: AtomicUsize::new(0),
+            insert_mutex: Mutex::new(()),
         }
     }
 
@@ -128,11 +130,8 @@ impl StringIndex {
                     let posting_list_id = PostingListId(((packed_value >> 32) as u32) as usize);
                     let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
 
-                    match self.posting_storage.get(posting_list_id) {
-                        Ok(postings) => {
-                            all_postings.push((postings, term_frequency));
-                        }
-                        Err(_) => {}
+                    if let Ok(postings) = self.posting_storage.get(posting_list_id) {
+                        all_postings.push((postings, term_frequency));
                     }
                 }
             }
@@ -162,18 +161,14 @@ impl StringIndex {
         let mut exact_match_documents = Vec::new();
 
         for (document_id, postings) in &filtered_postings {
-            let mut positions: Vec<usize> = postings
+            let mut token_positions: Vec<Vec<usize>> = postings
                 .iter()
-                .flat_map(|(posting, _)| posting.positions.clone())
+                .map(|(posting, _)| posting.positions.clone())
                 .collect();
-            positions.sort_unstable();
 
-            if positions.windows(tokens.len()).any(|window| {
-                window
-                    .iter()
-                    .enumerate()
-                    .all(|(i, &pos)| i == 0 || pos == window[i - 1] + 1)
-            }) {
+            token_positions.iter_mut().for_each(|positions| positions.sort_unstable());
+
+            if self.is_phrase_match(&token_positions) {
                 exact_match_documents.push(*document_id);
             }
 
@@ -190,7 +185,7 @@ impl StringIndex {
 
         let mut scores = scorer.get_scores();
 
-        let exact_match_boost = 5.0; // @todo: make this configurable.
+        let exact_match_boost = 12.0; // @todo: make this configurable.
         for document_id in exact_match_documents {
             if let Some(score) = scores.get_mut(&document_id) {
                 *score *= exact_match_boost;
@@ -201,6 +196,8 @@ impl StringIndex {
     }
 
     pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
+        let _lock = self.insert_mutex.lock().unwrap();
+
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
 
@@ -318,6 +315,41 @@ impl StringIndex {
 
         Ok(())
     }
+
+    fn is_phrase_match(&self, token_positions: &Vec<Vec<usize>>) -> bool {
+        if token_positions.is_empty() {
+            return false;
+        }
+
+        let position_sets: Vec<std::collections::HashSet<usize>> = token_positions
+            .iter()
+            .skip(1)
+            .map(|positions| positions.iter().copied().collect())
+            .collect();
+
+        for &start_pos in &token_positions[0] {
+            let mut current_pos = start_pos;
+            let mut matched = true;
+
+            for positions in &position_sets {
+                let next_pos = current_pos + 1;
+                if positions.contains(&next_pos) {
+                    current_pos = next_pos;
+                } else {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if matched {
+                return true;
+            }
+        }
+
+        false
+    }
+
+
 }
 
 #[cfg(test)]
@@ -862,5 +894,54 @@ mod tests {
         .collect();
 
         string_index.insert_multiple(batch).unwrap();
+    }
+
+    #[test]
+    fn test_exact_phrase_match() {
+        let tmp_dir = TempDir::new("string_index_test_exact_phrase").unwrap();
+        let tmp_dir: String = tmp_dir.into_path().to_str().unwrap().to_string();
+
+        let storage = Arc::new(crate::Storage::from_path(&tmp_dir));
+        let string_index = StringIndex::new(storage);
+        let parser = TextParser::from_language(Locale::EN);
+
+        let batch: HashMap<_, _> = vec![(
+            DocumentId(1),
+            vec![(FieldId(0), "5200 mAh battery in disguise".to_string())],
+        )]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
+
+        string_index.insert_multiple(batch).unwrap();
+
+        let output = string_index
+            .search(
+                vec!["5200".to_string(), "mAh".to_string(), "battery".to_string(), "in".to_string(), "disguise".to_string()],
+                Some(vec![FieldId(0)]),
+                Default::default(),
+                BM25Score::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            output.len(),
+            1,
+            "Should find the document containing the exact phrase"
+        );
+
+        assert!(
+            output.contains_key(&DocumentId(1)),
+            "Document with ID 1 should be found"
+        );
     }
 }
