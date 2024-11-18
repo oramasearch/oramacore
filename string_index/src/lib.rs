@@ -357,7 +357,7 @@ mod tests {
 
         let output = string_index
             .search(
-                vec![], // Empty search tokens
+                vec![],
                 None,
                 Default::default(),
                 BM25Score::default(),
@@ -400,7 +400,7 @@ mod tests {
 
         let output = string_index
             .search(
-                vec!["nonexistent".to_string()], // Term does not exist
+                vec!["nonexistent".to_string()],
                 None,
                 Default::default(),
                 BM25Score::default(),
@@ -424,7 +424,7 @@ mod tests {
 
         let batch: HashMap<_, _> = vec![(
             DocumentId(1),
-            vec![(FieldId(0), "".to_string())], // Empty document content
+            vec![(FieldId(0), "".to_string())],
         )]
         .into_iter()
         .map(|(doc_id, fields)| {
@@ -441,7 +441,6 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
-        // Search for any term, should get empty result
         let output = string_index
             .search(
                 vec!["test".to_string()],
@@ -491,7 +490,7 @@ mod tests {
         let output = string_index
             .search(
                 vec!["test".to_string()],
-                Some(vec![FieldId(0)]), // Search only in FieldId(0)
+                Some(vec![FieldId(0)]),
                 Default::default(),
                 BM25Score::default(),
             )
@@ -604,7 +603,7 @@ mod tests {
 
         let batch: HashMap<_, _> = vec![(
             DocumentId(1),
-            vec![(FieldId(0), "the and but or".to_string())], // Only stop words
+            vec![(FieldId(0), "the and but or".to_string())],
         )]
         .into_iter()
         .map(|(doc_id, fields)| {
@@ -621,7 +620,6 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
-        // Search for any term, should get empty result since only stop words are indexed
         let output = string_index
             .search(
                 vec!["the".to_string()],
@@ -726,7 +724,6 @@ mod tests {
         handle1.join().unwrap();
         handle2.join().unwrap();
 
-        // After concurrent insertions, search for "concurrent"
         let parser = TextParser::from_language(Locale::EN);
         let search_tokens = parser
             .tokenize_and_stem("concurrent")
@@ -759,7 +756,7 @@ mod tests {
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);
 
-        let large_text = "word ".repeat(10000); // Create a large document
+        let large_text = "word ".repeat(10000);
 
         let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), large_text.clone())])]
             .into_iter()
@@ -777,7 +774,6 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
-        // Search for "word"
         let output = string_index
             .search(
                 vec!["word".to_string()],
@@ -803,7 +799,7 @@ mod tests {
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);
 
-        let repeated_word = "repeat ".repeat(1000); // High term frequency
+        let repeated_word = "repeat ".repeat(1000);
 
         let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), repeated_word.clone())])]
             .into_iter()
@@ -821,7 +817,6 @@ mod tests {
 
         string_index.insert_multiple(batch).unwrap();
 
-        // Search for "repeat"
         let output = string_index
             .search(
                 vec!["repeat".to_string()],
