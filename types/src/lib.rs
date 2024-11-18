@@ -15,7 +15,7 @@ pub struct TokenScore {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct DocumentId(pub u64);
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct FieldId(pub u16);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
