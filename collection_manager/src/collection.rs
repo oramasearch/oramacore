@@ -300,6 +300,7 @@ impl Collection {
                     search_params.term.clone(),
                     Some(properties_on_code),
                     boost,
+                    filtered_doc_ids.as_ref(),
                 )?
             } else {
                 Default::default()

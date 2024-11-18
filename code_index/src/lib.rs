@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
@@ -67,6 +68,7 @@ impl CodeIndex {
         term: String,
         field_ids: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let tokens = self.new_parser.parse(CodeLanguage::TSX, &term)?;
         let tokens = tokens
@@ -85,6 +87,13 @@ impl CodeIndex {
 
             if let Some(c) = exact_match {
                 for (doc_id, code_posting) in c {
+
+                    if let Some(filtered_doc_ids) = filtered_doc_ids {
+                        if !filtered_doc_ids.contains(doc_id) {
+                            continue;
+                        }
+                    }
+
                     let v = output.entry(*doc_id).or_default();
 
                     for (field_id, code_posting) in code_posting {
