@@ -151,6 +151,7 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
             },
         )
         .await;

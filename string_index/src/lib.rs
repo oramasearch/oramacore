@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, RwLock,
@@ -72,6 +72,7 @@ impl StringIndex {
         search_on: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
         scorer: S,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
@@ -122,6 +123,13 @@ impl StringIndex {
 
                 let posting: Vec<_> = posting
                     .into_iter()
+                    .filter(|posting| {
+                        if let Some(filtered_doc_ids) = filtered_doc_ids {
+                            filtered_doc_ids.contains(&posting.document_id)
+                        } else {
+                            true
+                        }
+                    })
                     .filter(move |posting| {
                         fields
                             .map(|search_on| search_on.contains(&posting.field_id))
@@ -341,6 +349,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -352,6 +361,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 

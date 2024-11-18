@@ -242,3 +242,76 @@ pub enum CodeLanguage {
 pub trait StringParser: Send + Sync {
     fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>>;
 }
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum NumberFilter {
+    Equal(Number),
+    GreaterThan(Number),
+    GreaterThanOrEqual(Number),
+    LessThan(Number),
+    LessThanOrEqual(Number),
+    Between(Number, Number),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum Number {
+    I32(i32),
+    F32(f32),
+}
+
+impl From<i32> for Number {
+    fn from(value: i32) -> Self {
+        Number::I32(value)
+    }
+}
+impl From<f32> for Number {
+    fn from(value: f32) -> Self {
+        Number::F32(value)
+    }
+}
+
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Number::I32(a), Number::I32(b)) => a == b,
+            (Number::I32(a), Number::F32(b)) => *a as f32 == *b,
+            (Number::F32(a), Number::F32(b)) => {
+                // This is against the IEEE 754-2008 standard,
+                // But we don't care here.
+                if a.is_nan() && b.is_nan() {
+                    return true;
+                }
+                a == b
+            },
+            (Number::F32(a), Number::I32(b)) => *a == *b as f32,
+        }
+    }
+}
+impl Eq for Number {}
+
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Number {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // f32 is implemented as "binary32" type defined in IEEE 754-2008
+        // So, it means, it can represent also +/- Infinity and NaN
+        // Threat NaN as "more" the Infinity
+        // See `total_cmp` method in f32
+        match (self, other) {
+            (Number::I32(a), Number::I32(b)) => a.cmp(b),
+            (Number::I32(a), Number::F32(b)) => {
+                (*a as f32).total_cmp(b)
+            },
+            (Number::F32(a), Number::F32(b)) => {
+                a.total_cmp(b)
+            },
+            (Number::F32(a), Number::I32(b)) => {
+                a.total_cmp(&(*b as f32))
+            },
+        }
+    }
+}

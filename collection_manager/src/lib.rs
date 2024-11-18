@@ -85,9 +85,9 @@ mod tests {
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
-    use types::CodeLanguage;
+    use types::{CodeLanguage, NumberFilter};
 
-    use crate::dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField};
+    use crate::dto::{CreateCollectionOptionDTO, Filter, Limit, SearchParams, TypedField};
 
     use super::CollectionManager;
 
@@ -245,6 +245,7 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
             };
             collection.search(search_params)
         });
@@ -296,6 +297,7 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
             };
             collection.search(search_params)
         });
@@ -346,6 +348,7 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
             };
             collection.search(search_params)
         });
@@ -435,12 +438,56 @@ export type RowSelectionTableState = {
                     limit: Limit(10),
                     boost: Default::default(),
                     properties: Default::default(),
+                    where_filter: Default::default(),
                 };
                 collection.search(search_params)
             })
             .unwrap()
             .unwrap();
+    }
 
-        println!("{:#?}", output);
+    #[test]
+    fn test_filter_number() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager.get(collection_id.clone(), |collection| {
+            collection.insert_batch(
+                (0..100)
+                    .map(|i| {
+                        json!({
+                            "id": i.to_string(),
+                            "text": "text ".repeat(i + 1),
+                            "number": i,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+        }).unwrap().unwrap();
+
+        let output = manager.get(collection_id.clone(), |collection| {
+            collection.search(SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: vec![("number".to_string(), Filter::Number(NumberFilter::Equal(50.into())))].into_iter().collect(),
+            })
+        }).unwrap().unwrap();
+
+        assert_eq!(output.count, 1);
+        assert_eq!(output.hits.len(), 1);
+        assert_eq!(output.hits[0].id, "50");
     }
 }

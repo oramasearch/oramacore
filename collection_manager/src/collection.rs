@@ -10,16 +10,17 @@ use dashmap::DashMap;
 use document_storage::DocumentStorage;
 use nlp::locales::Locale;
 use nlp::TextParser;
+use num_traits::ToPrimitive;
+use number_index::NumberIndex;
 use ordered_float::NotNan;
 use serde_json::Value;
 use storage::Storage;
 use string_index::{scorer::bm25::BM25Score, DocumentBatch, StringIndex};
 use types::{
-    CollectionId, Document, DocumentId, DocumentList, FieldId, ScalarType, SearchResult,
-    SearchResultHit, StringParser, TokenScore, ValueType,
+    CollectionId, Document, DocumentId, DocumentList, FieldId, Number, ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType
 };
 
-use crate::dto::{CollectionDTO, SearchParams, TypedField};
+use crate::dto::{CollectionDTO, Filter, SearchParams, TypedField};
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -37,6 +38,8 @@ pub struct Collection {
     // Code
     code_index: CodeIndex,
     code_fields: DashMap<String, FieldId>,
+    // Number
+    number_index: NumberIndex,
 }
 
 impl Collection {
@@ -61,6 +64,7 @@ impl Collection {
             string_fields: Default::default(),
             code_index: CodeIndex::new(),
             code_fields: Default::default(),
+            number_index: Default::default(),
         };
 
         for (field_name, field_type) in typed_fields {
@@ -102,6 +106,7 @@ impl Collection {
     pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
         let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
+        let mut numbers = Vec::new();
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
             let mut flatten = doc.into_flatten();
@@ -150,6 +155,25 @@ impl Collection {
                             .or_default()
                             .push((field_id, tokens));
                     }
+                } else if field_type == ValueType::Scalar(ScalarType::Number) {
+                    let value = match flatten.remove(&key) {
+                        Some(Value::Number(value)) => value,
+                        _ => Err(anyhow!("value is not string. This should never happen"))?,
+                    };
+
+                    let v: Option<Number> = value.as_i64()
+                        .and_then(|v| v.to_i32())
+                        .map(Number::from)
+                        .or_else(|| value.as_f64().and_then(|v| v.to_f32()).map(Number::from))
+                        ;
+                    let v = match v {
+                        Some(v) => v,
+                        // TODO: handle better the error
+                        None => continue,
+                    };
+
+                    let field_id = self.get_field_id(key.clone());
+                    numbers.push((internal_document_id, field_id, v));
                 }
             }
 
@@ -162,10 +186,44 @@ impl Collection {
         self.string_index.insert_multiple(strings)?;
         self.code_index.insert_multiple(codes)?;
 
+        for (doc_id, field_id, value) in numbers {
+            self.number_index.add(doc_id, field_id, value);
+        }
+
         Ok(())
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        let filtered_doc_ids = if search_params.where_filter.is_empty() {
+            None
+        } else {
+            let mut filters: Vec<_> = search_params.where_filter
+                .into_iter()
+                .map(|(field_name, value)| {
+                    let field_id = self.get_field_id(field_name);
+                    (field_id, value)
+                }).collect();
+            let (field_id, filter) = filters.pop().expect("where condition has to not be empty here.");
+
+            let mut doc_ids = match filter {
+                Filter::Number(filter_number) => {
+                    self.number_index.filter(field_id, filter_number)
+                }
+            };
+            for (field_id, filter) in filters {
+                let doc_ids_ = match filter {
+                    Filter::Number(filter_number) => {
+                        self.number_index.filter(field_id, filter_number)
+                    }
+                };
+                doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
+            }
+
+            println!("doc_ids: {doc_ids:?}");
+
+            Some(doc_ids)
+        };
+
         let boost: HashMap<_, _> = search_params
             .boost
             .into_iter()
@@ -207,6 +265,7 @@ impl Collection {
                 Some(fields_on_search_with_default_parser),
                 boost.clone(),
                 BM25Score::default(),
+                filtered_doc_ids.as_ref(),
             )?;
 
             let id_field_id = self.get_field_id("id".to_string());
@@ -216,6 +275,7 @@ impl Collection {
                     Some(vec![id_field_id]),
                     boost.clone(),
                     BM25Score::default(),
+                    filtered_doc_ids.as_ref(),
                 )?;
 
                 for (key, v) in id_output {
@@ -316,13 +376,12 @@ impl Collection {
             None => return Ok(None),
         };
 
-        println!("field_id: {field_id:?}");
-
         let output = dbg!(self.string_index.search(
             vec![value],
             Some(vec![field_id]),
             Default::default(),
-            BM25Score::default()
+            BM25Score::default(),
+            None,
         )?);
 
         let doc_id = dbg!(match output.into_keys().next() {
