@@ -81,6 +81,7 @@ pub mod bm25 {
             let avg_doc_length = global_info.total_document_length as f32 / total_documents;
             let idf =
                 ((total_documents - total_token_count + 0.5) / (total_token_count + 0.5)).ln_1p();
+
             let score = Self::calculate_score(
                 term_frequency,
                 idf,

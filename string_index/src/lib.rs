@@ -132,7 +132,7 @@ impl StringIndex {
                         Ok(postings) => {
                             all_postings.push((postings, term_frequency));
                         }
-                        Err(e) => {}
+                        Err(_) => {}
                     }
                 }
             }
@@ -144,24 +144,58 @@ impl StringIndex {
             total_document_length,
         };
 
-        let mut filtered_postings = Vec::new();
+        let mut filtered_postings: HashMap<DocumentId, Vec<(Posting, usize)>> = HashMap::new();
         for (postings, term_freq) in all_postings {
             for posting in postings {
                 if fields
                     .map(|search_on| search_on.contains(&posting.field_id))
                     .unwrap_or(true)
                 {
-                    filtered_postings.push((posting, term_freq));
+                    filtered_postings
+                        .entry(posting.document_id)
+                        .or_insert_with(Vec::new)
+                        .push((posting, term_freq));
                 }
             }
         }
 
-        for (posting, term_freq) in filtered_postings {
-            let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-            scorer.add_entry(&global_info, posting, term_freq as f32, boost_per_field);
+        let mut exact_match_documents = Vec::new();
+
+        for (document_id, postings) in &filtered_postings {
+            let mut positions: Vec<usize> = postings
+                .iter()
+                .flat_map(|(posting, _)| posting.positions.clone())
+                .collect();
+            positions.sort_unstable();
+
+            if positions.windows(tokens.len()).any(|window| {
+                window
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &pos)| i == 0 || pos == window[i - 1] + 1)
+            }) {
+                exact_match_documents.push(*document_id);
+            }
+
+            for (posting, term_freq) in postings {
+                let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
+                scorer.add_entry(
+                    &global_info,
+                    posting.clone(),
+                    *term_freq as f32,
+                    boost_per_field,
+                );
+            }
         }
 
-        let scores = scorer.get_scores();
+        let mut scores = scorer.get_scores();
+
+        let exact_match_boost = 5.0; // @todo: make this configurable.
+        for document_id in exact_match_documents {
+            if let Some(score) = scores.get_mut(&document_id) {
+                *score *= exact_match_boost;
+            }
+        }
 
         Ok(scores)
     }
