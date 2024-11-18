@@ -185,7 +185,7 @@ impl StringIndex {
 
         let mut scores = scorer.get_scores();
 
-        let exact_match_boost = 12.0; // @todo: make this configurable.
+        let exact_match_boost = 25.0; // @todo: make this configurable.
         for document_id in exact_match_documents {
             if let Some(score) = scores.get_mut(&document_id) {
                 *score *= exact_match_boost;
