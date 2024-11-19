@@ -18,6 +18,14 @@ impl Tokenizer {
         }
     }
 
+    pub fn italian() -> Self {
+        let stop_words: HashSet<&str> = Locale::IT.stop_words().unwrap();
+        Tokenizer {
+            split_regex: Locale::IT.split_regex().unwrap(),
+            stop_words,
+        }
+    }
+
     pub fn tokenize<'a, 'b>(&'a self, input: &'b str) -> impl Iterator<Item = String> + 'b
     where
         'a: 'b,

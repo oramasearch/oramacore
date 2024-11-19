@@ -90,5 +90,6 @@ pub struct SearchParams {
     pub properties: Option<Vec<String>>,
     #[serde(default, rename = "where")]
     pub where_filter: HashMap<String, Filter>,
+    #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
 }

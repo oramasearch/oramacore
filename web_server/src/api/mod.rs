@@ -14,10 +14,12 @@ pub fn api_config() -> Router<Arc<CollectionManager>> {
 
 static INDEX_MESSAGE: &str = "hi! welcome to Orama";
 async fn index() -> impl IntoResponse {
+    println!("index");
     INDEX_MESSAGE
 }
 
 static HEALTH_MESSAGE: &str = "up";
 async fn health() -> impl IntoResponse {
+    println!("health");
     HEALTH_MESSAGE
 }
