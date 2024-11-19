@@ -55,7 +55,7 @@ axum-macros = "0.4.2"
 tower-http = { version = "0.6.1", features = ["trace", "cors"] }
 http = "1.1.0"
 
-
+# Embeddings
 hora = { version = "0.1.1" }
 fastembed = { version = "4.1.0", features = ["ort-download-binaries"] }
 strum = { version = "0.26", features = ["derive"] }
@@ -64,9 +64,13 @@ ndarray = "=0.15.6"
 reductive = "0.9.0"
 rand_chacha = "0.3.1"
 reqwest = { version = "0.12.9", features = ["blocking"] }
-
 async-once-cell = "0.5.4"
 quick-js = "0.4.1"
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+env_filter = "0.1.2"
 
 [build-dependencies]
 cc="*"
@@ -81,9 +85,6 @@ criterion = "0.5.1"
 http-body-util = "0.1.2"
 mime = "0.3.17"
 tower = { version = "0.5.1", features = ["util"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-
 
 [[bin]]
 name = "rustorama"

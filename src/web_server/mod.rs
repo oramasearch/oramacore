@@ -7,6 +7,7 @@ use anyhow::Result;
 use api::api_config;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
+use tracing::info;
 
 use crate::collection_manager::CollectionManager;
 
@@ -33,6 +34,7 @@ impl WebServer {
 
         let router = api_config().with_state(self.collection_manager.clone());
         let router = if config.allow_cors {
+            info!("Enabling CORS");
             let cors_layer = CorsLayer::new()
                 .allow_methods(tower_http::cors::Any)
                 .allow_headers(tower_http::cors::Any)
@@ -43,12 +45,9 @@ impl WebServer {
             router
         };
 
-        println!("Starting web server on {}:{}", config.host, config.port);
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
-        println!("Started at http://{:?}", listener.local_addr().unwrap());
-
-        println!("Listening on http://{}", addr);
+        info!("Address binded. Starting web server on http://{}", addr);
         let output = axum::serve(listener, router).await;
 
         match output {
