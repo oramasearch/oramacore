@@ -1,8 +1,8 @@
 use anyhow::Result;
 use csv::ReaderBuilder;
+use fastembed::Embedding;
 use rustorama::embeddings::pq;
 use rustorama::embeddings::OramaModels;
-use fastembed::Embedding;
 use serde::Deserialize;
 use std::time::Instant;
 

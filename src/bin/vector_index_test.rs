@@ -1,10 +1,10 @@
 use anyhow::Result;
 use rustorama::embeddings::OramaModels;
+use rustorama::indexes::vector::{VectorIndex, VectorIndexConfig};
+use rustorama::types::DocumentId;
 use serde::Deserialize;
 use std::fs;
 use std::time::Instant;
-use rustorama::types::DocumentId;
-use rustorama::indexes::vector::{VectorIndex, VectorIndexConfig};
 
 #[derive(Deserialize, Debug)]
 struct Movie {

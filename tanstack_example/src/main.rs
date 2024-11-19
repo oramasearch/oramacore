@@ -2,9 +2,14 @@ use std::{fs, sync::Arc};
 
 use documentation::parse_documentation;
 use example::parse_example;
-use rustorama::{collection_manager::{dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField}, CollectionManager, CollectionsConfiguration}, types::CodeLanguage, web_server::{HttpConfig, WebServer}};
-
-
+use rustorama::{
+    collection_manager::{
+        dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
+        CollectionManager, CollectionsConfiguration,
+    },
+    types::CodeLanguage,
+    web_server::{HttpConfig, WebServer},
+};
 
 mod documentation;
 mod example;
@@ -15,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let storage_dir = "./tanstack";
     let _ = fs::remove_dir_all(storage_dir);
 
-    let manager = CollectionManager::new(CollectionsConfiguration { });
+    let manager = CollectionManager::new(CollectionsConfiguration {});
 
     let collection_id = manager
         .create_collection(CreateCollectionOptionDTO {

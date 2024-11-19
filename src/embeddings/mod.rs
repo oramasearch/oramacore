@@ -2,8 +2,8 @@ pub mod custom_models;
 pub mod pq;
 pub mod properties_selector;
 
-use custom_models::{CustomModel, ModelFileConfig};
 use anyhow::{anyhow, Context, Result};
+use custom_models::{CustomModel, ModelFileConfig};
 use fastembed::{EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};

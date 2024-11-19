@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::embeddings::OramaModels;
+use anyhow::Result;
 use hora::core::ann_index::ANNIndex;
 use hora::core::metrics::Metric::Manhattan;
 use hora::core::node::IdxType;

@@ -73,7 +73,7 @@ impl StringIndex {
                 .map(|(key, value)| {
                     (
                         key.clone(),
-                        ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
+                        (value.posting_list_id.0 << 32) | (value.term_frequency as u64),
                     )
                 })
                 .collect()
