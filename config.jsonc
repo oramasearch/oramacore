@@ -1,0 +1,11 @@
+{
+    // where the data is stored
+    "data_dir": "/tmp/rustorama",
+
+    // http bind address
+    "http": {
+        "host": "127.0.0.1",
+        "port": 8080,
+        "allow_cors": true
+    },
+}
