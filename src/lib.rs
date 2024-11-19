@@ -17,12 +17,12 @@ mod tests {
     use futures::{future, pin_mut};
     use hurl::runner;
     use hurl::runner::{RunnerOptionsBuilder, Value};
-    use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
+    use hurl::util::logger::LoggerOptionsBuilder;
     use hurl_core::typing::Count;
-    use tokio::task::spawn_blocking;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::task::spawn_blocking;
     use tokio::time::sleep;
 
     use crate::collection_manager::{CollectionManager, CollectionsConfiguration};
@@ -30,7 +30,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_hurl() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         const HOST: &str = "127.0.0.1";
         const PORT: u16 = 8080;
@@ -98,9 +98,9 @@ mod tests {
             let result = spawn_blocking(move || {
                 runner::run(content, None, &runner_opts, &variables, &logger_opts)
             })
-                .await
-                .expect("Spawn blocking task failed")
-                .expect("Failed to run test");
+            .await
+            .expect("Spawn blocking task failed")
+            .expect("Failed to run test");
             assert!(result.success);
         }
 

@@ -143,7 +143,6 @@ impl Collection {
                         .entry(internal_document_id)
                         .or_default()
                         .push((field_id, value));
-
                 } else if field_type == ValueType::Scalar(ScalarType::String) {
                     // TODO: avoid this "id" hard coded
                     if key == "id" {
@@ -459,14 +458,20 @@ impl Collection {
             return *field_id;
         }
 
-        let field_id = self.string_fields.entry(field_name.clone()).or_insert_with(|| {
-            let field_id = self
-                .field_id_generator
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            FieldId(field_id)
-        });
+        let field_id = self
+            .string_fields
+            .entry(field_name.clone())
+            .or_insert_with(|| {
+                let field_id = self
+                    .field_id_generator
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                FieldId(field_id)
+            });
 
-        info!("Created new field id for \"{}\": {:?}", field_name, *field_id);
+        info!(
+            "Created new field id for \"{}\": {:?}",
+            field_name, *field_id
+        );
 
         *field_id
     }

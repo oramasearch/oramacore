@@ -71,7 +71,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
     use tower_http::trace::TraceLayer;
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    use tracing_subscriber::util::SubscriberInitExt;
 
     use crate::web_server::api::api_config;
     use crate::{
@@ -84,14 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_get() {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                    format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
-                }),
-            )
-            .with(tracing_subscriber::fmt::layer())
-            .init();
+        let _ = tracing_subscriber::registry().try_init();
 
         let mut router = api_config()
             .with_state(Arc::new(create_manager()))

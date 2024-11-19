@@ -59,7 +59,7 @@ impl CollectionManager {
         match entry {
             dashmap::mapref::entry::Entry::Occupied(_) => {
                 warn!("Collection with id {} already exists", id.0);
-                return Err(CreateCollectionError::IdAlreadyExists)
+                return Err(CreateCollectionError::IdAlreadyExists);
             }
             dashmap::mapref::entry::Entry::Vacant(entry) => entry.insert(collection),
         };
@@ -84,9 +84,7 @@ impl CollectionManager {
                 collection_id = %id.0,
             );
 
-            span.in_scope(|| {
-                f(collection.value())
-            })
+            span.in_scope(|| f(collection.value()))
         })
     }
 }

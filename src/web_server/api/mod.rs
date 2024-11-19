@@ -1,6 +1,6 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use axum::{extract::MatchedPath, response::IntoResponse, routing::get, Router};
+use axum::{response::IntoResponse, routing::get, Router};
 use http::Request;
 use tower_http::trace::TraceLayer;
 use tracing::info_span;
