@@ -61,6 +61,7 @@ impl Default for Limit {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Filter {
     Number(NumberFilter),
+    Bool(bool),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,6 +78,7 @@ pub struct NumberFacetDefinition {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum FacetDefinition {
     Number(NumberFacetDefinition),
+    Bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

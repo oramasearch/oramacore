@@ -856,6 +856,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bool_index"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "dashmap",
+ "itertools 0.13.0",
+ "rayon",
+ "roaring",
+ "serde",
+ "types",
+]
+
+[[package]]
 name = "brotli"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,6 +1250,7 @@ name = "collection_manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bool_index",
  "code_index",
  "code_parser",
  "cuid",
