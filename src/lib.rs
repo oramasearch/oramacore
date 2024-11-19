@@ -37,7 +37,6 @@ mod tests {
 
         async fn wait_for_server() {
             loop {
-                println!("--- Waiting for server to start...");
                 let resp = reqwest::Client::new()
                     .get(format!("http://{HOST}:{PORT}/"))
                     .send()
@@ -47,11 +46,8 @@ mod tests {
                     Ok(resp) => {
                         if resp.status().is_success() {
                             match resp.text().await {
-                                Ok(text) => {
-                                    println!("Server started: {}", text);
-
+                                Ok(_) => {
                                     sleep(Duration::from_secs(1)).await;
-
                                     break;
                                 }
                                 Err(_) => sleep(Duration::from_secs(1)).await,
@@ -73,10 +69,6 @@ mod tests {
                 port: PORT,
                 allow_cors: true,
             };
-            println!(
-                "Starting web server on {}:{}",
-                http_config.host, http_config.port
-            );
             web_server.start(http_config).await.unwrap();
         }
         async fn run_test() {
@@ -93,7 +85,7 @@ mod tests {
                 .connect_timeout(Duration::from_secs(2))
                 .build();
             let logger_opts = LoggerOptionsBuilder::new()
-                .verbosity(Some(Verbosity::VeryVerbose))
+                // .verbosity(Some(Verbosity::VeryVerbose))
                 .build();
 
             let variables: HashMap<_, _> = vec![(
