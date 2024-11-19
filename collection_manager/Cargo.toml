@@ -20,6 +20,7 @@ code_index = { path = "../code_index" }
 ordered-float = "4.4.0"
 num-traits = "0.2"
 number_index = { path = "../number_index" }
+bool_index = { path = "../bool_index" }
 
 [dev-dependencies]
 tempdir = "0.3.7"

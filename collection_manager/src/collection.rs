@@ -1,10 +1,11 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
+    collections::{BinaryHeap, HashMap, HashSet},
     sync::{atomic::AtomicU16, Arc},
 };
 
 use anyhow::{anyhow, Result};
+use bool_index::BoolIndex;
 use code_index::CodeIndex;
 use dashmap::DashMap;
 use document_storage::DocumentStorage;
@@ -13,7 +14,7 @@ use nlp::TextParser;
 use num_traits::ToPrimitive;
 use number_index::NumberIndex;
 use ordered_float::NotNan;
-use serde_json::{json, Value};
+use serde_json::Value;
 use storage::Storage;
 use string_index::{scorer::bm25::BM25Score, DocumentBatch, StringIndex};
 use types::{
@@ -41,6 +42,8 @@ pub struct Collection {
     code_fields: DashMap<String, FieldId>,
     // Number
     number_index: NumberIndex,
+    // Bool
+    bool_index: BoolIndex,
 }
 
 impl Collection {
@@ -66,6 +69,7 @@ impl Collection {
             code_index: CodeIndex::new(),
             code_fields: Default::default(),
             number_index: Default::default(),
+            bool_index: Default::default(),
         };
 
         for (field_name, field_type) in typed_fields {
@@ -108,6 +112,7 @@ impl Collection {
         let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut numbers = Vec::new();
+        let mut bools = Vec::new();
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
             let mut flatten = doc.into_flatten();
@@ -159,7 +164,7 @@ impl Collection {
                 } else if field_type == ValueType::Scalar(ScalarType::Number) {
                     let value = match flatten.remove(&key) {
                         Some(Value::Number(value)) => value,
-                        _ => Err(anyhow!("value is not string. This should never happen"))?,
+                        _ => Err(anyhow!("value is not number. This should never happen"))?,
                     };
 
                     let v: Option<Number> = value
@@ -175,6 +180,14 @@ impl Collection {
 
                     let field_id = self.get_field_id(key.clone());
                     numbers.push((internal_document_id, field_id, v));
+                } else if field_type == ValueType::Scalar(ScalarType::Boolean) {
+                    let value = match flatten.remove(&key) {
+                        Some(Value::Bool(value)) => value,
+                        _ => Err(anyhow!("value is not bool. This should never happen"))?,
+                    };
+
+                    let field_id = self.get_field_id(key.clone());
+                    bools.push((internal_document_id, field_id, value));
                 }
             }
 
@@ -189,6 +202,9 @@ impl Collection {
 
         for (doc_id, field_id, value) in numbers {
             self.number_index.add(doc_id, field_id, value);
+        }
+        for (doc_id, field_id, value) in bools {
+            self.bool_index.add(doc_id, field_id, value);
         }
 
         Ok(())
@@ -212,17 +228,17 @@ impl Collection {
 
             let mut doc_ids = match filter {
                 Filter::Number(filter_number) => self.number_index.filter(field_id, filter_number),
+                Filter::Bool(filter_bool) => self.bool_index.filter(field_id, filter_bool),
             };
             for (field_id, filter) in filters {
                 let doc_ids_ = match filter {
                     Filter::Number(filter_number) => {
                         self.number_index.filter(field_id, filter_number)
                     }
+                    Filter::Bool(filter_bool) => self.bool_index.filter(field_id, filter_bool),
                 };
                 doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
             }
-
-            println!("doc_ids: {doc_ids:?}");
 
             Some(doc_ids)
         };
@@ -333,9 +349,12 @@ impl Collection {
                         let mut values = HashMap::new();
 
                         for range in facet.ranges {
-                            let facet = self
+                            let facet: HashSet<_> = self
                                 .number_index
-                                .filter(field_id, NumberFilter::Between(range.from, range.to));
+                                .filter(field_id, NumberFilter::Between(range.from, range.to))
+                                .into_iter()
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect();
 
                             values.insert(format!("{}-{}", range.from, range.to), facet.len());
                         }
@@ -345,6 +364,31 @@ impl Collection {
                             FacetResult {
                                 count: values.len(),
                                 values,
+                            },
+                        );
+                    }
+                    FacetDefinition::Bool => {
+                        let true_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, true)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+                        let false_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, false)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+
+                        facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: 2,
+                                values: HashMap::from_iter([
+                                    ("true".to_string(), true_facet.len()),
+                                    ("false".to_string(), false_facet.len()),
+                                ]),
                             },
                         );
                     }

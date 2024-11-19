@@ -37,7 +37,10 @@ async fn start(config: RustoramaConfig) -> Result<()> {
     let manager = Arc::new(manager);
     let web_server = WebServer::new(manager);
 
-    println!("Starting web server on {}:{}", config.http.host, config.http.port);
+    println!(
+        "Starting web server on {}:{}",
+        config.http.host, config.http.port
+    );
     web_server.start(config.http).await?;
 
     Ok(())

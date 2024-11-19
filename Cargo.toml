@@ -17,4 +17,5 @@ members = [
     "utils",
     "llm",
     "number_index",
+    "bool_index",
 ]

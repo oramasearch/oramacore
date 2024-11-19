@@ -88,11 +88,11 @@ mod tests {
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
-    use types::{CodeLanguage, Number, NumberFilter};
+    use types::{Number, NumberFilter};
 
     use crate::dto::{
         CreateCollectionOptionDTO, FacetDefinition, Filter, Limit, NumberFacetDefinition,
-        NumberFacetDefinitionRange, SearchParams, TypedField,
+        NumberFacetDefinitionRange, SearchParams,
     };
 
     use super::CollectionManager;
@@ -375,88 +375,6 @@ mod tests {
     }
 
     #[test]
-    fn test_foo() {
-        let manager = create_manager();
-        let collection_id_str = "my-test-collection".to_string();
-
-        let collection_id = manager
-            .create_collection(CreateCollectionOptionDTO {
-                id: collection_id_str.clone(),
-                description: Some("Collection of songs".to_string()),
-                language: None,
-                typed_fields: vec![("code".to_string(), TypedField::Code(CodeLanguage::TSX))]
-                    .into_iter()
-                    .collect(),
-            })
-            .expect("insertion should be successful");
-
-        manager.get(collection_id.clone(), |collection| {
-            collection.insert_batch(
-                vec![
-                    json!({
-                        "id": "1",
-                        "code": r#"
-import { TableController, type SortingState } from '@tanstack/lit-table'
-//...
-@state()
-private _sorting: SortingState = [
-  {
-    id: 'age', //you should get autocomplete for the `id` and `desc` properties
-    desc: true,
-  }
-]
-"#,
-                    }),
-                    json!({
-                        "id": "2",
-                        "code": r#"export type RowSelectionState = Record<string, boolean>
-
-export type RowSelectionTableState = {
-  rowSelection: RowSelectionState
-}"#,
-                    }),
-                    json!({
-                        "id": "3",
-                        "code": r#"initialState?: Partial<
-  VisibilityTableState &
-  ColumnOrderTableState &
-  ColumnPinningTableState &
-  FiltersTableState &
-  SortingTableState &
-  ExpandedTableState &
-  GroupingTableState &
-  ColumnSizingTableState &
-  PaginationTableState &
-  RowSelectionTableState
->"#,
-                    }),
-                    json!({
-                        "id": "4",
-                        "code": r#"setColumnVisibility: (updater: Updater<VisibilityState>) => void"#,
-                    })
-                ]
-                .try_into()
-                .unwrap(),
-            )
-        });
-
-        let output = manager
-            .get(collection_id, |collection| {
-                let search_params = SearchParams {
-                    term: "SelectionTableState".to_string(),
-                    limit: Limit(10),
-                    boost: Default::default(),
-                    properties: Default::default(),
-                    where_filter: Default::default(),
-                    facets: Default::default(),
-                };
-                collection.search(search_params)
-            })
-            .unwrap()
-            .unwrap();
-    }
-
-    #[test]
     fn test_filter_number() {
         let manager = create_manager();
         let collection_id_str = "my-test-collection".to_string();
@@ -613,6 +531,221 @@ export type RowSelectionTableState = {
                 ("102-105".to_string(), 0),
                 ("99-105".to_string(), 1),
             ])
+        );
+    }
+
+    #[test]
+    fn test_filter_bool() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    (0..100)
+                        .map(|i| {
+                            json!({
+                                "id": i.to_string(),
+                                "text": "text ".repeat(i + 1),
+                                "bool": i % 2 == 0,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: vec![("bool".to_string(), Filter::Bool(true))]
+                        .into_iter()
+                        .collect(),
+                    facets: Default::default(),
+                })
+            })
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(output.count, 50);
+        assert_eq!(output.hits.len(), 10);
+        for hit in output.hits.iter() {
+            let id = hit.id.parse::<usize>().unwrap();
+            assert_eq!(id % 2, 0);
+        }
+    }
+
+    #[test]
+    fn test_facets_bool() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    (0..100)
+                        .map(|i| {
+                            json!({
+                                "id": i.to_string(),
+                                "text": "text ".repeat(i + 1),
+                                "bool": i % 2 == 0,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: Default::default(),
+                    facets: HashMap::from_iter(vec![("bool".to_string(), FacetDefinition::Bool)]),
+                })
+            })
+            .unwrap()
+            .unwrap();
+
+        let facets = output.facets.expect("Facet should be there");
+        let bool_facet = facets
+            .get("bool")
+            .expect("Facet on field 'bool' should be there");
+
+        assert_eq!(bool_facet.count, 2);
+        assert_eq!(bool_facet.values.len(), 2);
+
+        assert_eq!(
+            bool_facet.values,
+            HashMap::from_iter(vec![("true".to_string(), 50), ("false".to_string(), 50),])
+        );
+    }
+
+    #[test]
+    fn test_facets_should_based_on_term() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    vec![
+                        json!({
+                            "id": "1",
+                            "text": "text",
+                            "bool": true,
+                            "number": 1,
+                        }),
+                        json!({
+                            "id": "2",
+                            "text": "text text",
+                            "bool": false,
+                            "number": 2,
+                        }),
+                        // This document doens't match the term
+                        // so it should not be counted in the facets
+                        json!({
+                            "id": "3",
+                            "text": "another",
+                            "bool": true,
+                            "number": 1,
+                        }),
+                    ]
+                    .try_into()
+                    .unwrap(),
+                )
+            })
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: Default::default(),
+                    facets: HashMap::from_iter(vec![
+                        ("bool".to_string(), FacetDefinition::Bool),
+                        (
+                            "number".to_string(),
+                            FacetDefinition::Number(NumberFacetDefinition {
+                                ranges: vec![NumberFacetDefinitionRange {
+                                    from: Number::from(0),
+                                    to: Number::from(10),
+                                }],
+                            }),
+                        ),
+                    ]),
+                })
+            })
+            .unwrap()
+            .unwrap();
+
+        let facets = output.facets.expect("Facet should be there");
+        let bool_facet = facets
+            .get("bool")
+            .expect("Facet on field 'bool' should be there");
+
+        assert_eq!(bool_facet.count, 2);
+        assert_eq!(bool_facet.values.len(), 2);
+
+        assert_eq!(
+            bool_facet.values,
+            HashMap::from_iter(vec![("true".to_string(), 1), ("false".to_string(), 1),])
+        );
+
+        let number_facet = facets
+            .get("number")
+            .expect("Facet on field 'number' should be there");
+
+        assert_eq!(number_facet.count, 1);
+        assert_eq!(number_facet.values.len(), 1);
+
+        assert_eq!(
+            number_facet.values,
+            HashMap::from_iter(vec![("0-10".to_string(), 2),])
         );
     }
 }

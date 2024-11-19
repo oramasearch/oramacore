@@ -29,7 +29,6 @@ impl WebServer {
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        
         let router = api::api_config().with_state(self.collection_manager.clone());
         let router = if config.allow_cors {
             let cors_layer = CorsLayer::new()
