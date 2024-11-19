@@ -1,5 +1,5 @@
 use anyhow::Result;
-use embeddings::OramaModels;
+use rustorama::embeddings::OramaModels;
 
 fn main() -> Result<()> {
     let model = OramaModels::JinaV2BaseCode.try_new()?;

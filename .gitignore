@@ -3,3 +3,6 @@
 posting_storage
 .idea
 .custom_models
+
+.fastembed_cache
+./src/bin/datasets/*.csv

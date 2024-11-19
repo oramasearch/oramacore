@@ -1,4 +1,4 @@
-use embeddings::properties_selector::PropertiesSelector;
+use rustorama::embeddings::properties_selector::PropertiesSelector;
 use tokio::time::Instant;
 
 fn main() -> anyhow::Result<()> {

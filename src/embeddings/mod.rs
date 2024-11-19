@@ -2,11 +2,10 @@ pub mod custom_models;
 pub mod pq;
 pub mod properties_selector;
 
-use crate::custom_models::{CustomModel, ModelFileConfig};
+use custom_models::{CustomModel, ModelFileConfig};
 use anyhow::{anyhow, Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding};
 use once_cell::sync::OnceCell;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

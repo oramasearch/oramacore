@@ -1,11 +1,12 @@
 use anyhow::Result;
-use embeddings::OramaModels;
+use crate::embeddings::OramaModels;
 use hora::core::ann_index::ANNIndex;
 use hora::core::metrics::Metric::Manhattan;
 use hora::core::node::IdxType;
 use hora::index::hnsw_idx;
 use serde::Serialize;
-use types::DocumentId;
+
+use crate::types::DocumentId;
 
 #[derive(Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash)]
 struct IdxID(Option<DocumentId>);
