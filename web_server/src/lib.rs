@@ -152,6 +152,7 @@ mod tests {
                 boost: Default::default(),
                 properties: Default::default(),
                 where_filter: Default::default(),
+                facets: Default::default(),
             },
         )
         .await;

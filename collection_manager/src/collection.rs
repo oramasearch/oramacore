@@ -13,15 +13,15 @@ use nlp::TextParser;
 use num_traits::ToPrimitive;
 use number_index::NumberIndex;
 use ordered_float::NotNan;
-use serde_json::Value;
+use serde_json::{json, Value};
 use storage::Storage;
 use string_index::{scorer::bm25::BM25Score, DocumentBatch, StringIndex};
 use types::{
-    CollectionId, Document, DocumentId, DocumentList, FieldId, Number, ScalarType, SearchResult,
-    SearchResultHit, StringParser, TokenScore, ValueType,
+    CollectionId, Document, DocumentId, DocumentList, FacetResult, FieldId, Number, NumberFilter,
+    ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType,
 };
 
-use crate::dto::{CollectionDTO, Filter, SearchParams, TypedField};
+use crate::dto::{CollectionDTO, FacetDefinition, Filter, SearchParams, TypedField};
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -322,6 +322,37 @@ impl Collection {
             token_scores
         };
 
+        let facets = if search_params.facets.is_empty() {
+            None
+        } else {
+            let mut facets = HashMap::new();
+            for (field_name, facet) in search_params.facets {
+                let field_id = self.get_field_id(field_name.clone());
+                match facet {
+                    FacetDefinition::Number(facet) => {
+                        let mut values = HashMap::new();
+
+                        for range in facet.ranges {
+                            let facet = self
+                                .number_index
+                                .filter(field_id, NumberFilter::Between(range.from, range.to));
+
+                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
+                        }
+
+                        facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: values.len(),
+                                values,
+                            },
+                        );
+                    }
+                }
+            }
+            Some(facets)
+        };
+
         let count = token_scores.len();
 
         let token_scores = top_n(token_scores, search_params.limit.0);
@@ -348,7 +379,11 @@ impl Collection {
             })
             .collect();
 
-        Ok(SearchResult { count, hits })
+        Ok(SearchResult {
+            count,
+            hits,
+            facets,
+        })
     }
 
     fn generate_document_id(&self) -> DocumentId {

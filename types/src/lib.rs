@@ -226,9 +226,17 @@ pub struct SearchResultHit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FacetResult {
+    pub count: usize,
+    pub values: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub hits: Vec<SearchResultHit>,
     pub count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facets: Option<HashMap<String, FacetResult>>,
 }
 
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize)]
@@ -257,6 +265,15 @@ pub enum NumberFilter {
 pub enum Number {
     I32(i32),
     F32(f32),
+}
+
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Number::I32(value) => write!(f, "{}", value),
+            Number::F32(value) => write!(f, "{}", value),
+        }
+    }
 }
 
 impl From<i32> for Number {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nlp::locales::Locale;
 use serde::{Deserialize, Serialize};
-use types::{CodeLanguage, FieldId, NumberFilter};
+use types::{CodeLanguage, FieldId, Number, NumberFilter};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LanguageDTO {
@@ -64,6 +64,22 @@ pub enum Filter {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct NumberFacetDefinitionRange {
+    pub from: Number,
+    pub to: Number,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NumberFacetDefinition {
+    pub ranges: Vec<NumberFacetDefinitionRange>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum FacetDefinition {
+    Number(NumberFacetDefinition),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchParams {
     pub term: String,
     #[serde(default)]
@@ -74,4 +90,5 @@ pub struct SearchParams {
     pub properties: Option<Vec<String>>,
     #[serde(default, rename = "where")]
     pub where_filter: HashMap<String, Filter>,
+    pub facets: HashMap<String, FacetDefinition>,
 }
