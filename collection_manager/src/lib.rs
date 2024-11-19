@@ -80,14 +80,20 @@ impl CollectionManager {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     use serde_json::json;
     use storage::Storage;
     use tempdir::TempDir;
-    use types::CodeLanguage;
+    use types::{CodeLanguage, Number, NumberFilter};
 
-    use crate::dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField};
+    use crate::dto::{
+        CreateCollectionOptionDTO, FacetDefinition, Filter, Limit, NumberFacetDefinition,
+        NumberFacetDefinitionRange, SearchParams, TypedField,
+    };
 
     use super::CollectionManager;
 
@@ -245,6 +251,8 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
+                facets: Default::default(),
             };
             collection.search(search_params)
         });
@@ -296,6 +304,8 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
+                facets: Default::default(),
             };
             collection.search(search_params)
         });
@@ -346,6 +356,8 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
+                facets: Default::default(),
             };
             collection.search(search_params)
         });
@@ -435,12 +447,172 @@ export type RowSelectionTableState = {
                     limit: Limit(10),
                     boost: Default::default(),
                     properties: Default::default(),
+                    where_filter: Default::default(),
+                    facets: Default::default(),
                 };
                 collection.search(search_params)
             })
             .unwrap()
             .unwrap();
+    }
 
-        println!("{:#?}", output);
+    #[test]
+    fn test_filter_number() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    (0..100)
+                        .map(|i| {
+                            json!({
+                                "id": i.to_string(),
+                                "text": "text ".repeat(i + 1),
+                                "number": i,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: vec![(
+                        "number".to_string(),
+                        Filter::Number(NumberFilter::Equal(50.into())),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    facets: Default::default(),
+                })
+            })
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(output.count, 1);
+        assert_eq!(output.hits.len(), 1);
+        assert_eq!(output.hits[0].id, "50");
+    }
+
+    #[test]
+    fn test_facets_number() {
+        let manager = create_manager();
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .expect("insertion should be successful");
+
+        manager
+            .get(collection_id.clone(), |collection| {
+                collection.insert_batch(
+                    (0..100)
+                        .map(|i| {
+                            json!({
+                                "id": i.to_string(),
+                                "text": "text ".repeat(i + 1),
+                                "number": i,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .unwrap()
+            .unwrap();
+
+        let output = manager
+            .get(collection_id.clone(), |collection| {
+                collection.search(SearchParams {
+                    term: "text".to_string(),
+                    limit: Limit(10),
+                    boost: Default::default(),
+                    properties: Default::default(),
+                    where_filter: Default::default(),
+                    facets: HashMap::from_iter(vec![(
+                        "number".to_string(),
+                        FacetDefinition::Number(NumberFacetDefinition {
+                            ranges: vec![
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(0),
+                                    to: Number::from(10),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(0.5),
+                                    to: Number::from(10.5),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(-10),
+                                    to: Number::from(10),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(-10),
+                                    to: Number::from(-1),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(1),
+                                    to: Number::from(100),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(99),
+                                    to: Number::from(105),
+                                },
+                                NumberFacetDefinitionRange {
+                                    from: Number::from(102),
+                                    to: Number::from(105),
+                                },
+                            ],
+                        }),
+                    )]),
+                })
+            })
+            .unwrap()
+            .unwrap();
+
+        let facets = output.facets.expect("Facet should be there");
+        let number_facet = facets
+            .get("number")
+            .expect("Facet on field 'number' should be there");
+
+        assert_eq!(number_facet.count, 7);
+        assert_eq!(number_facet.values.len(), 7);
+
+        assert_eq!(
+            number_facet.values,
+            HashMap::from_iter(vec![
+                ("-10--1".to_string(), 0),
+                ("-10-10".to_string(), 11),
+                ("0-10".to_string(), 11),
+                ("0.5-10.5".to_string(), 10),
+                ("1-100".to_string(), 99),
+                ("102-105".to_string(), 0),
+                ("99-105".to_string(), 1),
+            ])
+        );
     }
 }

@@ -159,6 +159,7 @@ fn benchmark_search(c: &mut Criterion) {
                             None,
                             Default::default(),
                             BM25Score::default(),
+                            None,
                         )
                         .expect("Search failed");
                 }
@@ -211,6 +212,7 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
                                         None,
                                         Default::default(),
                                         BM25Score::default(),
+                                        None,
                                     )
                                     .expect("Concurrent search failed");
                             }

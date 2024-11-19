@@ -17,12 +17,12 @@ impl Tokenizer {
             stop_words,
         }
     }
-    
+
     pub fn italian() -> Self {
         let stop_words: HashSet<&str> = Locale::IT.stop_words().unwrap();
         Tokenizer {
             split_regex: Locale::IT.split_regex().unwrap(),
-            stop_words
+            stop_words,
         }
     }
 

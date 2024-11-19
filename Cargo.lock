@@ -1242,6 +1242,8 @@ dependencies = [
  "dashmap",
  "document_storage",
  "nlp",
+ "num-traits",
+ "number_index",
  "ordered-float 4.5.0",
  "serde",
  "serde_json",
@@ -4328,6 +4330,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "number_index"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "dashmap",
+ "itertools 0.13.0",
+ "rayon",
+ "roaring",
+ "serde",
+ "types",
+]
+
+[[package]]
 name = "number_prefix"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5531,6 +5547,16 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "roaring"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f4b84ba6e838ceb47b41de5194a60244fac43d9fe03b71dbe8c5a201081d6d1"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+]
 
 [[package]]
 name = "rocksdb"

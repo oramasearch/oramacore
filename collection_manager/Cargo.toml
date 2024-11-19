@@ -18,6 +18,8 @@ document_storage = { path = "../document_storage" }
 code_parser = { path = "../code_parser" }
 code_index = { path = "../code_index" }
 ordered-float = "4.4.0"
+num-traits = "0.2"
+number_index = { path = "../number_index" }
 
 [dev-dependencies]
 tempdir = "0.3.7"

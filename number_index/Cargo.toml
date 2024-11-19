@@ -1,0 +1,14 @@
+[package]
+name = "number_index"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.90"
+bincode = "1.3.3"
+itertools = "0.13.0"
+rayon = "1.10.0"
+serde = { version = "1.0.210", features = ["derive"] }
+types = { path = "../types" }
+roaring = "0.10"
+dashmap = "6"

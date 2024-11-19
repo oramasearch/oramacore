@@ -29,6 +29,7 @@ impl WebServer {
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
+        
         let router = api::api_config().with_state(self.collection_manager.clone());
         let router = if config.allow_cors {
             let cors_layer = CorsLayer::new()
@@ -41,10 +42,12 @@ impl WebServer {
             router
         };
 
+        println!("Starting web server on {}:{}", config.host, config.port);
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
         println!("Started at http://{:?}", listener.local_addr().unwrap());
 
+        println!("Listening on http://{}", addr);
         let output = axum::serve(listener, router).await;
 
         match output {
@@ -151,6 +154,8 @@ mod tests {
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
+                where_filter: Default::default(),
+                facets: Default::default(),
             },
         )
         .await;

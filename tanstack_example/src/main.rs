@@ -64,6 +64,8 @@ async fn main() -> anyhow::Result<()> {
             limit: Limit(3),
             boost: Default::default(),
             properties: Some(vec!["code".to_string()]),
+            where_filter: Default::default(),
+            facets: Default::default(),
         })
     });
 

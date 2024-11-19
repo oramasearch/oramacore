@@ -9,7 +9,7 @@ HTTP 200
 [Captures]
 collection_id: jsonpath "$[0]"
 
-POST {{base_url}}/v0/collections/
+POST {{base_url}}/v0/collections
 {
     "id": "{{collection_id}}"
 }

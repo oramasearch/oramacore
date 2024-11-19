@@ -109,7 +109,6 @@ pub async fn parse_example(path: &str) -> Vec<Value> {
         .collect();
 
     // Await all the futures
-    
 
     futures::future::join_all(futures).await
 }

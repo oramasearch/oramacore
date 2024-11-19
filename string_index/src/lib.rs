@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, RwLock, Mutex
+        Arc, Mutex, RwLock,
     },
 };
 
@@ -103,6 +103,7 @@ impl StringIndex {
         search_on: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
         scorer: S,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
@@ -143,16 +144,24 @@ impl StringIndex {
             total_document_length,
         };
 
+        let in_filtered = move |posting: &Posting| -> bool {
+            if let Some(filtered_doc_ids) = filtered_doc_ids {
+                filtered_doc_ids.contains(&posting.document_id)
+            } else {
+                true
+            }
+        };
+
         let mut filtered_postings: HashMap<DocumentId, Vec<(Posting, usize)>> = HashMap::new();
         for (postings, term_freq) in all_postings {
-            for posting in postings {
+            for posting in postings.into_iter().filter(in_filtered) {
                 if fields
                     .map(|search_on| search_on.contains(&posting.field_id))
                     .unwrap_or(true)
                 {
                     filtered_postings
                         .entry(posting.document_id)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((posting, term_freq));
                 }
             }
@@ -166,7 +175,9 @@ impl StringIndex {
                 .map(|(posting, _)| posting.positions.clone())
                 .collect();
 
-            token_positions.iter_mut().for_each(|positions| positions.sort_unstable());
+            token_positions
+                .iter_mut()
+                .for_each(|positions| positions.sort_unstable());
 
             if self.is_phrase_match(&token_positions) {
                 exact_match_documents.push(*document_id);
@@ -348,8 +359,6 @@ impl StringIndex {
 
         false
     }
-
-
 }
 
 #[cfg(test)]
@@ -388,12 +397,7 @@ mod tests {
         string_index.insert_multiple(batch).unwrap();
 
         let output = string_index
-            .search(
-                vec![],
-                None,
-                Default::default(),
-                BM25Score::default(),
-            )
+            .search(vec![], None, Default::default(), BM25Score::default(), None)
             .unwrap();
 
         assert!(
@@ -436,6 +440,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -454,22 +459,19 @@ mod tests {
         let string_index = StringIndex::new(storage);
         let parser = TextParser::from_language(Locale::EN);
 
-        let batch: HashMap<_, _> = vec![(
-            DocumentId(1),
-            vec![(FieldId(0), "".to_string())],
-        )]
-        .into_iter()
-        .map(|(doc_id, fields)| {
-            let fields: Vec<_> = fields
-                .into_iter()
-                .map(|(field_id, data)| {
-                    let tokens = parser.tokenize_and_stem(&data);
-                    (field_id, tokens)
-                })
-                .collect();
-            (doc_id, fields)
-        })
-        .collect();
+        let batch: HashMap<_, _> = vec![(DocumentId(1), vec![(FieldId(0), "".to_string())])]
+            .into_iter()
+            .map(|(doc_id, fields)| {
+                let fields: Vec<_> = fields
+                    .into_iter()
+                    .map(|(field_id, data)| {
+                        let tokens = parser.tokenize_and_stem(&data);
+                        (field_id, tokens)
+                    })
+                    .collect();
+                (doc_id, fields)
+            })
+            .collect();
 
         string_index.insert_multiple(batch).unwrap();
 
@@ -479,6 +481,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -525,6 +528,7 @@ mod tests {
                 Some(vec![FieldId(0)]),
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -540,6 +544,7 @@ mod tests {
                 Some(vec![FieldId(1)]),
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -555,6 +560,7 @@ mod tests {
                 Some(vec![FieldId(2)]),
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -610,6 +616,7 @@ mod tests {
                 None,
                 boost,
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -658,6 +665,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -681,6 +689,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -769,6 +778,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -812,6 +822,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -855,6 +866,7 @@ mod tests {
                 None,
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
@@ -909,27 +921,34 @@ mod tests {
             DocumentId(1),
             vec![(FieldId(0), "5200 mAh battery in disguise".to_string())],
         )]
-            .into_iter()
-            .map(|(doc_id, fields)| {
-                let fields: Vec<_> = fields
-                    .into_iter()
-                    .map(|(field_id, data)| {
-                        let tokens = parser.tokenize_and_stem(&data);
-                        (field_id, tokens)
-                    })
-                    .collect();
-                (doc_id, fields)
-            })
-            .collect();
+        .into_iter()
+        .map(|(doc_id, fields)| {
+            let fields: Vec<_> = fields
+                .into_iter()
+                .map(|(field_id, data)| {
+                    let tokens = parser.tokenize_and_stem(&data);
+                    (field_id, tokens)
+                })
+                .collect();
+            (doc_id, fields)
+        })
+        .collect();
 
         string_index.insert_multiple(batch).unwrap();
 
         let output = string_index
             .search(
-                vec!["5200".to_string(), "mAh".to_string(), "battery".to_string(), "in".to_string(), "disguise".to_string()],
+                vec![
+                    "5200".to_string(),
+                    "mAh".to_string(),
+                    "battery".to_string(),
+                    "in".to_string(),
+                    "disguise".to_string(),
+                ],
                 Some(vec![FieldId(0)]),
                 Default::default(),
                 BM25Score::default(),
+                None,
             )
             .unwrap();
 
