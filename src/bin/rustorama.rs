@@ -5,6 +5,7 @@ use config::Config;
 use rustorama::collection_manager::{CollectionManager, CollectionsConfiguration};
 use rustorama::web_server::{HttpConfig, WebServer};
 use serde::Deserialize;
+use tracing::info;
 
 #[derive(Debug, Deserialize, Clone)]
 struct RustoramaConfig {
@@ -13,6 +14,8 @@ struct RustoramaConfig {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "./config.jsonc".to_string());
 
     let settings = Config::builder()
@@ -31,19 +34,16 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn start(config: RustoramaConfig) -> Result<()> {
-    let manager = create_manager(config.clone());
+    let manager = CollectionManager::new(CollectionsConfiguration {});
     let manager = Arc::new(manager);
     let web_server = WebServer::new(manager);
 
-    println!(
+    info!(
         "Starting web server on {}:{}",
         config.http.host, config.http.port
     );
+
     web_server.start(config.http).await?;
 
     Ok(())
-}
-
-fn create_manager(config: RustoramaConfig) -> CollectionManager {
-    CollectionManager::new(CollectionsConfiguration {})
 }

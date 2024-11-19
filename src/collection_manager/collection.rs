@@ -24,6 +24,7 @@ use num_traits::ToPrimitive;
 
 use ordered_float::NotNan;
 use serde_json::Value;
+use tracing::info;
 
 use crate::types::{
     CollectionId, Document, DocumentId, DocumentList, FacetResult, FieldId, Number, NumberFilter,
@@ -117,6 +118,8 @@ impl Collection {
     }
 
     pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
+        info!("Inserting batch of {} documents", document_list.len());
+
         let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut numbers = Vec::new();
@@ -219,6 +222,8 @@ impl Collection {
     }
 
     pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        info!("Searching with params: {:?}", search_params);
+
         let filtered_doc_ids = if search_params.where_filter.is_empty() {
             None
         } else {
@@ -247,6 +252,8 @@ impl Collection {
                 };
                 doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
             }
+
+            info!("Matching doc from filters: {:?}", doc_ids);
 
             Some(doc_ids)
         };
@@ -346,9 +353,13 @@ impl Collection {
             token_scores
         };
 
+        info!("Document that match the term: {:?}", token_scores.len());
+
         let facets = if search_params.facets.is_empty() {
             None
         } else {
+            info!("Computing facets on {:?}", search_params.facets.keys());
+
             let mut facets = HashMap::new();
             for (field_name, facet) in search_params.facets {
                 let field_id = self.get_field_id(field_name.clone());
@@ -447,12 +458,20 @@ impl Collection {
             return *field_id;
         }
 
-        let field_id = self.string_fields.entry(field_name).or_insert_with(|| {
-            let field_id = self
-                .field_id_generator
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            FieldId(field_id)
-        });
+        let field_id = self
+            .string_fields
+            .entry(field_name.clone())
+            .or_insert_with(|| {
+                let field_id = self
+                    .field_id_generator
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                FieldId(field_id)
+            });
+
+        info!(
+            "Created new field id for \"{}\": {:?}",
+            field_name, *field_id
+        );
 
         *field_id
     }

@@ -2,11 +2,11 @@
 
 How to run:
 ```bash
-cargo run --bin rustorama
+RUST_LOG=trace cargo run --bin rustorama
 ```
 or, for release mode:
 ```bash
-cargo run --bin rustorama --release
+RUST_LOG=trace cargo run --bin rustorama --release
 ```
 
 The configuration file is located at `config.jsonc` and contains an example of the configuration.

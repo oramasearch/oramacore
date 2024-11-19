@@ -4,6 +4,7 @@ use collection::Collection;
 use dashmap::DashMap;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use thiserror::Error;
+use tracing::{info, info_span, warn};
 
 use crate::{document_storage::DocumentStorage, types::CollectionId};
 
@@ -57,10 +58,13 @@ impl CollectionManager {
         let entry = self.collections.entry(id.clone());
         match entry {
             dashmap::mapref::entry::Entry::Occupied(_) => {
-                return Err(CreateCollectionError::IdAlreadyExists)
+                warn!("Collection with id {} already exists", id.0);
+                return Err(CreateCollectionError::IdAlreadyExists);
             }
             dashmap::mapref::entry::Entry::Vacant(entry) => entry.insert(collection),
         };
+
+        info!("Collection with id {} created", id.0);
 
         Ok(id)
     }
@@ -74,7 +78,14 @@ impl CollectionManager {
 
     pub fn get<R>(&self, id: CollectionId, f: impl FnOnce(&Collection) -> R) -> Option<R> {
         let output = self.collections.get(&id);
-        output.map(|collection| f(collection.value()))
+        output.map(|collection| {
+            let span = info_span!(
+                "collection",
+                collection_id = %id.0,
+            );
+
+            span.in_scope(|| f(collection.value()))
+        })
     }
 }
 
