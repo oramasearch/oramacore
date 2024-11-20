@@ -96,8 +96,11 @@ impl<'guard> CollectionReadLock<'guard> {
         id: CollectionId,
     ) -> Option<Self> {
         let guard = lock.get(&id);
-        match guard {
-            Some(_) => Some(CollectionReadLock { lock, id }),
+        match &guard {
+            Some(_) => {
+                let _ = guard;
+                Some(CollectionReadLock { lock, id })
+            }
             None => None,
         }
     }
