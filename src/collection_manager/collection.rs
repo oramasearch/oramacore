@@ -208,7 +208,7 @@ impl Collection {
         // TODO: if the insert_multiple fails, should we rollback the `add_documents`?
         self.document_storage.add_documents(documents).await?;
 
-        self.string_index.insert_multiple(strings)?;
+        self.string_index.insert_multiple(strings).await?;
         self.code_index.insert_multiple(codes)?;
 
         for (doc_id, field_id, value) in numbers {
@@ -300,7 +300,7 @@ impl Collection {
                 boost.clone(),
                 BM25Score::default(),
                 filtered_doc_ids.as_ref(),
-            )?;
+            ).await?;
 
             let id_field_id = self.get_field_id("id".to_string());
             if properties.contains(&id_field_id) {
@@ -310,7 +310,7 @@ impl Collection {
                     boost.clone(),
                     BM25Score::default(),
                     filtered_doc_ids.as_ref(),
-                )?;
+                ).await?;
 
                 for (key, v) in id_output {
                     let vv = output.entry(key).or_default();
@@ -487,13 +487,13 @@ impl Collection {
             None => return Ok(None),
         };
 
-        let output = dbg!(self.string_index.search(
+        let output = self.string_index.search(
             vec![value],
             Some(vec![field_id]),
             Default::default(),
             BM25Score::default(),
             None,
-        )?);
+        ).await?;
 
         let doc_id = dbg!(match output.into_keys().next() {
             Some(doc_id) => doc_id,

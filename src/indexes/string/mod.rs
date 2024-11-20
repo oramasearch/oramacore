@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc, Mutex, RwLock,
+        Arc,
     },
 };
 
@@ -13,6 +13,7 @@ use posting_storage::{PostingListId, PostingStorage};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
 
 use crate::types::{DocumentId, FieldId};
 
@@ -65,9 +66,9 @@ impl StringIndex {
         }
     }
 
-    fn build_fst(&self) -> Result<Map<Vec<u8>>> {
+    async fn build_fst(&self) -> Result<Map<Vec<u8>>> {
         let entries: Vec<_> = {
-            let temp_map = self.temp_map.read().unwrap();
+            let temp_map = self.temp_map.read().await;
             temp_map
                 .iter()
                 .map(|(key, value)| {
@@ -97,7 +98,7 @@ impl StringIndex {
         self.total_documents.load(Ordering::Relaxed)
     }
 
-    pub fn search<S: Scorer + Sync>(
+    pub async fn search<S: Scorer + Sync>(
         &self,
         tokens: Vec<String>,
         search_on: Option<Vec<FieldId>>,
@@ -121,7 +122,7 @@ impl StringIndex {
 
         let mut all_postings = Vec::new();
 
-        if let Some(fst) = self.fst_map.read().unwrap().as_ref() {
+        if let Some(fst) = self.fst_map.read().await.as_ref() {
             for token in &tokens {
                 let automaton = fst::automaton::Str::new(token).starts_with();
                 let mut stream = fst.search(automaton).into_stream();
@@ -206,8 +207,8 @@ impl StringIndex {
         Ok(scores)
     }
 
-    pub fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
-        let _lock = self.insert_mutex.lock().unwrap();
+    pub async fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
+        let _lock = self.insert_mutex.lock().await;
 
         self.total_documents
             .fetch_add(data.len(), Ordering::Relaxed);
@@ -278,7 +279,7 @@ impl StringIndex {
 
         let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
             HashMap::with_capacity(posting_per_term.len());
-        let mut temp_map = self.temp_map.write().unwrap();
+        let mut temp_map = self.temp_map.write().await;
 
         for (term_id, postings) in posting_per_term {
             self.total_document_length.fetch_add(
@@ -313,10 +314,10 @@ impl StringIndex {
         }
 
         drop(temp_map);
-        let new_fst = self.build_fst()?;
+        let new_fst = self.build_fst().await?;
 
         {
-            let mut fst_map = self.fst_map.write().unwrap();
+            let mut fst_map = self.fst_map.write().await;
             *fst_map = Some(new_fst);
         }
 
@@ -363,6 +364,8 @@ impl StringIndex {
 
 #[cfg(test)]
 mod tests {
+    use futures::{future::join_all, FutureExt};
+
     use crate::{
         indexes::string::{scorer::bm25::BM25Score, StringIndex},
         nlp::{locales::Locale, TextParser},
@@ -370,8 +373,8 @@ mod tests {
     };
     use std::{collections::HashMap, sync::Arc};
 
-    #[test]
-    fn test_empty_search_query() {
+    #[tokio::test]
+    async fn test_empty_search_query() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -393,10 +396,11 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(vec![], None, Default::default(), BM25Score::default(), None)
+            .await
             .unwrap();
 
         assert!(
@@ -405,8 +409,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_nonexistent_term() {
+    #[tokio::test]
+    async fn test_search_nonexistent_term() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -428,7 +432,7 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -438,6 +442,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert!(
@@ -446,8 +451,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_insert_empty_document() {
+    #[tokio::test]
+    async fn test_insert_empty_document() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -466,7 +471,7 @@ mod tests {
             })
             .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -476,6 +481,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert!(
@@ -484,8 +490,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_with_field_filter() {
+    #[tokio::test]
+    async fn test_search_with_field_filter() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -510,7 +516,7 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -520,6 +526,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -536,6 +543,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -552,6 +560,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert!(
@@ -560,8 +569,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_with_boosts() {
+    #[tokio::test]
+    async fn test_search_with_boosts() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -592,7 +601,7 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let mut boost = HashMap::new();
         boost.insert(FieldId(0), 2.0);
@@ -605,6 +614,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(output.len(), 2, "Should find both documents");
@@ -618,8 +628,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_insert_document_with_stop_words_only() {
+    #[tokio::test]
+    async fn test_insert_document_with_stop_words_only() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -641,7 +651,7 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -651,6 +661,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert!(
@@ -659,8 +670,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_search_on_empty_index() {
+    #[tokio::test]
+    async fn test_search_on_empty_index() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
 
@@ -672,6 +683,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert!(
@@ -680,17 +692,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_concurrent_insertions() {
-        use std::thread;
-
+    #[tokio::test]
+    async fn test_concurrent_insertions() {
         let id_geneator = Arc::new(Default::default());
         let string_index = Arc::new(StringIndex::new(id_geneator));
 
         let string_index_clone1 = Arc::clone(&string_index);
         let string_index_clone2 = Arc::clone(&string_index);
 
-        let handle1 = thread::spawn(move || {
+        let handle1 = async {
             let parser = TextParser::from_language(Locale::EN);
             let batch: HashMap<_, _> = vec![(
                 DocumentId(1),
@@ -712,10 +722,10 @@ mod tests {
             })
             .collect();
 
-            string_index_clone1.insert_multiple(batch).unwrap();
-        });
+            string_index_clone1.insert_multiple(batch).await.unwrap();
+        }.boxed();
 
-        let handle2 = thread::spawn(move || {
+        let handle2 = async {
             let parser = TextParser::from_language(Locale::EN);
             let batch: HashMap<_, _> = vec![(
                 DocumentId(2),
@@ -737,11 +747,10 @@ mod tests {
             })
             .collect();
 
-            string_index_clone2.insert_multiple(batch).unwrap();
-        });
+            string_index_clone2.insert_multiple(batch).await.unwrap();
+        }.boxed();
 
-        handle1.join().unwrap();
-        handle2.join().unwrap();
+        join_all(vec![handle1, handle2]).await;
 
         let parser = TextParser::from_language(Locale::EN);
         let search_tokens = parser
@@ -758,6 +767,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -767,8 +777,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_large_documents() {
+    #[tokio::test]
+    async fn test_large_documents() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -789,7 +799,7 @@ mod tests {
             })
             .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -799,6 +809,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -808,8 +819,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_high_term_frequency() {
+    #[tokio::test]
+    async fn test_high_term_frequency() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -830,7 +841,7 @@ mod tests {
             })
             .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -840,6 +851,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -849,8 +861,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_term_positions() {
+    #[tokio::test]
+    async fn test_term_positions() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -875,11 +887,11 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
     }
 
-    #[test]
-    fn test_exact_phrase_match() {
+    #[tokio::test]
+    async fn test_exact_phrase_match() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
         let parser = TextParser::from_language(Locale::EN);
@@ -901,7 +913,7 @@ mod tests {
         })
         .collect();
 
-        string_index.insert_multiple(batch).unwrap();
+        string_index.insert_multiple(batch).await.unwrap();
 
         let output = string_index
             .search(
@@ -917,6 +929,7 @@ mod tests {
                 BM25Score::default(),
                 None,
             )
+            .await
             .unwrap();
 
         assert_eq!(

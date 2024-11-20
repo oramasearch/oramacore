@@ -82,7 +82,7 @@ hurl = "5.0.1"
 hurl_core = "5.0.1"
 tempdir = "0.3.7"
 pretty_assertions = "1.4.1"
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 http-body-util = "0.1.2"
 mime = "0.3.17"
 tower = { version = "0.5.1", features = ["util"] }
@@ -107,6 +107,11 @@ path = "src/bin/embeddings/pq.rs"
 [[bin]]
 name = "selector"
 path = "src/bin/embeddings/selector.rs"
+
+
+[[bench]]
+name = "string_index_bench"
+harness = false
 
 [workspace]
 members = [
