@@ -28,7 +28,7 @@ pub fn apis() -> Router<Arc<CollectionManager>> {
 }
 
 async fn get_collections(manager: State<Arc<CollectionManager>>) -> Json<Vec<CollectionDTO>> {
-    let collections = manager.list();
+    let collections = manager.list().await;
     Json(collections)
 }
 
@@ -37,10 +37,10 @@ async fn get_collection_by_id(
     manager: State<Arc<CollectionManager>>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let output = manager.get(collection_id, |collection| collection.as_dto());
+    let collection = manager.get(collection_id).await;
 
-    match output {
-        Some(data) => Ok((StatusCode::OK, Json(data))),
+    match collection {
+        Some(collection) => Ok((StatusCode::OK, Json(collection.as_dto()))),
         None => Err((
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "collection not found" })),
@@ -52,7 +52,7 @@ async fn create_collection(
     manager: State<Arc<CollectionManager>>,
     Json(json): Json<CreateCollectionOptionDTO>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = match manager.create_collection(json) {
+    let collection_id = match manager.create_collection(json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
             return Err((
@@ -73,20 +73,27 @@ async fn add_documents(
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let output = manager.get(collection_id, |collection| collection.insert_batch(json));
+
+    let collection = match manager.get(collection_id).await {
+        Some(collection) => collection,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "collection not found" })),
+            ));
+        }
+    };
+
+    let output = collection.insert_batch(json).await;
 
     match output {
-        Some(Ok(())) => Ok((
+        Ok(_) => Ok((
             StatusCode::OK,
             Json(json!({ "message": "documents added" })),
         )),
-        Some(Err(e)) => Err((
+        Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
-        )),
-        None => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "collection not found" })),
         )),
     }
 }
@@ -97,17 +104,26 @@ async fn search(
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let output = manager.get(collection_id, |collection| collection.search(json));
+
+    let collection = manager.get(collection_id).await;
+
+    let collection = match collection {
+        Some(collection) => collection,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "collection not found" })),
+            ));
+        }
+    };
+
+    let output = collection.search(json).await;
 
     match output {
-        Some(Ok(data)) => Ok((StatusCode::OK, Json(data))),
-        Some(Err(e)) => Err((
+        Ok(data) => Ok((StatusCode::OK, Json(data))),
+        Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
-        )),
-        None => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "collection not found" })),
         )),
     }
 }
@@ -117,23 +133,30 @@ async fn get_doc_by_id(
     manager: State<Arc<CollectionManager>>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(collection_id);
-    let output = manager.get(collection_id, |collection| {
-        collection.get_doc_by_unique_field("id".to_string(), document_id)
-    });
+
+    let collection = manager.get(collection_id).await;
+
+    let collection = match collection {
+        Some(collection) => collection,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "collection not found" })),
+            ));
+        }
+    };
+
+    let output = collection.get_doc_by_unique_field("id".to_string(), document_id).await;
 
     match output {
-        Some(Ok(Some(data))) => Ok((StatusCode::OK, Json(data))),
-        Some(Ok(None)) => Err((
+        Ok(Some(data)) => Ok((StatusCode::OK, Json(data))),
+        Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "document not found" })),
         )),
-        Some(Err(e)) => Err((
+        Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
-        )),
-        None => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "collection not found" })),
         )),
     }
 }

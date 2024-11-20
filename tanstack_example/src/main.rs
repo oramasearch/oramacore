@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
                 .into_iter()
                 .collect(),
         })
+        .await
         .expect("unable to create collection");
 
     let orama_documentation_documents =
@@ -45,12 +46,10 @@ async fn main() -> anyhow::Result<()> {
         .chain(orama_example_documents)
         .collect::<Vec<_>>();
 
-    manager.get(collection_id.clone(), |collection| {
-        collection.insert_batch(orama_documents.try_into().unwrap())
-    });
+    let collection = manager.get(collection_id).await.unwrap();
+    collection.insert_batch(orama_documents.try_into().unwrap()).await.unwrap();
 
-    let output = manager.get(collection_id, |collection| {
-        collection.search(SearchParams {
+    collection.search(SearchParams {
             term: r###"columnHelper.accessor('firstName')
 
 // OR
@@ -64,8 +63,9 @@ async fn main() -> anyhow::Result<()> {
             properties: Some(vec!["code".to_string()]),
             where_filter: Default::default(),
             facets: Default::default(),
-        })
-    });
+        }).await.unwrap();
+
+    drop(collection);
 
     let web_server = WebServer::new(Arc::new(manager));
 

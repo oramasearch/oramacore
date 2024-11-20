@@ -117,7 +117,7 @@ impl Collection {
         }
     }
 
-    pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
+    pub async fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
         info!("Inserting batch of {} documents", document_list.len());
 
         let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
@@ -206,7 +206,7 @@ impl Collection {
         }
 
         // TODO: if the insert_multiple fails, should we rollback the `add_documents`?
-        self.document_storage.add_documents(documents)?;
+        self.document_storage.add_documents(documents).await?;
 
         self.string_index.insert_multiple(strings)?;
         self.code_index.insert_multiple(codes)?;
@@ -221,7 +221,7 @@ impl Collection {
         Ok(())
     }
 
-    pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
         info!("Searching with params: {:?}", search_params);
 
         let filtered_doc_ids = if search_params.where_filter.is_empty() {
@@ -422,7 +422,8 @@ impl Collection {
 
         let docs = self
             .document_storage
-            .get_all(token_scores.iter().map(|m| m.document_id).collect())?;
+            .get_all(token_scores.iter().map(|m| m.document_id).collect())
+            .await?;
 
         let hits: Vec<_> = token_scores
             .into_iter()
@@ -476,7 +477,7 @@ impl Collection {
         *field_id
     }
 
-    pub fn get_doc_by_unique_field(
+    pub async fn get_doc_by_unique_field(
         &self,
         field_name: String,
         value: String,
@@ -499,7 +500,7 @@ impl Collection {
             None => return Ok(None),
         });
 
-        self.document_storage.get(doc_id)
+        self.document_storage.get(doc_id).await
     }
 }
 

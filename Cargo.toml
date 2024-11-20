@@ -49,6 +49,8 @@ cuid = "1.3.3"
 ordered-float = "4"
 num-traits = "0.2"
 
+futures = "0.3.31"
+
 # Webserver
 axum = "0.7.6"
 axum-macros = "0.4.2"
@@ -76,7 +78,6 @@ env_filter = "0.1.2"
 cc="*"
 
 [dev-dependencies]
-futures = "0.3.31"
 hurl = "5.0.1"
 hurl_core = "5.0.1"
 tempdir = "0.3.7"
