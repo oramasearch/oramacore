@@ -18,13 +18,14 @@ fn read_json_file() -> Result<Vec<Movie>> {
     Ok(movies)
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let config = VectorIndexConfig {
         embeddings_model: OramaModels::GTESmall,
     };
 
     let mut idx = VectorIndex::new(config);
-    let model = OramaModels::GTESmall.try_new()?;
+    let model = OramaModels::GTESmall.try_new().await?;
     let dataset = read_json_file()?;
 
     let start_embeddings = Instant::now();

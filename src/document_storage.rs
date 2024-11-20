@@ -1,13 +1,16 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use anyhow::Result;
-use dashmap::DashMap;
+use tokio::sync::RwLock;
 
 use crate::types::{Document, DocumentId};
 
 #[derive(Debug, Default)]
 pub struct DocumentStorage {
-    storage: DashMap<DocumentId, Document>,
+    storage: RwLock<HashMap<DocumentId, Document>>,
     id_generator: Arc<AtomicU64>,
 }
 
@@ -26,26 +29,29 @@ impl DocumentStorage {
         DocumentId(id)
     }
 
-    pub fn add_documents(&self, documents: Vec<(DocumentId, Document)>) -> Result<()> {
+    pub async fn add_documents(&self, documents: Vec<(DocumentId, Document)>) -> Result<()> {
+        let mut storage = self.storage.write().await;
         for (doc_id, doc) in documents {
-            self.storage.insert(doc_id, doc);
+            storage.insert(doc_id, doc);
         }
 
         Ok(())
     }
 
-    pub fn get_all(&self, doc_ids: Vec<DocumentId>) -> Result<Vec<Option<Document>>> {
+    pub async fn get_all(&self, doc_ids: Vec<DocumentId>) -> Result<Vec<Option<Document>>> {
+        let storage = self.storage.read().await;
         let docs = doc_ids
             .into_iter()
-            // TODO: Avoid this clone
-            .map(|doc_id| self.storage.get(&doc_id).map(|x| x.value().clone()))
+            // TODO: Avoid the `clone`
+            .map(|doc_id| storage.get(&doc_id).cloned())
             .collect();
 
         Ok(docs)
     }
 
-    pub fn get(&self, doc_id: DocumentId) -> Result<Option<Document>> {
-        // TODO: Avoid this clone
-        Ok(self.storage.get(&doc_id).map(|x| x.value().clone()))
+    pub async fn get(&self, doc_id: DocumentId) -> Result<Option<Document>> {
+        let storage = self.storage.read().await;
+        // TODO: Avoid the `clone`
+        Ok(storage.get(&doc_id).cloned())
     }
 }

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use rustorama::embeddings::OramaModels;
 
-fn main() -> Result<()> {
-    let model = OramaModels::JinaV2BaseCode.try_new()?;
+#[tokio::main]
+async fn main() -> Result<()> {
+    let model = OramaModels::JinaV2BaseCode.try_new().await?;
 
     let embedding = model.embed(
         vec![r"

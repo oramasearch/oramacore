@@ -3,15 +3,16 @@ pub mod pq;
 pub mod properties_selector;
 
 use anyhow::{anyhow, Context, Result};
+use async_once_cell::OnceCell;
 use custom_models::{CustomModel, ModelFileConfig};
 use fastembed::{EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding};
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use strum::EnumIter;
 use strum_macros::{AsRefStr, Display};
+use tokio::sync::RwLock;
 
 static MODELS: OnceCell<RwLock<HashMap<OramaModels, Arc<TextEmbedding>>>> = OnceCell::new();
 
@@ -96,14 +97,12 @@ impl TryInto<EmbeddingModel> for OramaModels {
 }
 
 impl OramaModels {
-    pub fn try_new(&self) -> Result<Arc<TextEmbedding>> {
-        MODELS.get_or_init(|| RwLock::new(HashMap::new()));
+    pub async fn try_new(&self) -> Result<Arc<TextEmbedding>> {
+        MODELS
+            .get_or_init(async { RwLock::new(HashMap::new()) })
+            .await;
 
-        let mut models_map = MODELS
-            .get()
-            .unwrap()
-            .write()
-            .map_err(|_| anyhow!("Failed to acquire write lock on the models map"))?;
+        let mut models_map = MODELS.get().unwrap().write().await;
 
         if let Some(existing_model) = models_map.get(self) {
             return Ok(existing_model.clone());
@@ -156,10 +155,7 @@ impl OramaModels {
     }
 
     pub fn is_custom_model(self) -> bool {
-        match self {
-            OramaModels::JinaV2BaseCode => true,
-            _ => false,
-        }
+        matches!(self, OramaModels::JinaV2BaseCode)
     }
 
     pub fn max_input_tokens(self) -> usize {

@@ -117,7 +117,7 @@ impl Collection {
         }
     }
 
-    pub fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
+    pub async fn insert_batch(&self, document_list: DocumentList) -> Result<(), anyhow::Error> {
         info!("Inserting batch of {} documents", document_list.len());
 
         let mut strings: DocumentBatch = HashMap::with_capacity(document_list.len());
@@ -206,9 +206,9 @@ impl Collection {
         }
 
         // TODO: if the insert_multiple fails, should we rollback the `add_documents`?
-        self.document_storage.add_documents(documents)?;
+        self.document_storage.add_documents(documents).await?;
 
-        self.string_index.insert_multiple(strings)?;
+        self.string_index.insert_multiple(strings).await?;
         self.code_index.insert_multiple(codes)?;
 
         for (doc_id, field_id, value) in numbers {
@@ -221,7 +221,7 @@ impl Collection {
         Ok(())
     }
 
-    pub fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
         info!("Searching with params: {:?}", search_params);
 
         let filtered_doc_ids = if search_params.where_filter.is_empty() {
@@ -294,23 +294,29 @@ impl Collection {
                 .map(|field_id| *field_id.value())
                 .collect();
 
-            let mut output = self.string_index.search(
-                tokens,
-                Some(fields_on_search_with_default_parser),
-                boost.clone(),
-                BM25Score::default(),
-                filtered_doc_ids.as_ref(),
-            )?;
-
-            let id_field_id = self.get_field_id("id".to_string());
-            if properties.contains(&id_field_id) {
-                let id_output = self.string_index.search(
-                    vec![search_params.term.clone()],
-                    Some(vec![id_field_id]),
+            let mut output = self
+                .string_index
+                .search(
+                    tokens,
+                    Some(fields_on_search_with_default_parser),
                     boost.clone(),
                     BM25Score::default(),
                     filtered_doc_ids.as_ref(),
-                )?;
+                )
+                .await?;
+
+            let id_field_id = self.get_field_id("id".to_string());
+            if properties.contains(&id_field_id) {
+                let id_output = self
+                    .string_index
+                    .search(
+                        vec![search_params.term.clone()],
+                        Some(vec![id_field_id]),
+                        boost.clone(),
+                        BM25Score::default(),
+                        filtered_doc_ids.as_ref(),
+                    )
+                    .await?;
 
                 for (key, v) in id_output {
                     let vv = output.entry(key).or_default();
@@ -422,7 +428,8 @@ impl Collection {
 
         let docs = self
             .document_storage
-            .get_all(token_scores.iter().map(|m| m.document_id).collect())?;
+            .get_all(token_scores.iter().map(|m| m.document_id).collect())
+            .await?;
 
         let hits: Vec<_> = token_scores
             .into_iter()
@@ -476,7 +483,7 @@ impl Collection {
         *field_id
     }
 
-    pub fn get_doc_by_unique_field(
+    pub async fn get_doc_by_unique_field(
         &self,
         field_name: String,
         value: String,
@@ -486,20 +493,23 @@ impl Collection {
             None => return Ok(None),
         };
 
-        let output = dbg!(self.string_index.search(
-            vec![value],
-            Some(vec![field_id]),
-            Default::default(),
-            BM25Score::default(),
-            None,
-        )?);
+        let output = self
+            .string_index
+            .search(
+                vec![value],
+                Some(vec![field_id]),
+                Default::default(),
+                BM25Score::default(),
+                None,
+            )
+            .await?;
 
         let doc_id = dbg!(match output.into_keys().next() {
             Some(doc_id) => doc_id,
             None => return Ok(None),
         });
 
-        self.document_storage.get(doc_id)
+        self.document_storage.get(doc_id).await
     }
 }
 

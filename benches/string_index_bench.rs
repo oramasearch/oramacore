@@ -1,10 +1,13 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use futures::future::join_all;
+use futures::FutureExt;
 use rand::{seq::SliceRandom, Rng};
 use rustorama::indexes::string::scorer::bm25::BM25Score;
 use rustorama::indexes::string::StringIndex;
 use rustorama::types::{DocumentId, FieldId};
 use std::sync::Arc;
 use std::{collections::HashMap, sync::atomic::AtomicU64};
+use tokio::runtime::Runtime;
 
 #[derive(Debug)]
 struct BenchmarkResults {
@@ -64,16 +67,19 @@ fn benchmark_indexing(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(30));
     group.sample_size(50);
 
+    let runtime = Runtime::new().unwrap();
+
     for &size in &[1000, 5000, 10_000] {
         group.bench_with_input(BenchmarkId::new("simple_index", size), &size, |b, &size| {
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
 
-            b.iter(|| {
+            b.to_async(&runtime).iter(|| async {
                 let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
 
                 index
                     .insert_multiple(batch.clone())
+                    .await
                     .expect("Insertion failed");
             });
         });
@@ -87,6 +93,8 @@ fn benchmark_batch_indexing(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(30));
     group.sample_size(30);
 
+    let runtime = Runtime::new().unwrap();
+
     for &size in &[1000, 5000, 10_000] {
         for &batch_size in &[100, 500] {
             group.bench_with_input(
@@ -96,10 +104,11 @@ fn benchmark_batch_indexing(c: &mut Criterion) {
                     let data = generate_test_data(size);
                     let batch: HashMap<_, _> = data.into_iter().collect();
 
-                    b.iter(|| {
+                    b.to_async(&runtime).iter(|| async {
                         let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
                         index
                             .insert_multiple(batch.clone())
+                            .await
                             .expect("Batch insertion failed");
                     });
                 },
@@ -133,17 +142,20 @@ fn benchmark_search(c: &mut Criterion) {
         })
         .collect();
 
+    let runtime = Runtime::new().unwrap();
+
     for &size in &[1000, 5000] {
         group.bench_with_input(BenchmarkId::new("search", size), &size, |b, &size| {
             let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
 
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
-            index
-                .insert_multiple(batch)
+
+            runtime
+                .block_on(index.insert_multiple(batch))
                 .expect("Initial data insertion failed");
 
-            b.iter(|| {
+            b.to_async(&runtime).iter(|| async {
                 for query in queries.iter() {
                     let _ = index
                         .search(
@@ -153,6 +165,7 @@ fn benchmark_search(c: &mut Criterion) {
                             BM25Score::default(),
                             None,
                         )
+                        .await
                         .expect("Search failed");
                 }
             });
@@ -166,6 +179,8 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
     let mut group = c.benchmark_group("concurrent_operations");
     group.measurement_time(std::time::Duration::from_secs(40));
 
+    let runtime = Runtime::new().unwrap();
+
     #[allow(clippy::single_element_loop)]
     for &size in &[5000] {
         group.bench_with_input(BenchmarkId::new("concurrent", size), &size, |b, &size| {
@@ -173,8 +188,9 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
 
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
-            index
-                .insert_multiple(batch)
+
+            runtime
+                .block_on(index.insert_multiple(batch))
                 .expect("Initial data insertion failed");
 
             let queries = generate_test_data(50)
@@ -189,15 +205,15 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
                 .collect::<Vec<_>>();
 
             b.iter(|| {
-                use std::thread;
+                let index: Arc<StringIndex> = Arc::clone(&index);
 
-                let search_threads: Vec<_> = (0..2)
-                    .map(|_| {
-                        let index: Arc<StringIndex> = Arc::clone(&index);
-                        let queries = queries.clone();
-                        thread::spawn(move || {
-                            for query in &queries {
-                                let _ = index
+                let mut search_threads = Vec::new();
+                for _ in 0..2 {
+                    for query in &queries {
+                        search_threads.push(
+                            async {
+                                index
+                                    .clone()
                                     .search(
                                         query.clone(),
                                         None,
@@ -205,15 +221,15 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
                                         BM25Score::default(),
                                         None,
                                     )
-                                    .expect("Concurrent search failed");
+                                    .await
+                                    .expect("Concurrent search failed")
                             }
-                        })
-                    })
-                    .collect();
-
-                for thread in search_threads {
-                    thread.join().expect("Search thread join failed");
+                            .boxed(),
+                        );
+                    }
                 }
+
+                runtime.block_on(join_all(search_threads));
             });
         });
     }
