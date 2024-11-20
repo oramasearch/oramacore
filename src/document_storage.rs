@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::{atomic::AtomicU64, Arc}};
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use anyhow::Result;
 use tokio::sync::RwLock;

@@ -47,9 +47,13 @@ async fn main() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     let collection = manager.get(collection_id).await.unwrap();
-    collection.insert_batch(orama_documents.try_into().unwrap()).await.unwrap();
+    collection
+        .insert_batch(orama_documents.try_into().unwrap())
+        .await
+        .unwrap();
 
-    collection.search(SearchParams {
+    collection
+        .search(SearchParams {
             term: r###"columnHelper.accessor('firstName')
 
 // OR
@@ -63,7 +67,9 @@ async fn main() -> anyhow::Result<()> {
             properties: Some(vec!["code".to_string()]),
             where_filter: Default::default(),
             facets: Default::default(),
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
     drop(collection);
 

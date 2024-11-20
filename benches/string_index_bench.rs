@@ -63,7 +63,6 @@ fn generate_test_data(
 }
 
 fn benchmark_indexing(c: &mut Criterion) {
-
     let mut group = c.benchmark_group("indexing");
     group.measurement_time(std::time::Duration::from_secs(30));
     group.sample_size(50);
@@ -109,7 +108,6 @@ fn benchmark_batch_indexing(c: &mut Criterion) {
                         let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
                         index
                             .insert_multiple(batch.clone())
-
                             .await
                             .expect("Batch insertion failed");
                     });
@@ -147,14 +145,15 @@ fn benchmark_search(c: &mut Criterion) {
     let runtime = Runtime::new().unwrap();
 
     for &size in &[1000, 5000] {
-
         group.bench_with_input(BenchmarkId::new("search", size), &size, |b, &size| {
             let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
 
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
 
-            runtime.block_on(index.insert_multiple(batch)).expect("Initial data insertion failed");
+            runtime
+                .block_on(index.insert_multiple(batch))
+                .expect("Initial data insertion failed");
 
             b.to_async(&runtime).iter(|| async {
                 for query in queries.iter() {
@@ -190,8 +189,8 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
 
-            runtime.block_on(index
-                .insert_multiple(batch))
+            runtime
+                .block_on(index.insert_multiple(batch))
                 .expect("Initial data insertion failed");
 
             let queries = generate_test_data(50)
@@ -211,24 +210,26 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
                 let mut search_threads = Vec::new();
                 for _ in 0..2 {
                     for query in &queries {
-                        search_threads.push(async {
-                            index.clone()
-                            .search(
-                                query.clone(),
-                                None,
-                                Default::default(),
-                                BM25Score::default(),
-                                None,
-                            )
-                            .await
-                            .expect("Concurrent search failed")
-                        }.boxed());
+                        search_threads.push(
+                            async {
+                                index
+                                    .clone()
+                                    .search(
+                                        query.clone(),
+                                        None,
+                                        Default::default(),
+                                        BM25Score::default(),
+                                        None,
+                                    )
+                                    .await
+                                    .expect("Concurrent search failed")
+                            }
+                            .boxed(),
+                        );
                     }
                 }
 
-                runtime.block_on(join_all(
-                    search_threads
-                ));
+                runtime.block_on(join_all(search_threads));
             });
         });
     }

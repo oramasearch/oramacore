@@ -723,7 +723,8 @@ mod tests {
             .collect();
 
             string_index_clone1.insert_multiple(batch).await.unwrap();
-        }.boxed();
+        }
+        .boxed();
 
         let handle2 = async {
             let parser = TextParser::from_language(Locale::EN);
@@ -748,7 +749,8 @@ mod tests {
             .collect();
 
             string_index_clone2.insert_multiple(batch).await.unwrap();
-        }.boxed();
+        }
+        .boxed();
 
         join_all(vec![handle1, handle2]).await;
 

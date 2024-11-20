@@ -17,8 +17,9 @@ struct Record {
 const BATCH_SIZE: usize = 50;
 const MAX_RECORDS: usize = 10_000;
 
-fn main() -> Result<()> {
-    let model = OramaModels::MultilingualE5Small.try_new()?;
+#[tokio::main]
+async fn main() -> Result<()> {
+    let model = OramaModels::MultilingualE5Small.try_new().await?;
     let mut data: Vec<Embedding> = vec![];
 
     let file_path = "src/bin/datasets/spotify_millsongdata.csv";

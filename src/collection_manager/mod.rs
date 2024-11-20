@@ -1,4 +1,8 @@
-use std::{collections::{hash_map::Entry, HashMap}, ops::Deref, sync::{atomic::AtomicU64, Arc}};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    ops::Deref,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
@@ -70,12 +74,10 @@ impl CollectionManager {
 
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
-        collections.iter()
-            .map(|(_, col)| col.as_dto())
-            .collect()
+        collections.iter().map(|(_, col)| col.as_dto()).collect()
     }
 
-    pub async  fn get<'guard, 's>(&'s self, id: CollectionId) -> Option<CollectionReadLock<'guard>>
+    pub async fn get<'guard, 's>(&'s self, id: CollectionId) -> Option<CollectionReadLock<'guard>>
     where
         's: 'guard,
     {
@@ -89,13 +91,13 @@ pub struct CollectionReadLock<'guard> {
 }
 
 impl<'guard> CollectionReadLock<'guard> {
-    pub fn try_new(lock: RwLockReadGuard<'guard, HashMap<CollectionId, Collection>>, id: CollectionId) -> Option<Self> {
+    pub fn try_new(
+        lock: RwLockReadGuard<'guard, HashMap<CollectionId, Collection>>,
+        id: CollectionId,
+    ) -> Option<Self> {
         let guard = lock.get(&id);
         match guard {
-            Some(_) => Some(CollectionReadLock {
-                lock,
-                id,
-            }),
+            Some(_) => Some(CollectionReadLock { lock, id }),
             None => None,
         }
     }
@@ -168,12 +170,14 @@ mod tests {
             .await
             .expect("insertion should be successful");
 
-        let output = manager.create_collection(CreateCollectionOptionDTO {
-            id: collection_id.clone(),
-            description: None,
-            language: None,
-            typed_fields: Default::default(),
-        }).await;
+        let output = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id.clone(),
+                description: None,
+                language: None,
+                typed_fields: Default::default(),
+            })
+            .await;
 
         assert_eq!(output, Err(super::CreateCollectionError::IdAlreadyExists));
     }
@@ -221,22 +225,24 @@ mod tests {
             .expect("insertion should be successful");
 
         let collection = manager.get(collection_id).await.unwrap();
-        let output = collection.insert_batch(
-            vec![
-                json!({
-                    "id": "1",
-                    "name": "Tommaso",
-                    "surname": "Allevi",
-                }),
-                json!({
-                    "id": "2",
-                    "name": "Michele",
-                    "surname": "Riva",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        ).await;
+        let output = collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "name": "Tommaso",
+                        "surname": "Allevi",
+                    }),
+                    json!({
+                        "id": "2",
+                        "name": "Michele",
+                        "surname": "Riva",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await;
 
         assert!(matches!(output, Ok(())));
     }
@@ -257,22 +263,24 @@ mod tests {
             .expect("insertion should be successful");
 
         let collection = manager.get(collection_id.clone()).await.unwrap();
-        let output = collection.insert_batch(
-            vec![
-                json!({
-                    "id": "1",
-                    "name": "Tommaso",
-                    "surname": "Allevi",
-                }),
-                json!({
-                    "id": "2",
-                    "name": "Michele",
-                    "surname": "Riva",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        ).await;
+        let output = collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "name": "Tommaso",
+                        "surname": "Allevi",
+                    }),
+                    json!({
+                        "id": "2",
+                        "name": "Michele",
+                        "surname": "Riva",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await;
 
         assert!(matches!(output, Ok(())));
 
@@ -312,20 +320,22 @@ mod tests {
             .expect("insertion should be successful");
 
         let collection = manager.get(collection_id.clone()).await.unwrap();
-        let output = collection.insert_batch(
-            vec![
-                json!({
-                    "id": "1",
-                    "text": "This is a long text with a lot of words",
-                }),
-                json!({
-                    "id": "2",
-                    "text": "This is a smaller text",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        ).await;
+        let output = collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "text": "This is a long text with a lot of words",
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "This is a smaller text",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await;
 
         assert!(matches!(output, Ok(())));
 
@@ -338,7 +348,6 @@ mod tests {
             facets: Default::default(),
         };
         let output = collection.search(search_params).await;
-
 
         assert!(output.is_ok());
         let output = output.unwrap();
@@ -365,7 +374,8 @@ mod tests {
             .expect("insertion should be successful");
 
         let collection = manager.get(collection_id.clone()).await.unwrap();
-        let output = collection.insert_batch(
+        let output = collection
+            .insert_batch(
                 (0..100)
                     .map(|i| {
                         json!({
@@ -376,7 +386,8 @@ mod tests {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-            ).await;
+            )
+            .await;
 
         assert!(matches!(output, Ok(())));
 
@@ -417,9 +428,9 @@ mod tests {
             .await
             .expect("insertion should be successful");
 
-        let collection = manager
-            .get(collection_id.clone()).await.unwrap();
-        collection.insert_batch(
+        let collection = manager.get(collection_id.clone()).await.unwrap();
+        collection
+            .insert_batch(
                 (0..100)
                     .map(|i| {
                         json!({
@@ -431,10 +442,12 @@ mod tests {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-            ).await
+            )
+            .await
             .unwrap();
 
-        let output = collection.search(SearchParams {
+        let output = collection
+            .search(SearchParams {
                 term: "text".to_string(),
                 limit: Limit(10),
                 boost: Default::default(),
@@ -446,7 +459,8 @@ mod tests {
                 .into_iter()
                 .collect(),
                 facets: Default::default(),
-            }).await
+            })
+            .await
             .unwrap();
 
         assert_eq!(output.count, 1);
@@ -470,62 +484,67 @@ mod tests {
             .expect("insertion should be successful");
 
         let collection = manager.get(collection_id).await.unwrap();
-        collection.insert_batch(
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                        "number": i,
+        collection
+            .insert_batch(
+                (0..100)
+                    .map(|i| {
+                        json!({
+                            "id": i.to_string(),
+                            "text": "text ".repeat(i + 1),
+                            "number": i,
+                        })
                     })
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        ).await.unwrap();
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-        let output = collection.search(SearchParams {
-            term: "text".to_string(),
-            limit: Limit(10),
-            boost: Default::default(),
-            properties: Default::default(),
-            where_filter: Default::default(),
-            facets: HashMap::from_iter(vec![(
-                "number".to_string(),
-                FacetDefinition::Number(NumberFacetDefinition {
-                    ranges: vec![
-                        NumberFacetDefinitionRange {
-                            from: Number::from(0),
-                            to: Number::from(10),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(0.5),
-                            to: Number::from(10.5),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(-10),
-                            to: Number::from(10),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(-10),
-                            to: Number::from(-1),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(1),
-                            to: Number::from(100),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(99),
-                            to: Number::from(105),
-                        },
-                        NumberFacetDefinitionRange {
-                            from: Number::from(102),
-                            to: Number::from(105),
-                        },
-                    ],
-                }),
-            )]),
-        }).await
+        let output = collection
+            .search(SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: Default::default(),
+                facets: HashMap::from_iter(vec![(
+                    "number".to_string(),
+                    FacetDefinition::Number(NumberFacetDefinition {
+                        ranges: vec![
+                            NumberFacetDefinitionRange {
+                                from: Number::from(0),
+                                to: Number::from(10),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(0.5),
+                                to: Number::from(10.5),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(-10),
+                                to: Number::from(10),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(-10),
+                                to: Number::from(-1),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(1),
+                                to: Number::from(100),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(99),
+                                to: Number::from(105),
+                            },
+                            NumberFacetDefinitionRange {
+                                from: Number::from(102),
+                                to: Number::from(105),
+                            },
+                        ],
+                    }),
+                )]),
+            })
+            .await
             .unwrap();
 
         let facets = output.facets.expect("Facet should be there");
@@ -567,30 +586,36 @@ mod tests {
 
         let collection = manager.get(collection_id).await.unwrap();
 
-        collection.insert_batch(
-                    (0..100)
-                        .map(|i| {
-                            json!({
-                                "id": i.to_string(),
-                                "text": "text ".repeat(i + 1),
-                                "bool": i % 2 == 0,
-                            })
+        collection
+            .insert_batch(
+                (0..100)
+                    .map(|i| {
+                        json!({
+                            "id": i.to_string(),
+                            "text": "text ".repeat(i + 1),
+                            "bool": i % 2 == 0,
                         })
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap(),
-                ).await.unwrap();
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-        let output = collection.search(SearchParams {
-                    term: "text".to_string(),
-                    limit: Limit(10),
-                    boost: Default::default(),
-                    properties: Default::default(),
-                    where_filter: vec![("bool".to_string(), Filter::Bool(true))]
-                        .into_iter()
-                        .collect(),
-                    facets: Default::default(),
-                }).await.unwrap();
+        let output = collection
+            .search(SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: vec![("bool".to_string(), Filter::Bool(true))]
+                    .into_iter()
+                    .collect(),
+                facets: Default::default(),
+            })
+            .await
+            .unwrap();
 
         assert_eq!(output.count, 50);
         assert_eq!(output.hits.len(), 10);
@@ -617,29 +642,34 @@ mod tests {
 
         let collection = manager.get(collection_id.clone()).await.unwrap();
 
-                collection.insert_batch(
-                    (0..100)
-                        .map(|i| {
-                            json!({
-                                "id": i.to_string(),
-                                "text": "text ".repeat(i + 1),
-                                "bool": i % 2 == 0,
-                            })
+        collection
+            .insert_batch(
+                (0..100)
+                    .map(|i| {
+                        json!({
+                            "id": i.to_string(),
+                            "text": "text ".repeat(i + 1),
+                            "bool": i % 2 == 0,
                         })
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .unwrap(),
-                ).await.unwrap();
+                    })
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-        let output = 
-                collection.search(SearchParams {
-                    term: "text".to_string(),
-                    limit: Limit(10),
-                    boost: Default::default(),
-                    properties: Default::default(),
-                    where_filter: Default::default(),
-                    facets: HashMap::from_iter(vec![("bool".to_string(), FacetDefinition::Bool)]),
-                }).await.unwrap();
+        let output = collection
+            .search(SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: Default::default(),
+                facets: HashMap::from_iter(vec![("bool".to_string(), FacetDefinition::Bool)]),
+            })
+            .await
+            .unwrap();
 
         let facets = output.facets.expect("Facet should be there");
         let bool_facet = facets
@@ -672,52 +702,58 @@ mod tests {
 
         let collection = manager.get(collection_id.clone()).await.unwrap();
 
-                collection.insert_batch(
-                    vec![
-                        json!({
-                            "id": "1",
-                            "text": "text",
-                            "bool": true,
-                            "number": 1,
-                        }),
-                        json!({
-                            "id": "2",
-                            "text": "text text",
-                            "bool": false,
-                            "number": 2,
-                        }),
-                        // This document doens't match the term
-                        // so it should not be counted in the facets
-                        json!({
-                            "id": "3",
-                            "text": "another",
-                            "bool": true,
-                            "number": 1,
-                        }),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                ).await.unwrap();
+        collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "text": "text",
+                        "bool": true,
+                        "number": 1,
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "text text",
+                        "bool": false,
+                        "number": 2,
+                    }),
+                    // This document doens't match the term
+                    // so it should not be counted in the facets
+                    json!({
+                        "id": "3",
+                        "text": "another",
+                        "bool": true,
+                        "number": 1,
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
 
-        let output = collection.search(SearchParams {
-                    term: "text".to_string(),
-                    limit: Limit(10),
-                    boost: Default::default(),
-                    properties: Default::default(),
-                    where_filter: Default::default(),
-                    facets: HashMap::from_iter(vec![
-                        ("bool".to_string(), FacetDefinition::Bool),
-                        (
-                            "number".to_string(),
-                            FacetDefinition::Number(NumberFacetDefinition {
-                                ranges: vec![NumberFacetDefinitionRange {
-                                    from: Number::from(0),
-                                    to: Number::from(10),
-                                }],
-                            }),
-                        ),
-                    ]),
-                }).await.unwrap();
+        let output = collection
+            .search(SearchParams {
+                term: "text".to_string(),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: Default::default(),
+                facets: HashMap::from_iter(vec![
+                    ("bool".to_string(), FacetDefinition::Bool),
+                    (
+                        "number".to_string(),
+                        FacetDefinition::Number(NumberFacetDefinition {
+                            ranges: vec![NumberFacetDefinitionRange {
+                                from: Number::from(0),
+                                to: Number::from(10),
+                            }],
+                        }),
+                    ),
+                ]),
+            })
+            .await
+            .unwrap();
 
         let facets = output.facets.expect("Facet should be there");
         let bool_facet = facets

@@ -146,7 +146,9 @@ async fn get_doc_by_id(
         }
     };
 
-    let output = collection.get_doc_by_unique_field("id".to_string(), document_id).await;
+    let output = collection
+        .get_doc_by_unique_field("id".to_string(), document_id)
+        .await;
 
     match output {
         Ok(Some(data)) => Ok((StatusCode::OK, Json(data))),

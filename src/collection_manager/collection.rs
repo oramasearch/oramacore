@@ -294,23 +294,29 @@ impl Collection {
                 .map(|field_id| *field_id.value())
                 .collect();
 
-            let mut output = self.string_index.search(
-                tokens,
-                Some(fields_on_search_with_default_parser),
-                boost.clone(),
-                BM25Score::default(),
-                filtered_doc_ids.as_ref(),
-            ).await?;
-
-            let id_field_id = self.get_field_id("id".to_string());
-            if properties.contains(&id_field_id) {
-                let id_output = self.string_index.search(
-                    vec![search_params.term.clone()],
-                    Some(vec![id_field_id]),
+            let mut output = self
+                .string_index
+                .search(
+                    tokens,
+                    Some(fields_on_search_with_default_parser),
                     boost.clone(),
                     BM25Score::default(),
                     filtered_doc_ids.as_ref(),
-                ).await?;
+                )
+                .await?;
+
+            let id_field_id = self.get_field_id("id".to_string());
+            if properties.contains(&id_field_id) {
+                let id_output = self
+                    .string_index
+                    .search(
+                        vec![search_params.term.clone()],
+                        Some(vec![id_field_id]),
+                        boost.clone(),
+                        BM25Score::default(),
+                        filtered_doc_ids.as_ref(),
+                    )
+                    .await?;
 
                 for (key, v) in id_output {
                     let vv = output.entry(key).or_default();
@@ -487,13 +493,16 @@ impl Collection {
             None => return Ok(None),
         };
 
-        let output = self.string_index.search(
-            vec![value],
-            Some(vec![field_id]),
-            Default::default(),
-            BM25Score::default(),
-            None,
-        ).await?;
+        let output = self
+            .string_index
+            .search(
+                vec![value],
+                Some(vec![field_id]),
+                Default::default(),
+                BM25Score::default(),
+                None,
+            )
+            .await?;
 
         let doc_id = dbg!(match output.into_keys().next() {
             Some(doc_id) => doc_id,
