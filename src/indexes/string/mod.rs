@@ -15,7 +15,7 @@ use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
-use crate::types::{DocumentId, FieldId};
+use crate::{collection_manager::FieldId, document_storage::DocumentId};
 
 mod dictionary;
 mod posting_storage;
@@ -367,9 +367,7 @@ mod tests {
     use futures::{future::join_all, FutureExt};
 
     use crate::{
-        indexes::string::{scorer::bm25::BM25Score, StringIndex},
-        nlp::{locales::Locale, TextParser},
-        types::{DocumentId, FieldId},
+        collection_manager::FieldId, document_storage::DocumentId, indexes::string::{scorer::bm25::BM25Score, StringIndex}, nlp::{locales::Locale, TextParser}
     };
     use std::{collections::HashMap, sync::Arc};
 

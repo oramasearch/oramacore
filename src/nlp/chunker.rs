@@ -3,7 +3,7 @@ use dashmap::DashMap;
 use text_splitter::{Characters, ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tiktoken_rs::*;
 
-use crate::types::CodeLanguage;
+use crate::code_parser::CodeLanguage;
 
 pub struct Chunker {
     max_tokens: usize,

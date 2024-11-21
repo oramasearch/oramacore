@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    embeddings::OramaModel, nlp::locales::Locale, types::{CodeLanguage, FieldId, Number, NumberFilter}
+    code_parser::CodeLanguage, embeddings::OramaModel, indexes::number::{Number, NumberFilter}, nlp::locales::Locale, types::Document
 };
+
+use super::collection::FieldId;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LanguageDTO {
@@ -104,4 +106,26 @@ pub struct SearchParams {
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResultHit {
+    pub id: String,
+    pub score: f32,
+    pub document: Option<Document>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FacetResult {
+    pub count: usize,
+    pub values: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub hits: Vec<SearchResultHit>,
+    pub count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub facets: Option<HashMap<String, FacetResult>>,
 }

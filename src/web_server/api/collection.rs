@@ -11,10 +11,9 @@ use serde_json::json;
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO, SearchParams},
-        CollectionManager,
+        dto::{CollectionDTO, CreateCollectionOptionDTO, SearchParams}, CollectionId, CollectionManager
     },
-    types::{CollectionId, DocumentList},
+    types::DocumentList,
 };
 
 pub fn apis() -> Router<Arc<CollectionManager>> {

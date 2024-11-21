@@ -4,10 +4,10 @@ use anyhow::Context;
 use documentation::parse_documentation;
 use example::parse_example;
 use rustorama::{
-    collection_manager::{
+    code_parser::CodeLanguage, collection_manager::{
         dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
         CollectionManager, CollectionsConfiguration,
-    }, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, types::CodeLanguage, web_server::{HttpConfig, WebServer}
+    }, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, web_server::{HttpConfig, WebServer}
 };
 
 mod documentation;

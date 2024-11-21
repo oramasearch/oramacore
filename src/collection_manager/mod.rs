@@ -6,14 +6,20 @@ use std::{
 
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
-use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService, types::CollectionId};
+use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService};
 
 mod collection;
 pub mod dto;
+
+pub use self::collection::FieldId;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectionId(pub String);
 
 pub struct CollectionsConfiguration {
     pub embedding_service: Arc<EmbeddingService>,
@@ -134,8 +140,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
-        types::{Number, NumberFilter},
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, indexes::number::{Number, NumberFilter},
     };
 
     use super::{

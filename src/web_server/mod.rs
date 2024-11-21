@@ -73,13 +73,12 @@ mod tests {
     use tower_http::trace::TraceLayer;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::{embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, web_server::api::api_config};
+    use crate::{collection_manager::dto::SearchResult, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, web_server::api::api_config};
     use crate::{
         collection_manager::{
             dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
             CollectionManager, CollectionsConfiguration,
         },
-        types::SearchResult,
     };
 
     #[tokio::test]

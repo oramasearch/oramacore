@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::collection_manager::FieldId;
+use crate::document_storage::DocumentId;
 use crate::embeddings::LoadedModel;
 use anyhow::{anyhow, Result};
 use dashmap::{DashMap, Entry};
@@ -11,7 +13,6 @@ use hora::index::hnsw_idx;
 use serde::Serialize;
 use tracing::warn;
 
-use crate::types::{DocumentId, FieldId};
 
 #[derive(Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash)]
 struct IdxID(Option<DocumentId>);

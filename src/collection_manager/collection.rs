@@ -8,16 +8,13 @@ use std::{
 };
 
 use crate::{
-    document_storage::DocumentStorage,
-    embeddings::EmbeddingService,
-    indexes::{
+    collection_manager::dto::{FacetResult, SearchResultHit}, document_storage::{DocumentId, DocumentStorage}, embeddings::EmbeddingService, indexes::{
         bool::BoolIndex,
         code::CodeIndex,
-        number::NumberIndex,
+        number::{Number, NumberFilter, NumberIndex},
         string::{scorer::bm25::BM25Score, DocumentBatch, StringIndex},
         vector::VectorIndexConfig,
-    },
-    nlp::locales::Locale,
+    }, nlp::locales::Locale
 };
 use crate::{indexes::vector::VectorIndex, nlp::TextParser};
 use anyhow::{anyhow, Context, Result};
@@ -25,17 +22,29 @@ use dashmap::DashMap;
 use num_traits::ToPrimitive;
 
 use ordered_float::NotNan;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value};
 use tracing::info;
 
 use crate::types::{
-    CollectionId, Document, DocumentId, DocumentList, FacetResult, FieldId, Number, NumberFilter,
-    ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType,
+    Document, DocumentList,
+    ScalarType, StringParser, ValueType,
 };
 
-use super::dto::{
-    CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, TypedField,
-};
+use super::{dto::{
+    CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, SearchResult, TypedField
+}, CollectionId};
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldId(pub u16);
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenScore {
+    pub document_id: DocumentId,
+    pub score: f32,
+}
+
 
 pub struct Collection {
     pub(crate) id: CollectionId,
