@@ -19,7 +19,7 @@ struct RustoramaConfig {
 #[instrument(level = "info")]
 fn load_config() -> Result<RustoramaConfig> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "./config.jsonc".to_string());
-    
+
     let config_path = PathBuf::from(config_path);
     let config_path = fs::canonicalize(&config_path)?;
     let config_path: String = config_path.to_string_lossy().into();
@@ -55,9 +55,7 @@ async fn start(config: RustoramaConfig) -> Result<()> {
         .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
-    let manager = CollectionManager::new(CollectionsConfiguration {
-        embedding_service,
-    });
+    let manager = CollectionManager::new(CollectionsConfiguration { embedding_service });
     let manager = Arc::new(manager);
     let web_server = WebServer::new(manager);
 

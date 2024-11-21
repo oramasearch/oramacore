@@ -49,7 +49,9 @@ pub struct EmbeddingsResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr)]
+#[derive(
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr,
+)]
 pub enum OramaFastembedModel {
     #[serde(rename = "gte-small")]
     #[strum(serialize = "gte-small")]
@@ -158,11 +160,10 @@ impl EmbeddingService {
             builder,
         };
 
-
         match config.preload {
             EmbeddingPreload::Bool(true) => {
                 unimplemented!("Preloading \"true\" is not implemented yet");
-            },
+            }
             EmbeddingPreload::Bool(false) => {
                 // Do nothing
             }
@@ -172,7 +173,6 @@ impl EmbeddingService {
                 }
             }
         }
-
 
         Ok(s)
     }
@@ -186,7 +186,7 @@ impl EmbeddingService {
                 let loaded_model = Arc::new(loaded_model);
                 entry.insert(loaded_model.clone());
                 Ok(loaded_model)
-            },
+            }
         }
     }
 

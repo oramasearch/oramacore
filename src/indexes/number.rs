@@ -65,7 +65,6 @@ impl NumberIndex {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NumberFilter {
     Equal(Number),
@@ -140,7 +139,6 @@ impl Ord for Number {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

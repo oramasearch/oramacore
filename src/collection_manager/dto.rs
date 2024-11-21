@@ -3,7 +3,11 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    code_parser::CodeLanguage, embeddings::OramaModel, indexes::number::{Number, NumberFilter}, nlp::locales::Locale, types::Document
+    code_parser::CodeLanguage,
+    embeddings::OramaModel,
+    indexes::number::{Number, NumberFilter},
+    nlp::locales::Locale,
+    types::Document,
 };
 
 use super::collection::FieldId;
@@ -107,7 +111,6 @@ pub struct SearchParams {
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResultHit {

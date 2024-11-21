@@ -140,7 +140,8 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, indexes::number::{Number, NumberFilter},
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        indexes::number::{Number, NumberFilter},
     };
 
     use super::{
@@ -154,12 +155,13 @@ mod tests {
     use super::CollectionManager;
 
     async fn create_manager() -> CollectionManager {
-        let embedding_service =
-            EmbeddingService::try_new(EmbeddingConfig {
-                preload: EmbeddingPreload::Bool(false),
-                cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
-                hugging_face: None,
-            }).await.unwrap();
+        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+            preload: EmbeddingPreload::Bool(false),
+            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+            hugging_face: None,
+        })
+        .await
+        .unwrap();
         CollectionManager::new(CollectionsConfiguration {
             embedding_service: Arc::new(embedding_service),
         })

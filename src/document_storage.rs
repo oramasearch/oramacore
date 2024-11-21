@@ -9,7 +9,6 @@ use tokio::sync::RwLock;
 
 use crate::types::Document;
 
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct DocumentId(pub u64);
 

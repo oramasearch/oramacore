@@ -65,11 +65,11 @@ mod tests {
                 cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
                 hugging_face: None,
                 preload: EmbeddingPreload::Bool(false),
-            }).await.unwrap();
+            })
+            .await
+            .unwrap();
             let embedding_service = Arc::new(embedding_service);
-            let manager = CollectionManager::new(CollectionsConfiguration {
-                embedding_service
-            });
+            let manager = CollectionManager::new(CollectionsConfiguration { embedding_service });
             let manager = Arc::new(manager);
             let web_server = WebServer::new(manager);
 

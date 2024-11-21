@@ -4,10 +4,13 @@ use anyhow::Context;
 use documentation::parse_documentation;
 use example::parse_example;
 use rustorama::{
-    code_parser::CodeLanguage, collection_manager::{
+    code_parser::CodeLanguage,
+    collection_manager::{
         dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
         CollectionManager, CollectionsConfiguration,
-    }, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, web_server::{HttpConfig, WebServer}
+    },
+    embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+    web_server::{HttpConfig, WebServer},
 };
 
 mod documentation;
@@ -24,12 +27,10 @@ async fn main() -> anyhow::Result<()> {
         hugging_face: None,
         preload: EmbeddingPreload::Bool(false),
     })
-        .await
-        .with_context(|| "Failed to initialize the EmbeddingService")?;
+    .await
+    .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
-    let manager = CollectionManager::new(CollectionsConfiguration {
-        embedding_service,
-    });
+    let manager = CollectionManager::new(CollectionsConfiguration { embedding_service });
 
     let collection_id = manager
         .create_collection(CreateCollectionOptionDTO {

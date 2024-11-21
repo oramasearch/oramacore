@@ -11,7 +11,8 @@ use serde_json::json;
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO, SearchParams}, CollectionId, CollectionManager
+        dto::{CollectionDTO, CreateCollectionOptionDTO, SearchParams},
+        CollectionId, CollectionManager,
     },
     types::DocumentList,
 };

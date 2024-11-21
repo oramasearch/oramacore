@@ -73,12 +73,14 @@ mod tests {
     use tower_http::trace::TraceLayer;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::{collection_manager::dto::SearchResult, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, web_server::api::api_config};
+    use crate::collection_manager::{
+        dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
+        CollectionManager, CollectionsConfiguration,
+    };
     use crate::{
-        collection_manager::{
-            dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
-            CollectionManager, CollectionsConfiguration,
-        },
+        collection_manager::dto::SearchResult,
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        web_server::api::api_config,
     };
 
     #[tokio::test]
@@ -242,10 +244,10 @@ mod tests {
             preload: EmbeddingPreload::Bool(false),
             cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
             hugging_face: None,
-        }).await.unwrap();
-        let embedding_service = Arc::new(embedding_service);
-        CollectionManager::new(CollectionsConfiguration {
-            embedding_service
         })
+        .await
+        .unwrap();
+        let embedding_service = Arc::new(embedding_service);
+        CollectionManager::new(CollectionsConfiguration { embedding_service })
     }
 }

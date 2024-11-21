@@ -367,7 +367,10 @@ mod tests {
     use futures::{future::join_all, FutureExt};
 
     use crate::{
-        collection_manager::FieldId, document_storage::DocumentId, indexes::string::{scorer::bm25::BM25Score, StringIndex}, nlp::{locales::Locale, TextParser}
+        collection_manager::FieldId,
+        document_storage::DocumentId,
+        indexes::string::{scorer::bm25::BM25Score, StringIndex},
+        nlp::{locales::Locale, TextParser},
     };
     use std::{collections::HashMap, sync::Arc};
 

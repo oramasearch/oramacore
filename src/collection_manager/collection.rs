@@ -8,13 +8,17 @@ use std::{
 };
 
 use crate::{
-    collection_manager::dto::{FacetResult, SearchResultHit}, document_storage::{DocumentId, DocumentStorage}, embeddings::EmbeddingService, indexes::{
+    collection_manager::dto::{FacetResult, SearchResultHit},
+    document_storage::{DocumentId, DocumentStorage},
+    embeddings::EmbeddingService,
+    indexes::{
         bool::BoolIndex,
         code::CodeIndex,
         number::{Number, NumberFilter, NumberIndex},
         string::{scorer::bm25::BM25Score, DocumentBatch, StringIndex},
         vector::VectorIndexConfig,
-    }, nlp::locales::Locale
+    },
+    nlp::locales::Locale,
 };
 use crate::{indexes::vector::VectorIndex, nlp::TextParser};
 use anyhow::{anyhow, Context, Result};
@@ -23,28 +27,27 @@ use num_traits::ToPrimitive;
 
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value};
+use serde_json::Value;
 use tracing::info;
 
-use crate::types::{
-    Document, DocumentList,
-    ScalarType, StringParser, ValueType,
-};
+use crate::types::{Document, DocumentList, ScalarType, StringParser, ValueType};
 
-use super::{dto::{
-    CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, SearchResult, TypedField
-}, CollectionId};
+use super::{
+    dto::{
+        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, SearchResult,
+        TypedField,
+    },
+    CollectionId,
+};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenScore {
     pub document_id: DocumentId,
     pub score: f32,
 }
-
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -84,7 +87,7 @@ impl Collection {
     ) -> Result<Self> {
         let default_parser = TextParser::from_language(Locale::EN);
 
-        let vector_index = VectorIndex::try_new(VectorIndexConfig { })?;
+        let vector_index = VectorIndex::try_new(VectorIndexConfig {})?;
 
         let collection = Collection {
             id,
@@ -116,14 +119,19 @@ impl Collection {
                     collection.code_fields.insert(field_name, field_id);
                 }
                 TypedField::Embedding(embedding) => {
-
                     let model = embedding_service
                         .get_model(embedding.model_name.clone())
                         .await
-                        .with_context(|| format!("Unable to find a model named \"{}\"", embedding.model_name.clone()))?
+                        .with_context(|| {
+                            format!(
+                                "Unable to find a model named \"{}\"",
+                                embedding.model_name.clone()
+                            )
+                        })?
                         .clone();
 
-                    collection.vector_index
+                    collection
+                        .vector_index
                         .add_field(field_id, model)
                         .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
                     collection

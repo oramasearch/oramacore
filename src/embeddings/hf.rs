@@ -1,19 +1,22 @@
 use std::{
-    collections::HashMap, fs::{self, File}, io::Write, path::Path, time::Duration
+    collections::HashMap,
+    fs::{self, File},
+    io::Write,
+    path::Path,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
 use duration_string::DurationString;
 use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
-use futures::future::{join_all, try_join_all};
+use futures::future::try_join_all;
 use http::{
     header::{CONTENT_LENGTH, USER_AGENT},
     HeaderMap, HeaderValue,
 };
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{info, instrument, trace_span, Instrument};
+use tracing::{info, trace_span, Instrument};
 
 use super::LoadedModel;
 
@@ -124,12 +127,13 @@ async fn download_missing_files(
     for MissingFile {
         filesystem_path,
         repo_path,
-    } in files_to_download {
+    } in files_to_download
+    {
         let url = format!(
             "{}/{}/resolve/main/{}",
             hugging_face_config.base_url, model_name, repo_path
         );
-        
+
         let f = download_file(&client, url, filesystem_path)
             .instrument(trace_span!("Downloading", %model_name, %repo_path));
 
@@ -198,7 +202,7 @@ async fn download_file(client: &Client, url: String, destination: String) -> Res
 
     let mut file = File::create(&destination)
         .with_context(|| format!("Failed to create file {}", destination))?;
-    
+
     // COpy the response body to the file
     while let Some(chunk) = response.chunk().await? {
         file.write_all(&chunk)
@@ -251,7 +255,8 @@ impl LoadedModel {
             cache_path,
             model_name.clone(),
             hugging_face_model_repo_config,
-        ).await?;
+        )
+        .await?;
 
         Ok(Self {
             text_embedding,
@@ -281,7 +286,8 @@ async fn try_build_text_embedding_model(
         hugging_face_config,
         &hugging_face_model_repo_config.real_model_name,
         missing_files,
-    ).await?;
+    )
+    .await?;
 
     let full_path = |file: &str| format!("{}/{}", &model_cache_root_path, file);
 

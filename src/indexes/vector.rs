@@ -6,13 +6,12 @@ use crate::document_storage::DocumentId;
 use crate::embeddings::LoadedModel;
 use anyhow::{anyhow, Result};
 use dashmap::{DashMap, Entry};
-use hora::{core::ann_index::ANNIndex, index::hnsw_idx::HNSWIndex};
 use hora::core::metrics::Metric::Manhattan;
 use hora::core::node::IdxType;
 use hora::index::hnsw_idx;
+use hora::{core::ann_index::ANNIndex, index::hnsw_idx::HNSWIndex};
 use serde::Serialize;
 use tracing::warn;
-
 
 #[derive(Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash)]
 struct IdxID(Option<DocumentId>);
@@ -57,7 +56,9 @@ impl VectorIndex {
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            index.1.add(vector, IdxID(Some(id)))
+            index
+                .1
+                .add(vector, IdxID(Some(id)))
                 .map_err(|e| anyhow!("Error adding vector: {:?}", e))?;
 
             field_ids.insert(field_id);
@@ -70,14 +71,21 @@ impl VectorIndex {
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            index.1.build(Manhattan)
+            index
+                .1
+                .build(Manhattan)
                 .map_err(|e| anyhow!("Error building index: {:?}", e))?;
         }
 
         Ok(())
     }
 
-    pub fn search(&mut self, field_ids: Vec<FieldId>, target: &[f32], k: usize) -> Result<HashMap<DocumentId, f32>> {
+    pub fn search(
+        &mut self,
+        field_ids: Vec<FieldId>,
+        target: &[f32],
+        k: usize,
+    ) -> Result<HashMap<DocumentId, f32>> {
         let mut output = HashMap::new();
 
         for field_id in field_ids {
@@ -87,11 +95,7 @@ impl VectorIndex {
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            let search_output = index
-                .1
-                .search(target, k)
-                .into_iter()
-                ;
+            let search_output = index.1.search(target, k).into_iter();
             for id in search_output {
                 let doc_id = match id.0 {
                     Some(id) => id,
