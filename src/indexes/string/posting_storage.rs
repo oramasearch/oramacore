@@ -16,8 +16,6 @@ pub enum PostingStorageError {
     SerializationError(#[from] bincode::Error),
 }
 
-const POSTING_STORAGE_TAG: u8 = 0;
-
 pub struct PostingStorage {
     storage: DashMap<PostingListId, Vec<Posting>>,
     id_generator: Arc<AtomicU64>,
@@ -56,12 +54,4 @@ impl PostingStorage {
 
         Ok(())
     }
-}
-
-// TODO: benchmark this and find a more performant way to serialize and deserialize
-fn unserialize(input: &[u8]) -> Result<Vec<Posting>, bincode::Error> {
-    bincode::deserialize(input)
-}
-fn serialize(vec: &Vec<Posting>) -> Result<Vec<u8>, bincode::Error> {
-    bincode::serialize(vec)
 }

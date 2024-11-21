@@ -10,7 +10,7 @@ use std::{
 use crate::{
     collection_manager::dto::{FacetResult, SearchResultHit},
     document_storage::{DocumentId, DocumentStorage},
-    embeddings::EmbeddingService,
+    embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
         code::CodeIndex,
@@ -72,6 +72,7 @@ pub struct Collection {
 
     // Vector
     vector_fields: DashMap<String, (FieldId, EmbeddingTypedField)>,
+    embedding_models: DashMap<FieldId, Arc<LoadedModel>>,
     vector_index: VectorIndex,
 }
 
@@ -105,6 +106,7 @@ impl Collection {
 
             vector_fields: Default::default(),
             vector_index,
+            embedding_models: Default::default(),
         };
 
         for (field_name, field_type) in typed_fields {
@@ -134,6 +136,9 @@ impl Collection {
                         .vector_index
                         .add_field(field_id, model)
                         .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
+                    let model = 
+                        embedding_service.get_model(embedding.model_name.clone()).await?;
+                    collection.embedding_models.insert(field_id, model);
                     collection
                         .vector_fields
                         .insert(field_name, (field_id, embedding));
@@ -284,10 +289,16 @@ impl Collection {
             self.bool_index.add(doc_id, field_id, value);
         }
 
+        let mut v = Vec::new();
         for (doc_id, field_id, values) in embeddings {
+            let model = self.embedding_models.get(&field_id)
+                .ok_or_else(|| anyhow!("Model not found"))?
+                .clone();
+            let embedding = model.embed(values, Some(1))?;
 
-            // self.vector_index.add(doc_id, field_id, embedding);
+            v.push((doc_id, field_id, embedding));
         }
+        self.vector_index.insert_batch(v)?;
 
         Ok(())
     }

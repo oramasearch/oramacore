@@ -98,6 +98,64 @@ pub enum FacetDefinition {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct FulltextSearchParams {
+    pub term: String,
+    #[serde(default)]
+    pub limit: Limit,
+    #[serde(default)]
+    pub boost: HashMap<String, f32>,
+    #[serde(default)]
+    pub properties: Option<Vec<String>>,
+    #[serde(default, rename = "where")]
+    pub where_filter: HashMap<String, Filter>,
+    #[serde(default)]
+    pub facets: HashMap<String, FacetDefinition>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VectorSearchParams {
+    pub term: String,
+    #[serde(default)]
+    pub limit: Limit,
+    #[serde(default)]
+    pub boost: HashMap<String, f32>,
+    #[serde(default)]
+    pub properties: Option<Vec<String>>,
+    #[serde(default, rename = "where")]
+    pub where_filter: HashMap<String, Filter>,
+    #[serde(default)]
+    pub facets: HashMap<String, FacetDefinition>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HybridSearchParams {
+    pub term: String,
+    #[serde(default)]
+    pub limit: Limit,
+    #[serde(default)]
+    pub boost: HashMap<String, f32>,
+    #[serde(default)]
+    pub properties: Option<Vec<String>>,
+    #[serde(default, rename = "where")]
+    pub where_filter: HashMap<String, Filter>,
+    #[serde(default)]
+    pub facets: HashMap<String, FacetDefinition>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SearchParams2 {
+    #[serde(rename = "fulltext")]
+    FullText(FulltextSearchParams),
+    #[serde(rename = "vector")]
+    Vector(VectorSearchParams),
+    #[serde(rename = "hybrid")]
+    Hybrid(HybridSearchParams),
+    #[serde(untagged)]
+    Default(FulltextSearchParams),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchParams {
     pub term: String,
     #[serde(default)]
@@ -131,4 +189,49 @@ pub struct SearchResult {
     pub count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub facets: Option<HashMap<String, FacetResult>>,
+}
+
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use super::SearchParams2;
+
+    #[test]
+    fn test_search_deserialization() {
+        let j = json!({
+            "type": "fulltext",
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
+        matches!(p, SearchParams2::FullText(_));
+
+        let j = json!({
+            "type": "vector",
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
+        matches!(p, SearchParams2::Vector(_));
+
+        let j = json!({
+            "type": "hybrid",
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
+        matches!(p, SearchParams2::Hybrid(_));
+
+        let j = json!({
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
+        matches!(p, SearchParams2::Default(_));
+
+        let j = json!({
+            "type": "unknown_value",
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
+        matches!(p, SearchParams2::Default(_));
+    }
 }

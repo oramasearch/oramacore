@@ -32,7 +32,7 @@
                     "tokenizer_config": "tokenizer_config.json",
                     "config": "config.json",
                     "max_input_tokens": 512,
-                    "dimensions": 768
+                    "dimensions": 384
                 }
             }
         }

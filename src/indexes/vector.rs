@@ -47,19 +47,21 @@ impl VectorIndex {
         }
     }
 
-    pub fn insert_batch(&self, data: Vec<(DocumentId, FieldId, &[f32])>) -> Result<()> {
+    pub fn insert_batch(&self, data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>) -> Result<()> {
         let mut field_ids = HashSet::new();
-        for (id, field_id, vector) in data {
+        for (id, field_id, vectors) in data {
             let index = self.indexes.get_mut(&field_id);
             let mut index = match index {
                 Some(index) => index,
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            index
-                .1
-                .add(vector, IdxID(Some(id)))
-                .map_err(|e| anyhow!("Error adding vector: {:?}", e))?;
+            for vector in vectors {
+                index
+                    .1
+                    .add(&vector, IdxID(Some(id)))
+                    .map_err(|e| anyhow!("Error adding vector: {:?}", e))?;
+            }
 
             field_ids.insert(field_id);
         }

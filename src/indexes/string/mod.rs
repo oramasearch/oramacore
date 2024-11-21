@@ -328,7 +328,7 @@ impl StringIndex {
         Ok(())
     }
 
-    fn is_phrase_match(&self, token_positions: &Vec<Vec<usize>>) -> bool {
+    fn is_phrase_match(&self, token_positions: &[Vec<usize>]) -> bool {
         if token_positions.is_empty() {
             return false;
         }
