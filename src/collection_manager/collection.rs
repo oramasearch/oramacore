@@ -110,6 +110,7 @@ impl Collection {
 
                     let model = embedding_service
                         .get_model(embedding.model_name.clone())
+                        .await
                         .with_context(|| format!("Unable to find a model named \"{}\"", embedding.model_name.clone()))?
                         .clone();
 

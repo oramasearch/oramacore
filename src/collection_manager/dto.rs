@@ -34,6 +34,7 @@ pub struct EmbeddingTypedField {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum TypedField {
     Text(LanguageDTO),
     Code(CodeLanguage),

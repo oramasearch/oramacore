@@ -7,7 +7,7 @@ use rustorama::{
     collection_manager::{
         dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
         CollectionManager, CollectionsConfiguration,
-    }, embeddings::{EmbeddingConfig, EmbeddingService}, types::CodeLanguage, web_server::{HttpConfig, WebServer}
+    }, embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService}, types::CodeLanguage, web_server::{HttpConfig, WebServer}
 };
 
 mod documentation;
@@ -22,8 +22,9 @@ async fn main() -> anyhow::Result<()> {
     let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
         cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
         hugging_face: None,
-        preload_all: false,
+        preload: EmbeddingPreload::Bool(false),
     })
+        .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
     let manager = CollectionManager::new(CollectionsConfiguration {

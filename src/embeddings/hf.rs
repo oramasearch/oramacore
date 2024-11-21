@@ -1,21 +1,19 @@
 use std::{
-    collections::HashMap,
-    fs::{self, File},
-    path::Path,
-    time::Duration,
+    collections::HashMap, fs::{self, File}, io::Write, path::Path, time::Duration
 };
 
 use anyhow::{anyhow, Context, Result};
 use duration_string::DurationString;
 use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
+use futures::future::{join_all, try_join_all};
 use http::{
     header::{CONTENT_LENGTH, USER_AGENT},
     HeaderMap, HeaderValue,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::Deserialize;
-use tracing::{info, instrument, trace_span};
+use tracing::{info, instrument, trace_span, Instrument};
 
 use super::LoadedModel;
 
@@ -115,43 +113,39 @@ fn calculate_missing_files(
     missing_files
 }
 
-fn download_missing_files(
+async fn download_missing_files(
     hugging_face_config: &HuggingFaceConfiguration,
     model_name: &String,
     files_to_download: Vec<MissingFile>,
 ) -> Result<()> {
     let client = create_client(hugging_face_config)?;
 
-    let output: Result<Vec<_>> = files_to_download
-        .into_par_iter()
-        .map(
-            |MissingFile {
-                 filesystem_path,
-                 repo_path,
-             }| {
-                let url = format!(
-                    "{}/{}/resolve/main/{}",
-                    hugging_face_config.base_url, model_name, repo_path
-                );
+    let mut v = Vec::new();
+    for MissingFile {
+        filesystem_path,
+        repo_path,
+    } in files_to_download {
+        let url = format!(
+            "{}/{}/resolve/main/{}",
+            hugging_face_config.base_url, model_name, repo_path
+        );
+        
+        let f = download_file(&client, url, filesystem_path)
+            .instrument(trace_span!("Downloading", %model_name, %repo_path));
 
-                let span = trace_span!("Downloading", %model_name, %repo_path);
-                span.in_scope(|| {
-                    download_file(&client, &url, &filesystem_path)
-                        .with_context(|| format!("Failed to download {}", url))
-                })
-            },
-        )
-        .collect();
+        v.push(f);
+    }
 
-    output?;
+    try_join_all(v).await?;
 
     Ok(())
 }
 
-fn follow_redirects(client: &Client, initial_url: &str) -> Result<reqwest::blocking::Response> {
+async fn follow_redirects(client: &Client, initial_url: &str) -> Result<reqwest::Response> {
     let mut response = client
         .get(initial_url)
         .send()
+        .await
         .context("Failed to send HTTP request")?;
 
     if !response.status().is_success() {
@@ -177,6 +171,7 @@ fn follow_redirects(client: &Client, initial_url: &str) -> Result<reqwest::block
         response = client
             .get(new_url)
             .send()
+            .await
             .context("Failed to follow redirect")?;
 
         if !response.status().is_success() {
@@ -187,24 +182,28 @@ fn follow_redirects(client: &Client, initial_url: &str) -> Result<reqwest::block
     Ok(response)
 }
 
-fn download_file(client: &Client, url: &str, destination: &str) -> Result<()> {
+async fn download_file(client: &Client, url: String, destination: String) -> Result<()> {
     info!("Start");
 
-    let mut response = follow_redirects(client, url)?;
+    let mut response = follow_redirects(client, &url).await?;
 
     info!("Response: {:?}", response.headers().get(CONTENT_LENGTH));
 
     // Make sure the directory exists
-    let parent = Path::new(destination)
+    let parent = Path::new(&destination)
         .parent()
-        .with_context(|| format!("Failed to get parent directory: {destination}"))?;
+        .with_context(|| format!("Failed to get parent directory: {}", destination))?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create directory: {parent:?}"))?;
 
-    let mut file = File::create(destination)
+    let mut file = File::create(&destination)
         .with_context(|| format!("Failed to create file {}", destination))?;
-    std::io::copy(&mut response, &mut file)
-        .with_context(|| format!("Failed to write to file {}", destination))?;
+    
+    // COpy the response body to the file
+    while let Some(chunk) = response.chunk().await? {
+        file.write_all(&chunk)
+            .with_context(|| format!("Failed to write to file {}", destination))?;
+    }
 
     info!("Downloaded");
 
@@ -237,7 +236,7 @@ fn create_client(hugging_face_config: &HuggingFaceConfiguration) -> Result<Clien
 }
 
 impl LoadedModel {
-    pub fn try_from_hugging_face(
+    pub async fn try_from_hugging_face(
         hugging_face_config: &HuggingFaceConfiguration,
         cache_path: String,
         model_name: String,
@@ -245,14 +244,14 @@ impl LoadedModel {
         let hugging_face_model_repo_config = hugging_face_config
             .model_configs
             .get(&model_name)
-            .with_context(|| format!("Model not found: {model_name}"))?;
+            .with_context(|| format!("Model not found in configuration: {model_name}"))?;
 
         let text_embedding = try_build_text_embedding_model(
             hugging_face_config,
             cache_path,
             model_name.clone(),
             hugging_face_model_repo_config,
-        )?;
+        ).await?;
 
         Ok(Self {
             text_embedding,
@@ -263,11 +262,7 @@ impl LoadedModel {
     }
 }
 
-#[instrument(
-    level = "trace",
-    skip(hugging_face_config, cache_path, hugging_face_model_repo_config)
-)]
-fn try_build_text_embedding_model(
+async fn try_build_text_embedding_model(
     hugging_face_config: &HuggingFaceConfiguration,
     cache_path: String,
     model_name: String,
@@ -286,7 +281,7 @@ fn try_build_text_embedding_model(
         hugging_face_config,
         &hugging_face_model_repo_config.real_model_name,
         missing_files,
-    )?;
+    ).await?;
 
     let full_path = |file: &str| format!("{}/{}", &model_cache_root_path, file);
 
@@ -321,8 +316,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_hf_download_onnx() {
+    #[tokio::test]
+    async fn test_hf_download_onnx() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let tmp = tempdir::TempDir::new("test_hf_download_onnx").unwrap();
@@ -356,9 +351,11 @@ mod tests {
             cache_path.clone(),
             rebranded_name.clone(),
         )
+        .await
         .expect("Failed to download model");
 
         LoadedModel::try_from_hugging_face(&hugging_face_config, cache_path, rebranded_name)
+            .await
             .expect("The second time should work too");
     }
 }

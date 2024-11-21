@@ -8,7 +8,7 @@
 
     "embeddings": {
         // Preload all embeddings on startup
-        "preload_all": true,
+        "preload": ["small-model"],
 
         // where to place the custom models
         "cache_path": ".custom_models",
@@ -24,9 +24,9 @@
             "timeout": "3600s",
 
             "model_configs": {
-                "orama-custom-name": {
-                    "real_model_name": "jina-v2-base-code",
-                    "onnx_model": "onnx/model.onnx",
+                "small-model": {
+                    "real_model_name": "Xenova/gte-small",
+                    "onnx_model": "onnx/model_quantized.onnx",
                     "special_tokens_map": "special_tokens_map.json",
                     "tokenizer": "tokenizer.json",
                     "tokenizer_config": "tokenizer_config.json",

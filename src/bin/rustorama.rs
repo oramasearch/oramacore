@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn start(config: RustoramaConfig) -> Result<()> {
     let embedding_service = EmbeddingService::try_new(config.embeddings)
+        .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
     let manager = CollectionManager::new(CollectionsConfiguration {

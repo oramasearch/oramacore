@@ -15,8 +15,15 @@ use strum_macros::{AsRefStr, Display};
 use tracing::{info, instrument};
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum EmbeddingPreload {
+    Bool(bool),
+    List(Vec<OramaModel>),
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct EmbeddingConfig {
-    pub preload_all: bool,
+    pub preload: EmbeddingPreload,
     pub cache_path: String,
     pub hugging_face: Option<HuggingFaceConfiguration>,
 }
@@ -143,21 +150,39 @@ pub struct EmbeddingService {
 }
 
 impl EmbeddingService {
-    pub fn try_new(config: EmbeddingConfig) -> Result<Self> {
-        let builder = EmbeddingBuilder::try_new(config)?;
+    pub async fn try_new(config: EmbeddingConfig) -> Result<Self> {
+        let builder = EmbeddingBuilder::try_new(config.clone())?;
 
-        Ok(Self {
+        let s = Self {
             loaded_models: DashMap::new(),
             builder,
-        })
+        };
+
+
+        match config.preload {
+            EmbeddingPreload::Bool(true) => {
+                unimplemented!("Preloading \"true\" is not implemented yet");
+            },
+            EmbeddingPreload::Bool(false) => {
+                // Do nothing
+            }
+            EmbeddingPreload::List(models) => {
+                for model in models {
+                    s.get_model(model).await?;
+                }
+            }
+        }
+
+
+        Ok(s)
     }
 
-    pub fn get_model(&self, model: OramaModel) -> Result<Arc<LoadedModel>> {
+    pub async fn get_model(&self, model: OramaModel) -> Result<Arc<LoadedModel>> {
         let loaded_model = self.loaded_models.entry(model.clone());
         match loaded_model {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
-                let loaded_model = self.builder.try_get(model)?;
+                let loaded_model = self.builder.try_get(model).await?;
                 let loaded_model = Arc::new(loaded_model);
                 entry.insert(loaded_model.clone());
                 Ok(loaded_model)
@@ -205,7 +230,7 @@ impl EmbeddingService {
         input: Vec<String>,
         batch_size: Option<usize>,
     ) -> Result<Vec<Vec<f32>>> {
-        let loaded_model = self.get_model(model)?;
+        let loaded_model = self.get_model(model).await?;
         loaded_model.embed(input, batch_size)
     }
 }
@@ -220,15 +245,11 @@ impl EmbeddingBuilder {
             config: config.clone(),
         };
 
-        if config.preload_all {
-            // TODO: preload all models
-        }
-
         Ok(builder)
     }
 
     #[instrument(skip(self), fields(orama_model = ?orama_model))]
-    fn try_get(&self, orama_model: OramaModel) -> Result<LoadedModel> {
+    async fn try_get(&self, orama_model: OramaModel) -> Result<LoadedModel> {
         info!("Loading model");
         match orama_model {
             OramaModel::Fastembed(orama_embedding_model) => {
@@ -267,6 +288,7 @@ impl EmbeddingBuilder {
                     self.config.cache_path.clone(),
                     model_name.clone(),
                 )
+                .await
                 .with_context(move || format!("Failed to load HuggingFace model {model_name}"))?;
                 Ok(hf_model)
             }
@@ -289,8 +311,9 @@ mod tests {
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: temp_dir.clone(),
             hugging_face: None,
-            preload_all: false,
+            preload: EmbeddingPreload::Bool(false),
         })
+        .await
         .expect("Failed to initialize the EmbeddingService");
 
         let output = embedding_service

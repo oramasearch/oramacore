@@ -134,7 +134,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{EmbeddingConfig, EmbeddingService},
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
         types::{Number, NumberFilter},
     };
 
@@ -148,13 +148,13 @@ mod tests {
 
     use super::CollectionManager;
 
-    fn create_manager() -> CollectionManager {
+    async fn create_manager() -> CollectionManager {
         let embedding_service =
             EmbeddingService::try_new(EmbeddingConfig {
-                preload_all: false,
+                preload: EmbeddingPreload::Bool(false),
                 cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
                 hugging_face: None,
-            }).unwrap();
+            }).await.unwrap();
         CollectionManager::new(CollectionsConfiguration {
             embedding_service: Arc::new(embedding_service),
         })
@@ -162,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_collection() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_id_str = "my-test-collection".to_string();
 
@@ -181,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collection_id_already_exists() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_id = "my-test-collection".to_string();
 
@@ -209,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_collections() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_ids: Vec<_> = (0..3)
             .map(|i| format!("my-test-collection-{}", i))
@@ -236,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_documents_into_collection() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -274,7 +274,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -331,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents_order() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -385,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents_limit() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -440,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_number() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -495,7 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_number() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_bool() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -652,7 +652,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_bool() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -712,7 +712,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_should_based_on_term() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
