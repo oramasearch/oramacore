@@ -10,17 +10,20 @@ use thiserror::Error;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
-use crate::{document_storage::DocumentStorage, types::CollectionId};
+use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService, types::CollectionId};
 
 mod collection;
 pub mod dto;
 
-pub struct CollectionsConfiguration {}
+pub struct CollectionsConfiguration {
+    pub embedding_service: Arc<EmbeddingService>,
+}
 
 pub struct CollectionManager {
     collections: RwLock<HashMap<CollectionId, Collection>>,
     document_storage: Arc<DocumentStorage>,
     id_generator: Arc<AtomicU64>,
+    embedding_service: Arc<EmbeddingService>,
 }
 
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -30,12 +33,13 @@ pub enum CreateCollectionError {
 }
 
 impl CollectionManager {
-    pub fn new(_configuration: CollectionsConfiguration) -> Self {
+    pub fn new(configuration: CollectionsConfiguration) -> Self {
         let id_generator = Arc::new(AtomicU64::new(0));
         CollectionManager {
             collections: Default::default(),
             document_storage: Arc::new(DocumentStorage::new(id_generator.clone())),
             id_generator,
+            embedding_service: configuration.embedding_service,
         }
     }
 
@@ -45,7 +49,8 @@ impl CollectionManager {
     ) -> Result<CollectionId, CreateCollectionError> {
         let id = CollectionId(collection_option.id);
 
-        let collection = Collection::new(
+        // TODO: fix error handling
+        let collection = Collection::try_new(
             id.clone(),
             collection_option.description,
             collection_option
@@ -55,7 +60,10 @@ impl CollectionManager {
             self.document_storage.clone(),
             collection_option.typed_fields,
             self.id_generator.clone(),
-        );
+            self.embedding_service.clone(),
+        )
+        .await
+        .expect("TODO: fix error handling");
 
         let mut collections = self.collections.write().await;
         let entry = collections.entry(id.clone());
@@ -118,11 +126,17 @@ impl Deref for CollectionReadLock<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     use serde_json::json;
 
-    use crate::types::{Number, NumberFilter};
+    use crate::{
+        embeddings::{EmbeddingConfig, EmbeddingService},
+        types::{Number, NumberFilter},
+    };
 
     use super::{
         dto::{
@@ -135,7 +149,15 @@ mod tests {
     use super::CollectionManager;
 
     fn create_manager() -> CollectionManager {
-        CollectionManager::new(CollectionsConfiguration {})
+        let embedding_service =
+            EmbeddingService::try_new(EmbeddingConfig {
+                preload_all: false,
+                cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+                hugging_face: None,
+            }).unwrap();
+        CollectionManager::new(CollectionsConfiguration {
+            embedding_service: Arc::new(embedding_service),
+        })
     }
 
     #[tokio::test]

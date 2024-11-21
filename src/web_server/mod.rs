@@ -73,7 +73,7 @@ mod tests {
     use tower_http::trace::TraceLayer;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::web_server::api::api_config;
+    use crate::{embeddings::{EmbeddingConfig, EmbeddingService}, web_server::api::api_config};
     use crate::{
         collection_manager::{
             dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
@@ -239,6 +239,14 @@ mod tests {
     }
 
     fn create_manager() -> CollectionManager {
-        CollectionManager::new(CollectionsConfiguration {})
+        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+            preload_all: false,
+            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+            hugging_face: None,
+        }).unwrap();
+        let embedding_service = Arc::new(embedding_service);
+        CollectionManager::new(CollectionsConfiguration {
+            embedding_service
+        })
     }
 }

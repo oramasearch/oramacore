@@ -73,6 +73,7 @@ quick-js = "0.4.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 env_filter = "0.1.2"
+duration-string = "0.4.0"
 
 [build-dependencies]
 cc="*"
@@ -92,21 +93,21 @@ name = "rustorama"
 path = "src/bin/rustorama.rs"
 
 ##### BIN FOR TEST #####
-[[bin]]
-name = "vector_index_test"
-path = "src/bin/vector_index_test.rs"
-[[bin]]
-name = "embeddings"
-path = "src/bin/embeddings/embeddings.rs"
-[[bin]]
-name = "pq_bench"
-path = "src/bin/embeddings/pq_bench.rs"
-[[bin]]
-name = "pq"
-path = "src/bin/embeddings/pq.rs"
-[[bin]]
-name = "selector"
-path = "src/bin/embeddings/selector.rs"
+#[[bin]]
+#name = "vector_index_test"
+#path = "src/bin/vector_index_test.rs"
+#[[bin]]
+#name = "embeddings"
+#path = "src/bin/embeddings/embeddings.rs"
+#[[bin]]
+#name = "pq_bench"
+#path = "src/bin/embeddings/pq_bench.rs"
+#[[bin]]
+#name = "pq"
+#path = "src/bin/embeddings/pq.rs"
+#[[bin]]
+#name = "selector"
+#path = "src/bin/embeddings/selector.rs"
 
 
 [[bench]]

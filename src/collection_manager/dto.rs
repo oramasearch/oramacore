@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    nlp::locales::Locale,
-    types::{CodeLanguage, FieldId, Number, NumberFilter},
+    embeddings::OramaModel, nlp::locales::Locale, types::{CodeLanguage, FieldId, Number, NumberFilter}
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -29,9 +28,16 @@ impl From<Locale> for LanguageDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct EmbeddingTypedField {
+    pub model_name: OramaModel,
+    pub document_fields: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum TypedField {
     Text(LanguageDTO),
     Code(CodeLanguage),
+    Embedding(EmbeddingTypedField),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

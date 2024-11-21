@@ -7,18 +7,20 @@ use std::{
     },
 };
 
-use crate::nlp::TextParser;
 use crate::{
     document_storage::DocumentStorage,
+    embeddings::EmbeddingService,
     indexes::{
         bool::BoolIndex,
         code::CodeIndex,
         number::NumberIndex,
         string::{scorer::bm25::BM25Score, DocumentBatch, StringIndex},
+        vector::VectorIndexConfig,
     },
     nlp::locales::Locale,
 };
-use anyhow::{anyhow, Result};
+use crate::{indexes::vector::VectorIndex, nlp::TextParser};
+use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use num_traits::ToPrimitive;
 
@@ -31,7 +33,9 @@ use crate::types::{
     ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType,
 };
 
-use super::dto::{CollectionDTO, FacetDefinition, Filter, SearchParams, TypedField};
+use super::dto::{
+    CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, TypedField,
+};
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -53,18 +57,25 @@ pub struct Collection {
     number_index: NumberIndex,
     // Bool
     bool_index: BoolIndex,
+
+    // Vector
+    vector_fields: DashMap<String, (FieldId, EmbeddingTypedField)>,
+    vector_index: VectorIndex,
 }
 
 impl Collection {
-    pub fn new(
+    pub async fn try_new(
         id: CollectionId,
         description: Option<String>,
         language: Locale,
         document_storage: Arc<DocumentStorage>,
         typed_fields: HashMap<String, TypedField>,
         id_generator: Arc<AtomicU64>,
-    ) -> Self {
+        embedding_service: Arc<EmbeddingService>,
+    ) -> Result<Self> {
         let default_parser = TextParser::from_language(Locale::EN);
+
+        let vector_index = VectorIndex::try_new(VectorIndexConfig { })?;
 
         let collection = Collection {
             id,
@@ -79,6 +90,9 @@ impl Collection {
             code_fields: Default::default(),
             number_index: Default::default(),
             bool_index: Default::default(),
+
+            vector_fields: Default::default(),
+            vector_index,
         };
 
         for (field_name, field_type) in typed_fields {
@@ -92,10 +106,24 @@ impl Collection {
                 TypedField::Code(_) => {
                     collection.code_fields.insert(field_name, field_id);
                 }
+                TypedField::Embedding(embedding) => {
+
+                    let model = embedding_service
+                        .get_model(embedding.model_name.clone())
+                        .with_context(|| format!("Unable to find a model named \"{}\"", embedding.model_name.clone()))?
+                        .clone();
+
+                    collection.vector_index
+                        .add_field(field_id, model)
+                        .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
+                    collection
+                        .vector_fields
+                        .insert(field_name, (field_id, embedding));
+                }
             }
         }
 
-        collection
+        Ok(collection)
     }
 
     pub fn as_dto(&self) -> CollectionDTO {
@@ -124,12 +152,32 @@ impl Collection {
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut numbers = Vec::new();
         let mut bools = Vec::new();
+        let mut embeddings: Vec<(DocumentId, FieldId, Vec<String>)> = Vec::new();
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
             let mut flatten = doc.into_flatten();
             let schema = flatten.get_field_schema();
 
             let internal_document_id = self.generate_document_id();
+
+            for e in self.vector_fields.iter() {
+                let (field_id, embedding) = e.value();
+
+                embeddings.push((
+                    internal_document_id,
+                    *field_id,
+                    embedding
+                        .document_fields
+                        .iter()
+                        .filter_map(|f| {
+                            flatten
+                                .get(f)
+                                .and_then(|v| v.as_str())
+                                .map(|v| v.to_string())
+                        })
+                        .collect(),
+                ))
+            }
 
             for (key, field_type) in schema {
                 if self.code_fields.contains_key(&key) {
@@ -216,6 +264,11 @@ impl Collection {
         }
         for (doc_id, field_id, value) in bools {
             self.bool_index.add(doc_id, field_id, value);
+        }
+
+        for (doc_id, field_id, values) in embeddings {
+
+            // self.vector_index.add(doc_id, field_id, embedding);
         }
 
         Ok(())

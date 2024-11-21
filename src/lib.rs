@@ -26,6 +26,7 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::collection_manager::{CollectionManager, CollectionsConfiguration};
+    use crate::embeddings::{EmbeddingConfig, EmbeddingService};
     use crate::web_server::{HttpConfig, WebServer};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
@@ -60,7 +61,15 @@ mod tests {
         }
 
         async fn run() {
-            let manager = CollectionManager::new(CollectionsConfiguration {});
+            let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+                cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+                hugging_face: None,
+                preload_all: false,
+            }).unwrap();
+            let embedding_service = Arc::new(embedding_service);
+            let manager = CollectionManager::new(CollectionsConfiguration {
+                embedding_service
+            });
             let manager = Arc::new(manager);
             let web_server = WebServer::new(manager);
 

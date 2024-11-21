@@ -1,10 +1,10 @@
 use anyhow::Result;
 use rustorama::embeddings::pq;
-use rustorama::embeddings::OramaModels;
+use rustorama::embeddings::OramaModel;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let model = OramaModels::JinaV2BaseCode.try_new().await?;
+    let model = OramaModel::JinaV2BaseCode.try_new().await?;
 
     let vectors = model.embed( vec![
         "CASUAL COMFORT, SPORTY STYLE.Slide into comfort in the lightweight and sporty Nike Benassi JDI Slide. It features the Nike logo on the foot strap, which is lined in super soft fabric. The foam midsole brings that beach feeling to your feet and adds spring to your kicked-back style.Benefits1-piece, synthetic leather strap is lined with super soft, towel-like fabric.The foam midsole doubles as an outsole, adding lightweight cushioning.Flex grooves let you move comfortably.Shown: Black/WhiteStyle: 343880-090".to_string(),

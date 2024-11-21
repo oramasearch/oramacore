@@ -160,6 +160,10 @@ impl FlattenDocument {
     pub fn remove(&mut self, key: &str) -> Option<Value> {
         self.0.remove(key)
     }
+
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
 }
 
 #[derive(Debug, Deserialize)]
