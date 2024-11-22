@@ -8,7 +8,6 @@ use anyhow::{anyhow, Context, Result};
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
@@ -145,17 +144,14 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{
-            EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
-        },
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
         indexes::number::{Number, NumberFilter},
     };
 
     use super::{
         dto::{
-            CreateCollectionOptionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode,
-            Limit, NumberFacetDefinition, NumberFacetDefinitionRange, SearchMode, SearchParams,
-            TypedField, VectorMode,
+            CreateCollectionOptionDTO, FacetDefinition, Filter, FulltextMode, Limit,
+            NumberFacetDefinition, NumberFacetDefinitionRange, SearchMode, SearchParams,
         },
         CollectionsConfiguration,
     };

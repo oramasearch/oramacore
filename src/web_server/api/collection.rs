@@ -57,7 +57,9 @@ async fn create_collection(
         Ok(collection_id) => collection_id,
         Err(e) => {
             error!("Error creating collection: {}", e);
-            e.chain().skip(1).for_each(|cause| error!("because: {}", cause));
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
