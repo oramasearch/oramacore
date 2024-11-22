@@ -16,7 +16,7 @@ use http::{
 };
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{info, trace_span, Instrument};
+use tracing::{info, trace, trace_span, Instrument};
 
 use super::LoadedModel;
 
@@ -203,6 +203,8 @@ async fn download_file(client: &Client, url: String, destination: String) -> Res
     let mut file = File::create(&destination)
         .with_context(|| format!("Failed to create file {}", destination))?;
 
+    trace!("Status code: {:?}, headers {:?}", response.status(), response.headers());
+
     // COpy the response body to the file
     while let Some(chunk) = response.chunk().await? {
         file.write_all(&chunk)
@@ -323,11 +325,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_hf_download_onnx() {
+    async fn test_hf_download_onnx() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let tmp = tempdir::TempDir::new("test_hf_download_onnx").unwrap();
+        let tmp = tempdir::TempDir::new("test_hf_download_onnx")?;
         let cache_path = tmp.path().to_str().unwrap().to_string();
+        fs::remove_dir(cache_path.clone())?;
 
         let rebranded_name = "my-model".to_string();
         let model_name = "Xenova/gte-small".to_string();
@@ -335,8 +338,8 @@ mod tests {
         let hugging_face_config = HuggingFaceConfiguration {
             base_url: "https://huggingface.co".to_string(),
             user_agent: "my-agent".to_string(),
-            connect_timeout: "1s".to_string(),
-            timeout: "1s".to_string(),
+            connect_timeout: "60s".to_string(),
+            timeout: "60s".to_string(),
             model_configs: HashMap::from_iter([(
                 rebranded_name.clone(),
                 HuggingFaceModelRepoConfig {
@@ -358,10 +361,12 @@ mod tests {
             rebranded_name.clone(),
         )
         .await
-        .expect("Failed to download model");
+        ?;
 
         LoadedModel::try_from_hugging_face(&hugging_face_config, cache_path, rebranded_name)
             .await
-            .expect("The second time should work too");
+            ?;
+
+        Ok(())
     }
 }
