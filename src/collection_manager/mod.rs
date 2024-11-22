@@ -140,14 +140,17 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel},
+        embeddings::{
+            EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
+        },
         indexes::number::{Number, NumberFilter},
     };
 
     use super::{
         dto::{
-            CreateCollectionOptionDTO, FacetDefinition, Filter, Limit, NumberFacetDefinition,
-            NumberFacetDefinitionRange, SearchParams, SearchMode, FulltextMode, TypedField, EmbeddingTypedField, VectorMode
+            CreateCollectionOptionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode,
+            Limit, NumberFacetDefinition, NumberFacetDefinitionRange, SearchMode, SearchParams,
+            TypedField, VectorMode,
         },
         CollectionsConfiguration,
     };
@@ -839,15 +842,13 @@ mod tests {
                 id: collection_id_str.clone(),
                 description: Some("Collection of songs".to_string()),
                 language: None,
-                typed_fields: HashMap::from_iter([
-                    (
-                        "vector".to_string(),
-                        TypedField::Embedding(EmbeddingTypedField {
-                            model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                            document_fields: vec!["text".to_string()],
-                        }),
-                    ),
-                ]),
+                typed_fields: HashMap::from_iter([(
+                    "vector".to_string(),
+                    TypedField::Embedding(EmbeddingTypedField {
+                        model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
+                        document_fields: vec!["text".to_string()],
+                    }),
+                )]),
             })
             .await
             .expect("insertion should be successful");

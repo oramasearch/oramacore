@@ -113,9 +113,7 @@ pub struct VectorMode {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct HybridMode {
-
-}
+pub struct HybridMode {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SearchMode {
@@ -130,7 +128,9 @@ pub enum SearchMode {
 }
 impl Default for SearchMode {
     fn default() -> Self {
-        SearchMode::Default(FulltextMode { term: "".to_string() })
+        SearchMode::Default(FulltextMode {
+            term: "".to_string(),
+        })
     }
 }
 
@@ -170,7 +170,6 @@ pub struct SearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub facets: Option<HashMap<String, FacetResult>>,
 }
-
 
 #[cfg(test)]
 mod test {

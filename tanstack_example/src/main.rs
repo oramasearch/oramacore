@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
 {
   accessorKey: 'firstName',
 }"###
-                .to_string()
+                    .to_string(),
             }),
             limit: Limit(3),
             boost: Default::default(),

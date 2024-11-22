@@ -74,7 +74,9 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
 
     use crate::collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO, FulltextMode, Limit, SearchMode, SearchParams},
+        dto::{
+            CollectionDTO, CreateCollectionOptionDTO, FulltextMode, Limit, SearchMode, SearchParams,
+        },
         CollectionManager, CollectionsConfiguration,
     };
     use crate::{

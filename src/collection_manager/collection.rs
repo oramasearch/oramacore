@@ -1,8 +1,10 @@
 use std::{
-    cmp::Reverse, collections::{BinaryHeap, HashMap, HashSet}, sync::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
+    sync::{
         atomic::{AtomicU16, AtomicU64},
         Arc,
-    }
+    },
 };
 
 use crate::{
@@ -32,7 +34,8 @@ use crate::types::{Document, DocumentList, ScalarType, StringParser, ValueType};
 
 use super::{
     dto::{
-        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode, SearchParams, SearchResult, TypedField, VectorMode
+        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode, SearchParams,
+        SearchResult, TypedField, VectorMode,
     },
     CollectionId,
 };
@@ -133,8 +136,9 @@ impl Collection {
                         .vector_index
                         .add_field(field_id, model)
                         .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
-                    let model = 
-                        embedding_service.get_model(embedding.model_name.clone()).await?;
+                    let model = embedding_service
+                        .get_model(embedding.model_name.clone())
+                        .await?;
                     collection.embedding_models.insert(field_id, model);
                     collection
                         .vector_fields
@@ -288,7 +292,9 @@ impl Collection {
 
         let mut v = Vec::new();
         for (doc_id, field_id, values) in embeddings {
-            let model = self.embedding_models.get(&field_id)
+            let model = self
+                .embedding_models
+                .get(&field_id)
                 .ok_or_else(|| anyhow!("Model not found"))?
                 .clone();
             let embedding = model.embed(values, Some(1))?;
@@ -300,8 +306,10 @@ impl Collection {
         Ok(())
     }
 
-
-    fn calculate_filtered_doc_ids(&self, where_filter: HashMap<String, Filter>) -> Option<HashSet<DocumentId>> {
+    fn calculate_filtered_doc_ids(
+        &self,
+        where_filter: HashMap<String, Filter>,
+    ) -> Option<HashSet<DocumentId>> {
         if where_filter.is_empty() {
             None
         } else {
@@ -336,11 +344,11 @@ impl Collection {
         }
     }
 
-    fn calculate_facets(&self,
+    fn calculate_facets(
+        &self,
         token_scores: &HashMap<DocumentId, f32>,
         facets: HashMap<String, FacetDefinition>,
     ) -> Option<HashMap<String, FacetResult>> {
-
         if facets.is_empty() {
             None
         } else {
@@ -403,11 +411,12 @@ impl Collection {
         }
     }
 
-    async fn search_full_text(&self,
+    async fn search_full_text(
+        &self,
         search_params: FulltextMode,
         properties: Option<Vec<String>>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<HashSet<DocumentId>>
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let properties: Vec<_> = match properties {
             Some(properties) => properties
@@ -520,56 +529,59 @@ impl Collection {
         search_params: VectorMode,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
+        let ret = self
+            .vector_fields
+            .iter()
+            .filter_map(|e| {
+                let (field_id, _) = e.value();
 
-        let ret = self.vector_fields.iter()
-        .filter_map(|e| {
-            let (field_id, _) = e.value();
+                let model = self.embedding_models.get(field_id);
 
-            let model = self.embedding_models.get(field_id);
-
-            let model = match model {
-                Some(model) => model,
-                None => return None,
-            };
-
-            let v = model.embed(vec![search_params.term.clone()], Some(1)).ok();
-
-            let v = match v {
-                Some(v) => v,
-                None => return None,
-            };
-
-            let mut ret: HashMap<DocumentId, f32> = HashMap::new();
-            for k in v {
-                let r = self.vector_index.search(vec![*field_id], &k, 1);
-                let r = match r {
-                    Ok(r) => r,
-                    // This is a hidden error, we should report it
-                    // TODO: report this error
-                    Err(_) => return None,
+                let model = match model {
+                    Some(model) => model,
+                    None => return None,
                 };
 
-                for (doc_id, score) in r {
-                    if !filtered_doc_ids.as_ref().map(|f| f.contains(&doc_id)).unwrap_or(true) {
-                        continue;
-                    }
+                let v = model.embed(vec![search_params.term.clone()], Some(1)).ok();
 
-                    let v = ret.entry(doc_id)
-                        .or_default();
+                let v = match v {
+                    Some(v) => v,
+                    None => return None,
+                };
+
+                let mut ret: HashMap<DocumentId, f32> = HashMap::new();
+                for k in v {
+                    let r = self.vector_index.search(vec![*field_id], &k, 1);
+                    let r = match r {
+                        Ok(r) => r,
+                        // This is a hidden error, we should report it
+                        // TODO: report this error
+                        Err(_) => return None,
+                    };
+
+                    for (doc_id, score) in r {
+                        if !filtered_doc_ids
+                            .as_ref()
+                            .map(|f| f.contains(&doc_id))
+                            .unwrap_or(true)
+                        {
+                            continue;
+                        }
+
+                        let v = ret.entry(doc_id).or_default();
+                        *v += score;
+                    }
+                }
+
+                Some(ret)
+            })
+            .fold(HashMap::new(), |mut acc, v| {
+                for (doc_id, score) in v {
+                    let v = acc.entry(doc_id).or_default();
                     *v += score;
                 }
-            }
-
-            Some(ret)
-        })
-        .fold(HashMap::new(), |mut acc, v| {
-            for (doc_id, score) in v {
-                let v = acc.entry(doc_id)
-                    .or_default();
-                *v += score;
-            }
-            acc
-        });
+                acc
+            });
 
         Ok(ret)
     }
@@ -591,7 +603,8 @@ impl Collection {
 
         let token_scores = match r#type {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
-                self.search_full_text(search_params, properties, boost, filtered_doc_ids).await?
+                self.search_full_text(search_params, properties, boost, filtered_doc_ids)
+                    .await?
             }
             SearchMode::Vector(search_params) => {
                 self.search_vector(search_params, filtered_doc_ids).await?
