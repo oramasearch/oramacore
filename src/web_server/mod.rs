@@ -74,7 +74,7 @@ mod tests {
     use tracing_subscriber::util::SubscriberInitExt;
 
     use crate::collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
+        dto::{CollectionDTO, CreateCollectionOptionDTO, FulltextMode, Limit, SearchMode, SearchParams},
         CollectionManager, CollectionsConfiguration,
     };
     use crate::{
@@ -141,7 +141,9 @@ mod tests {
             &mut router,
             &collection_id,
             &SearchParams {
-                term: "beatles".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "beatles".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),

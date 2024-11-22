@@ -98,66 +98,46 @@ pub enum FacetDefinition {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FulltextSearchParams {
+pub struct FulltextMode {
     pub term: String,
-    #[serde(default)]
-    pub limit: Limit,
-    #[serde(default)]
-    pub boost: HashMap<String, f32>,
-    #[serde(default)]
-    pub properties: Option<Vec<String>>,
-    #[serde(default, rename = "where")]
-    pub where_filter: HashMap<String, Filter>,
-    #[serde(default)]
-    pub facets: HashMap<String, FacetDefinition>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct VectorSearchParams {
+pub struct VectorMode {
+    // In Orama previously we support 2 kind:
+    // - "term": "hello"
+    // - "vector": [...]
+    // For simplicity, we only support "term" for now
+    // TODO: support "vector"
     pub term: String,
-    #[serde(default)]
-    pub limit: Limit,
-    #[serde(default)]
-    pub boost: HashMap<String, f32>,
-    #[serde(default)]
-    pub properties: Option<Vec<String>>,
-    #[serde(default, rename = "where")]
-    pub where_filter: HashMap<String, Filter>,
-    #[serde(default)]
-    pub facets: HashMap<String, FacetDefinition>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct HybridSearchParams {
-    pub term: String,
-    #[serde(default)]
-    pub limit: Limit,
-    #[serde(default)]
-    pub boost: HashMap<String, f32>,
-    #[serde(default)]
-    pub properties: Option<Vec<String>>,
-    #[serde(default, rename = "where")]
-    pub where_filter: HashMap<String, Filter>,
-    #[serde(default)]
-    pub facets: HashMap<String, FacetDefinition>,
+pub struct HybridMode {
+
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum SearchParams2 {
+pub enum SearchMode {
     #[serde(rename = "fulltext")]
-    FullText(FulltextSearchParams),
+    FullText(FulltextMode),
     #[serde(rename = "vector")]
-    Vector(VectorSearchParams),
+    Vector(VectorMode),
     #[serde(rename = "hybrid")]
-    Hybrid(HybridSearchParams),
+    Hybrid(HybridMode),
     #[serde(untagged)]
-    Default(FulltextSearchParams),
+    Default(FulltextMode),
+}
+impl Default for SearchMode {
+    fn default() -> Self {
+        SearchMode::Default(FulltextMode { term: "".to_string() })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchParams {
-    pub term: String,
+    #[serde(flatten)]
+    pub mode: SearchMode,
     #[serde(default)]
     pub limit: Limit,
     #[serde(default)]
@@ -196,7 +176,7 @@ pub struct SearchResult {
 mod test {
     use serde_json::json;
 
-    use super::SearchParams2;
+    use super::*;
 
     #[test]
     fn test_search_deserialization() {
@@ -204,34 +184,34 @@ mod test {
             "type": "fulltext",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
-        matches!(p, SearchParams2::FullText(_));
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        matches!(p.mode, SearchMode::FullText(_));
 
         let j = json!({
             "type": "vector",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
-        matches!(p, SearchParams2::Vector(_));
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        matches!(p.mode, SearchMode::Vector(_));
 
         let j = json!({
             "type": "hybrid",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
-        matches!(p, SearchParams2::Hybrid(_));
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        matches!(p.mode, SearchMode::Hybrid(_));
 
         let j = json!({
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
-        matches!(p, SearchParams2::Default(_));
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        matches!(p.mode, SearchMode::Default(_));
 
         let j = json!({
             "type": "unknown_value",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams2>(j).unwrap();
-        matches!(p, SearchParams2::Default(_));
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        matches!(p.mode, SearchMode::Default(_));
     }
 }

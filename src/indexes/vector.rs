@@ -83,7 +83,7 @@ impl VectorIndex {
     }
 
     pub fn search(
-        &mut self,
+        &self,
         field_ids: Vec<FieldId>,
         target: &[f32],
         k: usize,

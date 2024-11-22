@@ -1,14 +1,12 @@
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
-    sync::{
+    cmp::Reverse, collections::{BinaryHeap, HashMap, HashSet}, sync::{
         atomic::{AtomicU16, AtomicU64},
         Arc,
-    },
+    }
 };
 
 use crate::{
-    collection_manager::dto::{FacetResult, SearchResultHit},
+    collection_manager::dto::{FacetResult, SearchMode, SearchResultHit},
     document_storage::{DocumentId, DocumentStorage},
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{
@@ -34,8 +32,7 @@ use crate::types::{Document, DocumentList, ScalarType, StringParser, ValueType};
 
 use super::{
     dto::{
-        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, SearchParams, SearchResult,
-        TypedField,
+        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode, SearchParams, SearchResult, TypedField, VectorMode
     },
     CollectionId,
 };
@@ -303,14 +300,12 @@ impl Collection {
         Ok(())
     }
 
-    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
-        info!("Searching with params: {:?}", search_params);
 
-        let filtered_doc_ids = if search_params.where_filter.is_empty() {
+    fn calculate_filtered_doc_ids(&self, where_filter: HashMap<String, Filter>) -> Option<HashSet<DocumentId>> {
+        if where_filter.is_empty() {
             None
         } else {
-            let mut filters: Vec<_> = search_params
-                .where_filter
+            let mut filters: Vec<_> = where_filter
                 .into_iter()
                 .map(|(field_name, value)| {
                     let field_id = self.get_field_id(field_name);
@@ -338,17 +333,83 @@ impl Collection {
             info!("Matching doc from filters: {:?}", doc_ids);
 
             Some(doc_ids)
-        };
+        }
+    }
 
-        let boost: HashMap<_, _> = search_params
-            .boost
-            .into_iter()
-            .map(|(field_name, boost)| {
-                let field_id = self.get_field_id(field_name);
-                (field_id, boost)
-            })
-            .collect();
-        let properties: Vec<_> = match search_params.properties {
+    fn calculate_facets(&self,
+        token_scores: &HashMap<DocumentId, f32>,
+        facets: HashMap<String, FacetDefinition>,
+    ) -> Option<HashMap<String, FacetResult>> {
+
+        if facets.is_empty() {
+            None
+        } else {
+            info!("Computing facets on {:?}", facets.keys());
+
+            let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
+            for (field_name, facet) in facets {
+                let field_id = self.get_field_id(field_name.clone());
+                match facet {
+                    FacetDefinition::Number(facet) => {
+                        let mut values = HashMap::new();
+
+                        for range in facet.ranges {
+                            let facet: HashSet<_> = self
+                                .number_index
+                                .filter(field_id, NumberFilter::Between(range.from, range.to))
+                                .into_iter()
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect();
+
+                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
+                        }
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: values.len(),
+                                values,
+                            },
+                        );
+                    }
+                    FacetDefinition::Bool => {
+                        let true_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, true)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+                        let false_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, false)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: 2,
+                                values: HashMap::from_iter([
+                                    ("true".to_string(), true_facet.len()),
+                                    ("false".to_string(), false_facet.len()),
+                                ]),
+                            },
+                        );
+                    }
+                }
+            }
+            Some(res_facets)
+        }
+    }
+
+    async fn search_full_text(&self,
+        search_params: FulltextMode,
+        properties: Option<Vec<String>>,
+        boost: HashMap<FieldId, f32>,
+        filtered_doc_ids: Option<HashSet<DocumentId>>
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let properties: Vec<_> = match properties {
             Some(properties) => properties
                 .into_iter()
                 .map(|p| self.get_field_id(p))
@@ -441,72 +502,110 @@ impl Collection {
             token_scores
         };
 
-        info!("Document that match the term: {:?}", token_scores.len());
+        Ok(token_scores)
+    }
 
-        let facets = if search_params.facets.is_empty() {
-            None
-        } else {
-            info!("Computing facets on {:?}", search_params.facets.keys());
+    fn calculate_boost(&self, boost: HashMap<String, f32>) -> HashMap<FieldId, f32> {
+        boost
+            .into_iter()
+            .map(|(field_name, boost)| {
+                let field_id = self.get_field_id(field_name);
+                (field_id, boost)
+            })
+            .collect()
+    }
 
-            let mut facets = HashMap::new();
-            for (field_name, facet) in search_params.facets {
-                let field_id = self.get_field_id(field_name.clone());
-                match facet {
-                    FacetDefinition::Number(facet) => {
-                        let mut values = HashMap::new();
+    async fn search_vector(
+        &self,
+        search_params: VectorMode,
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
+    ) -> Result<HashMap<DocumentId, f32>> {
 
-                        for range in facet.ranges {
-                            let facet: HashSet<_> = self
-                                .number_index
-                                .filter(field_id, NumberFilter::Between(range.from, range.to))
-                                .into_iter()
-                                .filter(|doc_id| token_scores.contains_key(doc_id))
-                                .collect();
+        let ret = self.vector_fields.iter()
+        .filter_map(|e| {
+            let (field_id, _) = e.value();
 
-                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
-                        }
+            let model = self.embedding_models.get(field_id);
 
-                        facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: values.len(),
-                                values,
-                            },
-                        );
+            let model = match model {
+                Some(model) => model,
+                None => return None,
+            };
+
+            let v = model.embed(vec![search_params.term.clone()], Some(1)).ok();
+
+            let v = match v {
+                Some(v) => v,
+                None => return None,
+            };
+
+            let mut ret: HashMap<DocumentId, f32> = HashMap::new();
+            for k in v {
+                let r = self.vector_index.search(vec![*field_id], &k, 1);
+                let r = match r {
+                    Ok(r) => r,
+                    // This is a hidden error, we should report it
+                    // TODO: report this error
+                    Err(_) => return None,
+                };
+
+                for (doc_id, score) in r {
+                    if !filtered_doc_ids.as_ref().map(|f| f.contains(&doc_id)).unwrap_or(true) {
+                        continue;
                     }
-                    FacetDefinition::Bool => {
-                        let true_facet: HashSet<DocumentId> = self
-                            .bool_index
-                            .filter(field_id, true)
-                            .into_iter()
-                            .filter(|doc_id| token_scores.contains_key(doc_id))
-                            .collect();
-                        let false_facet: HashSet<DocumentId> = self
-                            .bool_index
-                            .filter(field_id, false)
-                            .into_iter()
-                            .filter(|doc_id| token_scores.contains_key(doc_id))
-                            .collect();
 
-                        facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: 2,
-                                values: HashMap::from_iter([
-                                    ("true".to_string(), true_facet.len()),
-                                    ("false".to_string(), false_facet.len()),
-                                ]),
-                            },
-                        );
-                    }
+                    let v = ret.entry(doc_id)
+                        .or_default();
+                    *v += score;
                 }
             }
-            Some(facets)
+
+            Some(ret)
+        })
+        .fold(HashMap::new(), |mut acc, v| {
+            for (doc_id, score) in v {
+                let v = acc.entry(doc_id)
+                    .or_default();
+                *v += score;
+            }
+            acc
+        });
+
+        Ok(ret)
+    }
+
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        info!("Searching with params: {:?}", search_params);
+
+        let SearchParams {
+            mode: r#type,
+            properties,
+            boost,
+            facets,
+            limit,
+            where_filter,
+        } = search_params;
+
+        let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter);
+        let boost = self.calculate_boost(boost);
+
+        let token_scores = match r#type {
+            SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
+                self.search_full_text(search_params, properties, boost, filtered_doc_ids).await?
+            }
+            SearchMode::Vector(search_params) => {
+                self.search_vector(search_params, filtered_doc_ids).await?
+            }
+            _ => unimplemented!(),
         };
+
+        info!("Document that match the term: {:?}", token_scores.len());
+
+        let facets = self.calculate_facets(&token_scores, facets);
 
         let count = token_scores.len();
 
-        let token_scores = top_n(token_scores, search_params.limit.0);
+        let token_scores = top_n(token_scores, limit.0);
 
         let docs = self
             .document_storage

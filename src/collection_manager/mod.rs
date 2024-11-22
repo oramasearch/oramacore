@@ -140,14 +140,14 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel},
         indexes::number::{Number, NumberFilter},
     };
 
     use super::{
         dto::{
             CreateCollectionOptionDTO, FacetDefinition, Filter, Limit, NumberFacetDefinition,
-            NumberFacetDefinitionRange, SearchParams,
+            NumberFacetDefinitionRange, SearchParams, SearchMode, FulltextMode, TypedField, EmbeddingTypedField, VectorMode
         },
         CollectionsConfiguration,
     };
@@ -319,7 +319,9 @@ mod tests {
         let collection = manager.get(collection_id).await.unwrap();
 
         let search_params = SearchParams {
-            term: "Tommaso".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "Tommaso".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -372,7 +374,9 @@ mod tests {
         assert!(matches!(output, Ok(())));
 
         let search_params = SearchParams {
-            term: "text".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "text".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -424,7 +428,9 @@ mod tests {
         assert!(matches!(output, Ok(())));
 
         let search_params = SearchParams {
-            term: "text".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "text".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -480,7 +486,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -535,7 +543,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -637,7 +647,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -693,7 +705,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -766,7 +780,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -811,5 +827,75 @@ mod tests {
             number_facet.values,
             HashMap::from_iter(vec![("0-10".to_string(), 2),])
         );
+    }
+
+    #[tokio::test]
+    async fn test_vector_search() {
+        let manager = create_manager().await;
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(CreateCollectionOptionDTO {
+                id: collection_id_str.clone(),
+                description: Some("Collection of songs".to_string()),
+                language: None,
+                typed_fields: HashMap::from_iter([
+                    (
+                        "vector".to_string(),
+                        TypedField::Embedding(EmbeddingTypedField {
+                            model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
+                            document_fields: vec!["text".to_string()],
+                        }),
+                    ),
+                ]),
+            })
+            .await
+            .expect("insertion should be successful");
+
+        let collection = manager.get(collection_id.clone()).await.unwrap();
+
+        collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "text": "The cat is sleeping on the table.",
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "A cat rests peacefully on the sofa.",
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "The dog is barking loudly in the yard.",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let output = collection
+            .search(SearchParams {
+                mode: SearchMode::Vector(VectorMode {
+                    term: "The feline is napping comfortably indoors.".to_string(),
+                }),
+                limit: Limit(10),
+                boost: Default::default(),
+                properties: Default::default(),
+                where_filter: Default::default(),
+                facets: Default::default(),
+            })
+            .await
+            .unwrap();
+
+        // Due to the lack of a large enough dataset,
+        // the search will not return 2 results as expected.
+        // But it should return at least one result.
+        // Anyway, the 3th document should not be returned.
+        assert_ne!(output.count, 0);
+        assert_ne!(output.hits.len(), 0);
+        assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
     }
 }

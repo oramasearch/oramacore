@@ -6,7 +6,7 @@ use example::parse_example;
 use rustorama::{
     code_parser::CodeLanguage,
     collection_manager::{
-        dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
+        dto::{CreateCollectionOptionDTO, FulltextMode, Limit, SearchParams, TypedField},
         CollectionManager, CollectionsConfiguration,
     },
     embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
@@ -64,14 +64,16 @@ async fn main() -> anyhow::Result<()> {
 
     collection
         .search(SearchParams {
-            term: r###"columnHelper.accessor('firstName')
+            mode: rustorama::collection_manager::dto::SearchMode::FullText(FulltextMode {
+                term: r###"columnHelper.accessor('firstName')
 
 // OR
 
 {
   accessorKey: 'firstName',
 }"###
-                .to_string(),
+                .to_string()
+            }),
             limit: Limit(3),
             boost: Default::default(),
             properties: Some(vec!["code".to_string()]),
