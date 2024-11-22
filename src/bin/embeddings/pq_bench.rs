@@ -2,7 +2,7 @@ use anyhow::Result;
 use csv::ReaderBuilder;
 use fastembed::Embedding;
 use rustorama::embeddings::pq;
-use rustorama::embeddings::OramaModels;
+use rustorama::embeddings::OramaModel;
 use serde::Deserialize;
 use std::time::Instant;
 
@@ -19,7 +19,7 @@ const MAX_RECORDS: usize = 10_000;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let model = OramaModels::MultilingualE5Small.try_new().await?;
+    let model = OramaModel::MultilingualE5Small.try_new().await?;
     let mut data: Vec<Embedding> = vec![];
 
     let file_path = "src/bin/datasets/spotify_millsongdata.csv";

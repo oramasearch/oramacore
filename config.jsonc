@@ -1,11 +1,40 @@
 {
-    // where the data is stored
-    "data_dir": "/tmp/rustorama",
-
     // http bind address
     "http": {
         "host": "127.0.0.1",
         "port": 8080,
         "allow_cors": true
     },
+
+    "embeddings": {
+        // Preload all embeddings on startup
+        "preload": ["small-model"],
+
+        // where to place the custom models
+        "cache_path": ".custom_models",
+
+        "hugging_face": {
+
+            // The base url for the hugging face model hub
+            "base_url": "https://huggingface.co",
+
+            "user_agent": "Mozilla/5.0 (compatible; RustBot/1.0)",
+
+            "connect_timeout": "10s",
+            "timeout": "3600s",
+
+            "model_configs": {
+                "small-model": {
+                    "real_model_name": "Xenova/gte-small",
+                    "onnx_model": "onnx/model_quantized.onnx",
+                    "special_tokens_map": "special_tokens_map.json",
+                    "tokenizer": "tokenizer.json",
+                    "tokenizer_config": "tokenizer_config.json",
+                    "config": "config.json",
+                    "max_input_tokens": 512,
+                    "dimensions": 384
+                }
+            }
+        }
+    }
 }

@@ -1,13 +1,15 @@
 use std::{fs, sync::Arc};
 
+use anyhow::Context;
 use documentation::parse_documentation;
 use example::parse_example;
 use rustorama::{
+    code_parser::CodeLanguage,
     collection_manager::{
-        dto::{CreateCollectionOptionDTO, Limit, SearchParams, TypedField},
+        dto::{CreateCollectionOptionDTO, FulltextMode, Limit, SearchParams, TypedField},
         CollectionManager, CollectionsConfiguration,
     },
-    types::CodeLanguage,
+    embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
     web_server::{HttpConfig, WebServer},
 };
 
@@ -20,7 +22,15 @@ async fn main() -> anyhow::Result<()> {
     let storage_dir = "./tanstack";
     let _ = fs::remove_dir_all(storage_dir);
 
-    let manager = CollectionManager::new(CollectionsConfiguration {});
+    let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+        cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+        hugging_face: None,
+        preload: EmbeddingPreload::Bool(false),
+    })
+    .await
+    .with_context(|| "Failed to initialize the EmbeddingService")?;
+    let embedding_service = Arc::new(embedding_service);
+    let manager = CollectionManager::new(CollectionsConfiguration { embedding_service });
 
     let collection_id = manager
         .create_collection(CreateCollectionOptionDTO {
@@ -54,14 +64,16 @@ async fn main() -> anyhow::Result<()> {
 
     collection
         .search(SearchParams {
-            term: r###"columnHelper.accessor('firstName')
+            mode: rustorama::collection_manager::dto::SearchMode::FullText(FulltextMode {
+                term: r###"columnHelper.accessor('firstName')
 
 // OR
 
 {
   accessorKey: 'firstName',
 }"###
-                .to_string(),
+                    .to_string(),
+            }),
             limit: Limit(3),
             boost: Default::default(),
             properties: Some(vec!["code".to_string()]),

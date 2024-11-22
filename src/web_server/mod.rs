@@ -73,13 +73,16 @@ mod tests {
     use tower_http::trace::TraceLayer;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    use crate::web_server::api::api_config;
-    use crate::{
-        collection_manager::{
-            dto::{CollectionDTO, CreateCollectionOptionDTO, Limit, SearchParams},
-            CollectionManager, CollectionsConfiguration,
+    use crate::collection_manager::{
+        dto::{
+            CollectionDTO, CreateCollectionOptionDTO, FulltextMode, Limit, SearchMode, SearchParams,
         },
-        types::SearchResult,
+        CollectionManager, CollectionsConfiguration,
+    };
+    use crate::{
+        collection_manager::dto::SearchResult,
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        web_server::api::api_config,
     };
 
     #[tokio::test]
@@ -87,7 +90,7 @@ mod tests {
         let _ = tracing_subscriber::registry().try_init();
 
         let mut router = api_config()
-            .with_state(Arc::new(create_manager()))
+            .with_state(Arc::new(create_manager().await))
             .layer(TraceLayer::new_for_http());
 
         let collection_id = "test".to_string();
@@ -140,7 +143,9 @@ mod tests {
             &mut router,
             &collection_id,
             &SearchParams {
-                term: "beatles".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "beatles".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -238,7 +243,15 @@ mod tests {
         (status_code, output)
     }
 
-    fn create_manager() -> CollectionManager {
-        CollectionManager::new(CollectionsConfiguration {})
+    async fn create_manager() -> CollectionManager {
+        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+            preload: EmbeddingPreload::Bool(false),
+            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+            hugging_face: None,
+        })
+        .await
+        .unwrap();
+        let embedding_service = Arc::new(embedding_service);
+        CollectionManager::new(CollectionsConfiguration { embedding_service })
     }
 }

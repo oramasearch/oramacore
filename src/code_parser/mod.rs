@@ -1,9 +1,16 @@
 use anyhow::Result;
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 use tree_sitter_typescript::{LANGUAGE_TSX, LANGUAGE_TYPESCRIPT};
 
-use crate::types::CodeLanguage;
+#[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub enum CodeLanguage {
+    JavaScript,
+    TypeScript,
+    TSX,
+    HTML,
+}
 
 #[derive(Default)]
 pub struct NewParser {

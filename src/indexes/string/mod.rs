@@ -14,8 +14,9 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
+use tracing::trace;
 
-use crate::types::{DocumentId, FieldId};
+use crate::{collection_manager::FieldId, document_storage::DocumentId};
 
 mod dictionary;
 mod posting_storage;
@@ -204,6 +205,8 @@ impl StringIndex {
             }
         }
 
+        trace!("StringIndex output: {:?}", scores);
+
         Ok(scores)
     }
 
@@ -328,7 +331,7 @@ impl StringIndex {
         Ok(())
     }
 
-    fn is_phrase_match(&self, token_positions: &Vec<Vec<usize>>) -> bool {
+    fn is_phrase_match(&self, token_positions: &[Vec<usize>]) -> bool {
         if token_positions.is_empty() {
             return false;
         }
@@ -367,9 +370,10 @@ mod tests {
     use futures::{future::join_all, FutureExt};
 
     use crate::{
+        collection_manager::FieldId,
+        document_storage::DocumentId,
         indexes::string::{scorer::bm25::BM25Score, StringIndex},
         nlp::{locales::Locale, TextParser},
-        types::{DocumentId, FieldId},
     };
     use std::{collections::HashMap, sync::Arc};
 

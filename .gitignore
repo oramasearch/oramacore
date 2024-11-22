@@ -6,3 +6,4 @@ posting_storage
 
 .fastembed_cache
 ./src/bin/datasets/*.csv
+.foo

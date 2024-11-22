@@ -7,31 +7,47 @@ use std::{
     },
 };
 
-use crate::nlp::TextParser;
 use crate::{
-    document_storage::DocumentStorage,
+    collection_manager::dto::{FacetResult, SearchMode, SearchResultHit},
+    document_storage::{DocumentId, DocumentStorage},
+    embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
         code::CodeIndex,
-        number::NumberIndex,
+        number::{Number, NumberFilter, NumberIndex},
         string::{scorer::bm25::BM25Score, DocumentBatch, StringIndex},
+        vector::VectorIndexConfig,
     },
     nlp::locales::Locale,
 };
-use anyhow::{anyhow, Result};
+use crate::{indexes::vector::VectorIndex, nlp::TextParser};
+use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use num_traits::ToPrimitive;
 
 use ordered_float::NotNan;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::info;
 
-use crate::types::{
-    CollectionId, Document, DocumentId, DocumentList, FacetResult, FieldId, Number, NumberFilter,
-    ScalarType, SearchResult, SearchResultHit, StringParser, TokenScore, ValueType,
+use crate::types::{Document, DocumentList, ScalarType, StringParser, ValueType};
+
+use super::{
+    dto::{
+        CollectionDTO, EmbeddingTypedField, FacetDefinition, Filter, FulltextMode, SearchParams,
+        SearchResult, TypedField, VectorMode,
+    },
+    CollectionId,
 };
 
-use super::dto::{CollectionDTO, FacetDefinition, Filter, SearchParams, TypedField};
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldId(pub u16);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenScore {
+    pub document_id: DocumentId,
+    pub score: f32,
+}
 
 pub struct Collection {
     pub(crate) id: CollectionId,
@@ -53,18 +69,26 @@ pub struct Collection {
     number_index: NumberIndex,
     // Bool
     bool_index: BoolIndex,
+
+    // Vector
+    vector_fields: DashMap<String, (FieldId, EmbeddingTypedField)>,
+    embedding_models: DashMap<FieldId, Arc<LoadedModel>>,
+    vector_index: VectorIndex,
 }
 
 impl Collection {
-    pub fn new(
+    pub async fn try_new(
         id: CollectionId,
         description: Option<String>,
         language: Locale,
         document_storage: Arc<DocumentStorage>,
         typed_fields: HashMap<String, TypedField>,
         id_generator: Arc<AtomicU64>,
-    ) -> Self {
+        embedding_service: Arc<EmbeddingService>,
+    ) -> Result<Self> {
         let default_parser = TextParser::from_language(Locale::EN);
+
+        let vector_index = VectorIndex::try_new(VectorIndexConfig {})?;
 
         let collection = Collection {
             id,
@@ -79,6 +103,10 @@ impl Collection {
             code_fields: Default::default(),
             number_index: Default::default(),
             bool_index: Default::default(),
+
+            vector_fields: Default::default(),
+            vector_index,
+            embedding_models: Default::default(),
         };
 
         for (field_name, field_type) in typed_fields {
@@ -92,10 +120,34 @@ impl Collection {
                 TypedField::Code(_) => {
                     collection.code_fields.insert(field_name, field_id);
                 }
+                TypedField::Embedding(embedding) => {
+                    let model = embedding_service
+                        .get_model(embedding.model_name.clone())
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Unable to find a model named \"{}\"",
+                                embedding.model_name.clone()
+                            )
+                        })?
+                        .clone();
+
+                    collection
+                        .vector_index
+                        .add_field(field_id, model)
+                        .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
+                    let model = embedding_service
+                        .get_model(embedding.model_name.clone())
+                        .await?;
+                    collection.embedding_models.insert(field_id, model);
+                    collection
+                        .vector_fields
+                        .insert(field_name, (field_id, embedding));
+                }
             }
         }
 
-        collection
+        Ok(collection)
     }
 
     pub fn as_dto(&self) -> CollectionDTO {
@@ -124,12 +176,32 @@ impl Collection {
         let mut codes: HashMap<_, Vec<_>> = HashMap::with_capacity(document_list.len());
         let mut numbers = Vec::new();
         let mut bools = Vec::new();
+        let mut embeddings: Vec<(DocumentId, FieldId, Vec<String>)> = Vec::new();
         let mut documents = Vec::with_capacity(document_list.len());
         for doc in document_list {
             let mut flatten = doc.into_flatten();
             let schema = flatten.get_field_schema();
 
             let internal_document_id = self.generate_document_id();
+
+            for e in self.vector_fields.iter() {
+                let (field_id, embedding) = e.value();
+
+                embeddings.push((
+                    internal_document_id,
+                    *field_id,
+                    embedding
+                        .document_fields
+                        .iter()
+                        .filter_map(|f| {
+                            flatten
+                                .get(f)
+                                .and_then(|v| v.as_str())
+                                .map(|v| v.to_string())
+                        })
+                        .collect(),
+                ))
+            }
 
             for (key, field_type) in schema {
                 if self.code_fields.contains_key(&key) {
@@ -218,17 +290,30 @@ impl Collection {
             self.bool_index.add(doc_id, field_id, value);
         }
 
+        let mut v = Vec::new();
+        for (doc_id, field_id, values) in embeddings {
+            let model = self
+                .embedding_models
+                .get(&field_id)
+                .ok_or_else(|| anyhow!("Model not found"))?
+                .clone();
+            let embedding = model.embed(values, Some(1))?;
+
+            v.push((doc_id, field_id, embedding));
+        }
+        self.vector_index.insert_batch(v)?;
+
         Ok(())
     }
 
-    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
-        info!("Searching with params: {:?}", search_params);
-
-        let filtered_doc_ids = if search_params.where_filter.is_empty() {
+    fn calculate_filtered_doc_ids(
+        &self,
+        where_filter: HashMap<String, Filter>,
+    ) -> Option<HashSet<DocumentId>> {
+        if where_filter.is_empty() {
             None
         } else {
-            let mut filters: Vec<_> = search_params
-                .where_filter
+            let mut filters: Vec<_> = where_filter
                 .into_iter()
                 .map(|(field_name, value)| {
                     let field_id = self.get_field_id(field_name);
@@ -256,17 +341,84 @@ impl Collection {
             info!("Matching doc from filters: {:?}", doc_ids);
 
             Some(doc_ids)
-        };
+        }
+    }
 
-        let boost: HashMap<_, _> = search_params
-            .boost
-            .into_iter()
-            .map(|(field_name, boost)| {
-                let field_id = self.get_field_id(field_name);
-                (field_id, boost)
-            })
-            .collect();
-        let properties: Vec<_> = match search_params.properties {
+    fn calculate_facets(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        facets: HashMap<String, FacetDefinition>,
+    ) -> Option<HashMap<String, FacetResult>> {
+        if facets.is_empty() {
+            None
+        } else {
+            info!("Computing facets on {:?}", facets.keys());
+
+            let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
+            for (field_name, facet) in facets {
+                let field_id = self.get_field_id(field_name.clone());
+                match facet {
+                    FacetDefinition::Number(facet) => {
+                        let mut values = HashMap::new();
+
+                        for range in facet.ranges {
+                            let facet: HashSet<_> = self
+                                .number_index
+                                .filter(field_id, NumberFilter::Between(range.from, range.to))
+                                .into_iter()
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect();
+
+                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
+                        }
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: values.len(),
+                                values,
+                            },
+                        );
+                    }
+                    FacetDefinition::Bool => {
+                        let true_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, true)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+                        let false_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, false)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: 2,
+                                values: HashMap::from_iter([
+                                    ("true".to_string(), true_facet.len()),
+                                    ("false".to_string(), false_facet.len()),
+                                ]),
+                            },
+                        );
+                    }
+                }
+            }
+            Some(res_facets)
+        }
+    }
+
+    async fn search_full_text(
+        &self,
+        search_params: FulltextMode,
+        properties: Option<Vec<String>>,
+        boost: HashMap<FieldId, f32>,
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let properties: Vec<_> = match properties {
             Some(properties) => properties
                 .into_iter()
                 .map(|p| self.get_field_id(p))
@@ -359,72 +511,125 @@ impl Collection {
             token_scores
         };
 
-        info!("Document that match the term: {:?}", token_scores.len());
+        Ok(token_scores)
+    }
 
-        let facets = if search_params.facets.is_empty() {
-            None
-        } else {
-            info!("Computing facets on {:?}", search_params.facets.keys());
+    fn calculate_boost(&self, boost: HashMap<String, f32>) -> HashMap<FieldId, f32> {
+        boost
+            .into_iter()
+            .map(|(field_name, boost)| {
+                let field_id = self.get_field_id(field_name);
+                (field_id, boost)
+            })
+            .collect()
+    }
 
-            let mut facets = HashMap::new();
-            for (field_name, facet) in search_params.facets {
-                let field_id = self.get_field_id(field_name.clone());
-                match facet {
-                    FacetDefinition::Number(facet) => {
-                        let mut values = HashMap::new();
+    async fn search_vector(
+        &self,
+        search_params: VectorMode,
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let ret = self
+            .vector_fields
+            .iter()
+            .filter_map(|e| {
+                let (field_id, _) = e.value();
 
-                        for range in facet.ranges {
-                            let facet: HashSet<_> = self
-                                .number_index
-                                .filter(field_id, NumberFilter::Between(range.from, range.to))
-                                .into_iter()
-                                .filter(|doc_id| token_scores.contains_key(doc_id))
-                                .collect();
+                let model = self.embedding_models.get(field_id);
 
-                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
+                let model = match model {
+                    Some(model) => model,
+                    None => return None,
+                };
+
+                let v = model.embed(vec![search_params.term.clone()], Some(1)).ok();
+
+                let v = match v {
+                    Some(v) => v,
+                    None => return None,
+                };
+
+                let mut ret: HashMap<DocumentId, f32> = HashMap::new();
+                for k in v {
+                    let r = self.vector_index.search(vec![*field_id], &k, 1);
+                    let r = match r {
+                        Ok(r) => r,
+                        // This is a hidden error, we should report it
+                        // TODO: report this error
+                        Err(_) => return None,
+                    };
+
+                    for (doc_id, score) in r {
+                        if !filtered_doc_ids
+                            .as_ref()
+                            .map(|f| f.contains(&doc_id))
+                            .unwrap_or(true)
+                        {
+                            continue;
                         }
 
-                        facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: values.len(),
-                                values,
-                            },
-                        );
-                    }
-                    FacetDefinition::Bool => {
-                        let true_facet: HashSet<DocumentId> = self
-                            .bool_index
-                            .filter(field_id, true)
-                            .into_iter()
-                            .filter(|doc_id| token_scores.contains_key(doc_id))
-                            .collect();
-                        let false_facet: HashSet<DocumentId> = self
-                            .bool_index
-                            .filter(field_id, false)
-                            .into_iter()
-                            .filter(|doc_id| token_scores.contains_key(doc_id))
-                            .collect();
-
-                        facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: 2,
-                                values: HashMap::from_iter([
-                                    ("true".to_string(), true_facet.len()),
-                                    ("false".to_string(), false_facet.len()),
-                                ]),
-                            },
-                        );
+                        let v = ret.entry(doc_id).or_default();
+                        *v += score;
                     }
                 }
+
+                Some(ret)
+            })
+            .fold(HashMap::new(), |mut acc, v| {
+                for (doc_id, score) in v {
+                    let v = acc.entry(doc_id).or_default();
+                    *v += score;
+                }
+                acc
+            });
+
+        Ok(ret)
+    }
+
+    pub async fn search<S: TryInto<SearchParams>>(
+        &self,
+        search_params: S,
+    ) -> Result<SearchResult, anyhow::Error>
+    where
+        anyhow::Error: From<S::Error>,
+        S::Error: std::fmt::Display,
+    {
+        let search_params = search_params
+            .try_into()
+            .map_err(|e| anyhow!("Cannot convert search params: {}", e))?;
+
+        info!("Searching with params: {:?}", search_params);
+
+        let SearchParams {
+            mode: r#type,
+            properties,
+            boost,
+            facets,
+            limit,
+            where_filter,
+        } = search_params;
+
+        let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter);
+        let boost = self.calculate_boost(boost);
+
+        let token_scores = match r#type {
+            SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
+                self.search_full_text(search_params, properties, boost, filtered_doc_ids)
+                    .await?
             }
-            Some(facets)
+            SearchMode::Vector(search_params) => {
+                self.search_vector(search_params, filtered_doc_ids).await?
+            }
+            _ => unimplemented!(),
         };
+
+        info!("Document that match the term: {:?}", token_scores.len());
+
+        let facets = self.calculate_facets(&token_scores, facets);
 
         let count = token_scores.len();
 
-        let token_scores = top_n(token_scores, search_params.limit.0);
+        let token_scores = top_n(token_scores, limit.0);
 
         let docs = self
             .document_storage

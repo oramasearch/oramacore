@@ -8,13 +8,14 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
+use tracing::error;
 
 use crate::{
     collection_manager::{
         dto::{CollectionDTO, CreateCollectionOptionDTO, SearchParams},
-        CollectionManager,
+        CollectionId, CollectionManager,
     },
-    types::{CollectionId, DocumentList},
+    types::DocumentList,
 };
 
 pub fn apis() -> Router<Arc<CollectionManager>> {
@@ -55,6 +56,10 @@ async fn create_collection(
     let collection_id = match manager.create_collection(json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
+            error!("Error creating collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

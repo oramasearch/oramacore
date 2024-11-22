@@ -1,0 +1,49 @@
+GET {{base_url}}/
+HTTP 200
+
+GET {{base_url}}/health
+HTTP 200
+
+GET http://www.randomnumberapi.com/api/v1.0/randomuuid
+HTTP 200
+[Captures]
+collection_id: jsonpath "$[0]"
+
+POST {{base_url}}/v0/collections
+{
+    "id": "{{collection_id}}",
+    "typed_fields": {
+        "my_embedding": {
+            "model_name": "gte-small",
+            "document_fields": ["content"]
+        }
+    }
+}
+HTTP 201
+
+PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
+[
+    {
+        "id": "1",
+        "content": "The cat is sleeping on the table."
+    },
+    {
+        "id": "2",
+        "content": "A cat rests peacefully on the sofa."
+    },
+    {
+        "id": "3",
+        "content": "The dog is barking loudly in the yard."
+    }
+]
+HTTP 200
+
+
+POST {{base_url}}/v0/collections/{{collection_id}}/search
+{
+    "type": "vector",
+    "term": "The feline is napping comfortably indoors."
+}
+HTTP 200
+[Asserts]
+jsonpath "$.count" == 1

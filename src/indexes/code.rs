@@ -5,9 +5,12 @@ use anyhow::Result;
 use ptrie::Trie;
 use regex::Regex;
 
-use crate::code_parser::{CodeToken, FunctionDeclaration, ImportedTokens, JsxElement, NewParser};
+use crate::code_parser::{
+    CodeLanguage, CodeToken, FunctionDeclaration, ImportedTokens, JsxElement, NewParser,
+};
+use crate::collection_manager::FieldId;
+use crate::document_storage::DocumentId;
 use crate::nlp::tokenizer::Tokenizer;
-use crate::types::{CodeLanguage, DocumentId, FieldId};
 
 pub struct CodeIndex {
     tree: RwLock<Trie<u8, HashMap<DocumentId, HashMap<FieldId, CodePosting>>>>,

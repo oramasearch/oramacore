@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::DocumentId;
+use crate::document_storage::DocumentId;
 
 use super::{GlobalInfo, Posting};
 
@@ -21,8 +21,8 @@ pub mod bm25 {
     use dashmap::DashMap;
 
     use crate::{
+        document_storage::DocumentId,
         indexes::string::{GlobalInfo, Posting},
-        types::DocumentId,
     };
 
     use super::Scorer;
@@ -112,8 +112,8 @@ pub mod code {
     use dashmap::DashMap;
 
     use crate::{
+        document_storage::DocumentId,
         indexes::string::{GlobalInfo, Posting},
-        types::DocumentId,
     };
 
     use super::Scorer;
@@ -235,7 +235,8 @@ pub mod code {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::FieldId;
+
+    use crate::collection_manager::FieldId;
 
     use super::*;
 

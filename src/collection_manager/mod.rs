@@ -4,48 +4,63 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
+use anyhow::{anyhow, Context, Result};
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
-use thiserror::Error;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
-use crate::{document_storage::DocumentStorage, types::CollectionId};
+use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService};
 
 mod collection;
 pub mod dto;
 
-pub struct CollectionsConfiguration {}
+pub use self::collection::FieldId;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectionId(pub String);
+
+pub struct CollectionsConfiguration {
+    pub embedding_service: Arc<EmbeddingService>,
+}
 
 pub struct CollectionManager {
     collections: RwLock<HashMap<CollectionId, Collection>>,
     document_storage: Arc<DocumentStorage>,
     id_generator: Arc<AtomicU64>,
-}
-
-#[derive(Error, Debug, PartialEq, Eq)]
-pub enum CreateCollectionError {
-    #[error("Id already exists")]
-    IdAlreadyExists,
+    embedding_service: Arc<EmbeddingService>,
 }
 
 impl CollectionManager {
-    pub fn new(_configuration: CollectionsConfiguration) -> Self {
+    pub fn new(configuration: CollectionsConfiguration) -> Self {
         let id_generator = Arc::new(AtomicU64::new(0));
         CollectionManager {
             collections: Default::default(),
             document_storage: Arc::new(DocumentStorage::new(id_generator.clone())),
             id_generator,
+            embedding_service: configuration.embedding_service,
         }
     }
 
-    pub async fn create_collection(
+    pub async fn create_collection<S: TryInto<CreateCollectionOptionDTO>>(
         &self,
-        collection_option: CreateCollectionOptionDTO,
-    ) -> Result<CollectionId, CreateCollectionError> {
+        collection_option: S,
+    ) -> Result<CollectionId>
+    where
+        anyhow::Error: From<S::Error>,
+        S::Error: std::fmt::Display,
+    {
+        let collection_option = collection_option
+            .try_into()
+            .map_err(|e| anyhow!("Cannot convert collection_option: {}", e))?;
+
+        info!("Creating collection with id {:?}", collection_option);
+
         let id = CollectionId(collection_option.id);
 
-        let collection = Collection::new(
+        // TODO: fix error handling
+        let collection = Collection::try_new(
             id.clone(),
             collection_option.description,
             collection_option
@@ -55,14 +70,17 @@ impl CollectionManager {
             self.document_storage.clone(),
             collection_option.typed_fields,
             self.id_generator.clone(),
-        );
+            self.embedding_service.clone(),
+        )
+        .await
+        .with_context(|| format!("Cannot create collection with id {}", id.0))?;
 
         let mut collections = self.collections.write().await;
         let entry = collections.entry(id.clone());
         match entry {
             Entry::Occupied(_) => {
                 warn!("Collection with id {} already exists", id.0);
-                return Err(CreateCollectionError::IdAlreadyExists);
+                return Err(anyhow!("Id already exists"));
             }
             Entry::Vacant(entry) => entry.insert(collection),
         };
@@ -118,29 +136,46 @@ impl Deref for CollectionReadLock<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
 
     use serde_json::json;
 
-    use crate::types::{Number, NumberFilter};
+    use crate::{
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        indexes::number::{Number, NumberFilter},
+    };
 
     use super::{
         dto::{
-            CreateCollectionOptionDTO, FacetDefinition, Filter, Limit, NumberFacetDefinition,
-            NumberFacetDefinitionRange, SearchParams,
+            CreateCollectionOptionDTO, FacetDefinition, Filter, FulltextMode, Limit,
+            NumberFacetDefinition, NumberFacetDefinitionRange, SearchMode, SearchParams,
         },
         CollectionsConfiguration,
     };
 
     use super::CollectionManager;
 
-    fn create_manager() -> CollectionManager {
-        CollectionManager::new(CollectionsConfiguration {})
+    async fn create_manager() -> CollectionManager {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+            preload: EmbeddingPreload::Bool(false),
+            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+            hugging_face: None,
+        })
+        .await
+        .unwrap();
+        CollectionManager::new(CollectionsConfiguration {
+            embedding_service: Arc::new(embedding_service),
+        })
     }
 
     #[tokio::test]
     async fn create_collection() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_id_str = "my-test-collection".to_string();
 
@@ -159,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collection_id_already_exists() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_id = "my-test-collection".to_string();
 
@@ -182,12 +217,12 @@ mod tests {
             })
             .await;
 
-        assert_eq!(output, Err(super::CreateCollectionError::IdAlreadyExists));
+        assert_eq!(format!("{}", output.err().unwrap()), "Id already exists");
     }
 
     #[tokio::test]
     async fn test_get_collections() {
-        let manager = create_manager();
+        let manager = create_manager().await;
 
         let collection_ids: Vec<_> = (0..3)
             .map(|i| format!("my-test-collection-{}", i))
@@ -214,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_documents_into_collection() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -252,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -290,7 +325,9 @@ mod tests {
         let collection = manager.get(collection_id).await.unwrap();
 
         let search_params = SearchParams {
-            term: "Tommaso".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "Tommaso".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -309,7 +346,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents_order() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -343,7 +380,9 @@ mod tests {
         assert!(matches!(output, Ok(())));
 
         let search_params = SearchParams {
-            term: "text".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "text".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -363,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_documents_limit() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -395,7 +434,9 @@ mod tests {
         assert!(matches!(output, Ok(())));
 
         let search_params = SearchParams {
-            term: "text".to_string(),
+            mode: SearchMode::FullText(FulltextMode {
+                term: "text".to_string(),
+            }),
             limit: Limit(10),
             boost: Default::default(),
             properties: Default::default(),
@@ -418,7 +459,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_number() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -451,7 +492,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -473,7 +516,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_number() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -506,7 +549,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -574,7 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_bool() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -608,7 +653,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -630,7 +677,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_bool() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -664,7 +711,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -690,7 +739,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_facets_should_based_on_term() {
-        let manager = create_manager();
+        let manager = create_manager().await;
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
@@ -737,7 +786,9 @@ mod tests {
 
         let output = collection
             .search(SearchParams {
-                term: "text".to_string(),
+                mode: SearchMode::FullText(FulltextMode {
+                    term: "text".to_string(),
+                }),
                 limit: Limit(10),
                 boost: Default::default(),
                 properties: Default::default(),
@@ -782,5 +833,65 @@ mod tests {
             number_facet.values,
             HashMap::from_iter(vec![("0-10".to_string(), 2),])
         );
+    }
+
+    #[tokio::test]
+    async fn test_vector_search() {
+        let manager = create_manager().await;
+        let collection_id_str = "my-test-collection".to_string();
+
+        let collection_id = manager
+            .create_collection(json!({
+                "id": collection_id_str,
+                "typed_fields": {
+                    "vector": {
+                        "type": "embedding",
+                        "model_name": "gte-small",
+                        "document_fields": ["text"],
+                    }
+                }
+            }))
+            .await
+            .expect("insertion should be successful");
+
+        let collection = manager.get(collection_id.clone()).await.unwrap();
+
+        collection
+            .insert_batch(
+                vec![
+                    json!({
+                        "id": "1",
+                        "text": "The cat is sleeping on the table.",
+                    }),
+                    json!({
+                        "id": "2",
+                        "text": "A cat rests peacefully on the sofa.",
+                    }),
+                    json!({
+                        "id": "3",
+                        "text": "The dog is barking loudly in the yard.",
+                    }),
+                ]
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let output = collection
+            .search(json!({
+                "type": "vector",
+                "term": "The feline is napping comfortably indoors.",
+            }))
+            .await
+            .unwrap();
+
+        // Due to the lack of a large enough dataset,
+        // the search will not return 2 results as expected.
+        // But it should return at least one result.
+        // Anyway, the 3th document should not be returned.
+        assert_ne!(output.count, 0);
+        assert_ne!(output.hits.len(), 0);
+        assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
     }
 }

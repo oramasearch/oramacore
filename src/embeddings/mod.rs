@@ -1,25 +1,37 @@
-pub mod custom_models;
+// pub mod custom_models;
 pub mod pq;
 pub mod properties_selector;
 
+mod hf;
+
 use anyhow::{anyhow, Context, Result};
-use async_once_cell::OnceCell;
-use custom_models::{CustomModel, ModelFileConfig};
-use fastembed::{EmbeddingModel, InitOptions, InitOptionsUserDefined, TextEmbedding};
+use dashmap::{DashMap, Entry};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use hf::HuggingFaceConfiguration;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use strum::EnumIter;
 use strum_macros::{AsRefStr, Display};
-use tokio::sync::RwLock;
+use tracing::{info, instrument};
 
-static MODELS: OnceCell<RwLock<HashMap<OramaModels, Arc<TextEmbedding>>>> = OnceCell::new();
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum EmbeddingPreload {
+    Bool(bool),
+    List(Vec<OramaModel>),
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct EmbeddingConfig {
+    pub preload: EmbeddingPreload,
+    pub cache_path: String,
+    pub hugging_face: Option<HuggingFaceConfiguration>,
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 pub struct EmbeddingsParams {
-    model: OramaModels,
+    model: OramaModel,
     intent: EncodingIntent,
     input: Vec<String>,
 }
@@ -37,8 +49,10 @@ pub struct EmbeddingsResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
-#[derive(Deserialize, Debug, Hash, PartialEq, Eq, Copy, Clone, EnumIter, Display, AsRefStr)]
-pub enum OramaModels {
+#[derive(
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr,
+)]
+pub enum OramaFastembedModel {
     #[serde(rename = "gte-small")]
     #[strum(serialize = "gte-small")]
     GTESmall,
@@ -57,143 +71,26 @@ pub enum OramaModels {
     #[serde(rename = "multilingual-e5-large")]
     #[strum(serialize = "multilingual-e5-large")]
     MultilingualE5Large,
-    #[serde(rename = "jinaai/jina-embeddings-v2-base-code")]
-    #[strum(serialize = "jinaai/jina-embeddings-v2-base-code")]
-    JinaV2BaseCode,
 }
 
-pub struct LoadedModels(HashMap<OramaModels, TextEmbedding>);
-
-impl LoadedModels {
-    pub fn embed(
-        &self,
-        model: OramaModels,
-        input: Vec<String>,
-        batch_size: Option<usize>,
-    ) -> Result<Vec<Vec<f32>>> {
-        let text_embedding = match self.0.get(&model) {
-            Some(model) => model,
-            None => return Err(anyhow!("Unable to retrieve embedding model: {model:?}")),
-        };
-
-        text_embedding.embed(input, batch_size)
-    }
-}
-
-impl TryInto<EmbeddingModel> for OramaModels {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> std::result::Result<EmbeddingModel, Self::Error> {
+impl OramaFastembedModel {
+    pub fn dimensions(&self) -> usize {
         match self {
-            OramaModels::GTESmall => Ok(EmbeddingModel::BGESmallENV15),
-            OramaModels::GTEBase => Ok(EmbeddingModel::BGEBaseENV15),
-            OramaModels::GTELarge => Ok(EmbeddingModel::BGELargeENV15),
-            OramaModels::MultilingualE5Small => Ok(EmbeddingModel::MultilingualE5Small),
-            OramaModels::MultilingualE5Base => Ok(EmbeddingModel::MultilingualE5Base),
-            OramaModels::MultilingualE5Large => Ok(EmbeddingModel::MultilingualE5Large),
-            OramaModels::JinaV2BaseCode => Err(anyhow!("JinaV2BaseCode is a custom model")),
+            OramaFastembedModel::GTESmall => 384,
+            OramaFastembedModel::GTEBase => 768,
+            OramaFastembedModel::GTELarge => 1024,
+            OramaFastembedModel::MultilingualE5Small => 384,
+            OramaFastembedModel::MultilingualE5Base => 768,
+            OramaFastembedModel::MultilingualE5Large => 1024,
         }
     }
 }
 
-impl OramaModels {
-    pub async fn try_new(&self) -> Result<Arc<TextEmbedding>> {
-        MODELS
-            .get_or_init(async { RwLock::new(HashMap::new()) })
-            .await;
-
-        let mut models_map = MODELS.get().unwrap().write().await;
-
-        if let Some(existing_model) = models_map.get(self) {
-            return Ok(existing_model.clone());
-        }
-
-        let new_model = if !self.is_custom_model() {
-            let embedding_model = (*self).try_into()?;
-            TextEmbedding::try_new(
-                InitOptions::new(embedding_model).with_show_download_progress(true),
-            )
-            .with_context(|| format!("Failed to initialize the model: {}", self))
-        } else {
-            let custom_model = CustomModel::try_new(
-                self.to_string(),
-                self.files().ok_or_else(|| {
-                    anyhow!("Missing file configuration for custom model {}", self)
-                })?,
-            )
-            .with_context(|| format!("Unable to initialize custom model {}", self))?;
-
-            if custom_model.exists() {
-                custom_model
-                    .download()
-                    .with_context(|| format!("Unable to download custom model {}", self))?;
-            }
-
-            let init_model = custom_model
-                .load()
-                .with_context(|| format!("Unable to load local files for custom model {}", self))?;
-
-            TextEmbedding::try_new_from_user_defined(init_model, InitOptionsUserDefined::default())
-                .with_context(|| format!("Unable to initialize custom model {}", self))
-        }?;
-
-        let arc_model = Arc::new(new_model);
-        models_map.insert(*self, arc_model.clone());
-        Ok(arc_model)
-    }
-
-    pub fn normalize_input(self, intent: EncodingIntent, input: Vec<String>) -> Vec<String> {
-        match self {
-            OramaModels::MultilingualE5Small
-            | OramaModels::MultilingualE5Base
-            | OramaModels::MultilingualE5Large => input
-                .into_iter()
-                .map(|text| format!("{intent}: {text}"))
-                .collect(),
-            _ => input,
-        }
-    }
-
-    pub fn is_custom_model(self) -> bool {
-        matches!(self, OramaModels::JinaV2BaseCode)
-    }
-
-    pub fn max_input_tokens(self) -> usize {
-        match self {
-            OramaModels::JinaV2BaseCode => 512,
-            OramaModels::GTESmall => 512,
-            OramaModels::GTEBase => 512,
-            OramaModels::GTELarge => 512,
-            OramaModels::MultilingualE5Small => 512,
-            OramaModels::MultilingualE5Base => 512,
-            OramaModels::MultilingualE5Large => 512,
-        }
-    }
-
-    pub fn dimensions(self) -> usize {
-        match self {
-            OramaModels::JinaV2BaseCode => 768,
-            OramaModels::GTESmall => 384,
-            OramaModels::GTEBase => 768,
-            OramaModels::GTELarge => 1024,
-            OramaModels::MultilingualE5Small => 384,
-            OramaModels::MultilingualE5Base => 768,
-            OramaModels::MultilingualE5Large => 1024,
-        }
-    }
-
-    pub fn files(self) -> Option<ModelFileConfig> {
-        match self {
-            OramaModels::JinaV2BaseCode => Some(ModelFileConfig {
-                onnx_model: "onnx/model.onnx".to_string(),
-                special_tokens_map: "special_tokens_map.json".to_string(),
-                tokenizer: "tokenizer.json".to_string(),
-                tokenizer_config: "tokenizer_config.json".to_string(),
-                config: "config.json".to_string(),
-            }),
-            _ => None,
-        }
-    }
+#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, Display, AsRefStr)]
+#[serde(untagged)]
+pub enum OramaModel {
+    Fastembed(OramaFastembedModel),
+    HuggingFace(String),
 }
 
 impl fmt::Display for EncodingIntent {
@@ -202,5 +99,235 @@ impl fmt::Display for EncodingIntent {
             EncodingIntent::Query => write!(f, "query"),
             EncodingIntent::Passage => write!(f, "passage"),
         }
+    }
+}
+
+pub struct LoadedModel {
+    text_embedding: TextEmbedding,
+    model_name: String,
+    max_input_tokens: usize,
+    dimensions: usize,
+}
+
+impl LoadedModel {
+    fn new(
+        text_embedding: TextEmbedding,
+        model_name: String,
+        max_input_tokens: usize,
+        dimensions: usize,
+    ) -> Self {
+        Self {
+            text_embedding,
+            model_name,
+            max_input_tokens,
+            dimensions,
+        }
+    }
+
+    pub fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    pub fn embed(&self, input: Vec<String>, batch_size: Option<usize>) -> Result<Vec<Vec<f32>>> {
+        // The following "clone" is ugly: we are cloing every input string
+        // Unfortunatelly, `embed` method required `Vec` and not `&Vec`.
+        // So, we can't avoid cloning here.
+        // Anyway, `embed` takes `Vec<&AsRef<str>>`
+        // so, in some how, we can avoid cloning.
+        // TODO: avoid cloning
+        self.text_embedding
+            .embed(input.clone(), batch_size)
+            .with_context(|| {
+                format!(
+                    "Model \"{}\" fails to calculate the embed for input: {:?}",
+                    self.model_name, input
+                )
+            })
+    }
+}
+
+pub struct EmbeddingService {
+    loaded_models: DashMap<OramaModel, Arc<LoadedModel>>,
+    builder: EmbeddingBuilder,
+}
+
+impl EmbeddingService {
+    pub async fn try_new(config: EmbeddingConfig) -> Result<Self> {
+        let builder = EmbeddingBuilder::try_new(config.clone())?;
+
+        let s = Self {
+            loaded_models: DashMap::new(),
+            builder,
+        };
+
+        match config.preload {
+            EmbeddingPreload::Bool(true) => {
+                unimplemented!("Preloading \"true\" is not implemented yet");
+            }
+            EmbeddingPreload::Bool(false) => {
+                // Do nothing
+            }
+            EmbeddingPreload::List(models) => {
+                for model in models {
+                    s.get_model(model).await?;
+                }
+            }
+        }
+
+        Ok(s)
+    }
+
+    pub async fn get_model(&self, model: OramaModel) -> Result<Arc<LoadedModel>> {
+        let loaded_model = self.loaded_models.entry(model.clone());
+        match loaded_model {
+            Entry::Occupied(entry) => Ok(entry.get().clone()),
+            Entry::Vacant(entry) => {
+                let loaded_model = self.builder.try_get(model).await?;
+                let loaded_model = Arc::new(loaded_model);
+                entry.insert(loaded_model.clone());
+                Ok(loaded_model)
+            }
+        }
+    }
+
+    pub fn max_input_tokens(&self, model: OramaModel) -> Result<usize> {
+        let loaded_model = self.loaded_models.get(&model);
+        match loaded_model {
+            Some(model) => Ok(model.max_input_tokens),
+            None => Err(anyhow!(
+                "Model not found in the loaded models. Try to load the model first"
+            )),
+        }
+    }
+
+    pub fn dimensions(&self, model: OramaModel) -> Result<usize> {
+        let loaded_model = self.loaded_models.get(&model);
+        match loaded_model {
+            Some(model) => Ok(model.dimensions),
+            None => Err(anyhow!(
+                "Model not found in the loaded models. Try to load the model first"
+            )),
+        }
+    }
+
+    /*
+    pub fn normalize_input(&self, model: OramaModel, intent: EncodingIntent, input: Vec<String>) -> Vec<String> {
+        match self {
+            OramaModel::Fastembed(OramaFastembedModel::MultilingualE5Small)
+            | OramaModel::Fastembed(OramaFastembedModel::MultilingualE5Base)
+            | OramaModel::Fastembed(OramaFastembedModel::MultilingualE5Large) => input
+                .into_iter()
+                .map(|text| format!("{intent}: {text}"))
+                .collect(),
+            _ => input,
+        }
+    }
+    */
+
+    pub async fn embed(
+        &self,
+        model: OramaModel,
+        input: Vec<String>,
+        batch_size: Option<usize>,
+    ) -> Result<Vec<Vec<f32>>> {
+        let loaded_model = self.get_model(model).await?;
+        loaded_model.embed(input, batch_size)
+    }
+}
+
+pub struct EmbeddingBuilder {
+    config: EmbeddingConfig,
+}
+
+impl EmbeddingBuilder {
+    fn try_new(config: EmbeddingConfig) -> Result<Self> {
+        let builder = Self {
+            config: config.clone(),
+        };
+
+        Ok(builder)
+    }
+
+    #[instrument(skip(self), fields(orama_model = ?orama_model))]
+    async fn try_get(&self, orama_model: OramaModel) -> Result<LoadedModel> {
+        info!("Loading model");
+        match orama_model {
+            OramaModel::Fastembed(orama_embedding_model) => {
+                let embedding_model = match orama_embedding_model {
+                    OramaFastembedModel::GTESmall => EmbeddingModel::BGESmallENV15,
+                    OramaFastembedModel::GTEBase => EmbeddingModel::BGEBaseENV15,
+                    OramaFastembedModel::GTELarge => EmbeddingModel::BGELargeENV15,
+                    OramaFastembedModel::MultilingualE5Small => EmbeddingModel::MultilingualE5Small,
+                    OramaFastembedModel::MultilingualE5Base => EmbeddingModel::MultilingualE5Base,
+                    OramaFastembedModel::MultilingualE5Large => EmbeddingModel::MultilingualE5Large,
+                };
+
+                let text_embedding = TextEmbedding::try_new(
+                    InitOptions::new(embedding_model)
+                        .with_show_download_progress(false)
+                        .with_cache_dir(self.config.cache_path.clone().into()),
+                )
+                .with_context(|| {
+                    format!("Failed to initialize the Fastembed: {orama_embedding_model}")
+                })?;
+                Ok(LoadedModel::new(
+                    text_embedding,
+                    orama_embedding_model.to_string(),
+                    512,
+                    orama_embedding_model.dimensions(),
+                ))
+            }
+            OramaModel::HuggingFace(model_name) => {
+                let hugging_face_config = self
+                    .config
+                    .hugging_face
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("HuggingFace configuration is missing"))?;
+                let hf_model = LoadedModel::try_from_hugging_face(
+                    hugging_face_config,
+                    self.config.cache_path.clone(),
+                    model_name.clone(),
+                )
+                .await
+                .with_context(move || format!("Failed to load HuggingFace model {model_name}"))?;
+                Ok(hf_model)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_embeddings_calculate_embedding() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // We don't want to download the model every time we run the test
+        // So we use a standard temp directory, without any cleanup logic
+        let temp_dir = std::env::temp_dir().to_str().unwrap().to_string();
+
+        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
+            cache_path: temp_dir.clone(),
+            hugging_face: None,
+            preload: EmbeddingPreload::Bool(false),
+        })
+        .await
+        .expect("Failed to initialize the EmbeddingService");
+
+        let output = embedding_service
+            .embed(
+                OramaModel::Fastembed(OramaFastembedModel::GTESmall),
+                vec!["Hello, world!".to_string()],
+                Some(1),
+            )
+            .await
+            .expect("Failed to embed text");
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].len(), OramaFastembedModel::GTESmall.dimensions());
+
+        assert_eq!(embedding_service.loaded_models.len(), 1);
     }
 }

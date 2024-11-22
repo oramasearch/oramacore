@@ -14,7 +14,7 @@ use std::{
 const BUFFER_SIZE: usize = 8192;
 const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; RustBot/1.0)";
 const BASE_URL: &str = "https://huggingface.co";
-const MODEL_BASE_DIR: &str = ".custom_models";
+// const MODEL_BASE_DIR: &str = ".custom_models";
 
 #[derive(Debug, Clone)]
 pub struct CustomModel {

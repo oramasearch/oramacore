@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rustorama::embeddings::OramaModels;
+use rustorama::embeddings::OramaModel;
 use rustorama::indexes::vector::{VectorIndex, VectorIndexConfig};
 use rustorama::types::DocumentId;
 use serde::Deserialize;
@@ -13,7 +13,7 @@ struct Movie {
 }
 
 fn read_json_file() -> Result<Vec<Movie>> {
-    let data = fs::read_to_string("./src/bin/imdb_top_1000_tv_series.json")?;
+    let data = fs::read_to_string("./src/bin/vector_index/imdb_top_1000_tv_series.json")?;
     let movies: Vec<Movie> = serde_json::from_str(&data)?;
     Ok(movies)
 }
@@ -21,11 +21,11 @@ fn read_json_file() -> Result<Vec<Movie>> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = VectorIndexConfig {
-        embeddings_model: OramaModels::GTESmall,
+        embeddings_model: OramaModel::GTESmall,
     };
 
     let mut idx = VectorIndex::new(config);
-    let model = OramaModels::GTESmall.try_new().await?;
+    let model = OramaModel::GTESmall.try_new().await?;
     let dataset = read_json_file()?;
 
     let start_embeddings = Instant::now();
