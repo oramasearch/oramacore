@@ -15,7 +15,7 @@ POST {{base_url}}/v0/collections
     "typed_fields": {
         "my_embedding": {
             "model_name": "small-model",
-            "document_fields": ["title"]
+            "document_fields": ["content"]
         }
     }
 }
@@ -25,13 +25,26 @@ PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
 [
     {
         "id": "1",
-        "title": "The Beatles",
-        "content": "The Beatles were an English rock band formed in Liverpool in 1960. With a line-up comprising John Lennon, Paul McCartney, George Harrison and Ringo Starr, they are regarded as the most influential band of all time."
+        "content": "The cat is sleeping on the table."
     },
     {
         "id": "2",
-        "title": "The Rolling Stones",
-        "content": "The Rolling Stones are an English rock band formed in London in 1962. The first settled line-up consisted of Brian Jones, Ian Stewart, Mick Jagger, Keith Richards, Bill Wyman, and Charlie Watts."
+        "content": "A cat rests peacefully on the sofa."
+    },
+    {
+        "id": "3",
+        "content": "The dog is barking loudly in the yard."
     }
 ]
 HTTP 200
+
+
+POST {{base_url}}/v0/collections/{{collection_id}}/search
+{
+    "type": "vector",
+    "term": "The feline is napping comfortably indoors."
+}
+HTTP 200
+[Asserts]
+jsonpath "$.count" == 1
+jsonpath "$.hits[0].id" == "1"

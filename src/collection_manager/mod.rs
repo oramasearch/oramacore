@@ -872,7 +872,7 @@ mod tests {
                         "text": "A cat rests peacefully on the sofa.",
                     }),
                     json!({
-                        "id": "2",
+                        "id": "3",
                         "text": "The dog is barking loudly in the yard.",
                     }),
                 ]
@@ -887,7 +887,6 @@ mod tests {
                 json!({
                     "type": "vector",
                     "term": "The feline is napping comfortably indoors.",
-                    "limit": 10,
                 })
             )
             .await
