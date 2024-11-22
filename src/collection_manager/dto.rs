@@ -56,6 +56,14 @@ pub struct CreateCollectionOptionDTO {
     pub typed_fields: HashMap<String, TypedField>,
 }
 
+impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        serde_json::from_value(value)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionDTO {
     pub id: String,
@@ -116,6 +124,7 @@ pub struct VectorMode {
 pub struct HybridMode {}
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum SearchMode {
     #[serde(rename = "fulltext")]
     FullText(FulltextMode),
@@ -136,7 +145,7 @@ impl Default for SearchMode {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchParams {
-    #[serde(flatten)]
+    #[serde(flatten, rename = "type")]
     pub mode: SearchMode,
     #[serde(default)]
     pub limit: Limit,
@@ -148,6 +157,19 @@ pub struct SearchParams {
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
+}
+
+impl TryFrom<serde_json::Value> for SearchParams {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        println!("value: {:?}", value);
+        let a = serde_json::from_value(value);
+
+        println!("a: {:?}", a);
+
+        a
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

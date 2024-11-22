@@ -586,7 +586,14 @@ impl Collection {
         Ok(ret)
     }
 
-    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+    pub async fn search<S: TryInto<SearchParams>>(&self, search_params: S) -> Result<SearchResult, anyhow::Error>
+    where
+        anyhow::Error: From<S::Error>,
+        S::Error: std::fmt::Display,
+    {
+        let search_params = search_params.try_into()
+            .map_err(|e| anyhow!("Cannot convert search params: {}", e))?;
+
         info!("Searching with params: {:?}", search_params);
 
         let SearchParams {

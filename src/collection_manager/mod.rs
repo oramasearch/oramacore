@@ -4,6 +4,7 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
+use anyhow::{anyhow, Result};
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use serde::{Deserialize, Serialize};
@@ -32,12 +33,6 @@ pub struct CollectionManager {
     embedding_service: Arc<EmbeddingService>,
 }
 
-#[derive(Error, Debug, PartialEq, Eq)]
-pub enum CreateCollectionError {
-    #[error("Id already exists")]
-    IdAlreadyExists,
-}
-
 impl CollectionManager {
     pub fn new(configuration: CollectionsConfiguration) -> Self {
         let id_generator = Arc::new(AtomicU64::new(0));
@@ -49,10 +44,19 @@ impl CollectionManager {
         }
     }
 
-    pub async fn create_collection(
+    pub async fn create_collection<S: TryInto<CreateCollectionOptionDTO>>(
         &self,
-        collection_option: CreateCollectionOptionDTO,
-    ) -> Result<CollectionId, CreateCollectionError> {
+        collection_option: S,
+    ) -> Result<CollectionId>
+    where
+        anyhow::Error: From<S::Error>,
+        S::Error: std::fmt::Display,
+    {
+        let collection_option = collection_option.try_into()
+            .map_err(|e| anyhow!("Cannot convert collection_option: {}", e))?;
+
+        info!("Creating collection with id {:?}", collection_option);
+
         let id = CollectionId(collection_option.id);
 
         // TODO: fix error handling
@@ -76,7 +80,7 @@ impl CollectionManager {
         match entry {
             Entry::Occupied(_) => {
                 warn!("Collection with id {} already exists", id.0);
-                return Err(CreateCollectionError::IdAlreadyExists);
+                return Err(anyhow!("Id already exists"));
             }
             Entry::Vacant(entry) => entry.insert(collection),
         };
@@ -158,6 +162,8 @@ mod tests {
     use super::CollectionManager;
 
     async fn create_manager() -> CollectionManager {
+        let _ = tracing_subscriber::fmt::try_init();
+
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             preload: EmbeddingPreload::Bool(false),
             cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
@@ -214,7 +220,7 @@ mod tests {
             })
             .await;
 
-        assert_eq!(output, Err(super::CreateCollectionError::IdAlreadyExists));
+        assert_eq!(format!("{}", output.err().unwrap()), "Id already exists");
     }
 
     #[tokio::test]
@@ -838,18 +844,17 @@ mod tests {
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
-            .create_collection(CreateCollectionOptionDTO {
-                id: collection_id_str.clone(),
-                description: Some("Collection of songs".to_string()),
-                language: None,
-                typed_fields: HashMap::from_iter([(
-                    "vector".to_string(),
-                    TypedField::Embedding(EmbeddingTypedField {
-                        model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                        document_fields: vec!["text".to_string()],
-                    }),
-                )]),
-            })
+            .create_collection(
+                json!({
+                    "id": collection_id_str,
+                    "typed_fields": {
+                        "vector": {
+                            "type": "embedding",
+                            "model_name": "gte-small",
+                            "document_fields": ["text"],
+                        }
+                    }
+                }))
             .await
             .expect("insertion should be successful");
 
@@ -878,16 +883,13 @@ mod tests {
             .unwrap();
 
         let output = collection
-            .search(SearchParams {
-                mode: SearchMode::Vector(VectorMode {
-                    term: "The feline is napping comfortably indoors.".to_string(),
-                }),
-                limit: Limit(10),
-                boost: Default::default(),
-                properties: Default::default(),
-                where_filter: Default::default(),
-                facets: Default::default(),
-            })
+            .search(
+                json!({
+                    "type": "vector",
+                    "term": "The feline is napping comfortably indoors.",
+                    "limit": 10,
+                })
+            )
             .await
             .unwrap();
 

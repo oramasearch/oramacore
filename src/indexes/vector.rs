@@ -11,7 +11,7 @@ use hora::core::node::IdxType;
 use hora::index::hnsw_idx;
 use hora::{core::ann_index::ANNIndex, index::hnsw_idx::HNSWIndex};
 use serde::Serialize;
-use tracing::warn;
+use tracing::{trace, warn};
 
 #[derive(Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash)]
 struct IdxID(Option<DocumentId>);
@@ -88,6 +88,8 @@ impl VectorIndex {
         target: &[f32],
         k: usize,
     ) -> Result<HashMap<DocumentId, f32>> {
+        trace!("Searching for target: {:?} in fields {:?}", target, field_ids);
+
         let mut output = HashMap::new();
 
         for field_id in field_ids {
@@ -111,6 +113,8 @@ impl VectorIndex {
                 *v += 1.0;
             }
         }
+
+        trace!("VectorIndex output: {:?}", output);
 
         Ok(output)
     }

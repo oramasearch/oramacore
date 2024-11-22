@@ -14,6 +14,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
+use tracing::trace;
 
 use crate::{collection_manager::FieldId, document_storage::DocumentId};
 
@@ -203,6 +204,8 @@ impl StringIndex {
                 *score *= exact_match_boost;
             }
         }
+
+        trace!("StringIndex output: {:?}", scores);
 
         Ok(scores)
     }
