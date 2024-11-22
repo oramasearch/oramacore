@@ -88,7 +88,11 @@ impl VectorIndex {
         target: &[f32],
         k: usize,
     ) -> Result<HashMap<DocumentId, f32>> {
-        trace!("Searching for target: {:?} in fields {:?}", target, field_ids);
+        trace!(
+            "Searching for target: {:?} in fields {:?}",
+            target,
+            field_ids
+        );
 
         let mut output = HashMap::new();
 

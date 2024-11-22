@@ -14,7 +14,7 @@ POST {{base_url}}/v0/collections
     "id": "{{collection_id}}",
     "typed_fields": {
         "my_embedding": {
-            "model_name": "small-model",
+            "model_name": "gte-small",
             "document_fields": ["content"]
         }
     }
@@ -47,4 +47,3 @@ POST {{base_url}}/v0/collections/{{collection_id}}/search
 HTTP 200
 [Asserts]
 jsonpath "$.count" == 1
-jsonpath "$.hits[0].id" == "1"

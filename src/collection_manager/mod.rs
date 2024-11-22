@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use collection::Collection;
 use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,8 @@ impl CollectionManager {
         anyhow::Error: From<S::Error>,
         S::Error: std::fmt::Display,
     {
-        let collection_option = collection_option.try_into()
+        let collection_option = collection_option
+            .try_into()
             .map_err(|e| anyhow!("Cannot convert collection_option: {}", e))?;
 
         info!("Creating collection with id {:?}", collection_option);
@@ -73,7 +74,7 @@ impl CollectionManager {
             self.embedding_service.clone(),
         )
         .await
-        .expect("TODO: fix error handling");
+        .with_context(|| format!("Cannot create collection with id {}", id.0))?;
 
         let mut collections = self.collections.write().await;
         let entry = collections.entry(id.clone());
@@ -844,17 +845,16 @@ mod tests {
         let collection_id_str = "my-test-collection".to_string();
 
         let collection_id = manager
-            .create_collection(
-                json!({
-                    "id": collection_id_str,
-                    "typed_fields": {
-                        "vector": {
-                            "type": "embedding",
-                            "model_name": "gte-small",
-                            "document_fields": ["text"],
-                        }
+            .create_collection(json!({
+                "id": collection_id_str,
+                "typed_fields": {
+                    "vector": {
+                        "type": "embedding",
+                        "model_name": "gte-small",
+                        "document_fields": ["text"],
                     }
-                }))
+                }
+            }))
             .await
             .expect("insertion should be successful");
 
@@ -883,12 +883,10 @@ mod tests {
             .unwrap();
 
         let output = collection
-            .search(
-                json!({
-                    "type": "vector",
-                    "term": "The feline is napping comfortably indoors.",
-                })
-            )
+            .search(json!({
+                "type": "vector",
+                "term": "The feline is napping comfortably indoors.",
+            }))
             .await
             .unwrap();
 

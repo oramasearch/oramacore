@@ -203,7 +203,11 @@ async fn download_file(client: &Client, url: String, destination: String) -> Res
     let mut file = File::create(&destination)
         .with_context(|| format!("Failed to create file {}", destination))?;
 
-    trace!("Status code: {:?}, headers {:?}", response.status(), response.headers());
+    trace!(
+        "Status code: {:?}, headers {:?}",
+        response.status(),
+        response.headers()
+    );
 
     // COpy the response body to the file
     while let Some(chunk) = response.chunk().await? {
@@ -360,12 +364,10 @@ mod tests {
             cache_path.clone(),
             rebranded_name.clone(),
         )
-        .await
-        ?;
+        .await?;
 
         LoadedModel::try_from_hugging_face(&hugging_face_config, cache_path, rebranded_name)
-            .await
-            ?;
+            .await?;
 
         Ok(())
     }
