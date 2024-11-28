@@ -446,12 +446,6 @@ impl CollectionWriter {
 
 #[cfg(test)]
 mod tests {
-    
-
-    
-    
-
-    
 
     use super::*;
 

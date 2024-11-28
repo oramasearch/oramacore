@@ -6,9 +6,9 @@ use rustorama::collection_manager::FieldId;
 use rustorama::document_storage::DocumentId;
 use rustorama::indexes::string::scorer::bm25::BM25Score;
 use rustorama::indexes::string::StringIndex;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::collections::HashMap;
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]

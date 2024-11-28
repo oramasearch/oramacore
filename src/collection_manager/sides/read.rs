@@ -4,10 +4,7 @@ use std::{
     fmt::Debug,
     ops::Deref,
     pin::Pin,
-    sync::{
-        atomic::AtomicU32,
-        Arc,
-    },
+    sync::{atomic::AtomicU32, Arc},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -20,18 +17,17 @@ use crate::{
     collection_manager::{
         collection::TokenScore,
         dto::{
-            FacetDefinition, FacetResult, Filter, FulltextMode, SearchMode, SearchParams, SearchResult, SearchResultHit, TypedField
+            FacetDefinition, FacetResult, Filter, FulltextMode, SearchMode, SearchParams,
+            SearchResult, SearchResultHit, TypedField, VectorMode,
         },
         CollectionId, FieldId,
     },
     document_storage::DocumentId,
-    embeddings::EmbeddingService,
+    embeddings::{EmbeddingService, LoadedModel, OramaModel},
     indexes::{
         bool::BoolIndex,
         number::{NumberFilter, NumberIndex},
-        string::{
-            scorer::bm25::BM25Score, Posting, StringIndex,
-        },
+        string::{scorer::bm25::BM25Score, Posting, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
     nlp::TextParser,
@@ -76,6 +72,8 @@ impl CollectionsReader {
                     // TODO: remove this unwrap
                     vector_index: VectorIndex::try_new(VectorIndexConfig {})
                         .context("Cannot create vector index during collection creation")?,
+                    fields_per_model: Default::default(),
+
                     string_index: StringIndex::new(self.posting_id_generator.clone()),
                     number_index: NumberIndex::new(),
                     bool_index: BoolIndex::new(),
@@ -192,6 +190,8 @@ pub struct CollectionReader {
 
     // indexes
     vector_index: VectorIndex,
+    fields_per_model: DashMap<Arc<LoadedModel>, Vec<FieldId>>,
+
     string_index: StringIndex,
     number_index: NumberIndex,
     bool_index: BoolIndex,
@@ -214,7 +214,13 @@ impl CollectionReader {
                 .get_model(embedding.model_name)
                 .await?;
 
-            self.vector_index.add_field(field_id, orama_model)?;
+            self.vector_index
+                .add_field(field_id, orama_model.dimensions())?;
+
+            self.fields_per_model
+                .entry(orama_model)
+                .or_default()
+                .push(field_id);
         };
 
         Ok(())
@@ -387,30 +393,16 @@ impl CollectionReader {
         let boost = self.calculate_boost(boost);
         let properties = self.calculate_properties(properties)?;
 
-        let tokens = match &mode {
-            SearchMode::FullText(FulltextMode { term }) => {
-                let text_parser = TextParser::from_language(crate::nlp::locales::Locale::EN);
-                text_parser.tokenize(term)
+        let token_scores = match mode {
+            SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
+                self.search_full_text(search_params, properties, boost, filtered_doc_ids)
+                    .await?
             }
-            _ => unimplemented!(""),
+            SearchMode::Vector(search_params) => {
+                self.search_vector(search_params, filtered_doc_ids).await?
+            }
+            _ => unimplemented!(),
         };
-
-        let token_scores = self
-            .string_index
-            .search(
-                tokens,
-                // This option is not required.
-                // It was introduced because for test purposes we
-                // could avoid to pass every properties
-                // Anyway the production code should always pass the properties
-                // So we could avoid this option
-                // TODO: remove this option
-                Some(properties),
-                boost,
-                BM25Score::default(),
-                filtered_doc_ids.as_ref(),
-            )
-            .await?;
 
         info!("token_scores len: {:?}", token_scores.len());
 
@@ -450,6 +442,67 @@ impl CollectionReader {
             hits,
             facets,
         })
+    }
+
+    async fn search_full_text(
+        &self,
+        search_params: FulltextMode,
+        properties: Vec<FieldId>,
+        boost: HashMap<FieldId, f32>,
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let text_parser = TextParser::from_language(crate::nlp::locales::Locale::EN);
+        let tokens = text_parser.tokenize(&search_params.term);
+
+        self.string_index
+            .search(
+                tokens,
+                // This option is not required.
+                // It was introduced because for test purposes we
+                // could avoid to pass every properties
+                // Anyway the production code should always pass the properties
+                // So we could avoid this option
+                // TODO: remove this option
+                Some(properties),
+                boost,
+                BM25Score::default(),
+                filtered_doc_ids.as_ref(),
+            )
+            .await
+    }
+
+    async fn search_vector(
+        &self,
+        search_params: VectorMode,
+        filtered_doc_ids: Option<HashSet<DocumentId>>,
+    ) -> Result<HashMap<DocumentId, f32>> {
+        let mut ret: HashMap<DocumentId, f32> = HashMap::new();
+
+        for e in &self.fields_per_model {
+            let model = e.key();
+            let fields = e.value();
+
+            let e = model.embed(vec![search_params.term.clone()], None)?;
+
+            for k in e {
+                let r = self.vector_index.search(fields, &k, 1)?;
+
+                for (doc_id, score) in r {
+                    if !filtered_doc_ids
+                        .as_ref()
+                        .map(|f| f.contains(&doc_id))
+                        .unwrap_or(true)
+                    {
+                        continue;
+                    }
+
+                    let v = ret.entry(doc_id).or_default();
+                    *v += score;
+                }
+            }
+        }
+
+        Ok(ret)
     }
 
     fn calculate_facets(

@@ -134,7 +134,7 @@ impl Collection {
 
                     collection
                         .vector_index
-                        .add_field(field_id, model)
+                        .add_field(field_id, model.dimensions())
                         .with_context(|| format!("Cannot add field \"{}\"", field_name))?;
                     let model = embedding_service
                         .get_model(embedding.model_name.clone())
@@ -553,7 +553,7 @@ impl Collection {
 
                 let mut ret: HashMap<DocumentId, f32> = HashMap::new();
                 for k in v {
-                    let r = self.vector_index.search(vec![*field_id], &k, 1);
+                    let r = self.vector_index.search(&vec![*field_id], &k, 1);
                     let r = match r {
                         Ok(r) => r,
                         // This is a hidden error, we should report it

@@ -6,19 +6,15 @@ pub mod write;
 mod tests {
     use std::{
         collections::{HashMap, HashSet},
-        sync::{
-            atomic::AtomicU32,
-            Arc,
-        },
+        sync::{atomic::AtomicU32, Arc},
     };
 
     use anyhow::Result;
     use document_storage::{DocumentStorage, InMemoryDocumentStorage};
-    
+
     use read::CollectionsReader;
     use serde_json::json;
-    
-    
+
     use write::CollectionsWriter;
 
     use crate::{

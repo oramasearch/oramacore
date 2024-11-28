@@ -11,6 +11,7 @@ use hf::HuggingFaceConfiguration;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug},
+    hash::Hash,
     sync::Arc,
 };
 use strum::EnumIter;
@@ -119,6 +120,17 @@ impl Debug for LoadedModel {
             .field("dimensions", &self.dimensions)
             .field("text_embedding", &"...".to_string())
             .finish()
+    }
+}
+impl PartialEq for LoadedModel {
+    fn eq(&self, other: &Self) -> bool {
+        self.model_name == other.model_name
+    }
+}
+impl Eq for LoadedModel {}
+impl Hash for LoadedModel {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.model_name.hash(state);
     }
 }
 

@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::AtomicU32,
-    Arc,
-};
+use std::sync::{atomic::AtomicU32, Arc};
 
 use dashmap::DashMap;
 use thiserror::Error;

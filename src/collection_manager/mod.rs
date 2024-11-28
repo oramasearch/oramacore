@@ -1,10 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
-    sync::{
-        atomic::AtomicU32,
-        Arc,
-    },
+    sync::{atomic::AtomicU32, Arc},
 };
 
 use anyhow::{anyhow, Context, Result};
