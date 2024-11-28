@@ -446,15 +446,12 @@ impl CollectionWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    
 
-    use serde_json::json;
-    use tokio::sync::broadcast::error::TryRecvError;
+    
+    
 
-    use crate::{
-        collection_manager::dto::{CreateCollectionOptionDTO, EmbeddingTypedField, TypedField},
-        embeddings::{EmbeddingConfig, EmbeddingPreload, OramaFastembedModel, OramaModel},
-    };
+    
 
     use super::*;
 

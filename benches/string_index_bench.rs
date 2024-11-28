@@ -8,7 +8,7 @@ use rustorama::indexes::string::scorer::bm25::BM25Score;
 use rustorama::indexes::string::StringIndex;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use std::{collections::HashMap, sync::atomic::AtomicU64};
+use std::collections::HashMap;
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]

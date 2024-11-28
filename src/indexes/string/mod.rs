@@ -1,21 +1,20 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
 };
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
-use fst::{automaton::Subsequence, Automaton, IntoStreamer, Map, MapBuilder, Streamer};
+use fst::{Automaton, IntoStreamer, Map, MapBuilder, Streamer};
 use posting_storage::{PostingListId, PostingStorage};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, trace, warn};
-use tracing_subscriber::field::debug;
 
 use crate::{collection_manager::FieldId, document_storage::DocumentId};
 

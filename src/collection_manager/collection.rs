@@ -2,7 +2,7 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},
     sync::{
-        atomic::{AtomicU16, AtomicU32, AtomicU64},
+        atomic::{AtomicU16, AtomicU32},
         Arc,
     },
 };

@@ -5,23 +5,20 @@ pub mod write;
 #[cfg(test)]
 mod tests {
     use std::{
-        any,
         collections::{HashMap, HashSet},
-        hash::Hash,
         sync::{
-            atomic::{AtomicU32, AtomicU64},
+            atomic::AtomicU32,
             Arc,
         },
-        time::Duration,
     };
 
-    use anyhow::{Context, Result};
+    use anyhow::Result;
     use document_storage::{DocumentStorage, InMemoryDocumentStorage};
-    use hurl_core::error;
+    
     use read::CollectionsReader;
     use serde_json::json;
-    use tokio::time::sleep;
-    use tracing::instrument;
+    
+    
     use write::CollectionsWriter;
 
     use crate::{

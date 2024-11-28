@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicU32, AtomicU64},
+    atomic::AtomicU32,
     Arc,
 };
 

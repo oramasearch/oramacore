@@ -1,13 +1,11 @@
 use std::{
-    any,
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},
-    f32::consts::E,
     fmt::Debug,
     ops::Deref,
     pin::Pin,
     sync::{
-        atomic::{AtomicU32, AtomicU64},
+        atomic::AtomicU32,
         Arc,
     },
 };
@@ -16,7 +14,7 @@ use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use ordered_float::NotNan;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 use crate::{
     collection_manager::{
@@ -33,8 +31,7 @@ use crate::{
         bool::BoolIndex,
         number::NumberIndex,
         string::{
-            posting_storage::PostingListId, scorer::bm25::BM25Score, Posting, StringIndex,
-            StringIndexValue,
+            scorer::bm25::BM25Score, Posting, StringIndex,
         },
         vector::{VectorIndex, VectorIndexConfig},
     },

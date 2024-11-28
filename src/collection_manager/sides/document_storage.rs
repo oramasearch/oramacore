@@ -18,6 +18,12 @@ pub trait DocumentStorage: Sync + Send + Debug {
 pub struct InMemoryDocumentStorage {
     documents: DashMap<DocumentId, Document>,
 }
+impl Default for InMemoryDocumentStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemoryDocumentStorage {
     pub fn new() -> Self {
         Self {

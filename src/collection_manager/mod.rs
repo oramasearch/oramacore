@@ -2,7 +2,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
     sync::{
-        atomic::{AtomicU32, AtomicU64},
+        atomic::AtomicU32,
         Arc,
     },
 };

@@ -17,6 +17,12 @@ pub struct Dictionary {
     reverse_index: DashMap<TermId, String>,
 }
 
+impl Default for Dictionary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dictionary {
     pub fn new() -> Self {
         Dictionary {
