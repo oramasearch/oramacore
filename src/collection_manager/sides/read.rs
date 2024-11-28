@@ -20,8 +20,7 @@ use crate::{
     collection_manager::{
         collection::TokenScore,
         dto::{
-            Filter, FulltextMode, SearchMode, SearchParams, SearchResult, SearchResultHit,
-            TypedField,
+            FacetDefinition, FacetResult, Filter, FulltextMode, SearchMode, SearchParams, SearchResult, SearchResultHit, TypedField
         },
         CollectionId, FieldId,
     },
@@ -29,7 +28,7 @@ use crate::{
     embeddings::EmbeddingService,
     indexes::{
         bool::BoolIndex,
-        number::NumberIndex,
+        number::{NumberFilter, NumberIndex},
         string::{
             scorer::bm25::BM25Score, Posting, StringIndex,
         },
@@ -417,6 +416,8 @@ impl CollectionReader {
 
         debug!("token_scores: {:?}", token_scores);
 
+        let facets = self.calculate_facets(&token_scores, facets)?;
+
         let count = token_scores.len();
 
         let top_results = top_n(token_scores, limit.0);
@@ -447,8 +448,75 @@ impl CollectionReader {
         Ok(SearchResult {
             count,
             hits,
-            facets: None,
+            facets,
         })
+    }
+
+    fn calculate_facets(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        facets: HashMap<String, FacetDefinition>,
+    ) -> Result<Option<HashMap<String, FacetResult>>> {
+        if facets.is_empty() {
+            Ok(None)
+        } else {
+            info!("Computing facets on {:?}", facets.keys());
+
+            let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
+            for (field_name, facet) in facets {
+                let field_id = self.get_field_id(field_name.clone())?;
+                match facet {
+                    FacetDefinition::Number(facet) => {
+                        let mut values = HashMap::new();
+
+                        for range in facet.ranges {
+                            let facet: HashSet<_> = self
+                                .number_index
+                                .filter(field_id, NumberFilter::Between(range.from, range.to))
+                                .into_iter()
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect();
+
+                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
+                        }
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: values.len(),
+                                values,
+                            },
+                        );
+                    }
+                    FacetDefinition::Bool => {
+                        let true_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, true)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+                        let false_facet: HashSet<DocumentId> = self
+                            .bool_index
+                            .filter(field_id, false)
+                            .into_iter()
+                            .filter(|doc_id| token_scores.contains_key(doc_id))
+                            .collect();
+
+                        res_facets.insert(
+                            field_name,
+                            FacetResult {
+                                count: 2,
+                                values: HashMap::from_iter([
+                                    ("true".to_string(), true_facet.len()),
+                                    ("false".to_string(), false_facet.len()),
+                                ]),
+                            },
+                        );
+                    }
+                }
+            }
+            Ok(Some(res_facets))
+        }
     }
 }
 
