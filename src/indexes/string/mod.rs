@@ -1,25 +1,26 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
 
 use anyhow::Result;
 use dictionary::{Dictionary, TermId};
-use fst::{Automaton, IntoStreamer, Map, MapBuilder, Streamer};
+use fst::{automaton::Subsequence, Automaton, IntoStreamer, Map, MapBuilder, Streamer};
 use posting_storage::{PostingListId, PostingStorage};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scorer::Scorer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tracing::trace;
+use tracing::{debug, trace, warn};
+use tracing_subscriber::field::debug;
 
 use crate::{collection_manager::FieldId, document_storage::DocumentId};
 
-mod dictionary;
-mod posting_storage;
+pub mod dictionary;
+pub mod posting_storage;
 pub mod scorer;
 
 pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
@@ -33,7 +34,7 @@ pub struct Posting {
     pub doc_length: u16,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StringIndexValue {
     pub posting_list_id: PostingListId,
     pub term_frequency: usize,
@@ -55,7 +56,7 @@ pub struct GlobalInfo {
 }
 
 impl StringIndex {
-    pub fn new(id_generator: Arc<AtomicU64>) -> Self {
+    pub fn new(id_generator: Arc<AtomicU32>) -> Self {
         StringIndex {
             fst_map: RwLock::new(None),
             temp_map: RwLock::new(HashMap::new()),
@@ -67,6 +68,103 @@ impl StringIndex {
         }
     }
 
+    pub async fn insert(
+        &self,
+        doc_id: DocumentId,
+        field_id: FieldId,
+        terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>,
+    ) -> Result<()> {
+        let total_documents_length: u32 = terms
+            .iter()
+            .map(|(_, (_, postings))| {
+                postings
+                    .iter()
+                    .map(|p| p.1.positions.len() as u32)
+                    .sum::<u32>()
+            })
+            .sum();
+
+        use std::collections::hash_map::Entry;
+        let mut p: HashMap<_, _> = Default::default();
+
+        let l = self.fst_map.read().await;
+        if let Some(m) = l.as_ref() {
+            debug!("Copy previous fst map");
+            let mut keys = m.keys();
+            while let Some(k) = keys.next() {
+                p.insert(String::from_utf8_lossy(k).to_string(), m.get(k).unwrap());
+            }
+        } else {
+            debug!("No previous fst map");
+        }
+
+        debug!("New terms: {:?}", terms);
+        for (term, (freq, postings)) in terms {
+            let k = term;
+
+            match p.entry(k) {
+                Entry::Occupied(mut e) => {
+                    let v = e.get_mut();
+                    let posting_list_id = PostingListId((*v >> 32) as u32);
+                    let mut f = (*v & 0xFFFFFFFF) as u32;
+                    f += freq;
+                    *v = ((posting_list_id.0 as u64) << 32) | f as u64;
+                    self.posting_storage.add_or_create(
+                        posting_list_id,
+                        vec![postings.values().cloned().collect()],
+                    )?;
+                }
+                Entry::Vacant(e) => {
+                    let posting_list_id = self.posting_storage.generate_new_id();
+                    let f = freq;
+                    let v = ((posting_list_id.0 as u64) << 32) | f as u64;
+                    let postings: Vec<Posting> = postings.into_values().collect();
+                    self.posting_storage
+                        .add_or_create(posting_list_id, vec![postings])?;
+                    e.insert(v);
+                }
+            }
+        }
+
+        /*
+        for (k, p) in &p {
+            let freq = (p & 0xFFFFFFFF) as u32;
+            let posting_list_id = PostingListId((p >> 32) as u32);
+            println!("posting_list_id: {:?}", posting_list_id);
+            let postings = self.posting_storage.get(posting_list_id)?;
+
+            println!("k: {}(freq: {}) -> {:?}", k, freq, postings);
+        }
+        */
+
+        let mut sorted_entries: Vec<_> = p.into_iter().collect();
+        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        debug!("building new fst map");
+
+        let mut builder = MapBuilder::memory();
+
+        for (key, value) in sorted_entries {
+            builder.insert(key, value)?;
+        }
+
+        let fst = builder.into_map();
+        drop(l);
+
+        let mut l = self.fst_map.write().await;
+        l.replace(fst);
+        drop(l);
+
+        self.total_document_length
+            .fetch_add(total_documents_length as usize, Ordering::Relaxed);
+
+        Ok(())
+    }
+
+    pub async fn new_document_inserted(&self) {
+        self.total_documents.fetch_add(1, Ordering::Relaxed);
+    }
+
     async fn build_fst(&self) -> Result<Map<Vec<u8>>> {
         let entries: Vec<_> = {
             let temp_map = self.temp_map.read().await;
@@ -75,7 +173,7 @@ impl StringIndex {
                 .map(|(key, value)| {
                     (
                         key.clone(),
-                        (value.posting_list_id.0 << 32) | (value.term_frequency as u64),
+                        ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
                     )
                 })
                 .collect()
@@ -109,6 +207,7 @@ impl StringIndex {
     ) -> Result<HashMap<DocumentId, f32>> {
         let total_documents = match self.total_documents.load(Ordering::Relaxed) {
             0 => {
+                warn!("No documents in the index: total_documents is 0");
                 return Ok(Default::default());
             }
             total_documents => total_documents,
@@ -116,6 +215,7 @@ impl StringIndex {
 
         let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
             0 => {
+                warn!("No documents in the index: total_document_length is 0");
                 return Ok(Default::default());
             }
             total_document_length => total_document_length,
@@ -130,7 +230,7 @@ impl StringIndex {
 
                 while let Some(result) = stream.next() {
                     let (_, packed_value) = result;
-                    let posting_list_id = PostingListId(((packed_value >> 32) as u32) as u64);
+                    let posting_list_id = PostingListId((packed_value >> 32) as u32);
                     let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
 
                     if let Ok(postings) = self.posting_storage.get(posting_list_id) {
@@ -138,6 +238,9 @@ impl StringIndex {
                     }
                 }
             }
+        } else {
+            warn!("fst map is empty: returning empty search results");
+            return Ok(Default::default());
         }
 
         let fields = search_on.as_ref();

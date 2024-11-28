@@ -3,6 +3,8 @@ pub mod locales;
 pub mod stop_words;
 pub mod tokenizer;
 
+use std::fmt::{Debug, Formatter};
+
 use anyhow::Result;
 use locales::Locale;
 use rust_stemmers::Algorithm;
@@ -15,6 +17,16 @@ pub struct TextParser {
     locale: Locale,
     pub tokenizer: Tokenizer,
     stemmer: Stemmer,
+}
+
+impl Debug for TextParser {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextParser")
+            .field("locale", &self.locale)
+            .field("tokenizer", &"...".to_string())
+            .field("stemmer", &"...".to_string())
+            .finish()
+    }
 }
 
 impl Clone for TextParser {

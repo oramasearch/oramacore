@@ -1,4 +1,7 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64},
+    Arc,
+};
 
 use dashmap::DashMap;
 use thiserror::Error;
@@ -6,7 +9,7 @@ use thiserror::Error;
 use super::Posting;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct PostingListId(pub u64);
+pub struct PostingListId(pub u32);
 
 #[derive(Debug, Error)]
 pub enum PostingStorageError {
@@ -16,13 +19,14 @@ pub enum PostingStorageError {
     SerializationError(#[from] bincode::Error),
 }
 
+#[derive(Debug)]
 pub struct PostingStorage {
     storage: DashMap<PostingListId, Vec<Posting>>,
-    id_generator: Arc<AtomicU64>,
+    id_generator: Arc<AtomicU32>,
 }
 
 impl PostingStorage {
-    pub fn new(id_generator: Arc<AtomicU64>) -> Self {
+    pub fn new(id_generator: Arc<AtomicU32>) -> Self {
         PostingStorage {
             storage: Default::default(),
             id_generator,

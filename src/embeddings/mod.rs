@@ -9,7 +9,10 @@ use dashmap::{DashMap, Entry};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hf::HuggingFaceConfiguration;
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Arc};
+use std::{
+    fmt::{self, Debug},
+    sync::Arc,
+};
 use strum::EnumIter;
 use strum_macros::{AsRefStr, Display};
 use tracing::{info, instrument};
@@ -107,6 +110,16 @@ pub struct LoadedModel {
     model_name: String,
     max_input_tokens: usize,
     dimensions: usize,
+}
+impl Debug for LoadedModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadedModel")
+            .field("model_name", &self.model_name)
+            .field("max_input_tokens", &self.max_input_tokens)
+            .field("dimensions", &self.dimensions)
+            .field("text_embedding", &"...".to_string())
+            .finish()
+    }
 }
 
 impl LoadedModel {

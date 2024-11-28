@@ -49,7 +49,7 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ScalarType {
     String,
     Number,
@@ -68,12 +68,13 @@ impl TryFrom<&Value> for ScalarType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ComplexType {
     Array(ScalarType),
+    Embedding,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ValueType {
     Scalar(ScalarType),
     Complex(ComplexType),
@@ -148,6 +149,10 @@ impl FlattenDocument {
 
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key)
+    }
+
+    pub fn into_inner(self) -> Map<String, Value> {
+        self.0
     }
 }
 

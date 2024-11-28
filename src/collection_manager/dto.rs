@@ -12,7 +12,7 @@ use crate::{
 
 use super::collection::FieldId;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum LanguageDTO {
     English,
 }
@@ -33,18 +33,20 @@ impl From<Locale> for LanguageDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EmbeddingTypedField {
     pub model_name: OramaModel,
     pub document_fields: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum TypedField {
     Text(LanguageDTO),
     Code(CodeLanguage),
     Embedding(EmbeddingTypedField),
+    Number,
+    Bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,7 +84,7 @@ impl Default for Limit {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Filter {
     Number(NumberFilter),
     Bool(bool),

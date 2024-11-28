@@ -2,7 +2,7 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet},
     sync::{
-        atomic::{AtomicU16, AtomicU64},
+        atomic::{AtomicU16, AtomicU32, AtomicU64},
         Arc,
     },
 };
@@ -83,7 +83,7 @@ impl Collection {
         language: Locale,
         document_storage: Arc<DocumentStorage>,
         typed_fields: HashMap<String, TypedField>,
-        id_generator: Arc<AtomicU64>,
+        id_generator: Arc<AtomicU32>,
         embedding_service: Arc<EmbeddingService>,
     ) -> Result<Self> {
         let default_parser = TextParser::from_language(Locale::EN);
@@ -144,6 +144,8 @@ impl Collection {
                         .vector_fields
                         .insert(field_name, (field_id, embedding));
                 }
+                TypedField::Number => unimplemented!("Number field"),
+                TypedField::Bool => unimplemented!("Bool field"),
             }
         }
 

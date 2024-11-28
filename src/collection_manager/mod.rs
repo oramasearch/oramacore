@@ -1,7 +1,10 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     ops::Deref,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU32, AtomicU64},
+        Arc,
+    },
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -16,6 +19,8 @@ use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService};
 mod collection;
 pub mod dto;
 
+pub mod sides;
+
 pub use self::collection::FieldId;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,13 +33,13 @@ pub struct CollectionsConfiguration {
 pub struct CollectionManager {
     collections: RwLock<HashMap<CollectionId, Collection>>,
     document_storage: Arc<DocumentStorage>,
-    id_generator: Arc<AtomicU64>,
+    id_generator: Arc<AtomicU32>,
     embedding_service: Arc<EmbeddingService>,
 }
 
 impl CollectionManager {
     pub fn new(configuration: CollectionsConfiguration) -> Self {
-        let id_generator = Arc::new(AtomicU64::new(0));
+        let id_generator = Arc::new(AtomicU32::new(0));
         CollectionManager {
             collections: Default::default(),
             document_storage: Arc::new(DocumentStorage::new(id_generator.clone())),
@@ -69,7 +74,7 @@ impl CollectionManager {
                 .into(),
             self.document_storage.clone(),
             collection_option.typed_fields,
-            self.id_generator.clone(),
+            Arc::new(AtomicU32::new(0)),
             self.embedding_service.clone(),
         )
         .await

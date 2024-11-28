@@ -6,6 +6,7 @@ use rustorama::collection_manager::FieldId;
 use rustorama::document_storage::DocumentId;
 use rustorama::indexes::string::scorer::bm25::BM25Score;
 use rustorama::indexes::string::StringIndex;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::atomic::AtomicU64};
 use tokio::runtime::Runtime;
@@ -36,7 +37,7 @@ fn generate_test_data(
 
     (0..num_docs)
         .map(|i| {
-            let doc_id = DocumentId(i as u64);
+            let doc_id = DocumentId(i as u32);
             let num_fields = rng.gen_range(1..=3);
 
             let fields = (0..num_fields)
@@ -76,7 +77,7 @@ fn benchmark_indexing(c: &mut Criterion) {
             let batch: HashMap<_, _> = data.into_iter().collect();
 
             b.to_async(&runtime).iter(|| async {
-                let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
+                let index = StringIndex::new(Arc::new(AtomicU32::new(0)));
 
                 index
                     .insert_multiple(batch.clone())
@@ -106,7 +107,7 @@ fn benchmark_batch_indexing(c: &mut Criterion) {
                     let batch: HashMap<_, _> = data.into_iter().collect();
 
                     b.to_async(&runtime).iter(|| async {
-                        let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
+                        let index = StringIndex::new(Arc::new(AtomicU32::new(0)));
                         index
                             .insert_multiple(batch.clone())
                             .await
@@ -147,7 +148,7 @@ fn benchmark_search(c: &mut Criterion) {
 
     for &size in &[1000, 5000] {
         group.bench_with_input(BenchmarkId::new("search", size), &size, |b, &size| {
-            let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
+            let index = StringIndex::new(Arc::new(AtomicU32::new(0)));
 
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
@@ -185,7 +186,7 @@ fn benchmark_concurrent_ops(c: &mut Criterion) {
     #[allow(clippy::single_element_loop)]
     for &size in &[5000] {
         group.bench_with_input(BenchmarkId::new("concurrent", size), &size, |b, &size| {
-            let index: Arc<StringIndex> = Arc::new(StringIndex::new(Arc::new(AtomicU64::new(0))));
+            let index: Arc<StringIndex> = Arc::new(StringIndex::new(Arc::new(AtomicU32::new(0))));
 
             let data = generate_test_data(size);
             let batch: HashMap<_, _> = data.into_iter().collect();
