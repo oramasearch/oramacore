@@ -5,15 +5,18 @@ use http::Request;
 use tower_http::trace::TraceLayer;
 use tracing::info_span;
 
-use crate::collection_manager::CollectionManager;
+use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
 mod collection;
 
-pub fn api_config() -> Router<Arc<CollectionManager>> {
+pub fn api_config(
+    writers: Option<Arc<CollectionsWriter>>,
+    readers: Option<Arc<CollectionsReader>>,
+) -> Router {
     // build our application with a route
     let router = Router::new()
         .route("/", get(index))
         .route("/health", get(health));
-    let router = router.nest("/v0/collections", collection::apis());
+    let router = router.nest("/v0/collections", collection::apis(writers, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
 

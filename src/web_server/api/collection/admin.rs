@@ -12,28 +12,29 @@ use tracing::error;
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO},
-        CollectionId, CollectionManager,
+        dto::CreateCollectionOptionDTO, sides::write::CollectionsWriter, CollectionId,
     },
     types::DocumentList,
 };
 
-pub fn apis() -> Router<Arc<CollectionManager>> {
-    Router::<Arc<CollectionManager>>::new()
+pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
+    Router::new()
         .route("/", get(get_collections))
-        .route("/:id", get(get_collection_by_id))
+        // .route("/:id", get(get_collection_by_id))
         .route("/", post(create_collection))
         .route("/:id/documents", patch(add_documents))
+        .with_state(writers)
 }
 
-async fn get_collections(manager: State<Arc<CollectionManager>>) -> Json<Vec<CollectionDTO>> {
-    let collections = manager.list().await;
+async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionId>> {
+    let collections = writer.list().await;
     Json(collections)
 }
 
+/*
 async fn get_collection_by_id(
     Path(id): Path<String>,
-    manager: State<Arc<CollectionManager>>,
+    manager: State<Arc<CollectionsWriter>>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
     let collection = manager.get(collection_id).await;
@@ -46,12 +47,13 @@ async fn get_collection_by_id(
         )),
     }
 }
+*/
 
 async fn create_collection(
-    manager: State<Arc<CollectionManager>>,
+    writer: State<Arc<CollectionsWriter>>,
     Json(json): Json<CreateCollectionOptionDTO>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = match manager.create_collection(json).await {
+    let collection_id = match writer.create_collection(json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
             error!("Error creating collection: {}", e);
@@ -72,31 +74,23 @@ async fn create_collection(
 
 async fn add_documents(
     Path(id): Path<String>,
-    manager: State<Arc<CollectionManager>>,
+    writer: State<Arc<CollectionsWriter>>,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
-    let collection = match manager.get(collection_id).await {
-        Some(collection) => collection,
-        None => {
+    match writer.write(collection_id, json).await {
+        Ok(_) => {}
+        Err(e) => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": "collection not found" })),
+                Json(json!({ "error": format!("collection not found {}", e) })),
             ));
         }
     };
 
-    let output = collection.insert_batch(json).await;
-
-    match output {
-        Ok(_) => Ok((
-            StatusCode::OK,
-            Json(json!({ "message": "documents added" })),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
-    }
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "message": "documents added" })),
+    ))
 }

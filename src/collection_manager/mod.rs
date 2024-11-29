@@ -1,141 +1,14 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    ops::Deref,
-    sync::{atomic::AtomicU32, Arc},
-};
-
-use anyhow::{anyhow, Context, Result};
-use collection::Collection;
-use dto::{CollectionDTO, CreateCollectionOptionDTO, LanguageDTO};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{info, warn};
 
-use crate::{document_storage::DocumentStorage, embeddings::EmbeddingService};
-
-mod collection;
+// mod collection;
 pub mod dto;
 
 pub mod sides;
 
-pub use self::collection::FieldId;
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectionId(pub String);
 
-pub struct CollectionsConfiguration {
-    pub embedding_service: Arc<EmbeddingService>,
-}
-
-pub struct CollectionManager {
-    collections: RwLock<HashMap<CollectionId, Collection>>,
-    document_storage: Arc<DocumentStorage>,
-    id_generator: Arc<AtomicU32>,
-    embedding_service: Arc<EmbeddingService>,
-}
-
-impl CollectionManager {
-    pub fn new(configuration: CollectionsConfiguration) -> Self {
-        let id_generator = Arc::new(AtomicU32::new(0));
-        CollectionManager {
-            collections: Default::default(),
-            document_storage: Arc::new(DocumentStorage::new(id_generator.clone())),
-            id_generator,
-            embedding_service: configuration.embedding_service,
-        }
-    }
-
-    pub async fn create_collection<S: TryInto<CreateCollectionOptionDTO>>(
-        &self,
-        collection_option: S,
-    ) -> Result<CollectionId>
-    where
-        anyhow::Error: From<S::Error>,
-        S::Error: std::fmt::Display,
-    {
-        let collection_option = collection_option
-            .try_into()
-            .map_err(|e| anyhow!("Cannot convert collection_option: {}", e))?;
-
-        info!("Creating collection with id {:?}", collection_option);
-
-        let id = CollectionId(collection_option.id);
-
-        // TODO: fix error handling
-        let collection = Collection::try_new(
-            id.clone(),
-            collection_option.description,
-            collection_option
-                .language
-                .unwrap_or(LanguageDTO::English)
-                .into(),
-            self.document_storage.clone(),
-            collection_option.typed_fields,
-            Arc::new(AtomicU32::new(0)),
-            self.embedding_service.clone(),
-        )
-        .await
-        .with_context(|| format!("Cannot create collection with id {}", id.0))?;
-
-        let mut collections = self.collections.write().await;
-        let entry = collections.entry(id.clone());
-        match entry {
-            Entry::Occupied(_) => {
-                warn!("Collection with id {} already exists", id.0);
-                return Err(anyhow!("Id already exists"));
-            }
-            Entry::Vacant(entry) => entry.insert(collection),
-        };
-
-        info!("Collection with id {} created", id.0);
-
-        Ok(id)
-    }
-
-    pub async fn list(&self) -> Vec<CollectionDTO> {
-        let collections = self.collections.read().await;
-        collections.iter().map(|(_, col)| col.as_dto()).collect()
-    }
-
-    pub async fn get<'guard, 's>(&'s self, id: CollectionId) -> Option<CollectionReadLock<'guard>>
-    where
-        's: 'guard,
-    {
-        CollectionReadLock::try_new(self.collections.read().await, id)
-    }
-}
-
-pub struct CollectionReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, HashMap<CollectionId, Collection>>,
-    id: CollectionId,
-}
-
-impl<'guard> CollectionReadLock<'guard> {
-    pub fn try_new(
-        lock: RwLockReadGuard<'guard, HashMap<CollectionId, Collection>>,
-        id: CollectionId,
-    ) -> Option<Self> {
-        let guard = lock.get(&id);
-        match &guard {
-            Some(_) => {
-                let _ = guard;
-                Some(CollectionReadLock { lock, id })
-            }
-            None => None,
-        }
-    }
-}
-
-impl Deref for CollectionReadLock<'_> {
-    type Target = Collection;
-
-    fn deref(&self) -> &Self::Target {
-        // safety: the collection contains the id because we checked it before
-        // no one can remove the collection from the map because we hold a read lock
-        self.lock.get(&self.id).unwrap()
-    }
-}
-
+/*
 #[cfg(test)]
 mod tests {
     use std::{
@@ -155,10 +28,7 @@ mod tests {
             CreateCollectionOptionDTO, FacetDefinition, Filter, FulltextMode, Limit,
             NumberFacetDefinition, NumberFacetDefinitionRange, SearchMode, SearchParams,
         },
-        CollectionsConfiguration,
     };
-
-    use super::CollectionManager;
 
     async fn create_manager() -> CollectionManager {
         let _ = tracing_subscriber::fmt::try_init();
@@ -897,3 +767,5 @@ mod tests {
         assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
     }
 }
+
+*/

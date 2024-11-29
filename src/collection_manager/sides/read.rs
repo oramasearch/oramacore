@@ -15,19 +15,18 @@ use tracing::{debug, error, info, instrument};
 
 use crate::{
     collection_manager::{
-        collection::TokenScore,
         dto::{
-            FacetDefinition, FacetResult, Filter, FulltextMode, SearchMode, SearchParams,
-            SearchResult, SearchResultHit, TypedField, VectorMode,
+            FacetDefinition, FacetResult, FieldId, Filter, FulltextMode, SearchMode, SearchParams,
+            SearchResult, SearchResultHit, TokenScore, TypedField, VectorMode,
         },
-        CollectionId, FieldId,
+        CollectionId,
     },
     document_storage::DocumentId,
-    embeddings::{EmbeddingService, LoadedModel, OramaModel},
+    embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
         number::{NumberFilter, NumberIndex},
-        string::{scorer::bm25::BM25Score, Posting, StringIndex},
+        string::{scorer::bm25::BM25Score, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
     nlp::TextParser,
@@ -36,19 +35,19 @@ use crate::{
 
 use super::{
     document_storage::DocumentStorage,
-    write::{CollectionWriteOperation, GenericWriteOperation, WriteOperation},
+    write::{CollectionWriteOperation, GenericWriteOperation, InsertStringTerms, WriteOperation},
 };
 
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
-    document_storage: Arc<Pin<Box<dyn DocumentStorage>>>,
+    document_storage: Arc<dyn DocumentStorage>,
     posting_id_generator: Arc<AtomicU32>,
 }
 impl CollectionsReader {
     pub fn new(
         embedding_service: Arc<EmbeddingService>,
-        document_storage: Arc<Pin<Box<dyn DocumentStorage>>>,
+        document_storage: Arc<dyn DocumentStorage>,
     ) -> Self {
         Self {
             embedding_service,
@@ -184,7 +183,7 @@ pub struct CollectionReader {
     id: CollectionId,
     embedding_service: Arc<EmbeddingService>,
 
-    document_storage: Arc<Pin<Box<dyn DocumentStorage>>>,
+    document_storage: Arc<dyn DocumentStorage>,
 
     fields: DashMap<String, (FieldId, TypedField)>,
 
@@ -246,7 +245,7 @@ impl CollectionReader {
         &self,
         doc_id: DocumentId,
         field_id: FieldId,
-        terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>,
+        terms: InsertStringTerms,
     ) -> Result<()> {
         self.string_index.insert(doc_id, field_id, terms).await?;
         Ok(())

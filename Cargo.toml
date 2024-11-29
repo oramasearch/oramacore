@@ -108,7 +108,7 @@ harness = false
 
 [workspace]
 members = [
-    "tanstack_example",
+    
 ]
 
 # [workspace]

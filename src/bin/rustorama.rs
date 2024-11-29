@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::Config;
-use rustorama::collection_manager::{CollectionManager, CollectionsConfiguration};
 use rustorama::embeddings::{EmbeddingConfig, EmbeddingService};
 use rustorama::web_server::{HttpConfig, WebServer};
+use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
 use serde::Deserialize;
 use tracing::{info, instrument};
 
@@ -14,6 +14,8 @@ use tracing::{info, instrument};
 struct RustoramaConfig {
     http: HttpConfig,
     embeddings: EmbeddingConfig,
+    writer_side: Option<WriteSideConfig>,
+    reader_side: Option<ReadSideConfig>,
 }
 
 #[instrument(level = "info")]
@@ -51,13 +53,18 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn start(config: RustoramaConfig) -> Result<()> {
-    let embedding_service = EmbeddingService::try_new(config.embeddings)
-        .await
-        .with_context(|| "Failed to initialize the EmbeddingService")?;
-    let embedding_service = Arc::new(embedding_service);
-    let manager = CollectionManager::new(CollectionsConfiguration { embedding_service });
-    let manager = Arc::new(manager);
-    let web_server = WebServer::new(manager);
+    let (writer, reader, receiver) = build_orama(
+        config.embeddings,
+        config
+            .writer_side
+            .expect("Writer side configuration is required"),
+        config
+            .reader_side
+            .expect("Reader side configuration is required"),
+    )
+    .await?;
+
+    let web_server = WebServer::new(writer, reader);
 
     info!(
         "Starting web server on {}:{}",

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::{collection_manager::FieldId, document_storage::DocumentId};
+use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
 #[derive(Debug, Default)]
 pub struct NumberIndex {

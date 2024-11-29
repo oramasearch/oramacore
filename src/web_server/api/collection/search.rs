@@ -9,22 +9,23 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::collection_manager::{dto::SearchParams, CollectionId, CollectionManager};
+use crate::collection_manager::{dto::SearchParams, sides::read::CollectionsReader, CollectionId};
 
-pub fn apis() -> Router<Arc<CollectionManager>> {
-    Router::<Arc<CollectionManager>>::new()
+pub fn apis(readers: Arc<CollectionsReader>) -> Router {
+    Router::new()
         .route("/:id/search", post(search))
-        .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
+        // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
+        .with_state(readers)
 }
 
 async fn search(
     Path(id): Path<String>,
-    manager: State<Arc<CollectionManager>>,
+    readers: State<Arc<CollectionsReader>>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
-    let collection = manager.get(collection_id).await;
+    let collection = readers.get_collection(collection_id).await;
 
     let collection = match collection {
         Some(collection) => collection,
@@ -47,13 +48,14 @@ async fn search(
     }
 }
 
+/*
 async fn get_doc_by_id(
     Path((collection_id, document_id)): Path<(String, String)>,
-    manager: State<Arc<CollectionManager>>,
+    readers: State<Arc<CollectionsReader>>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(collection_id);
 
-    let collection = manager.get(collection_id).await;
+    let collection = readers.get_collection(collection_id).await;
 
     let collection = match collection {
         Some(collection) => collection,
@@ -81,3 +83,4 @@ async fn get_doc_by_id(
         )),
     }
 }
+*/

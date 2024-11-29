@@ -8,7 +8,7 @@ use regex::Regex;
 use crate::code_parser::{
     CodeLanguage, CodeToken, FunctionDeclaration, ImportedTokens, JsxElement, NewParser,
 };
-use crate::collection_manager::FieldId;
+use crate::collection_manager::dto::FieldId;
 use crate::document_storage::DocumentId;
 use crate::nlp::tokenizer::Tokenizer;
 

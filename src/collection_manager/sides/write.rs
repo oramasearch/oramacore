@@ -13,6 +13,7 @@ use tokio::sync::broadcast::Sender;
 use tracing::info;
 
 use crate::{
+    collection_manager::dto::FieldId,
     document_storage::DocumentId,
     embeddings::{EmbeddingService, LoadedModel},
     indexes::string::Posting,
@@ -22,7 +23,7 @@ use crate::{
 
 use super::super::{
     dto::{CreateCollectionOptionDTO, LanguageDTO, TypedField},
-    CollectionId, FieldId,
+    CollectionId,
 };
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,9 @@ pub enum GenericWriteOperation {
         // TODO: add params
     },
 }
+
+pub type InsertStringTerms = HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>;
+type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
 
 #[derive(Debug, Clone)]
 pub enum CollectionWriteOperation {
@@ -48,7 +52,7 @@ pub enum CollectionWriteOperation {
     IndexString {
         doc_id: DocumentId,
         field_id: FieldId,
-        terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>,
+        terms: InsertStringTerms,
     },
     IndexEmbedding {
         doc_id: DocumentId,
@@ -65,7 +69,7 @@ pub enum WriteOperation {
 
 pub struct CollectionsWriter {
     document_id_generator: Arc<AtomicU32>,
-    sender: Arc<Sender<WriteOperation>>,
+    sender: Sender<WriteOperation>,
     embedding_service: Arc<EmbeddingService>,
     collections: DashMap<CollectionId, CollectionWriter>,
 }
@@ -73,7 +77,7 @@ pub struct CollectionsWriter {
 impl CollectionsWriter {
     pub fn new(
         document_id_generator: Arc<AtomicU32>,
-        sender: Arc<Sender<WriteOperation>>,
+        sender: Sender<WriteOperation>,
         embedding_service: Arc<EmbeddingService>,
     ) -> CollectionsWriter {
         CollectionsWriter {
@@ -100,7 +104,7 @@ impl CollectionsWriter {
     pub async fn create_collection(
         &self,
         collection_option: CreateCollectionOptionDTO,
-    ) -> Result<()> {
+    ) -> Result<CollectionId> {
         let CreateCollectionOptionDTO {
             id,
             description,
@@ -182,9 +186,13 @@ impl CollectionsWriter {
         // We should return an error if the collection already exists
         // NB: the check of the existence of the collection and the insertion should be done atomically
         // TODO: do it.
-        self.collections.insert(id, collection);
+        self.collections.insert(id.clone(), collection);
 
-        Ok(())
+        Ok(id)
+    }
+
+    pub async fn list(&self) -> Vec<CollectionId> {
+        self.collections.iter().map(|e| e.key().clone()).collect()
     }
 
     pub async fn write(
@@ -277,9 +285,19 @@ impl FieldIndexer for StringField {
 
         let doc_length = data.len().min(u16::MAX as usize - 1) as u16;
 
-        let mut terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)> =
-            Default::default();
-        for (position, (original, stemmed)) in data.into_iter().enumerate() {
+        let mut terms: InsertStringTerms = Default::default();
+        for (position, (original, stemmeds)) in data.into_iter().enumerate() {
+            // This `for` loop wants to build the `terms` hashmap
+            // it is a `HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>`
+            // that means we:
+            // term as string -> (term count, HashMap<(DocumentId, FieldId), Posting>)
+            // Here we don't want to store Posting into PostingListStorage,
+            // that is business of the IndexReader.
+            // Instead, here we want to extrapolate data from the document.
+            // The real storage leaves in the IndexReader.
+            // `original` & `stemmeds` appears in the `terms` hashmap with the "same value"
+            // ie: the position of the origin and stemmed term are the same.
+
             match terms.entry(original) {
                 Entry::Occupied(mut entry) => {
                     let v = entry.get_mut();
@@ -307,6 +325,36 @@ impl FieldIndexer for StringField {
                     entry.insert((1, HashMap::from_iter([((doc_id, field_id), p)])));
                 }
             };
+
+            for stemmed in stemmeds {
+                match terms.entry(stemmed) {
+                    Entry::Occupied(mut entry) => {
+                        let v = entry.get_mut();
+                        v.0 += 1; // Term frequency inside the doc for this field
+
+                        let p = v.1.entry((doc_id, field_id)).or_insert_with(|| Posting {
+                            document_id: doc_id,
+                            field_id,
+                            positions: vec![],
+                            term_frequency: 0.0,
+                            doc_length,
+                        });
+
+                        p.positions.push(position);
+                        p.term_frequency += 1.0;
+                    }
+                    Entry::Vacant(entry) => {
+                        let p = Posting {
+                            document_id: doc_id,
+                            field_id,
+                            positions: vec![position],
+                            term_frequency: 1.0,
+                            doc_length,
+                        };
+                        entry.insert((1, HashMap::from_iter([((doc_id, field_id), p)])));
+                    }
+                };
+            }
         }
 
         let op = WriteOperation::Collection(
@@ -405,7 +453,7 @@ impl CollectionWriter {
         &self,
         doc: Document,
         writer: &CollectionsWriter,
-    ) -> Result<DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>> {
+    ) -> Result<FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
 

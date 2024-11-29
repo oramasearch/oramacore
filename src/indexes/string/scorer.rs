@@ -236,7 +236,7 @@ pub mod code {
 #[cfg(test)]
 mod tests {
 
-    use crate::collection_manager::FieldId;
+    use crate::collection_manager::dto::FieldId;
 
     use super::*;
 

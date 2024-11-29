@@ -9,7 +9,7 @@ use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::collection_manager::CollectionManager;
+use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
 
 mod api;
 
@@ -21,18 +21,26 @@ pub struct HttpConfig {
 }
 
 pub struct WebServer {
-    collection_manager: Arc<CollectionManager>,
+    collections_writer: Option<Arc<CollectionsWriter>>,
+    collections_reader: Option<Arc<CollectionsReader>>,
 }
 
 impl WebServer {
-    pub fn new(collection_manager: Arc<CollectionManager>) -> Self {
-        Self { collection_manager }
+    pub fn new(
+        collections_writer: Option<Arc<CollectionsWriter>>,
+        collections_reader: Option<Arc<CollectionsReader>>,
+    ) -> Self {
+        Self {
+            collections_writer,
+            collections_reader,
+        }
     }
 
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        let router = api_config().with_state(self.collection_manager.clone());
+        let router = api_config(self.collections_writer, self.collections_reader);
+
         let router = if config.allow_cors {
             info!("Enabling CORS");
             let cors_layer = CorsLayer::new()
@@ -57,6 +65,7 @@ impl WebServer {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -255,3 +264,4 @@ mod tests {
         CollectionManager::new(CollectionsConfiguration { embedding_service })
     }
 }
+*/

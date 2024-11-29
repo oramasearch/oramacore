@@ -38,7 +38,6 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
-        let sender = Arc::new(sender);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: std::env::temp_dir().to_string_lossy().to_string(),
@@ -50,8 +49,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<std::pin::Pin<Box<dyn DocumentStorage>>> =
-            Arc::new(Box::pin(InMemoryDocumentStorage::new()));
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
         let reader = CollectionsReader::new(embedding_service, document_storage);
 
@@ -106,7 +104,6 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
-        let sender = Arc::new(sender);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: std::env::temp_dir().to_string_lossy().to_string(),
@@ -118,8 +115,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<std::pin::Pin<Box<dyn DocumentStorage>>> =
-            Arc::new(Box::pin(InMemoryDocumentStorage::new()));
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
         let reader = CollectionsReader::new(embedding_service, document_storage);
 
@@ -184,7 +180,6 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
-        let sender = Arc::new(sender);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: std::env::temp_dir().to_string_lossy().to_string(),
@@ -196,8 +191,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<std::pin::Pin<Box<dyn DocumentStorage>>> =
-            Arc::new(Box::pin(InMemoryDocumentStorage::new()));
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
         let reader = CollectionsReader::new(embedding_service, document_storage);
 

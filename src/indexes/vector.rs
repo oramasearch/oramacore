@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::collection_manager::FieldId;
+use crate::collection_manager::dto::FieldId;
 use crate::document_storage::DocumentId;
 use crate::embeddings::LoadedModel;
 use anyhow::{anyhow, Result};

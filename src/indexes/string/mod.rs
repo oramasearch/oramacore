@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, trace, warn};
 
-use crate::{collection_manager::FieldId, document_storage::DocumentId};
+use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
 pub mod dictionary;
 pub mod posting_storage;
@@ -472,7 +472,7 @@ mod tests {
     use futures::{future::join_all, FutureExt};
 
     use crate::{
-        collection_manager::FieldId,
+        collection_manager::dto::FieldId,
         document_storage::DocumentId,
         indexes::string::{scorer::bm25::BM25Score, StringIndex},
         nlp::{locales::Locale, TextParser},

@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::future::join_all;
 use futures::FutureExt;
 use rand::{seq::SliceRandom, Rng};
-use rustorama::collection_manager::FieldId;
+use rustorama::collection_manager::dto::FieldId;
 use rustorama::document_storage::DocumentId;
 use rustorama::indexes::string::scorer::bm25::BM25Score;
 use rustorama::indexes::string::StringIndex;

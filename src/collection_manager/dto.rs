@@ -4,13 +4,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     code_parser::CodeLanguage,
+    document_storage::DocumentId,
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
     types::Document,
 };
 
-use super::collection::FieldId;
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldId(pub u16);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenScore {
+    pub document_id: DocumentId,
+    pub score: f32,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum LanguageDTO {
@@ -59,10 +67,11 @@ pub struct CreateCollectionOptionDTO {
 }
 
 impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
-    type Error = serde_json::Error;
+    type Error = anyhow::Error;
 
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        serde_json::from_value(value)
+    fn try_from(value: serde_json::Value) -> anyhow::Result<Self> {
+        let v = serde_json::from_value(value)?;
+        Ok(v)
     }
 }
 
