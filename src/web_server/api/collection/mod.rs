@@ -19,11 +19,11 @@ pub fn apis(
         collection_router
     };
 
-    let collection_router = if let Some(readers) = readers {
+    
+
+    if let Some(readers) = readers {
         collection_router.nest("/", search::apis(readers))
     } else {
         collection_router
-    };
-
-    collection_router
+    }
 }

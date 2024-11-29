@@ -1,10 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use config::Config;
-use rustorama::embeddings::{EmbeddingConfig, EmbeddingService};
+use rustorama::embeddings::EmbeddingConfig;
 use rustorama::web_server::{HttpConfig, WebServer};
 use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
 use serde::Deserialize;

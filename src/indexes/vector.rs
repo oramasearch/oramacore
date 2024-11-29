@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::collection_manager::dto::FieldId;
 use crate::document_storage::DocumentId;
-use crate::embeddings::LoadedModel;
 use anyhow::{anyhow, Result};
 use dashmap::{DashMap, Entry};
 use hora::core::metrics::Metric::Manhattan;
@@ -95,7 +93,7 @@ impl VectorIndex {
         let mut output = HashMap::new();
 
         for field_id in field_ids {
-            let index = self.indexes.get(&field_id);
+            let index = self.indexes.get(field_id);
             let index = match index {
                 Some(index) => index,
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
