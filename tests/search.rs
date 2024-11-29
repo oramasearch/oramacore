@@ -63,6 +63,7 @@ async fn start_server() {
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
+            println!("--------------------Received operation: {:?}", op);
             collections_reader.update(op).await.expect("OUCH!");
         }
     });

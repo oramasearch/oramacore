@@ -8,8 +8,10 @@ use crate::{
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
-    types::Document,
+    types::{Document, ValueType},
 };
+
+use super::CollectionId;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
@@ -77,12 +79,10 @@ impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CollectionDTO {
-    pub id: String,
+    pub id: CollectionId,
     pub description: Option<String>,
-    pub language: LanguageDTO,
-    pub document_count: usize,
-    pub string_fields: HashMap<String, FieldId>,
-    pub code_fields: HashMap<String, FieldId>,
+    pub document_count: u32,
+    pub fields: HashMap<String, ValueType>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

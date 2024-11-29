@@ -12,7 +12,7 @@ use tracing::error;
 
 use crate::{
     collection_manager::{
-        dto::CreateCollectionOptionDTO, sides::write::CollectionsWriter, CollectionId,
+        dto::{CollectionDTO, CreateCollectionOptionDTO}, sides::write::CollectionsWriter, CollectionId,
     },
     types::DocumentList,
 };
@@ -20,34 +20,32 @@ use crate::{
 pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
     Router::new()
         .route("/", get(get_collections))
-        // .route("/:id", get(get_collection_by_id))
+        .route("/:id", get(get_collection_by_id))
         .route("/", post(create_collection))
         .route("/:id/documents", patch(add_documents))
         .with_state(writers)
 }
 
-async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionId>> {
-    let collections = writer.list().await;
+async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionDTO>> {
+    let collections = writer.list();
     Json(collections)
 }
 
-/*
 async fn get_collection_by_id(
     Path(id): Path<String>,
-    manager: State<Arc<CollectionsWriter>>,
+    writer: State<Arc<CollectionsWriter>>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collection = manager.get(collection_id).await;
+    let collection_dto = writer.get_collection_dto(collection_id);
 
-    match collection {
-        Some(collection) => Ok((StatusCode::OK, Json(collection.as_dto()))),
+    match collection_dto {
+        Some(collection_dto) => Ok((StatusCode::OK, Json(collection_dto))),
         None => Err((
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "collection not found" })),
         )),
     }
 }
-*/
 
 async fn create_collection(
     writer: State<Arc<CollectionsWriter>>,

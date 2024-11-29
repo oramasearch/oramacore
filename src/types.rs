@@ -49,7 +49,7 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ScalarType {
     String,
     Number,
@@ -68,13 +68,13 @@ impl TryFrom<&Value> for ScalarType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ComplexType {
     Array(ScalarType),
     Embedding,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ValueType {
     Scalar(ScalarType),
     Complex(ComplexType),

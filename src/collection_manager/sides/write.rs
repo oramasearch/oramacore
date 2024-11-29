@@ -13,7 +13,7 @@ use tokio::sync::broadcast::Sender;
 use tracing::info;
 
 use crate::{
-    collection_manager::dto::FieldId,
+    collection_manager::dto::{CollectionDTO, FieldId},
     document_storage::DocumentId,
     embeddings::{EmbeddingService, LoadedModel},
     indexes::string::Posting,
@@ -126,8 +126,9 @@ impl CollectionsWriter {
 
         let collection = CollectionWriter {
             id: id.clone(),
-            _description: description,
+            description,
             default_language: language.unwrap_or(LanguageDTO::English),
+            document_count: Default::default(),
             default_text_parser,
             fields: Default::default(),
             field_id_by_name: DashMap::new(),
@@ -191,8 +192,17 @@ impl CollectionsWriter {
         Ok(id)
     }
 
-    pub async fn list(&self) -> Vec<CollectionId> {
-        self.collections.iter().map(|e| e.key().clone()).collect()
+    pub fn list(&self) -> Vec<CollectionDTO> {
+        self.collections.iter().map(|e| {
+            let coll = e.value();
+
+            coll.as_dto()
+        }).collect()
+    }
+
+    pub fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
+        let collection = self.collections.get(&collection_id);
+        collection.map(|c| c.as_dto())
     }
 
     pub async fn write(
@@ -210,6 +220,7 @@ impl CollectionsWriter {
         for doc in document_list {
             let doc_id = self.generate_document_id();
 
+            collection.document_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.sender
                 .send(WriteOperation::Collection(
                     collection_id.clone(),
@@ -411,16 +422,27 @@ impl FieldIndexer for EmbeddingField {
 
 pub struct CollectionWriter {
     id: CollectionId,
-    _description: Option<String>,
+    description: Option<String>,
     default_language: LanguageDTO,
     default_text_parser: Arc<TextParser>,
     fields: DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>,
+
+    document_count: AtomicU32,
 
     field_id_generator: Arc<AtomicU16>,
     field_id_by_name: DashMap<String, FieldId>,
 }
 
 impl CollectionWriter {
+    pub fn as_dto(&self) -> CollectionDTO {
+        CollectionDTO {
+            id: self.id.clone(),
+            description: self.description.clone(),
+            document_count: self.document_count.load(std::sync::atomic::Ordering::Relaxed),
+            fields: self.fields.iter().map(|e| (e.key().clone(), e.value().0.clone())).collect(),
+        }
+    }
+
     fn get_field_id_by_name(&self, name: &str) -> FieldId {
         use dashmap::Entry;
 
