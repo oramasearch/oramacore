@@ -12,7 +12,9 @@ use tracing::error;
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO}, sides::write::CollectionsWriter, CollectionId,
+        dto::{CollectionDTO, CreateCollectionOptionDTO},
+        sides::write::CollectionsWriter,
+        CollectionId,
     },
     types::DocumentList,
 };
@@ -26,13 +28,21 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
         .with_state(writers)
 }
 
-#[endpoint(method = "GET", path = "/v0/collections", description = "List all collections")]
+#[endpoint(
+    method = "GET",
+    path = "/v0/collections",
+    description = "List all collections"
+)]
 async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionDTO>> {
     let collections = writer.list();
     Json(collections)
 }
 
-#[endpoint(method = "GET", path = "/v0/collections/:id", description = "Get a collection by id")]
+#[endpoint(
+    method = "GET",
+    path = "/v0/collections/:id",
+    description = "Get a collection by id"
+)]
 async fn get_collection_by_id(
     Path(id): Path<String>,
     writer: State<Arc<CollectionsWriter>>,
@@ -49,7 +59,11 @@ async fn get_collection_by_id(
     }
 }
 
-#[endpoint(method = "POST", path = "/v0/collections", description = "Create a collection")]
+#[endpoint(
+    method = "POST",
+    path = "/v0/collections",
+    description = "Create a collection"
+)]
 async fn create_collection(
     writer: State<Arc<CollectionsWriter>>,
     Json(json): Json<CreateCollectionOptionDTO>,
@@ -73,7 +87,11 @@ async fn create_collection(
     ))
 }
 
-#[endpoint(method = "PATCH", path = "/v0/collections/:id/documents", description = "Add documents to a collection")]
+#[endpoint(
+    method = "PATCH",
+    path = "/v0/collections/:id/documents",
+    description = "Add documents to a collection"
+)]
 async fn add_documents(
     Path(id): Path<String>,
     writer: State<Arc<CollectionsWriter>>,

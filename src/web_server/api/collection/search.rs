@@ -18,7 +18,11 @@ pub fn apis(readers: Arc<CollectionsReader>) -> Router {
         .with_state(readers)
 }
 
-#[endpoint(method = "POST", path = "/v0/collections/:id/search", description = "Search Endpoint")]
+#[endpoint(
+    method = "POST",
+    path = "/v0/collections/:id/search",
+    description = "Search Endpoint"
+)]
 async fn search(
     Path(id): Path<String>,
     readers: State<Arc<CollectionsReader>>,

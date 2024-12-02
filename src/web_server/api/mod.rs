@@ -1,7 +1,11 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use axum::{response::IntoResponse, Router, Json};
-use axum_openapi3::{endpoint, build_openapi, reset_openapi, utoipa::openapi::{InfoBuilder, OpenApiBuilder}, AddRoute};
+use axum::{response::IntoResponse, Json, Router};
+use axum_openapi3::{
+    build_openapi, endpoint, reset_openapi,
+    utoipa::openapi::{InfoBuilder, OpenApiBuilder},
+    AddRoute,
+};
 use http::Request;
 use tower_http::trace::TraceLayer;
 use tracing::info_span;
@@ -16,10 +20,7 @@ pub fn api_config(
     reset_openapi();
 
     // build our application with a route
-    let router = Router::new()
-        .add(index())
-        .add(health())
-        .add(openapi());
+    let router = Router::new().add(index()).add(health()).add(openapi());
     let router = router.nest("/", collection::apis(writers, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
@@ -55,8 +56,7 @@ async fn health() -> Json<&'static str> {
 #[endpoint(method = "GET", path = "/openapi.json", description = "OpenAPI spec")]
 async fn openapi() -> impl IntoResponse {
     let openapi = build_openapi(|| {
-        OpenApiBuilder::new()
-            .info(InfoBuilder::new().title("Orama").version("0.1.0"))
+        OpenApiBuilder::new().info(InfoBuilder::new().title("Orama").version("0.1.0"))
     });
 
     Json(openapi)

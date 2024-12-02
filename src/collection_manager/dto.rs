@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
+use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
-use axum_openapi3::utoipa;
 
 use crate::{
-    code_parser::CodeLanguage,
     document_storage::DocumentId,
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
@@ -56,7 +55,6 @@ pub struct EmbeddingTypedField {
 #[serde(untagged)]
 pub enum TypedField {
     Text(#[schema(inline)] LanguageDTO),
-    Code(#[schema(inline)] CodeLanguage),
     Embedding(#[schema(inline)] EmbeddingTypedField),
     Number,
     Bool,
@@ -81,7 +79,6 @@ impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
         Ok(v)
     }
 }
-
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CollectionDTO {
@@ -145,7 +142,9 @@ pub struct VectorMode {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct HybridMode {}
+pub struct HybridMode {
+    pub term: String,
+}
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]

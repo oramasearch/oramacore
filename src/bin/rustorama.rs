@@ -3,10 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
-use rustorama::embeddings::EmbeddingConfig;
-use rustorama::web_server::{HttpConfig, WebServer};
-use rustorama::{build_orama, start, ReadSideConfig, RustoramaConfig, WriteSideConfig};
-use serde::Deserialize;
+use rustorama::{start, RustoramaConfig};
 use tracing::{info, instrument};
 
 #[instrument(level = "info")]
@@ -48,4 +45,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

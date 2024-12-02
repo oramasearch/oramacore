@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
+use futures::join;
 use ordered_float::NotNan;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
@@ -15,8 +16,8 @@ use tracing::{debug, error, info, instrument};
 use crate::{
     collection_manager::{
         dto::{
-            FacetDefinition, FacetResult, FieldId, Filter, FulltextMode, SearchMode, SearchParams,
-            SearchResult, SearchResultHit, TokenScore, TypedField, VectorMode,
+            FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
+            SearchResultHit, TokenScore, TypedField,
         },
         CollectionId,
     },
@@ -393,13 +394,43 @@ impl CollectionReader {
 
         let token_scores = match mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
-                self.search_full_text(search_params, properties, boost, filtered_doc_ids)
+                self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
                     .await?
             }
             SearchMode::Vector(search_params) => {
-                self.search_vector(search_params, filtered_doc_ids).await?
+                self.search_vector(&search_params.term, filtered_doc_ids)
+                    .await?
             }
-            _ => unimplemented!(),
+            SearchMode::Hybrid(search_params) => {
+                let (vector, fulltext) = join!(
+                    self.search_vector(&search_params.term, filtered_doc_ids.clone()),
+                    self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
+                );
+                let vector = vector?;
+                let fulltext = fulltext?;
+
+                // min-max normalization
+                let max = vector.values().copied().fold(0.0, f32::max);
+                let max = max.max(fulltext.values().copied().fold(0.0, f32::max));
+                let min = vector.values().copied().fold(0.0, f32::min);
+                let min = min.min(fulltext.values().copied().fold(0.0, f32::min));
+
+                let vector: HashMap<_, _> = vector
+                    .into_iter()
+                    .map(|(k, v)| (k, (v - min) / (max - min)))
+                    .collect();
+
+                let mut fulltext: HashMap<_, _> = fulltext
+                    .into_iter()
+                    .map(|(k, v)| (k, (v - min) / (max - min)))
+                    .collect();
+
+                for (k, v) in vector {
+                    let e = fulltext.entry(k).or_default();
+                    *e += v;
+                }
+                fulltext
+            }
         };
 
         info!("token_scores len: {:?}", token_scores.len());
@@ -444,13 +475,13 @@ impl CollectionReader {
 
     async fn search_full_text(
         &self,
-        search_params: FulltextMode,
+        term: &str,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let text_parser = TextParser::from_language(crate::nlp::locales::Locale::EN);
-        let tokens = text_parser.tokenize(&search_params.term);
+        let tokens = text_parser.tokenize(term);
 
         self.string_index
             .search(
@@ -471,7 +502,7 @@ impl CollectionReader {
 
     async fn search_vector(
         &self,
-        search_params: VectorMode,
+        term: &str,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut ret: HashMap<DocumentId, f32> = HashMap::new();
@@ -480,7 +511,7 @@ impl CollectionReader {
             let model = e.key();
             let fields = e.value();
 
-            let e = model.embed(vec![search_params.term.clone()], None)?;
+            let e = model.embed(vec![term.to_string()], None)?;
 
             for k in e {
                 let r = self.vector_index.search(fields, &k, 1)?;
@@ -516,6 +547,17 @@ impl CollectionReader {
             let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
             for (field_name, facet) in facets {
                 let field_id = self.get_field_id(field_name.clone())?;
+
+                // This calculation is inneficient
+                // we have the doc_ids that matches:
+                // - filters
+                // - search
+                // We should use them to calculate the facets
+                // Instead here we are building an hashset and
+                // iter again on it to filter the doc_ids.
+                // We could create a dedicated method in the indexes that
+                // accepts the matching doc_ids + facet definition and returns the count
+                // TODO: do it
                 match facet {
                     FacetDefinition::Number(facet) => {
                         let mut values = HashMap::new();

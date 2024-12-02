@@ -1,9 +1,9 @@
 use anyhow::Result;
+use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use axum_openapi3::utoipa;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Document {

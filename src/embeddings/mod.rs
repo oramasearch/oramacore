@@ -5,6 +5,7 @@ pub mod properties_selector;
 mod hf;
 
 use anyhow::{anyhow, Context, Result};
+use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use dashmap::{DashMap, Entry};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
@@ -18,7 +19,6 @@ use std::{
 use strum::EnumIter;
 use strum_macros::{AsRefStr, Display};
 use tracing::{info, instrument};
-use axum_openapi3::utoipa;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
@@ -56,7 +56,7 @@ pub struct EmbeddingsResponse {
 }
 
 #[derive(
-    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr, ToSchema
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr, ToSchema,
 )]
 pub enum OramaFastembedModel {
     #[serde(rename = "gte-small")]
@@ -92,7 +92,9 @@ impl OramaFastembedModel {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, Display, AsRefStr, ToSchema)]
+#[derive(
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, Display, AsRefStr, ToSchema,
+)]
 #[serde(untagged)]
 pub enum OramaModel {
     Fastembed(#[schema(inline)] OramaFastembedModel),

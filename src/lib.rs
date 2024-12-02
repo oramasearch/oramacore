@@ -48,18 +48,9 @@ pub struct RustoramaConfig {
     reader_side: ReadSideConfig,
 }
 
-
 pub async fn start(config: RustoramaConfig) -> Result<()> {
-    let (writer, reader, mut receiver) = build_orama(
-        config.embeddings,
-        config
-            .writer_side
-            ,
-        config
-            .reader_side
-            ,
-    )
-    .await?;
+    let (writer, reader, mut receiver) =
+        build_orama(config.embeddings, config.writer_side, config.reader_side).await?;
 
     let web_server = WebServer::new(writer, reader.clone());
 

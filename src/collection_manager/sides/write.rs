@@ -163,7 +163,6 @@ impl CollectionsWriter {
                         ),
                     );
                 }
-                TypedField::Code(_) => unimplemented!("Code field not implemented yet"),
                 TypedField::Number => unimplemented!("Number field not implemented yet"),
                 TypedField::Bool => unimplemented!("Bool field not implemented yet"),
             }
@@ -193,11 +192,14 @@ impl CollectionsWriter {
     }
 
     pub fn list(&self) -> Vec<CollectionDTO> {
-        self.collections.iter().map(|e| {
-            let coll = e.value();
+        self.collections
+            .iter()
+            .map(|e| {
+                let coll = e.value();
 
-            coll.as_dto()
-        }).collect()
+                coll.as_dto()
+            })
+            .collect()
     }
 
     pub fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
@@ -220,7 +222,9 @@ impl CollectionsWriter {
         for doc in document_list {
             let doc_id = self.generate_document_id();
 
-            collection.document_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            collection
+                .document_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.sender
                 .send(WriteOperation::Collection(
                     collection_id.clone(),
@@ -438,8 +442,14 @@ impl CollectionWriter {
         CollectionDTO {
             id: self.id.clone(),
             description: self.description.clone(),
-            document_count: self.document_count.load(std::sync::atomic::Ordering::Relaxed),
-            fields: self.fields.iter().map(|e| (e.key().clone(), e.value().0.clone())).collect(),
+            document_count: self
+                .document_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            fields: self
+                .fields
+                .iter()
+                .map(|e| (e.key().clone(), e.value().0.clone()))
+                .collect(),
         }
     }
 
