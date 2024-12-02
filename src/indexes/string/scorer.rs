@@ -137,7 +137,7 @@ pub mod code {
         }
 
         #[inline]
-        fn calculate_score(pos: DashMap<Position, usize>, boost: f32, doc_length: u16) -> f32 {
+        fn calculate_score(pos: DashMap<Position, usize>, _boost: f32, doc_length: u16) -> f32 {
             let mut foo: Vec<_> = pos.into_iter().map(|(p, v)| (p.0, v)).collect();
 
             if foo.is_empty() || doc_length == 0 {

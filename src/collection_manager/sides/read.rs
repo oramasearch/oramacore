@@ -523,7 +523,7 @@ impl CollectionReader {
                         for range in facet.ranges {
                             let facet: HashSet<_> = self
                                 .number_index
-                                .filter(field_id, NumberFilter::Between(range.from, range.to))
+                                .filter(field_id, NumberFilter::Between((range.from, range.to)))
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();

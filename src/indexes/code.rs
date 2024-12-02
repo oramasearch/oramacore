@@ -69,7 +69,7 @@ impl CodeIndex {
     pub fn search(
         &self,
         term: String,
-        field_ids: Option<Vec<FieldId>>,
+        _field_ids: Option<Vec<FieldId>>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {

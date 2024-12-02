@@ -1,10 +1,12 @@
 use anyhow::Result;
+use axum_openapi3::utoipa::ToSchema;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 use tree_sitter_typescript::{LANGUAGE_TSX, LANGUAGE_TYPESCRIPT};
+use axum_openapi3::utoipa;
 
-#[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize, ToSchema)]
 pub enum CodeLanguage {
     JavaScript,
     TypeScript,

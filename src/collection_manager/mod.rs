@@ -1,11 +1,13 @@
+use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 
-// mod collection;
+use axum_openapi3::utoipa;
+
 pub mod dto;
 
 pub mod sides;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CollectionId(pub String);
 
 /*

@@ -1,11 +1,14 @@
 use anyhow::Result;
+use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use axum_openapi3::utoipa;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Document {
     #[serde(flatten)]
+    #[schema(inline)]
     pub inner: Map<String, Value>,
 }
 impl Document {
@@ -49,7 +52,7 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
 pub enum ScalarType {
     String,
     Number,
@@ -68,16 +71,16 @@ impl TryFrom<&Value> for ScalarType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
 pub enum ComplexType {
-    Array(ScalarType),
+    Array(#[schema(inline)] ScalarType),
     Embedding,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
 pub enum ValueType {
-    Scalar(ScalarType),
-    Complex(ComplexType),
+    Scalar(#[schema(inline)] ScalarType),
+    Complex(#[schema(inline)] ComplexType),
 }
 
 impl TryFrom<&Value> for ValueType {
@@ -156,8 +159,8 @@ impl FlattenDocument {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DocumentList(Vec<Document>);
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DocumentList(#[schema(inline)] Vec<Document>);
 impl DocumentList {
     #[inline]
     pub fn len(&self) -> usize {

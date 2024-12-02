@@ -1,21 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use config::Config;
 use rustorama::embeddings::EmbeddingConfig;
 use rustorama::web_server::{HttpConfig, WebServer};
-use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
+use rustorama::{build_orama, start, ReadSideConfig, RustoramaConfig, WriteSideConfig};
 use serde::Deserialize;
 use tracing::{info, instrument};
-
-#[derive(Debug, Deserialize, Clone)]
-struct RustoramaConfig {
-    http: HttpConfig,
-    embeddings: EmbeddingConfig,
-    writer_side: Option<WriteSideConfig>,
-    reader_side: Option<ReadSideConfig>,
-}
 
 #[instrument(level = "info")]
 fn load_config() -> Result<RustoramaConfig> {
@@ -44,33 +36,16 @@ fn load_config() -> Result<RustoramaConfig> {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let config = load_config()?;
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to load configuration: {:?}", e);
+            return Err(anyhow!("Failed to load configuration"));
+        }
+    };
 
     start(config).await?;
 
     Ok(())
 }
 
-async fn start(config: RustoramaConfig) -> Result<()> {
-    let (writer, reader, receiver) = build_orama(
-        config.embeddings,
-        config
-            .writer_side
-            .expect("Writer side configuration is required"),
-        config
-            .reader_side
-            .expect("Reader side configuration is required"),
-    )
-    .await?;
-
-    let web_server = WebServer::new(writer, reader);
-
-    info!(
-        "Starting web server on {}:{}",
-        config.http.host, config.http.port
-    );
-
-    web_server.start(config.http).await?;
-
-    Ok(())
-}

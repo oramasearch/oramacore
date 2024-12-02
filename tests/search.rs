@@ -52,7 +52,7 @@ async fn start_server() {
             output: rustorama::SideChannelType::InMemory,
         },
         ReadSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            input: rustorama::SideChannelType::InMemory,
         },
     )
     .await

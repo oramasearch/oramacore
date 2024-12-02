@@ -4,20 +4,21 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
     Json, Router,
 };
+use axum_openapi3::*;
 use serde_json::json;
 
 use crate::collection_manager::{dto::SearchParams, sides::read::CollectionsReader, CollectionId};
 
 pub fn apis(readers: Arc<CollectionsReader>) -> Router {
     Router::new()
-        .route("/:id/search", post(search))
+        .add(search())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
         .with_state(readers)
 }
 
+#[endpoint(method = "POST", path = "/v0/collections/:id/search", description = "Search Endpoint")]
 async fn search(
     Path(id): Path<String>,
     readers: State<Arc<CollectionsReader>>,

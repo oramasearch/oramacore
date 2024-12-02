@@ -1,6 +1,7 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use axum::{response::IntoResponse, routing::get, Router};
+use axum::{response::IntoResponse, Router, Json};
+use axum_openapi3::{endpoint, build_openapi, reset_openapi, utoipa::openapi::{InfoBuilder, OpenApiBuilder}, AddRoute};
 use http::Request;
 use tower_http::trace::TraceLayer;
 use tracing::info_span;
@@ -12,11 +13,14 @@ pub fn api_config(
     writers: Option<Arc<CollectionsWriter>>,
     readers: Option<Arc<CollectionsReader>>,
 ) -> Router {
+    reset_openapi();
+
     // build our application with a route
     let router = Router::new()
-        .route("/", get(index))
-        .route("/health", get(health));
-    let router = router.nest("/v0/collections", collection::apis(writers, readers));
+        .add(index())
+        .add(health())
+        .add(openapi());
+    let router = router.nest("/", collection::apis(writers, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
 
@@ -34,13 +38,26 @@ pub fn api_config(
 }
 
 static INDEX_MESSAGE: &str = "hi! welcome to Orama";
-async fn index() -> impl IntoResponse {
+
+#[endpoint(method = "GET", path = "/", description = "Welcome to Orama")]
+async fn index() -> Json<&'static str> {
     println!("index");
-    INDEX_MESSAGE
+    Json(INDEX_MESSAGE)
 }
 
 static HEALTH_MESSAGE: &str = "up";
-async fn health() -> impl IntoResponse {
+#[endpoint(method = "GET", path = "/health", description = "Health check")]
+async fn health() -> Json<&'static str> {
     println!("health");
-    HEALTH_MESSAGE
+    Json(HEALTH_MESSAGE)
+}
+
+#[endpoint(method = "GET", path = "/openapi.json", description = "OpenAPI spec")]
+async fn openapi() -> impl IntoResponse {
+    let openapi = build_openapi(|| {
+        OpenApiBuilder::new()
+            .info(InfoBuilder::new().title("Orama").version("0.1.0"))
+    });
+
+    Json(openapi)
 }

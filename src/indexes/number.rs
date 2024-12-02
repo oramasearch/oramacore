@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
+use axum_openapi3::utoipa;
+use axum_openapi3::utoipa::ToSchema;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +59,7 @@ impl NumberIndex {
                 .range((Bound::Included(&value), Bound::Unbounded))
                 .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
                 .collect(),
-            NumberFilter::Between(min, max) => btree
+            NumberFilter::Between((min, max)) => btree
                 .range((Bound::Included(&min), Bound::Included(&max)))
                 .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
                 .collect(),
@@ -65,20 +67,21 @@ impl NumberIndex {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum NumberFilter {
-    Equal(Number),
-    GreaterThan(Number),
-    GreaterThanOrEqual(Number),
-    LessThan(Number),
-    LessThanOrEqual(Number),
-    Between(Number, Number),
+    Equal(#[schema(inline)] Number),
+    GreaterThan(#[schema(inline)] Number),
+    GreaterThanOrEqual(#[schema(inline)] Number),
+    LessThan(#[schema(inline)] Number),
+    LessThanOrEqual(#[schema(inline)] Number),
+    Between(#[schema(inline)] (Number, Number)),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
 pub enum Number {
-    I32(i32),
-    F32(f32),
+    I32(#[schema(inline)] i32),
+    F32(#[schema(inline)] f32),
 }
 
 impl std::fmt::Display for Number {
@@ -334,7 +337,7 @@ mod tests {
         );
     });
     test_number_filter!(test_number_index_filter_between, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::Between(2.into(), 3.into()));
+        let output = index.filter(FieldId(0), NumberFilter::Between((2.into(), 3.into())));
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(3), DocumentId(2), DocumentId(5)])

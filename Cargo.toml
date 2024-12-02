@@ -50,6 +50,7 @@ futures = "0.3.31"
 axum = "0.7.6"
 tower-http = { version = "0.6.1", features = ["trace", "cors"] }
 http = "1.1.0"
+axum-openapi3 = { path = "/Users/allevo/repos/axum-openapi/" }
 
 # Embeddings
 hora = { version = "0.1.1" }

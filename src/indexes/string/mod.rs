@@ -69,8 +69,8 @@ impl StringIndex {
 
     pub async fn insert(
         &self,
-        doc_id: DocumentId,
-        field_id: FieldId,
+        _doc_id: DocumentId,
+        _field_id: FieldId,
         terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>,
     ) -> Result<()> {
         let total_documents_length: u32 = terms
