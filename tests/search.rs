@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::future::Either;
 use futures::{future, pin_mut};
-use hurl::runner::{self, HurlResult};
+use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
@@ -90,12 +90,9 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
             .verbosity(Some(Verbosity::VeryVerbose))
             .build();
 
-        let variables: HashMap<_, _> = vec![(
-            "base_url".to_string(),
-            Value::String(format!("http://{}:{}", HOST, PORT)),
-        )]
-        .into_iter()
-        .collect();
+        let mut variables = VariableSet::new();
+        variables.insert("base_url".to_string(), Value::String(format!("http://{}:{}", HOST, PORT)));
+
         runner::run(content, None, &runner_opts, &variables, &logger_opts)
     })
     .await;

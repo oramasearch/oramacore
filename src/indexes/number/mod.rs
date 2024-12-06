@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
+mod linear;
+mod serializable_number;
+mod stats;
+
 #[derive(Debug, Default)]
 pub struct NumberIndex {
     maps: DashMap<FieldId, BTreeMap<Number, HashSet<DocumentId>>>,
@@ -139,6 +143,19 @@ impl Ord for Number {
             (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
             (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
             (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
+        }
+    }
+}
+
+impl std::ops::Add for Number {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::I32(a), Number::I32(b)) => (a + b).into(),
+            (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
+            (Number::F32(a), Number::F32(b)) => (a + b).into(),
+            (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
         }
     }
 }
