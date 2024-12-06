@@ -1,5 +1,11 @@
 use core::f32;
-use std::{collections::HashSet, io::{BufReader, BufWriter, Write}, path::PathBuf, ptr::{self, null}, sync::atomic::{AtomicPtr, AtomicUsize}};
+use std::{
+    collections::HashSet,
+    io::{BufReader, BufWriter, Write},
+    path::PathBuf,
+    ptr::{self, null},
+    sync::atomic::{AtomicPtr, AtomicUsize},
+};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -28,7 +34,7 @@ impl<const N: usize> PageUsage<N> {
 
     fn increment(&self, epoch: u64) {
         // We count number of access each 64 epoch (seconds).
-        let idx = epoch >> 6; 
+        let idx = epoch >> 6;
 
         let head = self.head_index.load(std::sync::atomic::Ordering::Relaxed);
         let head = head % N;
@@ -36,10 +42,12 @@ impl<const N: usize> PageUsage<N> {
 
         if bucket.is_null() {
             loop {
-                match self.buff[head].compare_exchange_weak(bucket, &mut (
-                    idx,
-                    1,
-                ), std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+                match self.buff[head].compare_exchange_weak(
+                    bucket,
+                    &mut (idx, 1),
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                ) {
                     Ok(_) => break,
                     Err(x) => bucket = x,
                 }
@@ -50,10 +58,12 @@ impl<const N: usize> PageUsage<N> {
                 bucket_count += 1;
             } else {
                 loop {
-                    match self.buff[head].compare_exchange_weak(bucket, &mut (
-                        idx,
-                        1,
-                    ), std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+                    match self.buff[head].compare_exchange_weak(
+                        bucket,
+                        &mut (idx, 1),
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                    ) {
                         Ok(_) => break,
                         Err(x) => bucket = x,
                     }
@@ -120,7 +130,13 @@ fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) ->
 }
 
 impl Page {
-    fn filter(&self, m_field_id: FieldId, filter: &NumberFilter, matching_docs: &mut HashSet<DocumentId>, epoch: u64) -> Result<()> {
+    fn filter(
+        &self,
+        m_field_id: FieldId,
+        filter: &NumberFilter,
+        matching_docs: &mut HashSet<DocumentId>,
+        epoch: u64,
+    ) -> Result<()> {
         self.usage.increment(epoch);
         match &self.pointer {
             PagePointer::InMemory(items) => {
@@ -132,22 +148,30 @@ impl Page {
                 let items: Vec<Item> = bincode::deserialize_from(buf)?;
 
                 Self::filter_on_items(&items, m_field_id, filter, matching_docs);
-            },
+            }
         };
 
         Ok(())
     }
 
-    fn filter_on_items(items: &[Item], m_field_id: FieldId, filter: &NumberFilter, matching_docs: &mut HashSet<DocumentId>) {
+    fn filter_on_items(
+        items: &[Item],
+        m_field_id: FieldId,
+        filter: &NumberFilter,
+        matching_docs: &mut HashSet<DocumentId>,
+    ) {
         let filter_fn = get_filter_fn(filter);
 
         matching_docs.extend(
-            items.iter()
+            items
+                .iter()
                 .filter(|item| filter_fn(item))
-                .flat_map(|item| item.values.iter()
-                    .filter(|(_, field_id)| *field_id == m_field_id)
-                    .map(|(doc_id, _)| *doc_id)
-                )
+                .flat_map(|item| {
+                    item.values
+                        .iter()
+                        .filter(|(_, field_id)| *field_id == m_field_id)
+                        .map(|(doc_id, _)| *doc_id)
+                }),
         );
     }
 }
@@ -221,7 +245,9 @@ impl LinearNumberIndex {
 
             if (current_chunk_size + page_size) >= max_size_per_chunk {
                 current_chunk.max = key;
-                index.bounds.push(((current_chunk.min, current_chunk.max), current_chunk.id));
+                index
+                    .bounds
+                    .push(((current_chunk.min, current_chunk.max), current_chunk.id));
                 index.pages.push(current_chunk);
 
                 current_chunk = Page {
@@ -231,18 +257,16 @@ impl LinearNumberIndex {
                     max: Number::from(f32::INFINITY),
                     usage: PageUsage::new(),
                 };
-                
+
                 current_chunk_size = 0;
             }
 
             current_chunk_size += page_size;
             match current_chunk.pointer {
-                PagePointer::InMemory(ref mut items) => {
-                    items.push(Item {
-                        key: SerializableNumber(key),
-                        values: doc_id_field_id_pairs.into_iter().collect(),
-                    })
-                }
+                PagePointer::InMemory(ref mut items) => items.push(Item {
+                    key: SerializableNumber(key),
+                    values: doc_id_field_id_pairs.into_iter().collect(),
+                }),
                 PagePointer::OnFile(_) => unreachable!("Chunk should be loaded"),
             };
 
@@ -261,7 +285,9 @@ impl LinearNumberIndex {
         first.min = Number::from(f32::NEG_INFINITY);
 
         // Add the last chunk
-        index.bounds.push(((current_chunk.min, current_chunk.max), current_chunk.id));
+        index
+            .bounds
+            .push(((current_chunk.min, current_chunk.max), current_chunk.id));
         index.pages.push(current_chunk);
 
         // Checks we cover all the `Number` space
@@ -272,7 +298,12 @@ impl LinearNumberIndex {
         index
     }
 
-    pub fn filter(&self, field_id: FieldId, filter: &NumberFilter, epoch: u64) -> Result<HashSet<DocumentId>> {
+    pub fn filter(
+        &self,
+        field_id: FieldId,
+        filter: &NumberFilter,
+        epoch: u64,
+    ) -> Result<HashSet<DocumentId>> {
         let pages = match filter {
             NumberFilter::Equal(value) => {
                 let page = match self.find_page(value) {
@@ -280,15 +311,15 @@ impl LinearNumberIndex {
                     Err(_) => return Ok(HashSet::new()),
                 };
                 vec![page]
-            },
-            _ => unimplemented!()
+            }
+            _ => unimplemented!(),
         };
 
         let mut matching_docs = HashSet::new();
 
         for page in pages {
             // If the `filter` fails, should we ignore it?
-            // TODO: think better about this. 
+            // TODO: think better about this.
             page.filter(field_id, filter, &mut matching_docs, epoch)?;
         }
 
@@ -300,7 +331,9 @@ impl LinearNumberIndex {
             return Err(anyhow::anyhow!("No pages in the index"));
         }
 
-        let pos = self.bounds.binary_search_by_key(value, |(bounds, _)| bounds.0);
+        let pos = self
+            .bounds
+            .binary_search_by_key(value, |(bounds, _)| bounds.0);
 
         let page = pos.map(|pos| &self.pages[pos])
             // If the value i'm looking for is contained in a boud, the `binary_search_by_key` returns a error.
@@ -327,16 +360,14 @@ And this should not happen. Return the last page."#);
     }
 
     pub fn save_on_fs_and_unload<P>(&mut self, p: P) -> Result<()>
-    where 
-        P: Into<PathBuf>
+    where
+        P: Into<PathBuf>,
     {
         let p = p.into();
 
         for page in &mut self.pages {
             if let PagePointer::InMemory(items) = &mut page.pointer {
-
-                let page_file = p
-                    .join(format!("page_{}.bin", page.id.0));
+                let page_file = p.join(format!("page_{}.bin", page.id.0));
 
                 println!("Save page {} on file {:?}", page.id.0, page_file);
 
@@ -370,12 +401,30 @@ mod tests {
         let index_2 = LinearNumberIndex::from_iter(iter, 2048);
 
         let tests = [
-            (NumberFilter::Equal(Number::from(1)), HashSet::from_iter(vec![DocumentId(1)])),
-            (NumberFilter::Equal(Number::from(1.0)), HashSet::from_iter(vec![DocumentId(1)])),
-            (NumberFilter::Equal(Number::from(0)), HashSet::from_iter(vec![DocumentId(0)])),
-            (NumberFilter::Equal(Number::from(0.0)), HashSet::from_iter(vec![DocumentId(0)])),
-            (NumberFilter::Equal(Number::from(-1)), HashSet::from_iter(vec![])),
-            (NumberFilter::Equal(Number::from(10_000_000)), HashSet::from_iter(vec![])),
+            (
+                NumberFilter::Equal(Number::from(1)),
+                HashSet::from_iter(vec![DocumentId(1)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(1.0)),
+                HashSet::from_iter(vec![DocumentId(1)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(0)),
+                HashSet::from_iter(vec![DocumentId(0)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(0.0)),
+                HashSet::from_iter(vec![DocumentId(0)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(-1)),
+                HashSet::from_iter(vec![]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(10_000_000)),
+                HashSet::from_iter(vec![]),
+            ),
         ];
 
         for (filter, expected) in tests {
@@ -388,7 +437,6 @@ mod tests {
 
         Ok(())
     }
-
 
     #[test]
     fn test_indexes_number_linear_dump_on_fs() -> Result<()> {
@@ -411,12 +459,30 @@ mod tests {
         index_2.save_on_fs_and_unload(dump_path.clone())?;
 
         let tests = [
-            (NumberFilter::Equal(Number::from(1)), HashSet::from_iter(vec![DocumentId(1)])),
-            (NumberFilter::Equal(Number::from(1.0)), HashSet::from_iter(vec![DocumentId(1)])),
-            (NumberFilter::Equal(Number::from(0)), HashSet::from_iter(vec![DocumentId(0)])),
-            (NumberFilter::Equal(Number::from(0.0)), HashSet::from_iter(vec![DocumentId(0)])),
-            (NumberFilter::Equal(Number::from(-1)), HashSet::from_iter(vec![])),
-            (NumberFilter::Equal(Number::from(10_000_000)), HashSet::from_iter(vec![])),
+            (
+                NumberFilter::Equal(Number::from(1)),
+                HashSet::from_iter(vec![DocumentId(1)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(1.0)),
+                HashSet::from_iter(vec![DocumentId(1)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(0)),
+                HashSet::from_iter(vec![DocumentId(0)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(0.0)),
+                HashSet::from_iter(vec![DocumentId(0)]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(-1)),
+                HashSet::from_iter(vec![]),
+            ),
+            (
+                NumberFilter::Equal(Number::from(10_000_000)),
+                HashSet::from_iter(vec![]),
+            ),
         ];
 
         for (filter, expected) in tests {
@@ -448,6 +514,5 @@ mod tests {
         };
         let size = bincode::serialized_size(&item).unwrap();
         assert!(size > LIMIT_64K);
-
     }
 }

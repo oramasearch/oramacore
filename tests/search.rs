@@ -6,7 +6,6 @@ use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
 use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
-use std::collections::HashMap;
 use std::time::Duration;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
@@ -91,7 +90,10 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
             .build();
 
         let mut variables = VariableSet::new();
-        variables.insert("base_url".to_string(), Value::String(format!("http://{}:{}", HOST, PORT)));
+        variables.insert(
+            "base_url".to_string(),
+            Value::String(format!("http://{}:{}", HOST, PORT)),
+        );
 
         runner::run(content, None, &runner_opts, &variables, &logger_opts)
     })

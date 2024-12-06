@@ -2,8 +2,6 @@ use serde::{de::Visitor, ser::SerializeTuple, Deserialize, Serialize};
 
 use super::Number;
 
-
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SerializableNumber(pub Number);
 
@@ -18,13 +16,13 @@ impl Serialize for SerializableNumber {
                 tuple.serialize_element(&1_u8)?;
                 tuple.serialize_element(v)?;
                 tuple.end()
-            },
+            }
             Number::I32(v) => {
                 let mut tuple = serializer.serialize_tuple(2)?;
                 tuple.serialize_element(&2_u8)?;
                 tuple.serialize_element(v)?;
                 tuple.end()
-            },
+            }
         }
     }
 }

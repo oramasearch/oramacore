@@ -1,8 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-
-
-
 // const SIZE: usize = 128; // Number of seconds to track
 
 pub struct PageUsage<const N: usize> {
@@ -37,7 +34,7 @@ impl<const N: usize> PageUsage<N> {
     // fn get(&self, epoch: u64) -> usize {
     //     let idx = (epoch % N as u64) as usize;
     //     let current_value = self.buckets[idx].load(Ordering::Relaxed);
-    // 
+    //
     //     // Check if the epoch matches; otherwise, the value is outdated
     //     if current_value >> 32 == epoch {
     //         (current_value & 0xFFFF_FFFF) as usize
