@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use dashmap::DashMap;
 
-use crate::{collection_manager::FieldId, document_storage::DocumentId};
+use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
 #[derive(Debug, Default)]
 struct BoolIndexPerField {
@@ -51,7 +51,7 @@ impl BoolIndex {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::{collection_manager::FieldId, document_storage::DocumentId};
+    use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
     use super::BoolIndex;
 

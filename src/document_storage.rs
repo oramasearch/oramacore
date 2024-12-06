@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{atomic::AtomicU32, Arc},
 };
 
 use anyhow::Result;
@@ -10,16 +10,16 @@ use tokio::sync::RwLock;
 use crate::types::Document;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct DocumentId(pub u64);
+pub struct DocumentId(pub u32);
 
 #[derive(Debug, Default)]
 pub struct DocumentStorage {
     storage: RwLock<HashMap<DocumentId, Document>>,
-    id_generator: Arc<AtomicU64>,
+    id_generator: Arc<AtomicU32>,
 }
 
 impl DocumentStorage {
-    pub fn new(id_generator: Arc<AtomicU64>) -> Self {
+    pub fn new(id_generator: Arc<AtomicU32>) -> Self {
         Self {
             storage: Default::default(),
             id_generator,

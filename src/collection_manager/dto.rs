@@ -1,18 +1,29 @@
 use std::collections::HashMap;
 
+use axum_openapi3::utoipa;
+use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    code_parser::CodeLanguage,
+    document_storage::DocumentId,
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
-    types::Document,
+    types::{Document, ValueType},
 };
 
-use super::collection::FieldId;
+use super::CollectionId;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldId(pub u16);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenScore {
+    pub document_id: DocumentId,
+    pub score: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema)]
 pub enum LanguageDTO {
     English,
 }
@@ -33,84 +44,94 @@ impl From<Locale> for LanguageDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct EmbeddingTypedField {
+    #[schema(inline)]
     pub model_name: OramaModel,
     pub document_fields: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 #[serde(untagged)]
 pub enum TypedField {
-    Text(LanguageDTO),
-    Code(CodeLanguage),
-    Embedding(EmbeddingTypedField),
+    Text(#[schema(inline)] LanguageDTO),
+    Embedding(#[schema(inline)] EmbeddingTypedField),
+    Number,
+    Bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateCollectionOptionDTO {
     pub id: String,
     pub description: Option<String>,
+    #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]
+    #[schema(inline)]
     pub typed_fields: HashMap<String, TypedField>,
 }
 
 impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
-    type Error = serde_json::Error;
+    type Error = anyhow::Error;
 
-    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        serde_json::from_value(value)
+    fn try_from(value: serde_json::Value) -> anyhow::Result<Self> {
+        let v = serde_json::from_value(value)?;
+        Ok(v)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CollectionDTO {
-    pub id: String,
+    #[schema(inline)]
+    pub id: CollectionId,
     pub description: Option<String>,
-    pub language: LanguageDTO,
-    pub document_count: usize,
-    pub string_fields: HashMap<String, FieldId>,
-    pub code_fields: HashMap<String, FieldId>,
+    pub document_count: u32,
+    #[schema(inline)]
+    pub fields: HashMap<String, ValueType>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Limit(pub usize);
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct Limit(#[schema(inline)] pub usize);
 impl Default for Limit {
     fn default() -> Self {
         Limit(10)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[serde(untagged)]
 pub enum Filter {
-    Number(NumberFilter),
+    Number(#[schema(inline)] NumberFilter),
     Bool(bool),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct NumberFacetDefinitionRange {
+    #[schema(inline)]
     pub from: Number,
+    #[schema(inline)]
     pub to: Number,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct NumberFacetDefinition {
+    #[schema(inline)]
     pub ranges: Vec<NumberFacetDefinitionRange>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+
 pub enum FacetDefinition {
-    Number(NumberFacetDefinition),
+    Number(#[schema(inline)] NumberFacetDefinition),
     Bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct FulltextMode {
     pub term: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -120,20 +141,22 @@ pub struct VectorMode {
     pub term: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct HybridMode {}
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct HybridMode {
+    pub term: String,
+}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum SearchMode {
     #[serde(rename = "fulltext")]
-    FullText(FulltextMode),
+    FullText(#[schema(inline)] FulltextMode),
     #[serde(rename = "vector")]
-    Vector(VectorMode),
+    Vector(#[schema(inline)] VectorMode),
     #[serde(rename = "hybrid")]
-    Hybrid(HybridMode),
+    Hybrid(#[schema(inline)] HybridMode),
     #[serde(untagged)]
-    Default(FulltextMode),
+    Default(#[schema(inline)] FulltextMode),
 }
 impl Default for SearchMode {
     fn default() -> Self {
@@ -143,19 +166,23 @@ impl Default for SearchMode {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SearchParams {
     #[serde(flatten, rename = "type")]
+    #[schema(inline)]
     pub mode: SearchMode,
     #[serde(default)]
+    #[schema(inline)]
     pub limit: Limit,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
     #[serde(default)]
     pub properties: Option<Vec<String>>,
     #[serde(default, rename = "where")]
+    #[schema(inline)]
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
+    #[schema(inline)]
     pub facets: HashMap<String, FacetDefinition>,
 }
 

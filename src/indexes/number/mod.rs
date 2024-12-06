@@ -1,9 +1,15 @@
 use std::collections::{BTreeMap, HashSet};
 
+use axum_openapi3::utoipa;
+use axum_openapi3::utoipa::ToSchema;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::{collection_manager::FieldId, document_storage::DocumentId};
+use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
+
+mod linear;
+mod serializable_number;
+mod stats;
 
 #[derive(Debug, Default)]
 pub struct NumberIndex {
@@ -57,7 +63,7 @@ impl NumberIndex {
                 .range((Bound::Included(&value), Bound::Unbounded))
                 .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
                 .collect(),
-            NumberFilter::Between(min, max) => btree
+            NumberFilter::Between((min, max)) => btree
                 .range((Bound::Included(&min), Bound::Included(&max)))
                 .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
                 .collect(),
@@ -65,20 +71,21 @@ impl NumberIndex {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum NumberFilter {
-    Equal(Number),
-    GreaterThan(Number),
-    GreaterThanOrEqual(Number),
-    LessThan(Number),
-    LessThanOrEqual(Number),
-    Between(Number, Number),
+    Equal(#[schema(inline)] Number),
+    GreaterThan(#[schema(inline)] Number),
+    GreaterThanOrEqual(#[schema(inline)] Number),
+    LessThan(#[schema(inline)] Number),
+    LessThanOrEqual(#[schema(inline)] Number),
+    Between(#[schema(inline)] (Number, Number)),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
 pub enum Number {
-    I32(i32),
-    F32(f32),
+    I32(#[schema(inline)] i32),
+    F32(#[schema(inline)] f32),
 }
 
 impl std::fmt::Display for Number {
@@ -136,6 +143,19 @@ impl Ord for Number {
             (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
             (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
             (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
+        }
+    }
+}
+
+impl std::ops::Add for Number {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::I32(a), Number::I32(b)) => (a + b).into(),
+            (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
+            (Number::F32(a), Number::F32(b)) => (a + b).into(),
+            (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
         }
     }
 }
@@ -334,7 +354,7 @@ mod tests {
         );
     });
     test_number_filter!(test_number_index_filter_between, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::Between(2.into(), 3.into()));
+        let output = index.filter(FieldId(0), NumberFilter::Between((2.into(), 3.into())));
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(3), DocumentId(2), DocumentId(5)])

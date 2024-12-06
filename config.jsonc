@@ -6,6 +6,13 @@
         "allow_cors": true
     },
 
+    "writer_side": {
+        "output": "in-memory",
+    },
+    "reader_side": {
+        "input": "in-memory",
+    },
+
     "embeddings": {
         // Preload all embeddings on startup
         "preload": ["small-model"],

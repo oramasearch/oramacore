@@ -5,11 +5,17 @@ pub mod properties_selector;
 mod hf;
 
 use anyhow::{anyhow, Context, Result};
+use axum_openapi3::utoipa;
+use axum_openapi3::utoipa::ToSchema;
 use dashmap::{DashMap, Entry};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hf::HuggingFaceConfiguration;
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Arc};
+use std::{
+    fmt::{self, Debug},
+    hash::Hash,
+    sync::Arc,
+};
 use strum::EnumIter;
 use strum_macros::{AsRefStr, Display};
 use tracing::{info, instrument};
@@ -50,7 +56,7 @@ pub struct EmbeddingsResponse {
 }
 
 #[derive(
-    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr,
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, EnumIter, Display, AsRefStr, ToSchema,
 )]
 pub enum OramaFastembedModel {
     #[serde(rename = "gte-small")]
@@ -86,10 +92,12 @@ impl OramaFastembedModel {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, Display, AsRefStr)]
+#[derive(
+    Serialize, Deserialize, Debug, Hash, PartialEq, Eq, Clone, Display, AsRefStr, ToSchema,
+)]
 #[serde(untagged)]
 pub enum OramaModel {
-    Fastembed(OramaFastembedModel),
+    Fastembed(#[schema(inline)] OramaFastembedModel),
     HuggingFace(String),
 }
 
@@ -107,6 +115,27 @@ pub struct LoadedModel {
     model_name: String,
     max_input_tokens: usize,
     dimensions: usize,
+}
+impl Debug for LoadedModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadedModel")
+            .field("model_name", &self.model_name)
+            .field("max_input_tokens", &self.max_input_tokens)
+            .field("dimensions", &self.dimensions)
+            .field("text_embedding", &"...".to_string())
+            .finish()
+    }
+}
+impl PartialEq for LoadedModel {
+    fn eq(&self, other: &Self) -> bool {
+        self.model_name == other.model_name
+    }
+}
+impl Eq for LoadedModel {}
+impl Hash for LoadedModel {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.model_name.hash(state);
+    }
 }
 
 impl LoadedModel {
