@@ -325,7 +325,6 @@ mod tests {
                 let way = v[i].cmp(&v[j]);
                 let other_way = v[j].cmp(&v[i]);
 
-                println!("{:?} cmp {:?}", v[i], v[j]);
                 assert_eq!(way.reverse(), other_way);
             }
         }
@@ -335,7 +334,7 @@ mod tests {
         ($fn_name: ident, $b: expr) => {
             #[test]
             fn $fn_name() {
-                let index = NumberIndex::new();
+                let mut index = NumberIndex::new();
 
                 index.add(DocumentId(0), FieldId(0), 0.into());
                 index.add(DocumentId(1), FieldId(0), 1.into());
@@ -346,12 +345,24 @@ mod tests {
 
                 let a = $b;
 
-                a(index);
+                a(&index);
+
+                index.commit();
+
+                a(&index);
+
+                let tmp_dir = TempDir::new("example").unwrap();
+                let dump_path = tmp_dir.path().join("index_2");
+                std::fs::remove_dir_all(dump_path.clone()).ok();
+                std::fs::create_dir_all(dump_path.clone()).unwrap();
+                index.committed.save_on_fs_and_unload(dump_path.clone()).unwrap();
+
+                a(&index);
             }
         };
     }
 
-    test_number_filter!(test_number_index_filter_eq, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_eq, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
             .unwrap();
@@ -360,7 +371,7 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
     });
-    test_number_filter!(test_number_index_filter_lt, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_lt, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::LessThan(2.into()))
             .unwrap();
@@ -369,7 +380,7 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(0), DocumentId(1)])
         );
     });
-    test_number_filter!(test_number_index_filter_lt_equal, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_lt_equal, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::LessThanOrEqual(2.into()))
             .unwrap();
@@ -383,7 +394,7 @@ mod tests {
             ])
         );
     });
-    test_number_filter!(test_number_index_filter_gt, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_gt, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::GreaterThan(2.into()))
             .unwrap();
@@ -392,7 +403,7 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(3), DocumentId(4)])
         );
     });
-    test_number_filter!(test_number_index_filter_gt_equal, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_gt_equal, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::GreaterThanOrEqual(2.into()))
             .unwrap();
@@ -406,7 +417,7 @@ mod tests {
             ])
         );
     });
-    test_number_filter!(test_number_index_filter_between, |index: NumberIndex| {
+    test_number_filter!(test_number_index_filter_between, |index: &NumberIndex| {
         let output = index
             .filter(FieldId(0), NumberFilter::Between((2.into(), 3.into())))
             .unwrap();

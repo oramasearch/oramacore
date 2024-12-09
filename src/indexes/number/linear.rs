@@ -57,7 +57,7 @@ enum PagePointer {
 }
 
 /// This is the index of the chunk used in `chunks` array.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct ChunkId(usize);
 
 struct Page {
@@ -83,7 +83,11 @@ impl Debug for Page {
 fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) -> bool + 'filter> {
     match filter {
         NumberFilter::Equal(value) => Box::new(move |x| &x.key.0 == value),
-        _ => unimplemented!(),
+        NumberFilter::Between((min, max)) => Box::new(move |x| &x.key.0 >= min && &x.key.0 <= max),
+        NumberFilter::GreaterThan(min) => Box::new(move |x| &x.key.0 > min),
+        NumberFilter::GreaterThanOrEqual(min) => Box::new(move |x| &x.key.0 >= min),
+        NumberFilter::LessThan(max) => Box::new(move |x| &x.key.0 < max),
+        NumberFilter::LessThanOrEqual(max) => Box::new(move |x| &x.key.0 <= max),
     }
 }
 
@@ -271,7 +275,54 @@ impl LinearNumberIndex {
                 };
                 vec![page]
             }
-            _ => unimplemented!(),
+            NumberFilter::Between((min, max)) => {
+                let min_page = match self.find_page(min) {
+                    Ok(page) => page,
+                    Err(_) => return Ok(HashSet::new()),
+                };
+                let max_page = match self.find_page(max) {
+                    Ok(page) => page,
+                    Err(_) => return Ok(HashSet::new()),
+                };
+
+                let min_page_id = min_page.id;
+                let max_page_id = max_page.id;
+
+                // let min_pos = self.pages.iter().position(|p| p.id == min_page_id).unwrap();
+                // let max_pos = self.pages.iter().position(|p| p.id == max_page_id).unwrap();
+
+                self.pages
+                    .iter()
+                    .skip_while(|p| p.id < min_page_id)
+                    .take_while(|p| p.id <= max_page_id)
+                    .collect()
+            }
+            NumberFilter::GreaterThan(min) | NumberFilter::GreaterThanOrEqual(min) => {
+                let min_page = match self.find_page(min) {
+                    Ok(page) => page,
+                    Err(_) => return Ok(HashSet::new()),
+                };
+
+                let min_page_id = min_page.id;
+
+                self.pages
+                    .iter()
+                    .skip_while(|p| p.id < min_page_id)
+                    .collect()
+            }
+            NumberFilter::LessThan(max) | NumberFilter::LessThanOrEqual(max) => {
+                let max_page = match self.find_page(max) {
+                    Ok(page) => page,
+                    Err(_) => return Ok(HashSet::new()),
+                };
+
+                let max_page_id = max_page.id;
+
+                self.pages
+                    .iter()
+                    .take_while(|p| p.id <= max_page_id)
+                    .collect()
+            }
         };
 
         let mut matching_docs = HashSet::new();
@@ -287,6 +338,9 @@ impl LinearNumberIndex {
 
     fn find_page(&self, value: &Number) -> Result<&Page> {
         if self.pages.is_empty() {
+            // This should never fail.
+            // We could put an empty page, so we can avoid this check.
+            // TODO: do it.
             return Err(anyhow::anyhow!("No pages in the index"));
         }
 
