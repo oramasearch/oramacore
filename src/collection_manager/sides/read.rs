@@ -308,10 +308,10 @@ impl CollectionReader {
 
             let mut doc_ids = match (&field_type, filter) {
                 (TypedField::Number, Filter::Number(filter_number)) => {
-                    self.number_index.filter(field_id, filter_number)
+                    self.number_index.filter(field_id, filter_number)?
                 }
                 (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                    self.bool_index.filter(field_id, filter_bool)
+                    self.bool_index.filter(field_id, filter_bool)?
                 }
                 _ => {
                     error!(
@@ -328,10 +328,10 @@ impl CollectionReader {
             for (field_name, field_id, field_type, filter) in filters {
                 let doc_ids_ = match (&field_type, filter) {
                     (TypedField::Number, Filter::Number(filter_number)) => {
-                        self.number_index.filter(field_id, filter_number)
+                        self.number_index.filter(field_id, filter_number)?
                     }
                     (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                        self.bool_index.filter(field_id, filter_bool)
+                        self.bool_index.filter(field_id, filter_bool)?
                     }
                     _ => {
                         error!(
@@ -565,7 +565,7 @@ impl CollectionReader {
                         for range in facet.ranges {
                             let facet: HashSet<_> = self
                                 .number_index
-                                .filter(field_id, NumberFilter::Between((range.from, range.to)))
+                                .filter(field_id, NumberFilter::Between((range.from, range.to)))?
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();
@@ -584,13 +584,13 @@ impl CollectionReader {
                     FacetDefinition::Bool => {
                         let true_facet: HashSet<DocumentId> = self
                             .bool_index
-                            .filter(field_id, true)
+                            .filter(field_id, true)?
                             .into_iter()
                             .filter(|doc_id| token_scores.contains_key(doc_id))
                             .collect();
                         let false_facet: HashSet<DocumentId> = self
                             .bool_index
-                            .filter(field_id, false)
+                            .filter(field_id, false)?
                             .into_iter()
                             .filter(|doc_id| token_scores.contains_key(doc_id))
                             .collect();

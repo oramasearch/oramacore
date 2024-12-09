@@ -28,6 +28,8 @@ ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/expos
 
 regex = "1.11.1"
 
+invocation-counter = "0.1.0"
+
 
 rust-stemmers = "1.2.0"
 text-splitter = { version = "0.19", features = ["tiktoken-rs", "markdown", "code"] }

@@ -1,73 +1,114 @@
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashSet},
+    mem::swap,
+};
 
+use anyhow::Result;
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use dashmap::DashMap;
+use linear::LinearNumberIndex;
+use merge_iter::{MergeIter, MergeIterState};
 use serde::{Deserialize, Serialize};
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
 mod linear;
+mod merge_iter;
 mod serializable_number;
 mod stats;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct NumberIndex {
-    maps: DashMap<FieldId, BTreeMap<Number, HashSet<DocumentId>>>,
+    uncommitted: DashMap<FieldId, BTreeMap<Number, HashSet<DocumentId>>>,
+    committed: LinearNumberIndex,
 }
 
 impl NumberIndex {
     pub fn new() -> Self {
         Self {
-            maps: Default::default(),
+            uncommitted: Default::default(),
+            committed: LinearNumberIndex::from_iter(std::iter::empty(), 2048),
         }
     }
 
     pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: Number) {
-        let mut btree = self.maps.entry(field_id).or_default();
+        let mut btree = self.uncommitted.entry(field_id).or_default();
         let doc_ids = btree.entry(value).or_default();
         doc_ids.insert(doc_id);
     }
 
-    pub fn filter(&self, field_id: FieldId, filter: NumberFilter) -> HashSet<DocumentId> {
+    pub fn filter(&self, field_id: FieldId, filter: NumberFilter) -> Result<HashSet<DocumentId>> {
         use std::ops::Bound;
 
-        let btree = match self.maps.get(&field_id) {
-            Some(btree) => btree,
-            // This should never happen: if the field is not in the index, it means that the field
-            // was not indexed, and the filter should not have been created in the first place.
-            None => return HashSet::new(),
+        let mut doc_ids = self.committed.filter(field_id, &filter, 0)?;
+
+        if let Some(btree) = self.uncommitted.get(&field_id) {
+            match filter {
+                NumberFilter::Equal(value) => {
+                    if let Some(d) = btree.get(&value) {
+                        doc_ids.extend(d.iter().cloned());
+                    }
+                }
+                NumberFilter::LessThan(value) => doc_ids.extend(
+                    btree
+                        .range((Bound::Unbounded, Bound::Excluded(&value)))
+                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
+                ),
+                NumberFilter::LessThanOrEqual(value) => doc_ids.extend(
+                    btree
+                        .range((Bound::Unbounded, Bound::Included(&value)))
+                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
+                ),
+                NumberFilter::GreaterThan(value) => doc_ids.extend(
+                    btree
+                        .range((Bound::Excluded(&value), Bound::Unbounded))
+                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
+                ),
+                NumberFilter::GreaterThanOrEqual(value) => doc_ids.extend(
+                    btree
+                        .range((Bound::Included(&value), Bound::Unbounded))
+                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
+                ),
+                NumberFilter::Between((min, max)) => doc_ids.extend(
+                    btree
+                        .range((Bound::Included(&min), Bound::Included(&max)))
+                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
+                ),
+            }
         };
 
-        match filter {
-            NumberFilter::Equal(value) => {
-                if let Some(doc_ids) = btree.get(&value) {
-                    HashSet::from_iter(doc_ids.iter().cloned())
-                } else {
-                    HashSet::new()
+        Ok(doc_ids)
+    }
+
+    pub fn commit(&mut self) {
+        let committed = self.committed.iter();
+
+        let mut dd: BTreeMap<Number, Cow<Vec<(DocumentId, FieldId)>>> = BTreeMap::new();
+        for e in self.uncommitted.iter() {
+            let field_id = *e.key();
+            let btree = e.value();
+            for (number, doc_ids) in btree.iter() {
+                let a = dd.entry(*number).or_default();
+                for doc_id in doc_ids.iter() {
+                    a.to_mut().push((*doc_id, field_id));
                 }
             }
-            NumberFilter::LessThan(value) => btree
-                .range((Bound::Unbounded, Bound::Excluded(&value)))
-                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                .collect(),
-            NumberFilter::LessThanOrEqual(value) => btree
-                .range((Bound::Unbounded, Bound::Included(&value)))
-                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                .collect(),
-            NumberFilter::GreaterThan(value) => btree
-                .range((Bound::Excluded(&value), Bound::Unbounded))
-                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                .collect(),
-            NumberFilter::GreaterThanOrEqual(value) => btree
-                .range((Bound::Included(&value), Bound::Unbounded))
-                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                .collect(),
-            NumberFilter::Between((min, max)) => btree
-                .range((Bound::Included(&min), Bound::Included(&max)))
-                .flat_map(|(_, doc_ids)| doc_ids.iter().cloned())
-                .collect(),
         }
+
+        let merge_iter = MergeIter {
+            iter1: committed.map(|p| p.unwrap()),
+            iter2: dd.into_iter(),
+            state: MergeIterState::Unstarted,
+        };
+
+        let new_linear = LinearNumberIndex::from_iter(merge_iter, 2048);
+
+        // This is safe because `commit` method keeps **`&mut self`**.
+        // So no concurrent access is possible.
+        self.committed = new_linear;
+        self.uncommitted.clear();
     }
 }
 
@@ -164,6 +205,8 @@ impl std::ops::Add for Number {
 mod tests {
     use core::f32;
     use std::{cmp::Ordering, collections::HashSet};
+
+    use tempdir::TempDir;
 
     use super::*;
 
@@ -309,21 +352,27 @@ mod tests {
     }
 
     test_number_filter!(test_number_index_filter_eq, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::Equal(2.into()));
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
     });
     test_number_filter!(test_number_index_filter_lt, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::LessThan(2.into()));
+        let output = index
+            .filter(FieldId(0), NumberFilter::LessThan(2.into()))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(0), DocumentId(1)])
         );
     });
     test_number_filter!(test_number_index_filter_lt_equal, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::LessThanOrEqual(2.into()));
+        let output = index
+            .filter(FieldId(0), NumberFilter::LessThanOrEqual(2.into()))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![
@@ -335,14 +384,18 @@ mod tests {
         );
     });
     test_number_filter!(test_number_index_filter_gt, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::GreaterThan(2.into()));
+        let output = index
+            .filter(FieldId(0), NumberFilter::GreaterThan(2.into()))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(3), DocumentId(4)])
         );
     });
     test_number_filter!(test_number_index_filter_gt_equal, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::GreaterThanOrEqual(2.into()));
+        let output = index
+            .filter(FieldId(0), NumberFilter::GreaterThanOrEqual(2.into()))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![
@@ -354,10 +407,56 @@ mod tests {
         );
     });
     test_number_filter!(test_number_index_filter_between, |index: NumberIndex| {
-        let output = index.filter(FieldId(0), NumberFilter::Between((2.into(), 3.into())));
+        let output = index
+            .filter(FieldId(0), NumberFilter::Between((2.into(), 3.into())))
+            .unwrap();
         assert_eq!(
             output,
             HashSet::from_iter(vec![DocumentId(3), DocumentId(2), DocumentId(5)])
         );
     });
+
+    #[test]
+    fn test_number_commit() {
+        let mut index = NumberIndex::new();
+
+        index.add(DocumentId(0), FieldId(0), 0.into());
+        index.add(DocumentId(1), FieldId(0), 1.into());
+        index.add(DocumentId(2), FieldId(0), 2.into());
+        index.add(DocumentId(3), FieldId(0), 3.into());
+        index.add(DocumentId(4), FieldId(0), 4.into());
+        index.add(DocumentId(5), FieldId(0), 2.into());
+
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
+        );
+
+        index.commit();
+
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
+        );
+
+        let tmp_dir = TempDir::new("example").unwrap();
+        let dump_path = tmp_dir.path().join("index_2");
+        std::fs::remove_dir_all(dump_path.clone()).ok();
+        std::fs::create_dir_all(dump_path.clone()).unwrap();
+        index.committed.save_on_fs_and_unload(dump_path.clone()).unwrap();
+
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
+        );
+    }
 }

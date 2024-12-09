@@ -90,10 +90,12 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
             .build();
 
         let mut variables = VariableSet::new();
-        variables.insert(
-            "base_url".to_string(),
-            Value::String(format!("http://{}:{}", HOST, PORT)),
-        );
+        variables
+            .insert(
+                "base_url".to_string(),
+                Value::String(format!("http://{}:{}", HOST, PORT)),
+            )
+            .unwrap();
 
         runner::run(content, None, &runner_opts, &variables, &logger_opts)
     })

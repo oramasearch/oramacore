@@ -1,6 +1,8 @@
 use core::f32;
 use std::{
+    borrow::Cow,
     collections::HashSet,
+    fmt::Debug,
     io::{BufReader, BufWriter, Write},
     path::PathBuf,
     ptr::{self, null},
@@ -9,69 +11,14 @@ use std::{
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{
+    error,
+    field::{Field, Iter},
+};
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
-use super::{serializable_number::SerializableNumber, Number, NumberFilter};
-
-/// struct to track the usage of a page.
-#[derive(Debug)]
-struct PageUsage<const N: usize> {
-    buff: [AtomicPtr<(u64, usize)>; N],
-    head_index: AtomicUsize,
-}
-impl<const N: usize> PageUsage<N> {
-    fn new() -> Self {
-        Self {
-            // Fill the array with 0.
-            // This mean the epoch is 0, so 1Gen 1970.
-            buff: core::array::from_fn(|i| AtomicPtr::new(ptr::null_mut())),
-
-            head_index: AtomicUsize::new(0),
-        }
-    }
-
-    fn increment(&self, epoch: u64) {
-        // We count number of access each 64 epoch (seconds).
-        let idx = epoch >> 6;
-
-        let head = self.head_index.load(std::sync::atomic::Ordering::Relaxed);
-        let head = head % N;
-        let mut bucket = self.buff[head].load(std::sync::atomic::Ordering::Relaxed);
-
-        if bucket.is_null() {
-            loop {
-                match self.buff[head].compare_exchange_weak(
-                    bucket,
-                    &mut (idx, 1),
-                    std::sync::atomic::Ordering::Relaxed,
-                    std::sync::atomic::Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(x) => bucket = x,
-                }
-            }
-        } else {
-            let (mut bucket_epoch, mut bucket_count) = unsafe { &mut *bucket };
-            if bucket_epoch == idx {
-                bucket_count += 1;
-            } else {
-                loop {
-                    match self.buff[head].compare_exchange_weak(
-                        bucket,
-                        &mut (idx, 1),
-                        std::sync::atomic::Ordering::Relaxed,
-                        std::sync::atomic::Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(x) => bucket = x,
-                    }
-                }
-            }
-        }
-    }
-}
+use super::{serializable_number::SerializableNumber, stats::PageUsage, Number, NumberFilter};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Item {
@@ -113,13 +60,24 @@ enum PagePointer {
 #[derive(Debug, Clone, Copy)]
 struct ChunkId(usize);
 
-#[derive(Debug)]
 struct Page {
     id: ChunkId,
     pointer: PagePointer,
     min: Number,
     max: Number,
-    usage: PageUsage<10>,
+    usage: PageUsage,
+}
+
+impl Debug for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Page")
+            .field("id", &self.id)
+            .field("pointer", &self.pointer)
+            .field("min", &self.min)
+            .field("max", &self.max)
+            .field("usage", &"...")
+            .finish()
+    }
 }
 
 fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) -> bool + 'filter> {
@@ -138,6 +96,7 @@ impl Page {
         epoch: u64,
     ) -> Result<()> {
         self.usage.increment(epoch);
+
         match &self.pointer {
             PagePointer::InMemory(items) => {
                 Self::filter_on_items(items, m_field_id, filter, matching_docs);
@@ -369,8 +328,6 @@ And this should not happen. Return the last page."#);
             if let PagePointer::InMemory(items) = &mut page.pointer {
                 let page_file = p.join(format!("page_{}.bin", page.id.0));
 
-                println!("Save page {} on file {:?}", page.id.0, page_file);
-
                 let mut file = std::fs::File::create(page_file.clone())?;
                 let mut buf_writer = BufWriter::new(&mut file);
                 bincode::serialize_into(&mut buf_writer, items)?;
@@ -383,6 +340,73 @@ And this should not happen. Return the last page."#);
         }
 
         Ok(())
+    }
+
+    pub fn iter(&self) -> LinearNumberIndexIter<'_> {
+        LinearNumberIndexIter {
+            index: self,
+            current_page: 0,
+            current_item: 0,
+        }
+    }
+}
+
+pub struct LinearNumberIndexIter<'s> {
+    index: &'s LinearNumberIndex,
+    current_page: usize,
+    current_item: usize,
+}
+
+impl<'a> Iterator for LinearNumberIndexIter<'a> {
+    type Item = Result<(Number, Cow<'a, Vec<(DocumentId, FieldId)>>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_page >= self.index.pages.len() {
+            return None;
+        }
+
+        let page = &self.index.pages[self.current_page];
+        let item = &page.pointer;
+
+        match item {
+            PagePointer::InMemory(items) => {
+                if self.current_item >= items.len() {
+                    self.current_page += 1;
+                    self.current_item = 0;
+                    return self.next();
+                }
+
+                let item = &items[self.current_item];
+                let values = &item.values;
+
+                self.current_item += 1;
+
+                Some(Ok((item.key.0, Cow::Borrowed(values))))
+            }
+            PagePointer::OnFile(p) => {
+                let f = match std::fs::File::open(p) {
+                    Ok(f) => f,
+                    Err(e) => return Some(Err(e.into())),
+                };
+                let buf = BufReader::new(f);
+                let mut items: Vec<Item> = match bincode::deserialize_from(buf) {
+                    Ok(items) => items,
+                    Err(e) => return Some(Err(e.into())),
+                };
+
+                if self.current_item >= items.len() {
+                    self.current_page += 1;
+                    self.current_item = 0;
+                    return self.next();
+                }
+
+                let item = items.remove(self.current_item);
+
+                self.current_item += 1;
+
+                Some(Ok((item.key.0, Cow::Owned(item.values))))
+            }
+        }
     }
 }
 
@@ -514,5 +538,49 @@ mod tests {
         };
         let size = bincode::serialized_size(&item).unwrap();
         assert!(size > LIMIT_64K);
+    }
+
+    #[test]
+    fn test_indexes_number_linear_aaa() -> Result<()> {
+        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
+        let mut index = LinearNumberIndex::from_iter(iter, 2048);
+
+        let all: Vec<_> = index
+            .iter()
+            .map(|item| {
+                let key = item.as_ref().unwrap().0;
+                let values = item.as_ref().unwrap().1.to_vec();
+                (key, values)
+            })
+            .collect();
+
+        assert_eq!(all.len(), 1_000);
+
+        let is_sorted = all.windows(2).all(|w| w[0].0 < w[1].0);
+        assert!(is_sorted);
+
+        let tmp_dir = TempDir::new("example")?;
+        let dump_path = tmp_dir.path().join("index_2");
+        std::fs::remove_dir_all(dump_path.clone()).ok();
+        std::fs::create_dir_all(dump_path.clone())?;
+        index.save_on_fs_and_unload(dump_path.clone())?;
+
+        let all_after_dump: Vec<_> = index
+            .iter()
+            .map(|item| {
+                let key = item.as_ref().unwrap().0;
+                let values = item.as_ref().unwrap().1.to_vec();
+                (key, values)
+            })
+            .collect();
+
+        assert_eq!(all_after_dump.len(), 1_000);
+
+        let is_sorted = all_after_dump.windows(2).all(|w| w[0].0 < w[1].0);
+        assert!(is_sorted);
+
+        assert_eq!(all, all_after_dump);
+
+        Ok(())
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use anyhow::Result;
 use dashmap::DashMap;
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
@@ -31,18 +32,18 @@ impl BoolIndex {
         }
     }
 
-    pub fn filter(&self, field_id: FieldId, val: bool) -> HashSet<DocumentId> {
+    pub fn filter(&self, field_id: FieldId, val: bool) -> Result<HashSet<DocumentId>> {
         let btree = match self.maps.get(&field_id) {
             Some(btree) => btree,
             // This should never happen: if the field is not in the index, it means that the field
             // was not indexed, and the filter should not have been created in the first place.
-            None => return HashSet::new(),
+            None => return Ok(HashSet::new()),
         };
 
         if val {
-            btree.true_docs.clone()
+            Ok(btree.true_docs.clone())
         } else {
-            btree.false_docs.clone()
+            Ok(btree.false_docs.clone())
         }
     }
 }
@@ -66,13 +67,13 @@ mod tests {
         index.add(DocumentId(4), FieldId(0), true);
         index.add(DocumentId(5), FieldId(0), false);
 
-        let true_docs = index.filter(FieldId(0), true);
+        let true_docs = index.filter(FieldId(0), true).unwrap();
         assert_eq!(
             true_docs,
             HashSet::from([DocumentId(0), DocumentId(2), DocumentId(4)])
         );
 
-        let false_docs = index.filter(FieldId(0), false);
+        let false_docs = index.filter(FieldId(0), false).unwrap();
         assert_eq!(
             false_docs,
             HashSet::from([DocumentId(1), DocumentId(3), DocumentId(5)])
@@ -90,10 +91,10 @@ mod tests {
         index.add(DocumentId(4), FieldId(0), true);
         index.add(DocumentId(5), FieldId(0), false);
 
-        let true_docs = index.filter(FieldId(1), true);
+        let true_docs = index.filter(FieldId(1), true).unwrap();
         assert_eq!(true_docs, HashSet::from([]));
 
-        let false_docs = index.filter(FieldId(1), false);
+        let false_docs = index.filter(FieldId(1), false).unwrap();
         assert_eq!(false_docs, HashSet::from([]));
     }
 }
