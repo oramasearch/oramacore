@@ -16,7 +16,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
 use crate::{
-    capped_heap::{CappedHead},
+    capped_heap::CappedHeap,
     collection_manager::{
         dto::{
             FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
@@ -648,7 +648,7 @@ impl CollectionReader {
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    let mut capped_heap = CappedHead::new(n);
+    let mut capped_heap = CappedHeap::new(n);
 
     for (key, value) in map {
         let k = match NotNan::new(value) {

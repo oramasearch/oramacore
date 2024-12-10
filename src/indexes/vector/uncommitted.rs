@@ -5,7 +5,7 @@ use ordered_float::NotNan;
 use tracing::info;
 
 use crate::{
-    capped_heap::CappedHead, collection_manager::dto::FieldId, document_storage::DocumentId,
+    capped_heap::CappedHeap, collection_manager::dto::FieldId, document_storage::DocumentId,
 };
 
 type VectorWithMagnetude = (f32, Vec<f32>);
@@ -71,7 +71,7 @@ impl UncommittedVectorIndex {
 
         let magnetude = calculate_magnetude(target);
 
-        let mut capped_heap = CappedHead::new(limit);
+        let mut capped_heap = CappedHeap::new(limit);
         for (id, field_id, vectors) in lock.iter() {
             if !field_ids.contains(field_id) {
                 continue;

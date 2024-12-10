@@ -1,11 +1,11 @@
 use std::{cmp::Reverse, collections::BinaryHeap};
 
-pub struct CappedHead<K, V> {
+pub struct CappedHeap<K, V> {
     heap: BinaryHeap<Reverse<(K, V)>>,
     limit: usize,
 }
 
-impl<K: std::cmp::Ord, V: std::cmp::Ord> CappedHead<K, V> {
+impl<K: std::cmp::Ord, V: std::cmp::Ord> CappedHeap<K, V> {
     pub fn new(limit: usize) -> Self {
         Self {
             heap: BinaryHeap::new(),
@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn test_cappend_heap() {
-        let mut heap = CappedHead::new(3);
+        let mut heap = CappedHeap::new(3);
 
         heap.insert(1, 1);
         heap.insert(2, 2);
