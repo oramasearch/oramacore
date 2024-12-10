@@ -25,12 +25,14 @@ PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
     {
         "id": "1",
         "title": "The Beatles",
-        "content": "The Beatles were an English rock band formed in Liverpool in 1960. With a line-up comprising John Lennon, Paul McCartney, George Harrison and Ringo Starr, they are regarded as the most influential band of all time."
+        "content": "The Beatles were an English rock band formed in Liverpool in 1960. With a line-up comprising John Lennon, Paul McCartney, George Harrison and Ringo Starr, they are regarded as the most influential band of all time.",
+        "number": 1
     },
     {
         "id": "2",
         "title": "The Rolling Stones",
-        "content": "The Rolling Stones are an English rock band formed in London in 1962. The first settled line-up consisted of Brian Jones, Ian Stewart, Mick Jagger, Keith Richards, Bill Wyman, and Charlie Watts."
+        "content": "The Rolling Stones are an English rock band formed in London in 1962. The first settled line-up consisted of Brian Jones, Ian Stewart, Mick Jagger, Keith Richards, Bill Wyman, and Charlie Watts.",
+        "number": 2
     }
 ]
 HTTP 200
@@ -41,6 +43,9 @@ HTTP 200
 jsonpath "$.document_count" == 2
 
 POST {{base_url}}/v0/collections/{{collection_id}}/search
+[Options]
+retry: 10
+retry-interval: 500ms
 {
     "term": "beatles"
 }

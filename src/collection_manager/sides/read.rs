@@ -27,7 +27,7 @@ use crate::{
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
-        number::{NumberFilter, NumberIndex},
+        number::{Number, NumberFilter, NumberIndex},
         string::{scorer::bm25::BM25Score, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
@@ -72,21 +72,22 @@ impl CollectionsReader {
         match op {
             WriteOperation::Generic(GenericWriteOperation::CreateCollection { id }) => {
                 info!("CreateCollection {:?}", id);
+
+                let collection_data_dir = self.data_config.data_dir.join(&id.0);
+
                 let collection_reader = CollectionReader {
                     id: id.clone(),
                     embedding_service: self.embedding_service.clone(),
 
                     document_storage: Arc::clone(&self.document_storage),
 
-                    // The unwrap here is bad even if it is safe because it never fails
-                    // TODO: remove this unwrap
                     vector_index: VectorIndex::try_new(VectorIndexConfig {})
                         .context("Cannot create vector index during collection creation")?,
                     fields_per_model: Default::default(),
 
                     string_index: StringIndex::new(self.posting_id_generator.clone()),
                     number_index: NumberIndex::new(
-                        self.data_config.data_dir.join("numbers"),
+                        collection_data_dir.join("numbers"),
                         self.data_config.max_size_per_chunk,
                     )?,
                     bool_index: BoolIndex::new(),
@@ -142,6 +143,12 @@ impl CollectionsReader {
                             .insert_document(doc_id, doc)
                             .await
                             .context("cannot insert document")?;
+                    }
+                    CollectionWriteOperation::IndexNumber { doc_id, field_id, value } => {
+                        collection_reader
+                            .index_number(doc_id, field_id, value)
+                            .await
+                            .context("cannot index number")?;
                     }
                 }
             }
@@ -262,6 +269,17 @@ impl CollectionReader {
         terms: InsertStringTerms,
     ) -> Result<()> {
         self.string_index.insert(doc_id, field_id, terms).await?;
+        Ok(())
+    }
+
+    #[instrument(skip(self, value), level="debug", fields(self.id = ?self.id))]
+    async fn index_number(
+        &self,
+        doc_id: DocumentId,
+        field_id: FieldId,
+        value: Number,
+    ) -> Result<()> {
+        self.number_index.add(doc_id, field_id, value);
         Ok(())
     }
 

@@ -1,6 +1,7 @@
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
-use serde::{Deserialize, Serialize};
+use serde::{ser::Error, Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(untagged)]
@@ -26,6 +27,24 @@ impl From<i32> for Number {
 impl From<f32> for Number {
     fn from(value: f32) -> Self {
         Number::F32(value)
+    }
+}
+impl TryFrom<&Value> for Number {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Ok(Number::I32(i as i32))
+                } else if let Some(f) = n.as_f64() {
+                    Ok(Number::F32(f as f32))
+                } else {
+                    Err(serde_json::Error::custom("Not a number"))
+                }
+            }
+            _ => Err(serde_json::Error::custom("Not a number")),
+        }
     }
 }
 

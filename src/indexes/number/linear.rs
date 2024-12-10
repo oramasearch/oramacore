@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -102,9 +102,11 @@ impl Page {
                 Self::filter_on_items(items, m_field_id, filter, matching_docs);
             }
             PagePointer::OnFile(p) => {
-                let f = std::fs::File::open(p)?;
+                let f = std::fs::File::open(p)
+                    .with_context(|| format!("Cannot open {p:?}"))?;
                 let buf = BufReader::new(f);
-                let items: Vec<Item> = bincode::deserialize_from(buf)?;
+                let items: Vec<Item> = bincode::deserialize_from(buf)
+                    .with_context(|| format!("Cannot deserialize items from {p:?}"))?;
 
                 Self::filter_on_items(&items, m_field_id, filter, matching_docs);
             }
@@ -190,7 +192,8 @@ impl LinearNumberIndex {
     pub fn from_fs(base_path: PathBuf, default_max_size_per_chunk: usize) -> Result<Self> {
         let bound_file = base_path.join("bounds.bin");
 
-        if !fs::exists(&bound_file)? {
+        let exists = fs::exists(&bound_file).unwrap_or(false);
+        if !exists {
             return Self::from_iter(
                 std::iter::empty(),
                 FromIterConfig {
@@ -201,10 +204,13 @@ impl LinearNumberIndex {
         }
 
         let (max_size_per_chunk, bounds) = {
-            let f = std::fs::File::open(bound_file)?;
+            let f = std::fs::File::open(bound_file)
+                .with_context(|| anyhow::anyhow!("Cannot open file"))?;
             let mut buf = BufReader::new(f);
-            let max_size_per_chunk: usize = bincode::deserialize_from(&mut buf)?;
-            let bounds: Vec<((Number, Number), ChunkId)> = bincode::deserialize_from(&mut buf)?;
+            let max_size_per_chunk: usize = bincode::deserialize_from(&mut buf)
+                .with_context(|| anyhow::anyhow!("Cannot deserialize `max_size_per_chunk`"))?;
+            let bounds: Vec<((Number, Number), ChunkId)> = bincode::deserialize_from(&mut buf)
+                .with_context(|| anyhow::anyhow!("Cannot deserialize `bounds`"))?;
 
             (max_size_per_chunk, bounds)
         };
@@ -291,7 +297,8 @@ impl LinearNumberIndex {
                     .push(((current_chunk.min, current_chunk.max), current_chunk.id));
 
                 let page_file = get_page_file(&current_chunk, &base_path);
-                current_chunk.move_to_fs(page_file)?;
+                current_chunk.move_to_fs(page_file)
+                    .with_context(|| anyhow::anyhow!("Cannot move page to FS"))?;
                 index.pages.push(current_chunk);
 
                 current_chunk = Page {
@@ -334,15 +341,19 @@ impl LinearNumberIndex {
             .push(((current_chunk.min, current_chunk.max), current_chunk.id));
 
         let page_file = get_page_file(&current_chunk, &base_path);
-        current_chunk.move_to_fs(page_file)?;
+        current_chunk.move_to_fs(page_file)
+            .with_context(|| anyhow::anyhow!("Cannot move page to FS"))?;
 
         index.pages.push(current_chunk);
 
         let bound_file = base_path.join("bounds.bin");
-        let mut file = std::fs::File::create(bound_file.clone())?;
+        let mut file = std::fs::File::create(bound_file.clone())
+            .with_context(|| anyhow::anyhow!("Cannot create bounds.bin file"))?;
         let mut buf_writer = BufWriter::new(&mut file);
-        bincode::serialize_into(&mut buf_writer, &index.max_size_per_chunk)?;
-        bincode::serialize_into(&mut buf_writer, &index.bounds)?;
+        bincode::serialize_into(&mut buf_writer, &index.max_size_per_chunk)
+            .context("Cannot serialize `max_size_per_chunk`")?;
+        bincode::serialize_into(&mut buf_writer, &index.bounds)
+            .context("Cannot serialize `bounds`")?;
         buf_writer.flush().unwrap();
         drop(buf_writer);
         file.sync_data().unwrap();
@@ -542,21 +553,25 @@ mod tests {
 
     #[test]
     fn test_indexes_number_linear_equal() -> Result<()> {
+        let base_path1 = generate_new_path();
+        fs::create_dir_all(&base_path1)?;
         let iter = (0..2).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
         let index_1 = LinearNumberIndex::from_iter(
             iter,
             FromIterConfig {
                 max_size_per_chunk: 2048,
-                base_path: generate_new_path(),
+                base_path: base_path1,
             },
         )?;
 
+        let base_path2 = generate_new_path();
+        fs::create_dir_all(&base_path2)?;
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
         let index_2 = LinearNumberIndex::from_iter(
             iter,
             FromIterConfig {
                 max_size_per_chunk: 2048,
-                base_path: generate_new_path(),
+                base_path: base_path2,
             },
         )?;
 

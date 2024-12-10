@@ -16,7 +16,7 @@ use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
     document_storage::DocumentId,
     embeddings::{EmbeddingService, LoadedModel},
-    indexes::string::Posting,
+    indexes::{number::Number, string::Posting},
     nlp::{locales::Locale, TextParser},
     types::{ComplexType, Document, DocumentList, FlattenDocument, ScalarType, ValueType},
 };
@@ -59,6 +59,11 @@ pub enum CollectionWriteOperation {
         field_id: FieldId,
         value: Vec<f32>,
     },
+    IndexNumber {
+        doc_id: DocumentId,
+        field_id: FieldId,
+        value: Number,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -163,7 +168,17 @@ impl CollectionsWriter {
                         ),
                     );
                 }
-                TypedField::Number => unimplemented!("Number field not implemented yet"),
+                TypedField::Number => {
+                    collection.fields.insert(
+                        field_name.clone(),
+                        (
+                            ValueType::Scalar(ScalarType::Number),
+                            Arc::new(Box::new(StringField {
+                                parser: self.get_text_parser(None),
+                            })),
+                        ),
+                    );
+                },
                 TypedField::Bool => unimplemented!("Bool field not implemented yet"),
             }
 
@@ -273,6 +288,37 @@ trait FieldIndexer: Sync + Send + Debug {
         field_id: FieldId,
         doc: &FlattenDocument,
     ) -> Result<Vec<WriteOperation>>;
+}
+
+#[derive(Debug)]
+pub struct NumberField {}
+impl FieldIndexer for NumberField {
+    fn get_write_operations(
+        &self,
+        coll_id: CollectionId,
+        doc_id: DocumentId,
+        field_name: &str,
+        field_id: FieldId,
+        doc: &FlattenDocument,
+    ) -> Result<Vec<WriteOperation>> {
+        let value = doc.get(field_name).and_then(|v| Number::try_from(v).ok());
+
+        let value = match value {
+            None => return Ok(vec![]),
+            Some(value) => value,
+        };
+
+        let op = WriteOperation::Collection(
+            coll_id,
+            CollectionWriteOperation::IndexNumber {
+                doc_id,
+                field_id,
+                value,
+            },
+        );
+
+        Ok(vec![op])
+    }
 }
 
 #[derive(Debug)]
@@ -514,6 +560,15 @@ impl CollectionWriter {
                     self.fields.insert(
                         field_name.clone(),
                         (value_type, Arc::new(Box::new(StringField { parser }))),
+                    );
+                }
+                ValueType::Scalar(ScalarType::Number) => {
+                    self.fields.insert(
+                        field_name.clone(),
+                        (
+                            value_type,
+                            Arc::new(Box::new(NumberField {})),
+                        ),
                     );
                 }
                 _ => unimplemented!("Field type not implemented yet"),

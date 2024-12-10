@@ -11,6 +11,7 @@ use dashmap::DashMap;
 use linear::{FromIterConfig, LinearNumberIndex};
 use merge_iter::{MergeIter, MergeIterState};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
@@ -34,6 +35,7 @@ pub struct NumberIndex {
 
 impl NumberIndex {
     pub fn new(base_path: PathBuf, max_size_per_chunk: usize) -> Result<Self> {
+        std::fs::create_dir_all(&base_path)?;
         Ok(Self {
             uncommitted: Default::default(),
             committed: LinearNumberIndex::from_fs(base_path.clone(), max_size_per_chunk)?,
@@ -43,6 +45,7 @@ impl NumberIndex {
     }
 
     pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: Number) {
+        debug!("Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}", doc_id, field_id, value);
         let mut btree = self.uncommitted.entry(field_id).or_default();
         let doc_ids = btree.entry(value).or_default();
         doc_ids.insert(doc_id);
@@ -268,9 +271,7 @@ mod tests {
 
     #[test]
     fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
-        fs::remove_dir_all(".data")?;
-        fs::create_dir(".data")?;
-        let mut index = NumberIndex::new(".data".parse().unwrap(), 2048)?;
+        let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
         for (number, (doc_id, field_id)) in iter {
