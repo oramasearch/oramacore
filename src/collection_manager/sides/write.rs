@@ -63,7 +63,7 @@ pub enum CollectionWriteOperation {
         doc_id: DocumentId,
         field_id: FieldId,
         value: Number,
-    }
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -178,7 +178,7 @@ impl CollectionsWriter {
                             })),
                         ),
                     );
-                },
+                }
                 TypedField::Bool => unimplemented!("Bool field not implemented yet"),
             }
 
@@ -565,10 +565,7 @@ impl CollectionWriter {
                 ValueType::Scalar(ScalarType::Number) => {
                     self.fields.insert(
                         field_name.clone(),
-                        (
-                            value_type,
-                            Arc::new(Box::new(NumberField {})),
-                        ),
+                        (value_type, Arc::new(Box::new(NumberField {}))),
                     );
                 }
                 _ => unimplemented!("Field type not implemented yet"),

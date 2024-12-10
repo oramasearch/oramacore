@@ -144,7 +144,11 @@ impl CollectionsReader {
                             .await
                             .context("cannot insert document")?;
                     }
-                    CollectionWriteOperation::IndexNumber { doc_id, field_id, value } => {
+                    CollectionWriteOperation::IndexNumber {
+                        doc_id,
+                        field_id,
+                        value,
+                    } => {
                         collection_reader
                             .index_number(doc_id, field_id, value)
                             .await

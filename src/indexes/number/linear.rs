@@ -102,8 +102,7 @@ impl Page {
                 Self::filter_on_items(items, m_field_id, filter, matching_docs);
             }
             PagePointer::OnFile(p) => {
-                let f = std::fs::File::open(p)
-                    .with_context(|| format!("Cannot open {p:?}"))?;
+                let f = std::fs::File::open(p).with_context(|| format!("Cannot open {p:?}"))?;
                 let buf = BufReader::new(f);
                 let items: Vec<Item> = bincode::deserialize_from(buf)
                     .with_context(|| format!("Cannot deserialize items from {p:?}"))?;
@@ -297,7 +296,8 @@ impl LinearNumberIndex {
                     .push(((current_chunk.min, current_chunk.max), current_chunk.id));
 
                 let page_file = get_page_file(&current_chunk, &base_path);
-                current_chunk.move_to_fs(page_file)
+                current_chunk
+                    .move_to_fs(page_file)
                     .with_context(|| anyhow::anyhow!("Cannot move page to FS"))?;
                 index.pages.push(current_chunk);
 
@@ -341,7 +341,8 @@ impl LinearNumberIndex {
             .push(((current_chunk.min, current_chunk.max), current_chunk.id));
 
         let page_file = get_page_file(&current_chunk, &base_path);
-        current_chunk.move_to_fs(page_file)
+        current_chunk
+            .move_to_fs(page_file)
             .with_context(|| anyhow::anyhow!("Cannot move page to FS"))?;
 
         index.pages.push(current_chunk);

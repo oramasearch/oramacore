@@ -45,7 +45,10 @@ impl NumberIndex {
     }
 
     pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: Number) {
-        debug!("Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}", doc_id, field_id, value);
+        debug!(
+            "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
+            doc_id, field_id, value
+        );
         let mut btree = self.uncommitted.entry(field_id).or_default();
         let doc_ids = btree.entry(value).or_default();
         doc_ids.insert(doc_id);
