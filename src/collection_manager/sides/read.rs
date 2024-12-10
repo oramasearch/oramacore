@@ -16,6 +16,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
 use crate::{
+    capped_heap::{self, CappedHead},
     collection_manager::{
         dto::{
             FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
@@ -647,24 +648,19 @@ impl CollectionReader {
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    // A min-heap of size `n` to keep track of the top N elements
-    let mut heap: BinaryHeap<Reverse<(NotNan<f32>, DocumentId)>> = BinaryHeap::with_capacity(n);
+    let mut capped_heap = CappedHead::new(n);
 
     for (key, value) in map {
-        // Insert into the heap if it's not full, or replace the smallest element if the current one is larger
-        if heap.len() < n {
-            heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-        } else if let Some(Reverse((min_value, _))) = heap.peek() {
-            if value > *min_value.as_ref() {
-                heap.pop();
-                heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-            }
-        }
+        let k = match NotNan::new(value) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let v = key;
+        capped_heap.insert(k, v);
     }
 
-    // Collect results into a sorted Vec (optional sorting based on descending values)
-    let result: Vec<TokenScore> = heap
-        .into_sorted_vec()
+    let result: Vec<TokenScore> = capped_heap
+        .into_top()
         .into_iter()
         .map(|Reverse((value, key))| TokenScore {
             document_id: key,

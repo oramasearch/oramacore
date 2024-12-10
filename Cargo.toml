@@ -84,6 +84,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 http-body-util = "0.1.2"
 mime = "0.3.17"
 tower = { version = "0.5.1", features = ["util"] }
+rand = "0.8.5"
 
 [[bin]]
 name = "rustorama"
