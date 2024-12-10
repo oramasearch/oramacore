@@ -12,6 +12,8 @@ pub trait DocumentStorage: Sync + Send + Debug {
 
     async fn get_documents_by_ids(&self, doc_ids: Vec<DocumentId>)
         -> Result<Vec<Option<Document>>>;
+
+    async fn get_total_documents(&self) -> Result<usize>;
 }
 
 #[derive(Debug)]
@@ -48,5 +50,9 @@ impl DocumentStorage for InMemoryDocumentStorage {
             .map(|doc_id| self.documents.get(&doc_id).map(|doc| doc.value().clone()))
             .collect();
         Ok(docs)
+    }
+
+    async fn get_total_documents(&self) -> Result<usize> {
+        Ok(self.documents.len())
     }
 }

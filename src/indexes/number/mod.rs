@@ -137,11 +137,17 @@ impl NumberIndex {
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum NumberFilter {
+    #[serde(rename = "eq")]
     Equal(#[schema(inline)] Number),
+    #[serde(rename = "gt")]
     GreaterThan(#[schema(inline)] Number),
+    #[serde(rename = "gte")]
     GreaterThanOrEqual(#[schema(inline)] Number),
+    #[serde(rename = "lt")]
     LessThan(#[schema(inline)] Number),
+    #[serde(rename = "lte")]
     LessThanOrEqual(#[schema(inline)] Number),
+    #[serde(rename = "between")]
     Between(#[schema(inline)] (Number, Number)),
 }
 

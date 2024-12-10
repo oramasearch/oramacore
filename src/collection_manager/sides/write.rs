@@ -542,6 +542,25 @@ impl CollectionWriter {
 
             let field_id = self.get_field_id_by_name(&field_name);
 
+            let typed_field = match value_type {
+                ValueType::Scalar(ScalarType::String) => {
+                    let parser = self.default_text_parser.clone();
+                    self.fields.insert(
+                        field_name.clone(),
+                        (value_type, Arc::new(Box::new(StringField { parser }))),
+                    );
+                    TypedField::Text(self.default_language)
+                }
+                ValueType::Scalar(ScalarType::Number) => {
+                    self.fields.insert(
+                        field_name.clone(),
+                        (value_type, Arc::new(Box::new(NumberField {}))),
+                    );
+                    TypedField::Number
+                }
+                _ => unimplemented!("Field type not implemented yet"),
+            };
+
             writer
                 .sender
                 .send(WriteOperation::Collection(
@@ -549,27 +568,10 @@ impl CollectionWriter {
                     CollectionWriteOperation::CreateField {
                         field_id,
                         field_name: field_name.clone(),
-                        field: TypedField::Text(self.default_language),
+                        field: typed_field,
                     },
                 ))
                 .context("Cannot sent creation field")?;
-
-            match value_type {
-                ValueType::Scalar(ScalarType::String) => {
-                    let parser = self.default_text_parser.clone();
-                    self.fields.insert(
-                        field_name.clone(),
-                        (value_type, Arc::new(Box::new(StringField { parser }))),
-                    );
-                }
-                ValueType::Scalar(ScalarType::Number) => {
-                    self.fields.insert(
-                        field_name.clone(),
-                        (value_type, Arc::new(Box::new(NumberField {}))),
-                    );
-                }
-                _ => unimplemented!("Field type not implemented yet"),
-            }
         }
 
         Ok(self.fields.clone())
