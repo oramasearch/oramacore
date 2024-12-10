@@ -67,6 +67,7 @@ impl StringIndex {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub async fn insert(
         &self,
         _doc_id: DocumentId,

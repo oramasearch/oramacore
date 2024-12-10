@@ -3,6 +3,7 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet},
     fmt::Debug,
     ops::Deref,
+    path::PathBuf,
     sync::{atomic::AtomicU32, Arc},
 };
 
@@ -10,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use futures::join;
 use ordered_float::NotNan;
+use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
@@ -38,22 +40,31 @@ use super::{
     write::{CollectionWriteOperation, GenericWriteOperation, InsertStringTerms, WriteOperation},
 };
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct DataConfig {
+    pub data_dir: PathBuf,
+    pub max_size_per_chunk: usize,
+}
+
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     document_storage: Arc<dyn DocumentStorage>,
     posting_id_generator: Arc<AtomicU32>,
+    data_config: DataConfig,
 }
 impl CollectionsReader {
     pub fn new(
         embedding_service: Arc<EmbeddingService>,
         document_storage: Arc<dyn DocumentStorage>,
+        data_config: DataConfig,
     ) -> Self {
         Self {
             embedding_service,
             collections: Default::default(),
             document_storage,
             posting_id_generator: Arc::new(AtomicU32::new(0)),
+            data_config,
         }
     }
 
@@ -74,7 +85,10 @@ impl CollectionsReader {
                     fields_per_model: Default::default(),
 
                     string_index: StringIndex::new(self.posting_id_generator.clone()),
-                    number_index: NumberIndex::new(),
+                    number_index: NumberIndex::new(
+                        self.data_config.data_dir.join("numbers"),
+                        self.data_config.max_size_per_chunk,
+                    )?,
                     bool_index: BoolIndex::new(),
 
                     fields: Default::default(),

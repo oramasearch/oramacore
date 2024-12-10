@@ -1,14 +1,14 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, HashSet},
-    mem::swap,
+    path::PathBuf,
 };
 
 use anyhow::Result;
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use dashmap::DashMap;
-use linear::LinearNumberIndex;
+use linear::{FromIterConfig, LinearNumberIndex};
 use merge_iter::{MergeIter, MergeIterState};
 use serde::{Deserialize, Serialize};
 
@@ -18,19 +18,28 @@ mod linear;
 mod merge_iter;
 mod serializable_number;
 mod stats;
+mod r#type;
+
+pub use r#type::Number;
+
+pub struct CommitConfig {}
 
 #[derive(Debug)]
 pub struct NumberIndex {
     uncommitted: DashMap<FieldId, BTreeMap<Number, HashSet<DocumentId>>>,
     committed: LinearNumberIndex,
+    base_path: PathBuf,
+    max_size_per_chunk: usize,
 }
 
 impl NumberIndex {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(base_path: PathBuf, max_size_per_chunk: usize) -> Result<Self> {
+        Ok(Self {
             uncommitted: Default::default(),
-            committed: LinearNumberIndex::from_iter(std::iter::empty(), 2048),
-        }
+            committed: LinearNumberIndex::from_fs(base_path.clone(), max_size_per_chunk)?,
+            base_path,
+            max_size_per_chunk,
+        })
     }
 
     pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: Number) {
@@ -82,7 +91,7 @@ impl NumberIndex {
         Ok(doc_ids)
     }
 
-    pub fn commit(&mut self) {
+    pub fn commit(&mut self, _config: CommitConfig) -> Result<()> {
         let committed = self.committed.iter();
 
         let mut dd: BTreeMap<Number, Cow<Vec<(DocumentId, FieldId)>>> = BTreeMap::new();
@@ -103,12 +112,20 @@ impl NumberIndex {
             state: MergeIterState::Unstarted,
         };
 
-        let new_linear = LinearNumberIndex::from_iter(merge_iter, 2048);
+        let new_linear = LinearNumberIndex::from_iter(
+            merge_iter,
+            FromIterConfig {
+                max_size_per_chunk: self.max_size_per_chunk,
+                base_path: self.base_path.clone(),
+            },
+        )?;
 
         // This is safe because `commit` method keeps **`&mut self`**.
         // So no concurrent access is possible.
         self.committed = new_linear;
         self.uncommitted.clear();
+
+        Ok(())
     }
 }
 
@@ -122,219 +139,19 @@ pub enum NumberFilter {
     Between(#[schema(inline)] (Number, Number)),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
-#[serde(untagged)]
-pub enum Number {
-    I32(#[schema(inline)] i32),
-    F32(#[schema(inline)] f32),
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Number::I32(value) => write!(f, "{}", value),
-            Number::F32(value) => write!(f, "{}", value),
-        }
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Number::I32(value)
-    }
-}
-impl From<f32> for Number {
-    fn from(value: f32) -> Self {
-        Number::F32(value)
-    }
-}
-
-impl PartialEq for Number {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Number::I32(a), Number::I32(b)) => a == b,
-            (Number::I32(a), Number::F32(b)) => *a as f32 == *b,
-            (Number::F32(a), Number::F32(b)) => {
-                // This is against the IEEE 754-2008 standard,
-                // But we don't care here.
-                if a.is_nan() && b.is_nan() {
-                    return true;
-                }
-                a == b
-            }
-            (Number::F32(a), Number::I32(b)) => *a == *b as f32,
-        }
-    }
-}
-impl Eq for Number {}
-
-impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for Number {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // f32 is implemented as "binary32" type defined in IEEE 754-2008
-        // So, it means, it can represent also +/- Infinity and NaN
-        // Threat NaN as "more" the Infinity
-        // See `total_cmp` method in f32
-        match (self, other) {
-            (Number::I32(a), Number::I32(b)) => a.cmp(b),
-            (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
-            (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
-            (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
-        }
-    }
-}
-
-impl std::ops::Add for Number {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Number::I32(a), Number::I32(b)) => (a + b).into(),
-            (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
-            (Number::F32(a), Number::F32(b)) => (a + b).into(),
-            (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use core::f32;
-    use std::{cmp::Ordering, collections::HashSet};
+    use std::{collections::HashSet, fs};
 
-    use tempdir::TempDir;
+    use crate::test_utils::generate_new_path;
 
     use super::*;
-
-    #[test]
-    fn test_number_eq() {
-        let a = Number::from(1);
-        let b = Number::from(1.0);
-        assert_eq!(a, b);
-        assert!(a == b);
-        assert!(a != Number::from(f32::NAN));
-
-        let a = Number::from(-1);
-        let b = Number::from(-1.0);
-        assert_eq!(a, b);
-        assert!(a == b);
-        assert!(a != Number::from(f32::NAN));
-
-        let a = Number::from(2);
-        let b = Number::from(2.0);
-        assert_eq!(a, b);
-        assert!(a == b);
-        assert!(a != Number::from(f32::NAN));
-
-        let a = Number::from(f32::INFINITY);
-        let b = Number::from(f32::NEG_INFINITY);
-        assert_ne!(a, b);
-        assert!(a != b);
-        assert!(a != Number::from(f32::NAN));
-
-        let a = Number::from(f32::NAN);
-        assert_eq!(a, Number::from(f32::NAN));
-        assert!(a == Number::from(f32::NAN));
-        assert!(a != Number::from(f32::INFINITY));
-        assert!(a != Number::from(f32::NEG_INFINITY));
-        assert!(a != Number::from(0));
-    }
-
-    #[test]
-    fn test_number_ord() {
-        let a = Number::from(1);
-
-        let b = Number::from(1.0);
-        assert_eq!(a.cmp(&b), Ordering::Equal);
-
-        let b = Number::from(2.0);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-        let b = Number::from(2);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-
-        let b = Number::from(-2.0);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-        let b = Number::from(-2);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-
-        let a = Number::from(-1);
-
-        let b = Number::from(-1.0);
-        assert_eq!(a.cmp(&b), Ordering::Equal);
-
-        let b = Number::from(2.0);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-        let b = Number::from(2);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-
-        let b = Number::from(-2.0);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-        let b = Number::from(-2);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-
-        let a = Number::from(1.0);
-
-        let b = Number::from(1.0);
-        assert_eq!(a.cmp(&b), Ordering::Equal);
-
-        let b = Number::from(2.0);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-        let b = Number::from(2);
-        assert_eq!(a.cmp(&b), Ordering::Less);
-
-        let b = Number::from(-2.0);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-        let b = Number::from(-2);
-        assert_eq!(a.cmp(&b), Ordering::Greater);
-
-        let a = Number::from(1);
-        assert!(a < Number::from(f32::INFINITY));
-        assert!(a > Number::from(f32::NEG_INFINITY));
-        assert!(a < Number::from(f32::NAN));
-
-        let a = Number::from(1.0);
-        assert!(a < Number::from(f32::INFINITY));
-        assert!(a > Number::from(f32::NEG_INFINITY));
-        assert!(a < Number::from(f32::NAN));
-
-        let a = Number::from(f32::NAN);
-        assert!(a > Number::from(f32::INFINITY));
-        assert!(a > Number::from(f32::NEG_INFINITY));
-        assert!(a == Number::from(f32::NAN));
-
-        let v = [
-            Number::from(1),
-            Number::from(1.0),
-            Number::from(2),
-            Number::from(2.0),
-            Number::from(-1),
-            Number::from(-1.0),
-            Number::from(-2),
-            Number::from(-2.0),
-            Number::from(f32::INFINITY),
-            Number::from(f32::NEG_INFINITY),
-            Number::from(f32::NAN),
-        ];
-
-        for i in 0..v.len() {
-            for j in 0..v.len() {
-                let way = v[i].cmp(&v[j]);
-                let other_way = v[j].cmp(&v[i]);
-
-                assert_eq!(way.reverse(), other_way);
-            }
-        }
-    }
 
     macro_rules! test_number_filter {
         ($fn_name: ident, $b: expr) => {
             #[test]
             fn $fn_name() {
-                let mut index = NumberIndex::new();
+                let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
                 index.add(DocumentId(0), FieldId(0), 0.into());
                 index.add(DocumentId(1), FieldId(0), 1.into());
@@ -347,15 +164,7 @@ mod tests {
 
                 a(&index);
 
-                index.commit();
-
-                a(&index);
-
-                let tmp_dir = TempDir::new("example").unwrap();
-                let dump_path = tmp_dir.path().join("index_2");
-                std::fs::remove_dir_all(dump_path.clone()).ok();
-                std::fs::create_dir_all(dump_path.clone()).unwrap();
-                index.committed.save_on_fs_and_unload(dump_path.clone()).unwrap();
+                index.commit(CommitConfig {}).unwrap();
 
                 a(&index);
             }
@@ -429,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_number_commit() {
-        let mut index = NumberIndex::new();
+        let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
         index.add(DocumentId(0), FieldId(0), 0.into());
         index.add(DocumentId(1), FieldId(0), 1.into());
@@ -446,7 +255,7 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
 
-        index.commit();
+        index.commit(CommitConfig {}).unwrap();
 
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
@@ -455,19 +264,31 @@ mod tests {
             output,
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
+    }
 
-        let tmp_dir = TempDir::new("example").unwrap();
-        let dump_path = tmp_dir.path().join("index_2");
-        std::fs::remove_dir_all(dump_path.clone()).ok();
-        std::fs::create_dir_all(dump_path.clone()).unwrap();
-        index.committed.save_on_fs_and_unload(dump_path.clone()).unwrap();
+    #[test]
+    fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
+        fs::remove_dir_all(".data")?;
+        fs::create_dir(".data")?;
+        let mut index = NumberIndex::new(".data".parse().unwrap(), 2048)?;
+
+        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
+        for (number, (doc_id, field_id)) in iter {
+            index.add(doc_id, field_id, number);
+        }
 
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
             .unwrap();
-        assert_eq!(
-            output,
-            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
-        );
+        assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
+
+        index.commit(CommitConfig {})?;
+
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
+
+        Ok(())
     }
 }

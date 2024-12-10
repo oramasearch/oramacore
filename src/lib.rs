@@ -3,7 +3,7 @@ use std::sync::{atomic::AtomicU32, Arc};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     document_storage::{DocumentStorage, InMemoryDocumentStorage},
-    read::CollectionsReader,
+    read::{CollectionsReader, DataConfig},
     write::{CollectionsWriter, WriteOperation},
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
@@ -25,6 +25,9 @@ pub mod web_server;
 
 pub mod embeddings;
 
+#[cfg(test)]
+pub mod test_utils;
+
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum SideChannelType {
     #[serde(rename = "in-memory")]
@@ -38,6 +41,7 @@ pub struct WriteSideConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
+    pub data: DataConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -103,7 +107,8 @@ pub async fn build_orama(
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
 
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
-    let collections_reader = CollectionsReader::new(embedding_service, document_storage);
+    let collections_reader =
+        CollectionsReader::new(embedding_service, document_storage, reader_side.data);
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));

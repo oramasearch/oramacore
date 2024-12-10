@@ -12,7 +12,7 @@ mod tests {
     use anyhow::Result;
     use document_storage::{DocumentStorage, InMemoryDocumentStorage};
 
-    use read::CollectionsReader;
+    use read::{CollectionsReader, DataConfig};
     use serde_json::json;
 
     use write::CollectionsWriter;
@@ -33,6 +33,8 @@ mod tests {
 
     use super::*;
 
+    use crate::test_utils::generate_new_path;
+
     #[tokio::test]
     async fn test_sides_error_on_unknow_filter_field() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
@@ -51,7 +53,14 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(embedding_service, document_storage);
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            DataConfig {
+                data_dir: generate_new_path(),
+                max_size_per_chunk: 2048,
+            },
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -117,7 +126,14 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(embedding_service, document_storage);
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            DataConfig {
+                data_dir: generate_new_path(),
+                max_size_per_chunk: 2048,
+            },
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -193,7 +209,14 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(embedding_service, document_storage);
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            DataConfig {
+                data_dir: generate_new_path(),
+                max_size_per_chunk: 2048,
+            },
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),

@@ -3,18 +3,14 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     fmt::Debug,
+    fs,
     io::{BufReader, BufWriter, Write},
-    path::PathBuf,
-    ptr::{self, null},
-    sync::atomic::{AtomicPtr, AtomicUsize},
+    path::{Path, PathBuf},
 };
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tracing::{
-    error,
-    field::{Field, Iter},
-};
+use tracing::error;
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
@@ -57,8 +53,8 @@ enum PagePointer {
 }
 
 /// This is the index of the chunk used in `chunks` array.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct ChunkId(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ChunkId(usize);
 
 struct Page {
     id: ChunkId,
@@ -137,6 +133,28 @@ impl Page {
                 }),
         );
     }
+
+    fn move_to_fs(&mut self, page_file: PathBuf) -> Result<()> {
+        let items = match &self.pointer {
+            PagePointer::InMemory(items) => items,
+            PagePointer::OnFile(_) => return Ok(()),
+        };
+
+        let mut file = std::fs::File::create(page_file.clone())?;
+        let mut buf_writer = BufWriter::new(&mut file);
+        bincode::serialize_into(&mut buf_writer, items).unwrap();
+        buf_writer.flush().unwrap();
+        drop(buf_writer);
+        file.sync_data().unwrap();
+
+        self.pointer = PagePointer::OnFile(page_file);
+
+        Ok(())
+    }
+}
+
+fn get_page_file(page: &Page, base_path: &Path) -> PathBuf {
+    base_path.join(format!("page_{}.bin", page.id.0))
 }
 
 #[derive(Debug)]
@@ -150,6 +168,11 @@ pub struct LinearNumberIndex {
     max_size_per_chunk: usize,
 }
 
+pub struct FromIterConfig {
+    pub max_size_per_chunk: usize,
+    pub base_path: PathBuf,
+}
+
 impl LinearNumberIndex {
     fn new(max_size_per_chunk: usize) -> Self {
         Self {
@@ -159,11 +182,66 @@ impl LinearNumberIndex {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn bounds(&self) -> &[((Number, Number), ChunkId)] {
+        &self.bounds
+    }
+
+    pub fn from_fs(base_path: PathBuf, default_max_size_per_chunk: usize) -> Result<Self> {
+        let bound_file = base_path.join("bounds.bin");
+
+        if !fs::exists(&bound_file)? {
+            return Self::from_iter(
+                std::iter::empty(),
+                FromIterConfig {
+                    max_size_per_chunk: default_max_size_per_chunk,
+                    base_path,
+                },
+            );
+        }
+
+        let (max_size_per_chunk, bounds) = {
+            let f = std::fs::File::open(bound_file)?;
+            let mut buf = BufReader::new(f);
+            let max_size_per_chunk: usize = bincode::deserialize_from(&mut buf)?;
+            let bounds: Vec<((Number, Number), ChunkId)> = bincode::deserialize_from(&mut buf)?;
+
+            (max_size_per_chunk, bounds)
+        };
+
+        let mut pages = Vec::with_capacity(bounds.len());
+
+        for ((min, max), id) in &bounds {
+            let page_file = base_path.join(format!("page_{}.bin", id.0));
+            let pointer = PagePointer::OnFile(page_file);
+            let page = Page {
+                id: *id,
+                pointer,
+                min: *min,
+                max: *max,
+                usage: PageUsage::new(),
+            };
+
+            pages.push(page);
+        }
+
+        Ok(Self {
+            pages,
+            bounds,
+            max_size_per_chunk,
+        })
+    }
+
     /// `data`` should be already sorter
-    pub fn from_iter<I>(iter: I, max_size_per_chunk: usize) -> Self
+    pub fn from_iter<I>(iter: I, config: FromIterConfig) -> Result<Self>
     where
         I: IntoIterator<Item = (Number, (DocumentId, FieldId))>,
     {
+        let FromIterConfig {
+            max_size_per_chunk,
+            base_path,
+        } = config;
+
         let mut index = Self::new(max_size_per_chunk);
 
         let mut current_chunk_size = 0_usize;
@@ -211,6 +289,9 @@ impl LinearNumberIndex {
                 index
                     .bounds
                     .push(((current_chunk.min, current_chunk.max), current_chunk.id));
+
+                let page_file = get_page_file(&current_chunk, &base_path);
+                current_chunk.move_to_fs(page_file)?;
                 index.pages.push(current_chunk);
 
                 current_chunk = Page {
@@ -251,14 +332,27 @@ impl LinearNumberIndex {
         index
             .bounds
             .push(((current_chunk.min, current_chunk.max), current_chunk.id));
+
+        let page_file = get_page_file(&current_chunk, &base_path);
+        current_chunk.move_to_fs(page_file)?;
+
         index.pages.push(current_chunk);
 
-        // Checks we cover all the `Number` space
-        assert_eq!(index.pages.len(), index.bounds.len());
-        assert_eq!(index.pages[0].min, Number::from(f32::NEG_INFINITY));
-        assert_eq!(index.pages.last().unwrap().max, Number::from(f32::INFINITY));
+        let bound_file = base_path.join("bounds.bin");
+        let mut file = std::fs::File::create(bound_file.clone())?;
+        let mut buf_writer = BufWriter::new(&mut file);
+        bincode::serialize_into(&mut buf_writer, &index.max_size_per_chunk)?;
+        bincode::serialize_into(&mut buf_writer, &index.bounds)?;
+        buf_writer.flush().unwrap();
+        drop(buf_writer);
+        file.sync_data().unwrap();
 
-        index
+        // Checks we cover all the `Number` space
+        debug_assert_eq!(index.pages.len(), index.bounds.len());
+        debug_assert_eq!(index.pages[0].min, Number::from(f32::NEG_INFINITY));
+        debug_assert_eq!(index.pages.last().unwrap().max, Number::from(f32::INFINITY));
+
+        Ok(index)
     }
 
     pub fn filter(
@@ -372,30 +466,6 @@ And this should not happen. Return the last page."#);
         Ok(page)
     }
 
-    pub fn save_on_fs_and_unload<P>(&mut self, p: P) -> Result<()>
-    where
-        P: Into<PathBuf>,
-    {
-        let p = p.into();
-
-        for page in &mut self.pages {
-            if let PagePointer::InMemory(items) = &mut page.pointer {
-                let page_file = p.join(format!("page_{}.bin", page.id.0));
-
-                let mut file = std::fs::File::create(page_file.clone())?;
-                let mut buf_writer = BufWriter::new(&mut file);
-                bincode::serialize_into(&mut buf_writer, items)?;
-                buf_writer.flush()?;
-                drop(buf_writer);
-                file.sync_data()?;
-
-                page.pointer = PagePointer::OnFile(page_file);
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn iter(&self) -> LinearNumberIndexIter<'_> {
         LinearNumberIndexIter {
             index: self,
@@ -466,17 +536,29 @@ impl<'a> Iterator for LinearNumberIndexIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use tempdir::TempDir;
+    use crate::test_utils::generate_new_path;
 
     use super::*;
 
     #[test]
     fn test_indexes_number_linear_equal() -> Result<()> {
         let iter = (0..2).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
-        let index_1 = LinearNumberIndex::from_iter(iter, 2048);
+        let index_1 = LinearNumberIndex::from_iter(
+            iter,
+            FromIterConfig {
+                max_size_per_chunk: 2048,
+                base_path: generate_new_path(),
+            },
+        )?;
 
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
-        let index_2 = LinearNumberIndex::from_iter(iter, 2048);
+        let index_2 = LinearNumberIndex::from_iter(
+            iter,
+            FromIterConfig {
+                max_size_per_chunk: 2048,
+                base_path: generate_new_path(),
+            },
+        )?;
 
         let tests = [
             (
@@ -517,61 +599,6 @@ mod tests {
     }
 
     #[test]
-    fn test_indexes_number_linear_dump_on_fs() -> Result<()> {
-        let iter = (0..2).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
-        let mut index_1 = LinearNumberIndex::from_iter(iter, 2048);
-
-        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
-        let mut index_2 = LinearNumberIndex::from_iter(iter, 2048);
-
-        let tmp_dir = TempDir::new("example")?;
-        let dump_path = tmp_dir.path().join("index_1");
-        std::fs::remove_dir_all(dump_path.clone()).ok();
-        std::fs::create_dir_all(dump_path.clone())?;
-        index_1.save_on_fs_and_unload(dump_path.clone())?;
-
-        let tmp_dir = TempDir::new("example")?;
-        let dump_path = tmp_dir.path().join("index_2");
-        std::fs::remove_dir_all(dump_path.clone()).ok();
-        std::fs::create_dir_all(dump_path.clone())?;
-        index_2.save_on_fs_and_unload(dump_path.clone())?;
-
-        let tests = [
-            (
-                NumberFilter::Equal(Number::from(1)),
-                HashSet::from_iter(vec![DocumentId(1)]),
-            ),
-            (
-                NumberFilter::Equal(Number::from(1.0)),
-                HashSet::from_iter(vec![DocumentId(1)]),
-            ),
-            (
-                NumberFilter::Equal(Number::from(0)),
-                HashSet::from_iter(vec![DocumentId(0)]),
-            ),
-            (
-                NumberFilter::Equal(Number::from(0.0)),
-                HashSet::from_iter(vec![DocumentId(0)]),
-            ),
-            (
-                NumberFilter::Equal(Number::from(-1)),
-                HashSet::from_iter(vec![]),
-            ),
-            (
-                NumberFilter::Equal(Number::from(10_000_000)),
-                HashSet::from_iter(vec![]),
-            ),
-        ];
-
-        for (filter, expected) in tests {
-            let matching_docs = index_1.filter(FieldId(0), &filter, 0)?;
-            assert_eq!(matching_docs, expected);
-        }
-
-        Ok(())
-    }
-
-    #[test]
     fn test_indexes_number_linear_how_many_docs_live_in_64k() {
         const LIMIT_64K: u64 = 64 * 1024;
 
@@ -592,49 +619,5 @@ mod tests {
         };
         let size = bincode::serialized_size(&item).unwrap();
         assert!(size > LIMIT_64K);
-    }
-
-    #[test]
-    fn test_indexes_number_linear_aaa() -> Result<()> {
-        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
-        let mut index = LinearNumberIndex::from_iter(iter, 2048);
-
-        let all: Vec<_> = index
-            .iter()
-            .map(|item| {
-                let key = item.as_ref().unwrap().0;
-                let values = item.as_ref().unwrap().1.to_vec();
-                (key, values)
-            })
-            .collect();
-
-        assert_eq!(all.len(), 1_000);
-
-        let is_sorted = all.windows(2).all(|w| w[0].0 < w[1].0);
-        assert!(is_sorted);
-
-        let tmp_dir = TempDir::new("example")?;
-        let dump_path = tmp_dir.path().join("index_2");
-        std::fs::remove_dir_all(dump_path.clone()).ok();
-        std::fs::create_dir_all(dump_path.clone())?;
-        index.save_on_fs_and_unload(dump_path.clone())?;
-
-        let all_after_dump: Vec<_> = index
-            .iter()
-            .map(|item| {
-                let key = item.as_ref().unwrap().0;
-                let values = item.as_ref().unwrap().1.to_vec();
-                (key, values)
-            })
-            .collect();
-
-        assert_eq!(all_after_dump.len(), 1_000);
-
-        let is_sorted = all_after_dump.windows(2).all(|w| w[0].0 < w[1].0);
-        assert!(is_sorted);
-
-        assert_eq!(all, all_after_dump);
-
-        Ok(())
     }
 }

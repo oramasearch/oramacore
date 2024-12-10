@@ -5,8 +5,11 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
+use rustorama::collection_manager::sides::read::DataConfig;
 use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
+use std::path::PathBuf;
 use std::time::Duration;
+use tempdir::TempDir;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
@@ -15,6 +18,11 @@ use rustorama::web_server::{HttpConfig, WebServer};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 8080;
+
+pub fn generate_new_path() -> PathBuf {
+    let tmp_dir = TempDir::new("test").unwrap();
+    tmp_dir.path().to_path_buf()
+}
 
 async fn wait_for_server() {
     loop {
@@ -52,6 +60,10 @@ async fn start_server() {
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
+            data: DataConfig {
+                data_dir: generate_new_path(),
+                max_size_per_chunk: 2048,
+            },
         },
     )
     .await
@@ -62,7 +74,6 @@ async fn start_server() {
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
-            println!("--------------------Received operation: {:?}", op);
             collections_reader.update(op).await.expect("OUCH!");
         }
     });
