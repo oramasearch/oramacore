@@ -324,7 +324,7 @@ impl CollectionReader {
         where_filter: HashMap<String, Filter>,
     ) -> Result<Option<HashSet<DocumentId>>> {
         if where_filter.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
         let filters: Result<Vec<_>> = where_filter
             .into_iter()
@@ -342,7 +342,10 @@ impl CollectionReader {
             None => return Err(anyhow!("No filter provided")),
         };
 
-        info!("Filtering on field {:?}({:?}): {:?}", field_name, field_type, filter);
+        info!(
+            "Filtering on field {:?}({:?}): {:?}",
+            field_name, field_type, filter
+        );
 
         let mut doc_ids = match (&field_type, filter) {
             (TypedField::Number, Filter::Number(filter_number)) => {
@@ -408,10 +411,7 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
-    pub async fn search(
-        &self,
-        search_params: SearchParams,
-    ) -> Result<SearchResult, anyhow::Error> {
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
         let SearchParams {
             mode,
             properties,

@@ -1,10 +1,16 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use rustorama::{build_orama, collection_manager::sides::{read::{CollectionsReader, DataConfig}, write::CollectionsWriter}, embeddings::{EmbeddingConfig, EmbeddingPreload}, ReadSideConfig, WriteSideConfig};
+use rustorama::{
+    build_orama,
+    collection_manager::sides::{
+        read::{CollectionsReader, DataConfig},
+        write::CollectionsWriter,
+    },
+    embeddings::{EmbeddingConfig, EmbeddingPreload},
+    ReadSideConfig, WriteSideConfig,
+};
 use tempdir::TempDir;
-
-
 
 fn generate_new_path() -> PathBuf {
     let tmp_dir = TempDir::new("test").unwrap();
@@ -42,5 +48,9 @@ pub async fn start_all() -> Result<(
         }
     });
 
-    Ok((collections_writer.unwrap(), collections_reader.unwrap(), handler))
+    Ok((
+        collections_writer.unwrap(),
+        collections_reader.unwrap(),
+        handler,
+    ))
 }
