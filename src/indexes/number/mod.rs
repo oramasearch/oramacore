@@ -11,7 +11,7 @@ use dashmap::DashMap;
 use linear::{FromIterConfig, LinearNumberIndex};
 use merge_iter::{MergeIter, MergeIterState};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
@@ -147,7 +147,7 @@ pub enum NumberFilter {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, fs};
+    use std::collections::HashSet;
 
     use crate::test_utils::generate_new_path;
 
