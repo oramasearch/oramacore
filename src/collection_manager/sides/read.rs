@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
     ops::Deref,
     path::PathBuf,
@@ -16,7 +16,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
 use crate::{
-    capped_heap::{self, CappedHead},
+    capped_heap::{CappedHead},
     collection_manager::{
         dto::{
             FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
