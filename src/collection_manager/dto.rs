@@ -190,12 +190,7 @@ impl TryFrom<serde_json::Value> for SearchParams {
     type Error = serde_json::Error;
 
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        println!("value: {:?}", value);
-        let a = serde_json::from_value(value);
-
-        println!("a: {:?}", a);
-
-        a
+        serde_json::from_value(value)
     }
 }
 

@@ -11,6 +11,11 @@
     },
     "reader_side": {
         "input": "in-memory",
+
+        "data": {
+            "data_dir": "./.data",
+            "max_size_per_chunk": 2048,
+        }
     },
 
     "embeddings": {

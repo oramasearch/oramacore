@@ -3,6 +3,7 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet},
     fmt::Debug,
     ops::Deref,
+    path::PathBuf,
     sync::{atomic::AtomicU32, Arc},
 };
 
@@ -10,6 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use futures::join;
 use ordered_float::NotNan;
+use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
@@ -25,7 +27,7 @@ use crate::{
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
-        number::{NumberFilter, NumberIndex},
+        number::{Number, NumberFilter, NumberIndex},
         string::{scorer::bm25::BM25Score, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
@@ -38,22 +40,31 @@ use super::{
     write::{CollectionWriteOperation, GenericWriteOperation, InsertStringTerms, WriteOperation},
 };
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct DataConfig {
+    pub data_dir: PathBuf,
+    pub max_size_per_chunk: usize,
+}
+
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     document_storage: Arc<dyn DocumentStorage>,
     posting_id_generator: Arc<AtomicU32>,
+    data_config: DataConfig,
 }
 impl CollectionsReader {
     pub fn new(
         embedding_service: Arc<EmbeddingService>,
         document_storage: Arc<dyn DocumentStorage>,
+        data_config: DataConfig,
     ) -> Self {
         Self {
             embedding_service,
             collections: Default::default(),
             document_storage,
             posting_id_generator: Arc::new(AtomicU32::new(0)),
+            data_config,
         }
     }
 
@@ -61,20 +72,24 @@ impl CollectionsReader {
         match op {
             WriteOperation::Generic(GenericWriteOperation::CreateCollection { id }) => {
                 info!("CreateCollection {:?}", id);
+
+                let collection_data_dir = self.data_config.data_dir.join(&id.0);
+
                 let collection_reader = CollectionReader {
                     id: id.clone(),
                     embedding_service: self.embedding_service.clone(),
 
                     document_storage: Arc::clone(&self.document_storage),
 
-                    // The unwrap here is bad even if it is safe because it never fails
-                    // TODO: remove this unwrap
                     vector_index: VectorIndex::try_new(VectorIndexConfig {})
                         .context("Cannot create vector index during collection creation")?,
                     fields_per_model: Default::default(),
 
                     string_index: StringIndex::new(self.posting_id_generator.clone()),
-                    number_index: NumberIndex::new(),
+                    number_index: NumberIndex::new(
+                        collection_data_dir.join("numbers"),
+                        self.data_config.max_size_per_chunk,
+                    )?,
                     bool_index: BoolIndex::new(),
 
                     fields: Default::default(),
@@ -128,6 +143,16 @@ impl CollectionsReader {
                             .insert_document(doc_id, doc)
                             .await
                             .context("cannot insert document")?;
+                    }
+                    CollectionWriteOperation::IndexNumber {
+                        doc_id,
+                        field_id,
+                        value,
+                    } => {
+                        collection_reader
+                            .index_number(doc_id, field_id, value)
+                            .await
+                            .context("cannot index number")?;
                     }
                 }
             }
@@ -251,6 +276,17 @@ impl CollectionReader {
         Ok(())
     }
 
+    #[instrument(skip(self, value), level="debug", fields(self.id = ?self.id))]
+    async fn index_number(
+        &self,
+        doc_id: DocumentId,
+        field_id: FieldId,
+        value: Number,
+    ) -> Result<()> {
+        self.number_index.add(doc_id, field_id, value);
+        Ok(())
+    }
+
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
     async fn insert_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
         self.string_index.new_document_inserted().await;
@@ -288,30 +324,55 @@ impl CollectionReader {
         where_filter: HashMap<String, Filter>,
     ) -> Result<Option<HashSet<DocumentId>>> {
         if where_filter.is_empty() {
-            Ok(None)
-        } else {
-            let filters: Result<Vec<_>> = where_filter
-                .into_iter()
-                .map(|(field_name, value)| {
-                    self.get_field_id_with_type(&field_name)
-                        .with_context(|| format!("Unknown field \"{}\"", &field_name))
-                        .map(|(field_id, field_type)| (field_name, field_id, field_type, value))
-                })
-                .collect();
-            let mut filters = filters?;
-            let last = filters.pop();
+            return Ok(None);
+        }
+        let filters: Result<Vec<_>> = where_filter
+            .into_iter()
+            .map(|(field_name, value)| {
+                self.get_field_id_with_type(&field_name)
+                    .with_context(|| format!("Unknown field \"{}\"", &field_name))
+                    .map(|(field_id, field_type)| (field_name, field_id, field_type, value))
+            })
+            .collect();
+        let mut filters = filters?;
+        let last = filters.pop();
 
-            let (field_name, field_id, field_type, filter) = match last {
-                Some(v) => v,
-                None => return Err(anyhow!("No filter provided")),
-            };
+        let (field_name, field_id, field_type, filter) = match last {
+            Some(v) => v,
+            None => return Err(anyhow!("No filter provided")),
+        };
 
-            let mut doc_ids = match (&field_type, filter) {
+        info!(
+            "Filtering on field {:?}({:?}): {:?}",
+            field_name, field_type, filter
+        );
+
+        let mut doc_ids = match (&field_type, filter) {
+            (TypedField::Number, Filter::Number(filter_number)) => {
+                self.number_index.filter(field_id, filter_number)?
+            }
+            (TypedField::Bool, Filter::Bool(filter_bool)) => {
+                self.bool_index.filter(field_id, filter_bool)?
+            }
+            _ => {
+                error!(
+                    "Filter on field {:?}({:?}) not supported",
+                    field_name, field_type
+                );
+                anyhow::bail!(
+                    "Filter on field {:?}({:?}) not supported",
+                    field_name,
+                    field_type
+                )
+            }
+        };
+        for (field_name, field_id, field_type, filter) in filters {
+            let doc_ids_ = match (&field_type, filter) {
                 (TypedField::Number, Filter::Number(filter_number)) => {
-                    self.number_index.filter(field_id, filter_number)
+                    self.number_index.filter(field_id, filter_number)?
                 }
                 (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                    self.bool_index.filter(field_id, filter_bool)
+                    self.bool_index.filter(field_id, filter_bool)?
                 }
                 _ => {
                     error!(
@@ -325,33 +386,12 @@ impl CollectionReader {
                     )
                 }
             };
-            for (field_name, field_id, field_type, filter) in filters {
-                let doc_ids_ = match (&field_type, filter) {
-                    (TypedField::Number, Filter::Number(filter_number)) => {
-                        self.number_index.filter(field_id, filter_number)
-                    }
-                    (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                        self.bool_index.filter(field_id, filter_bool)
-                    }
-                    _ => {
-                        error!(
-                            "Filter on field {:?}({:?}) not supported",
-                            field_name, field_type
-                        );
-                        anyhow::bail!(
-                            "Filter on field {:?}({:?}) not supported",
-                            field_name,
-                            field_type
-                        )
-                    }
-                };
-                doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
-            }
-
-            info!("Matching doc from filters: {:?}", doc_ids);
-
-            Ok(Some(doc_ids))
+            doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
         }
+
+        info!("Matching doc from filters: {:?}", doc_ids);
+
+        Ok(Some(doc_ids))
     }
 
     fn calculate_properties(&self, properties: Option<Vec<String>>) -> Result<Vec<FieldId>> {
@@ -366,19 +406,12 @@ impl CollectionReader {
         properties
     }
 
-    #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
-    pub async fn search<S: TryInto<SearchParams> + Debug>(
-        &self,
-        search_params: S,
-    ) -> Result<SearchResult, anyhow::Error>
-    where
-        anyhow::Error: From<S::Error>,
-        S::Error: std::fmt::Display,
-    {
-        let search_params = search_params
-            .try_into()
-            .map_err(|e| anyhow!("Cannot convert search params: {}", e))?;
+    pub async fn get_total_documents(&self) -> Result<usize> {
+        self.document_storage.get_total_documents().await
+    }
 
+    #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
+    pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
         let SearchParams {
             mode,
             properties,
@@ -565,7 +598,7 @@ impl CollectionReader {
                         for range in facet.ranges {
                             let facet: HashSet<_> = self
                                 .number_index
-                                .filter(field_id, NumberFilter::Between((range.from, range.to)))
+                                .filter(field_id, NumberFilter::Between((range.from, range.to)))?
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();
@@ -584,13 +617,13 @@ impl CollectionReader {
                     FacetDefinition::Bool => {
                         let true_facet: HashSet<DocumentId> = self
                             .bool_index
-                            .filter(field_id, true)
+                            .filter(field_id, true)?
                             .into_iter()
                             .filter(|doc_id| token_scores.contains_key(doc_id))
                             .collect();
                         let false_facet: HashSet<DocumentId> = self
                             .bool_index
-                            .filter(field_id, false)
+                            .filter(field_id, false)?
                             .into_iter()
                             .filter(|doc_id| token_scores.contains_key(doc_id))
                             .collect();

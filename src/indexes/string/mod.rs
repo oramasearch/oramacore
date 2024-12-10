@@ -67,6 +67,7 @@ impl StringIndex {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub async fn insert(
         &self,
         _doc_id: DocumentId,
@@ -124,17 +125,6 @@ impl StringIndex {
                 }
             }
         }
-
-        /*
-        for (k, p) in &p {
-            let freq = (p & 0xFFFFFFFF) as u32;
-            let posting_list_id = PostingListId((p >> 32) as u32);
-            println!("posting_list_id: {:?}", posting_list_id);
-            let postings = self.posting_storage.get(posting_list_id)?;
-
-            println!("k: {}(freq: {}) -> {:?}", k, freq, postings);
-        }
-        */
 
         let mut sorted_entries: Vec<_> = p.into_iter().collect();
         sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));

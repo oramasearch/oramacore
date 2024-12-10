@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct BenchmarkResults {
     docs_count: usize,
     index_size_bytes: u64,
@@ -21,6 +22,7 @@ struct BenchmarkResults {
     throughput_docs_per_sec: f64,
 }
 
+#[allow(clippy::type_complexity)]
 fn generate_test_data(
     num_docs: usize,
 ) -> Vec<(DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>)> {

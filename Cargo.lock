@@ -1896,6 +1896,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "invocation-counter"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95527be09cc8c06ee0ef1e5b23ad9064ef545ea23ff8be3bbcb59dfd8b0f9dc0"
+
+[[package]]
 name = "ipnet"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3281,6 +3287,7 @@ dependencies = [
  "http-body-util",
  "hurl",
  "hurl_core",
+ "invocation-counter",
  "mime",
  "ndarray 0.15.6",
  "num-traits",
