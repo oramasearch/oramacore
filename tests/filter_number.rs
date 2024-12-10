@@ -1,65 +1,21 @@
+#[path = "utils/start.rs"]
+mod start;
+
 use anyhow::Result;
-use rustorama::collection_manager::sides::read::{CollectionsReader, DataConfig};
-use rustorama::collection_manager::sides::write::CollectionsWriter;
-use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
+use rustorama::collection_manager::{sides::read::CollectionsReader, CollectionId};
 use serde_json::json;
-use tokio::time::sleep;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use start::start_all;
+use tokio::{sync::OnceCell, time::sleep};
+use std::{sync::Arc, time::Duration};
 
-use tempdir::TempDir;
+static INSTANCE: OnceCell<(Arc<CollectionsReader>, CollectionId)> = OnceCell::const_new();
 
-use rustorama::embeddings::{EmbeddingConfig, EmbeddingPreload};
-
-pub fn generate_new_path() -> PathBuf {
-    let tmp_dir = TempDir::new("test").unwrap();
-    tmp_dir.path().to_path_buf()
-}
-
-async fn start_all() -> Result<(
-    Arc<CollectionsWriter>,
-    Arc<CollectionsReader>,
-    tokio::task::JoinHandle<()>,
-)> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(
-        EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
-            hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
-        },
-        WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
-        },
-        ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
-            data: DataConfig {
-                data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
-            },
-        },
-    )
-    .await?;
-
-    let collections_reader_inner = collections_reader.clone().unwrap();
-    let handler = tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
-            collections_reader_inner.update(op).await.expect("OUCH!");
-        }
-    });
-
-    Ok((collections_writer.unwrap(), collections_reader.unwrap(), handler))
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_number_filters() -> Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let (writer, reader, _) = start_all().await?;
+async fn init() -> (Arc<CollectionsReader>, CollectionId) {
+    let (writer, reader, _) = start_all().await.unwrap();
 
     let collection_id = writer.create_collection(json!({
         "id": "test",
-    }).try_into().unwrap()).await?;
+    }).try_into().unwrap()).await.unwrap();
 
     writer.write(collection_id.clone(), json!([
         {
@@ -82,7 +38,7 @@ async fn test_number_filters() -> Result<()> {
             "id": "doc5",
             "number": 5
         },
-    ]).try_into().unwrap()).await?;
+    ]).try_into().unwrap()).await.unwrap();
 
     loop {
         sleep(Duration::from_millis(100)).await;
@@ -99,6 +55,14 @@ async fn test_number_filters() -> Result<()> {
         }
     }
 
+    (reader, collection_id)
+}
+
+#[tokio::test]
+async fn test_number_filters_gt() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
+
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
         "term": "doc",
@@ -111,6 +75,14 @@ async fn test_number_filters() -> Result<()> {
 
     assert_eq!(output.hits.len(), 3);
     assert_eq!(output.count, 3);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_number_filters_gte() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
 
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
@@ -125,6 +97,14 @@ async fn test_number_filters() -> Result<()> {
     assert_eq!(output.hits.len(), 4);
     assert_eq!(output.count, 4);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_number_filters_lt() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
+
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
         "term": "doc",
@@ -138,6 +118,13 @@ async fn test_number_filters() -> Result<()> {
     assert_eq!(output.hits.len(), 1);
     assert_eq!(output.count, 1);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_number_filters_lte() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
 
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
@@ -152,6 +139,14 @@ async fn test_number_filters() -> Result<()> {
     assert_eq!(output.hits.len(), 2);
     assert_eq!(output.count, 2);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_number_filters_eq() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
+
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
         "term": "doc",
@@ -164,6 +159,14 @@ async fn test_number_filters() -> Result<()> {
 
     assert_eq!(output.hits.len(), 1);
     assert_eq!(output.count, 1);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_number_filters_between() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
 
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let output = collection.search(json!({
