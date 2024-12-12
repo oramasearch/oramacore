@@ -46,7 +46,7 @@ impl JavaScript {
             input_json.replace('\'', "\\'"),
             func_name
         );
-
+        
         let promise = self.runtime.execute_script("[exec]", FastString::from(execute_code))?;
         let result = self.runtime.resolve(promise).await?;
         Ok(result)
@@ -56,24 +56,19 @@ impl JavaScript {
         let cache_key = format!("{}:{}", context, code);
 
         if !self.cached_functions.contains_key(&cache_key) {
-            self.runtime.execute_script("[decl]", FastString::from(code.to_string()))?;
-
             let func_name = format!("func_{}", self.cached_functions.len());
-            let cache_code = format!(
-                r#"
-                    globalThis.{} = (async () => {{
-                        const module = await import('[decl]');
-                        return module.default;
-                    }})();
-                "#,
-                func_name
-            );
-
-            let promise = self.runtime.execute_script("[cache]", FastString::from(cache_code))?;
-            self.runtime.resolve(promise).await?;
+            self.runtime.execute_script(
+                "[decl]",
+                FastString::from(format!(
+                    r#"globalThis.{} = (async () => {{
+                    const module = {{ default: {} }};
+                    return module.default;
+                }})();"#,
+                    func_name, code
+                ))
+            )?;
             self.cached_functions.insert(cache_key, func_name);
         }
-
         Ok(())
     }
 
