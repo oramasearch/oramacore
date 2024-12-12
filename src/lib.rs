@@ -27,6 +27,7 @@ pub mod embeddings;
 
 #[cfg(test)]
 pub mod test_utils;
+mod js;
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum SideChannelType {
