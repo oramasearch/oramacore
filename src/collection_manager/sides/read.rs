@@ -82,7 +82,9 @@ impl CollectionsReader {
 
                     document_storage: Arc::clone(&self.document_storage),
 
-                    vector_index: VectorIndex::try_new(VectorIndexConfig {})
+                    vector_index: VectorIndex::try_new(VectorIndexConfig {
+                        base_path: collection_data_dir.join("vectors"),
+                    })
                         .context("Cannot create vector index during collection creation")?,
                     fields_per_model: Default::default(),
 

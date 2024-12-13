@@ -1,38 +1,34 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
 use crate::collection_manager::dto::FieldId;
 use crate::document_storage::DocumentId;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use committed::CommittedState;
 use dashmap::{DashMap, Entry};
-use hora::core::metrics::Metric::Manhattan;
-use hora::core::node::IdxType;
-use hora::index::hnsw_idx;
-use hora::{core::ann_index::ANNIndex, index::hnsw_idx::HNSWIndex};
-use serde::{Deserialize, Serialize};
-use tracing::{trace, warn};
+use tracing::trace;
 use uncommitted::UncommittedVectorIndex;
 
 mod uncommitted;
+mod committed;
 
-#[derive(
-    Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
-)]
-struct IdxID(Option<DocumentId>);
 
 pub struct VectorIndex {
     uncommitted: UncommittedVectorIndex,
-    commited: DashMap<FieldId, HNSWIndex<f32, IdxID>>,
+    commited: DashMap<FieldId, CommittedState>,
+    base_path: PathBuf,
 }
 
-pub struct VectorIndexConfig {}
+pub struct VectorIndexConfig {
+    pub base_path: PathBuf,
+}
 
-impl IdxType for IdxID {}
 
 impl VectorIndex {
-    pub fn try_new(_config: VectorIndexConfig) -> Result<Self> {
+    pub fn try_new(config: VectorIndexConfig) -> Result<Self> {
         Ok(Self {
             uncommitted: UncommittedVectorIndex::new(),
             commited: Default::default(),
+            base_path: config.base_path,
         })
     }
 
@@ -41,11 +37,7 @@ impl VectorIndex {
         match entry {
             Entry::Occupied(_) => Err(anyhow!("Field already exists")),
             Entry::Vacant(entry) => {
-                let idx = hnsw_idx::HNSWIndex::<f32, IdxID>::new(
-                    dimension,
-                    &hora::index::hnsw_params::HNSWParams::<f32>::default(),
-                );
-                entry.insert(idx);
+                entry.insert(CommittedState::new_in_memory(dimension));
 
                 Ok(())
             }
@@ -68,36 +60,81 @@ impl VectorIndex {
         // TODO: measure time and think about it.
 
         let uncommitted = self.uncommitted.consume();
-
-        // Keep track of field_ids to build indexes only for them
-        let mut field_ids = HashSet::new();
+        let mut loaded_index_field_ids = HashSet::new();
         for (id, field_id, vectors) in uncommitted {
             let index = self.commited.get_mut(&field_id);
+
             let mut index = match index {
                 Some(index) => index,
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
+            // `load_in_memory` does nothing if it is already loaded.
+            let loaded_index = index.load_in_memory()?;
             for (_, vector) in vectors {
-                index
-                    .add(&vector, IdxID(Some(id)))
-                    .map_err(|e| anyhow!("Error adding vector: {:?}", e))?;
+                loaded_index
+                    .add(&vector, id)?;
             }
 
-            field_ids.insert(field_id);
+            loaded_index_field_ids.insert(field_id);
         }
 
         // Rebuild indexes only for fields that have been updated
-        for field_id in field_ids {
+        for field_id in loaded_index_field_ids {
             let index = self.commited.get_mut(&field_id);
+
             let mut index = match index {
                 Some(index) => index,
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            index
-                .build(Manhattan)
-                .map_err(|e| anyhow!("Error building index: {:?}", e))?;
+            let loaded_index = index.load_in_memory()?;
+            loaded_index
+                .build()?;
+
+            loaded_index.save_on_fs(self.base_path.join(field_id.0.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn load_in_memory(&self, field_ids: Option<Vec<FieldId>>) -> Result<()> {
+        let field_ids = match field_ids {
+            Some(field_ids) => field_ids,
+            None => self.commited.iter().map(|e| *e.key()).collect(),
+        };
+
+        for field_id in field_ids {
+            let index = self.commited.get_mut(&field_id);
+
+            let mut index = match index {
+                Some(index) => index,
+                None => return Err(anyhow!("Field {:?} not found", field_id)),
+            };
+
+            // We don't use the index itself,
+            // but we need to call `load_in_memory` to load the index in memory
+            let _ = index.load_in_memory();
+        }
+
+        Ok(())
+    }
+
+    pub fn unload_from_memory(&self, field_ids: Option<Vec<FieldId>>) -> Result<()> {
+        let field_ids = match field_ids {
+            Some(field_ids) => field_ids,
+            None => self.commited.iter().map(|e| *e.key()).collect(),
+        };
+
+        for field_id in field_ids {
+            let index = self.commited.get_mut(&field_id);
+
+            let mut index = match index {
+                Some(index) => index,
+                None => return Err(anyhow!("Field {:?} not found", field_id)),
+            };
+
+            index.unload_from_memory(self.base_path.join(field_id.0.to_string()))?;
         }
 
         Ok(())
@@ -124,19 +161,8 @@ impl VectorIndex {
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            let search_output = index.search(target, limit).into_iter();
-            for id in search_output {
-                let doc_id = match id.0 {
-                    Some(id) => id,
-                    // ???
-                    None => {
-                        warn!("This should not happen");
-                        continue;
-                    }
-                };
-                let v = output.entry(doc_id).or_insert(0.0);
-                *v += 1.0;
-            }
+            index.search(target, limit, &mut output)
+                .context("Cannot perform search on vector index")?;
         }
 
         trace!("VectorIndex output: {:?}", output);
@@ -147,48 +173,18 @@ impl VectorIndex {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::generate_new_path;
+
     use super::*;
-
-    #[test]
-    fn test_indexes_vector_serialize_deserialize() -> Result<()> {
-        let index = VectorIndex::try_new(VectorIndexConfig {})?;
-        index.add_field(FieldId(0), 3)?;
-
-        index.insert_batch(vec![
-            (DocumentId(0), FieldId(0), vec![vec![1.0, 2.0, 3.0]]),
-            (DocumentId(1), FieldId(0), vec![vec![4.0, 5.0, 6.0]]),
-            (DocumentId(2), FieldId(0), vec![vec![7.0, 8.0, 9.0]]),
-        ])?;
-
-        let output = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
-
-        let keys: HashSet<_> = output.keys().cloned().collect();
-        assert_eq!(
-            keys,
-            HashSet::from_iter([DocumentId(0), DocumentId(1), DocumentId(2)])
-        );
-
-        let hnws_index = &*index.commited.get(&FieldId(0)).unwrap();
-        let dump = bincode::serialize(&hnws_index)?;
-
-        let index_after = VectorIndex::try_new(VectorIndexConfig {})?;
-        index_after.add_field(FieldId(0), 3)?;
-        let hnws_index: HNSWIndex<f32, IdxID> = bincode::deserialize(&dump)?;
-        index_after.commited.insert(FieldId(0), hnws_index);
-
-        let output_after = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
-
-        assert_eq!(output, output_after);
-
-        Ok(())
-    }
 
     #[test]
     fn test_indexes_vector_commit_dont_change_the_result() -> Result<()> {
         const DIM: usize = 3;
         const N: usize = 1_000;
 
-        let mut index = VectorIndex::try_new(VectorIndexConfig {})?;
+        let mut index = VectorIndex::try_new(VectorIndexConfig {
+            base_path: generate_new_path(),
+        })?;
         index.add_field(FieldId(0), 3)?;
 
         let data = (0..N)
