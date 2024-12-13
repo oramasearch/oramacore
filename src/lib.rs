@@ -25,6 +25,8 @@ pub mod web_server;
 
 pub mod embeddings;
 
+pub mod js;
+
 #[cfg(test)]
 pub mod test_utils;
 

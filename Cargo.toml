@@ -71,6 +71,8 @@ quick-js = "0.4.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 duration-string = "0.4.0"
+deno_core = "0.325.0"
+serde_v8 = "0.234.0"
 
 [build-dependencies]
 cc="1"
@@ -105,7 +107,9 @@ path = "src/bin/rustorama.rs"
 #[[bin]]
 #name = "selector"
 #path = "src/bin/embeddings/selector.rs"
-
+[[bin]]
+name = "deno"
+path = "src/bin/js/deno.rs"
 
 [[bench]]
 name = "string_index_bench"
