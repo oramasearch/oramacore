@@ -108,7 +108,9 @@ path = "src/bin/rustorama.rs"
 #[[bin]]
 #name = "selector"
 #path = "src/bin/embeddings/selector.rs"
-
+[[bin]]
+name = "deno"
+path = "src/bin/js/deno.rs"
 
 [[bench]]
 name = "string_index_bench"
