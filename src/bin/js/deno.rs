@@ -19,7 +19,7 @@ async fn main() -> Result<(), Error> {
     let mut timings = Vec::new();
 
     for i in 1..=10 {
-        let input = Document { 
+        let input = Document {
             title: "Wireless headphones".to_string(),
             description: "These are some beautiful wireless headphones".to_string(),
             favorite: true,
@@ -30,9 +30,9 @@ async fn main() -> Result<(), Error> {
             function(input) {
                 const doc = {
                     ...input,
-                    price: input.price > 75 ? "expensive" : "not expensive"
+                    price_description: input.price > 75 ? "expensive" : "not expensive"
                 }
-                
+
                 return doc;
             }
         "#.to_string();
