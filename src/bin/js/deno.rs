@@ -1,6 +1,16 @@
 use anyhow::Error;
 use rustorama::js::deno::JavaScript;
+use serde::Serialize;
 use std::time::Instant;
+use rand::Rng;
+
+#[derive(Serialize)]
+struct Document {
+    title: String,
+    description: String,
+    favorite: bool,
+    price: usize
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -9,19 +19,26 @@ async fn main() -> Result<(), Error> {
     let mut timings = Vec::new();
 
     for i in 1..=10 {
-        let code = r#"
-            function foo() {
-                const x = 10;
-                const y = 20;
-                const result = x * y;
-                console.log(`when x=${x} and y=${y}, x*y=${result}`);
-            }
+        let input = Document { 
+            title: "Wireless headphones".to_string(),
+            description: "These are some beautiful wireless headphones".to_string(),
+            favorite: true,
+            price: rand::thread_rng().gen_range(50..100),
+        };
 
-            foo()
+        let code = r#"
+            function(input) {
+                const doc = {
+                    ...input,
+                    price: input.price > 75 ? "expensive" : "not expensive"
+                }
+                
+                return doc;
+            }
         "#.to_string();
 
         let start = Instant::now();
-        let result = js.eval(code).await?;
+        let result = js.eval(code, input).await?;
         let duration = start.elapsed();
         println!("Call {}: JavaScript result: {} (Duration: {:?})", i, result, duration);
         timings.push(duration);
