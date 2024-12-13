@@ -33,8 +33,6 @@ impl JavaScript {
             for job in receiver {
                 // @todo: based on the `Operation`, we can perform custom checks and custom script
                 // operations on the incoming data.
-                let function_name: Box<str> =
-                    format!("{}_function.js", job.operation.to_string()).into_boxed_str();
                 let full_script = format!(
                     r#"
                         (() => {{
@@ -48,9 +46,8 @@ impl JavaScript {
                     job.code
                 );
 
-                let script_name: &'static str = Box::leak(function_name);
                 let result = runtime
-                    .execute_script(script_name, full_script)
+                    .execute_script("script.js", full_script)
                     .and_then(|value| {
                         let scope = &mut runtime.handle_scope();
                         let local = value.open(scope);
