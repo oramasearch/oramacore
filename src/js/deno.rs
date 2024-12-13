@@ -49,8 +49,7 @@ impl JavaScript {
                             return JSON.stringify(output);
                         }})()
                     "#,
-                    job.input,
-                    job.code
+                    job.input, job.code
                 );
 
                 let script_name = format!("{}_script.js", job.operation);
