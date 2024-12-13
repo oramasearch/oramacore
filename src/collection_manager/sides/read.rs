@@ -1,6 +1,6 @@
 use std::{
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Debug,
     ops::Deref,
     path::PathBuf,
@@ -16,6 +16,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument};
 
 use crate::{
+    capped_heap::CappedHeap,
     collection_manager::{
         dto::{
             FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
@@ -81,8 +82,10 @@ impl CollectionsReader {
 
                     document_storage: Arc::clone(&self.document_storage),
 
-                    vector_index: VectorIndex::try_new(VectorIndexConfig {})
-                        .context("Cannot create vector index during collection creation")?,
+                    vector_index: VectorIndex::try_new(VectorIndexConfig {
+                        base_path: collection_data_dir.join("vectors"),
+                    })
+                    .context("Cannot create vector index during collection creation")?,
                     fields_per_model: Default::default(),
 
                     string_index: StringIndex::new(self.posting_id_generator.clone()),
@@ -647,24 +650,19 @@ impl CollectionReader {
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    // A min-heap of size `n` to keep track of the top N elements
-    let mut heap: BinaryHeap<Reverse<(NotNan<f32>, DocumentId)>> = BinaryHeap::with_capacity(n);
+    let mut capped_heap = CappedHeap::new(n);
 
     for (key, value) in map {
-        // Insert into the heap if it's not full, or replace the smallest element if the current one is larger
-        if heap.len() < n {
-            heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-        } else if let Some(Reverse((min_value, _))) = heap.peek() {
-            if value > *min_value.as_ref() {
-                heap.pop();
-                heap.push(Reverse((NotNan::new(value).unwrap(), key)));
-            }
-        }
+        let k = match NotNan::new(value) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let v = key;
+        capped_heap.insert(k, v);
     }
 
-    // Collect results into a sorted Vec (optional sorting based on descending values)
-    let result: Vec<TokenScore> = heap
-        .into_sorted_vec()
+    let result: Vec<TokenScore> = capped_heap
+        .into_top()
         .into_iter()
         .map(|Reverse((value, key))| TokenScore {
             document_id: key,
