@@ -35,7 +35,8 @@ impl JavaScript {
                     job.code
                 );
 
-                let result = runtime.execute_script("user_function.js", full_script)
+                let result = runtime
+                    .execute_script("user_function.js", full_script)
                     .and_then(|value| {
                         let scope = &mut runtime.handle_scope();
                         let local = value.open(scope);
@@ -47,7 +48,6 @@ impl JavaScript {
                     })
                     .map_err(|err| Error::msg(format!("JavaScript error: {:?}", err)));
 
-
                 let _ = job.response.send(result);
             }
         });
@@ -55,11 +55,7 @@ impl JavaScript {
         Self { sender }
     }
 
-    pub async fn eval<T: serde::Serialize>(
-        &self,
-        code: String,
-        input: T,
-    ) -> Result<String, Error> {
+    pub async fn eval<T: serde::Serialize>(&self, code: String, input: T) -> Result<String, Error> {
         let input_json = serde_json::to_value(input)?;
         let (response_tx, response_rx) = oneshot::channel();
         let job = Job {
@@ -68,7 +64,9 @@ impl JavaScript {
             response: response_tx,
         };
 
-        self.sender.send(job).map_err(|_| Error::msg("Runtime thread disconnected"))?;
+        self.sender
+            .send(job)
+            .map_err(|_| Error::msg("Runtime thread disconnected"))?;
         response_rx.await?
     }
 }

@@ -1,15 +1,15 @@
 use anyhow::Error;
+use rand::Rng;
 use rustorama::js::deno::JavaScript;
 use serde::Serialize;
 use std::time::Instant;
-use rand::Rng;
 
 #[derive(Serialize)]
 struct Document {
     title: String,
     description: String,
     favorite: bool,
-    price: usize
+    price: usize,
 }
 
 #[tokio::main]
@@ -35,12 +35,16 @@ async fn main() -> Result<(), Error> {
 
                 return doc;
             }
-        "#.to_string();
+        "#
+        .to_string();
 
         let start = Instant::now();
         let result = js.eval(code, input).await?;
         let duration = start.elapsed();
-        println!("Call {}: JavaScript result: {} (Duration: {:?})", i, result, duration);
+        println!(
+            "Call {}: JavaScript result: {} (Duration: {:?})",
+            i, result, duration
+        );
         timings.push(duration);
     }
 
