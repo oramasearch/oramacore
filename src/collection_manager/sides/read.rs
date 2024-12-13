@@ -85,7 +85,7 @@ impl CollectionsReader {
                     vector_index: VectorIndex::try_new(VectorIndexConfig {
                         base_path: collection_data_dir.join("vectors"),
                     })
-                        .context("Cannot create vector index during collection creation")?,
+                    .context("Cannot create vector index during collection creation")?,
                     fields_per_model: Default::default(),
 
                     string_index: StringIndex::new(self.posting_id_generator.clone()),

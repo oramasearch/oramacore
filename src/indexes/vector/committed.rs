@@ -1,7 +1,14 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use hora::{core::{ann_index::{ANNIndex, SerializableIndex}, metrics::Metric, node::IdxType}, index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams}};
+use hora::{
+    core::{
+        ann_index::{ANNIndex, SerializableIndex},
+        metrics::Metric,
+        node::IdxType,
+    },
+    index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams},
+};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -30,10 +37,7 @@ pub enum CommittedState {
 
 impl CommittedState {
     pub fn new_in_memory(dimension: usize) -> Self {
-        let index = HNSWIndex::<f32, IdxID>::new(
-            dimension,
-            &HNSWParams::<f32>::default(),
-        );
+        let index = HNSWIndex::<f32, IdxID>::new(dimension, &HNSWParams::<f32>::default());
         Self::InMemory(LoadedInMemoryCommittedIndex { index })
     }
 
@@ -54,9 +58,7 @@ impl CommittedState {
     pub fn unload_from_memory(&mut self, path: PathBuf) -> Result<()> {
         let loaded = match self {
             Self::InMemory(loaded) => loaded,
-            Self::OnFile(_) => {
-                return Ok(())
-            }
+            Self::OnFile(_) => return Ok(()),
         };
 
         loaded.save_on_fs(path.clone())?;
@@ -66,12 +68,17 @@ impl CommittedState {
         Ok(())
     }
 
-    pub fn search(&self, target: &[f32], limit: usize, output: &mut HashMap<DocumentId, f32>) -> Result<()> {
+    pub fn search(
+        &self,
+        target: &[f32],
+        limit: usize,
+        output: &mut HashMap<DocumentId, f32>,
+    ) -> Result<()> {
         match self {
             Self::InMemory(idx) => {
                 idx.search(target, limit, output);
                 Ok(())
-            },
+            }
             Self::OnFile(path) => {
                 let loaded = LoadedInMemoryCommittedIndex::from_path(path)
                     .with_context(|| format!("Cannot load index from '{:?}'", path))?;
@@ -90,12 +97,14 @@ pub struct LoadedInMemoryCommittedIndex {
 
 impl LoadedInMemoryCommittedIndex {
     pub fn add(&mut self, vector: &[f32], id: DocumentId) -> Result<()> {
-        self.index.add(vector, IdxID(Some(id)))
+        self.index
+            .add(vector, IdxID(Some(id)))
             .map_err(|e| anyhow!("Error adding vector: {:?}", e))
     }
 
     pub fn build(&mut self) -> Result<()> {
-        self.index.build(Metric::Manhattan)
+        self.index
+            .build(Metric::Manhattan)
             .map_err(|e| anyhow!("Error building index: {:?}", e))
     }
 
@@ -121,14 +130,17 @@ impl LoadedInMemoryCommittedIndex {
                 .with_context(|| format!("Cannot create directory '{:?}'", path))?;
         }
 
-        let path: &str = path.to_str()
+        let path: &str = path
+            .to_str()
             .with_context(|| format!("'{:?}' cannot to converted to str", path))?;
-        self.index.dump(path)
+        self.index
+            .dump(path)
             .map_err(|e| anyhow!("Error saving index: {:?}", e))
     }
 
     pub fn from_path(path: &PathBuf) -> Result<Self> {
-        let path: &str = path.to_str()
+        let path: &str = path
+            .to_str()
             .with_context(|| format!("'{:?}' cannot to converted to str", path))?;
         let index = HNSWIndex::<f32, IdxID>::load(path)
             .map_err(|e| anyhow!("Error loading index: {:?}", e))?;
@@ -148,7 +160,6 @@ mod tests {
     fn test_serialize_deserialize_inner() -> Result<()> {
         let mut index = HNSWIndex::<f32, IdxID>::new(3, &HNSWParams::<f32>::default());
         {
-
             const DIM: usize = 3;
             const N: usize = 10;
             let data = (0..N)
@@ -192,7 +203,6 @@ mod tests {
 
         let mut index = CommittedState::new_in_memory(3);
         {
-            
             let data = (0..N)
                 .map(|i| {
                     let doc_id = DocumentId(i as u32);

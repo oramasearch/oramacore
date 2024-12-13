@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use crate::collection_manager::dto::FieldId;
 use crate::document_storage::DocumentId;
@@ -8,9 +11,8 @@ use dashmap::{DashMap, Entry};
 use tracing::trace;
 use uncommitted::UncommittedVectorIndex;
 
-mod uncommitted;
 mod committed;
-
+mod uncommitted;
 
 pub struct VectorIndex {
     uncommitted: UncommittedVectorIndex,
@@ -21,7 +23,6 @@ pub struct VectorIndex {
 pub struct VectorIndexConfig {
     pub base_path: PathBuf,
 }
-
 
 impl VectorIndex {
     pub fn try_new(config: VectorIndexConfig) -> Result<Self> {
@@ -72,8 +73,7 @@ impl VectorIndex {
             // `load_in_memory` does nothing if it is already loaded.
             let loaded_index = index.load_in_memory()?;
             for (_, vector) in vectors {
-                loaded_index
-                    .add(&vector, id)?;
+                loaded_index.add(&vector, id)?;
             }
 
             loaded_index_field_ids.insert(field_id);
@@ -89,8 +89,7 @@ impl VectorIndex {
             };
 
             let loaded_index = index.load_in_memory()?;
-            loaded_index
-                .build()?;
+            loaded_index.build()?;
 
             loaded_index.save_on_fs(self.base_path.join(field_id.0.to_string()))?;
         }
@@ -161,7 +160,8 @@ impl VectorIndex {
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
-            index.search(target, limit, &mut output)
+            index
+                .search(target, limit, &mut output)
                 .context("Cannot perform search on vector index")?;
         }
 
