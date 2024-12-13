@@ -26,6 +26,7 @@ pub mod web_server;
 pub mod embeddings;
 
 mod capped_heap;
+pub mod js;
 
 #[cfg(test)]
 pub mod test_utils;
