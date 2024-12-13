@@ -23,6 +23,12 @@ struct Job {
     operation: Operation,
 }
 
+impl Default for JavaScript {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JavaScript {
     pub fn new() -> Self {
         // @todo: use crossbeam to create a thread pool (multi-consumer, multi-producer)
@@ -43,17 +49,22 @@ impl JavaScript {
                             return JSON.stringify(output);
                         }})()
                     "#,
-                    job.input.to_string(),
+                    job.input,
                     job.code
                 );
 
-                let script_name = format!("{}_script.js", job.operation.to_string());
+                let script_name = format!("{}_script.js", job.operation);
                 let b = Box::into_raw(Box::new(script_name));
-                let c: &'static str = unsafe { &**b };
+                let c: &'static str = unsafe { &*b };
 
                 let result = runtime
                     .execute_script(c, full_script)
-                    .with_context(|| format!("Failed to run script in Deno in operation '{}'", job.operation))
+                    .with_context(|| {
+                        format!(
+                            "Failed to run script in Deno in operation '{}'",
+                            job.operation
+                        )
+                    })
                     .and_then(|value| {
                         let scope = &mut runtime.handle_scope();
                         let local = value.open(scope);
