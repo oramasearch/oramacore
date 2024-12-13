@@ -1,5 +1,5 @@
 use anyhow::{Context, Error};
-use deno_core::{JsRuntime, RuntimeOptions};
+use deno_core::{FastString, JsRuntime, RuntimeOptions};
 use std::sync::mpsc;
 use std::thread;
 use strum_macros::Display;
@@ -53,7 +53,7 @@ impl JavaScript {
 
                 let result = runtime
                     .execute_script(c, full_script)
-                    .with_context(|| format!("Failed to run script in Deno"))
+                    .with_context(|| format!("Failed to run script in Deno in operation '{}'", job.operation))
                     .and_then(|value| {
                         let scope = &mut runtime.handle_scope();
                         let local = value.open(scope);
