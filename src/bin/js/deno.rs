@@ -1,6 +1,6 @@
 use anyhow::Error;
 use rand::Rng;
-use rustorama::js::deno::JavaScript;
+use rustorama::js::deno::{JavaScript, Operation};
 use serde::Serialize;
 use std::time::Instant;
 
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Error> {
         .to_string();
 
         let start = Instant::now();
-        let result = js.eval(code, input).await?;
+        let result = js.eval(Operation::Anonymous, code, input).await?;
         let duration = start.elapsed();
         println!(
             "Call {}: JavaScript result: {} (Duration: {:?})",

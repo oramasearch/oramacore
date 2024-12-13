@@ -1,6 +1,5 @@
 // pub mod custom_models;
 pub mod pq;
-pub mod properties_selector;
 
 mod hf;
 
