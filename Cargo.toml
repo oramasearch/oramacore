@@ -73,7 +73,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 duration-string = "0.4.0"
 deno_core = "0.325.0"
 serde_v8 = "0.234.0"
-twox-hash = "2.1.0"
 
 [build-dependencies]
 cc="1"
