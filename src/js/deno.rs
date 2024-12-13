@@ -1,4 +1,4 @@
-use anyhow::Error;
+use anyhow::{Context, Error};
 use deno_core::{JsRuntime, RuntimeOptions};
 use std::sync::mpsc;
 use std::thread;
@@ -25,6 +25,7 @@ struct Job {
 
 impl JavaScript {
     pub fn new() -> Self {
+        // @todo: use crossbeam to create a thread pool (multi-consumer, multi-producer)
         let (sender, receiver) = mpsc::channel::<Job>();
 
         thread::spawn(move || {
@@ -46,8 +47,13 @@ impl JavaScript {
                     job.code
                 );
 
+                let script_name = format!("{}_script.js", job.operation.to_string());
+                let b = Box::into_raw(Box::new(script_name));
+                let c: &'static str = unsafe { &**b };
+
                 let result = runtime
-                    .execute_script("script.js", full_script)
+                    .execute_script(c, full_script)
+                    .with_context(|| format!("Failed to run script in Deno"))
                     .and_then(|value| {
                         let scope = &mut runtime.handle_scope();
                         let local = value.open(scope);
@@ -59,6 +65,7 @@ impl JavaScript {
                     })
                     .map_err(|err| Error::msg(format!("JavaScript error: {:?}", err)));
 
+                let _ = unsafe { Box::from_raw(b) };
                 let _ = job.response.send(result);
             }
         });
