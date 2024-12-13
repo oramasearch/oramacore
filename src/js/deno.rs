@@ -1,5 +1,5 @@
 use anyhow::{Context, Error};
-use deno_core::{FastString, JsRuntime, RuntimeOptions};
+use deno_core::{JsRuntime, RuntimeOptions};
 use std::sync::mpsc;
 use std::thread;
 use strum_macros::Display;
