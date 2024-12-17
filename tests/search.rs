@@ -69,7 +69,7 @@ async fn start_server() {
     .await
     .unwrap();
 
-    let web_server = WebServer::new(collections_writer, collections_reader.clone());
+    let web_server = WebServer::new(collections_writer, collections_reader.clone(), None);
 
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
@@ -82,6 +82,7 @@ async fn start_server() {
         host: HOST.parse().unwrap(),
         port: PORT,
         allow_cors: true,
+        with_prometheus: false,
     };
     web_server.start(http_config).await.unwrap();
 }

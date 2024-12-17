@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::Result;
 use api::api_config;
+use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::info;
@@ -18,28 +19,36 @@ pub struct HttpConfig {
     pub host: IpAddr,
     pub port: u16,
     pub allow_cors: bool,
+    pub with_prometheus: bool,
 }
 
 pub struct WebServer {
     collections_writer: Option<Arc<CollectionsWriter>>,
     collections_reader: Option<Arc<CollectionsReader>>,
+    prometheus_handler: Option<PrometheusHandle>,
 }
 
 impl WebServer {
     pub fn new(
         collections_writer: Option<Arc<CollectionsWriter>>,
         collections_reader: Option<Arc<CollectionsReader>>,
+        prometheus_handler: Option<PrometheusHandle>,
     ) -> Self {
         Self {
             collections_writer,
             collections_reader,
+            prometheus_handler,
         }
     }
 
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        let router = api_config(self.collections_writer, self.collections_reader);
+        let router = api_config(
+            self.collections_writer,
+            self.collections_reader,
+            self.prometheus_handler,
+        );
 
         let router = if config.allow_cors {
             info!("Enabling CORS");

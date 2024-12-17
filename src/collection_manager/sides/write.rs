@@ -17,6 +17,10 @@ use crate::{
     document_storage::DocumentId,
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{number::Number, string::Posting},
+    metrics::{
+        AddedDocumentsLabels, EmbeddingCalculationLabels, StringCalculationLabels,
+        ADDED_DOCUMENTS_COUNTER, EMBEDDING_CALCULATION_METRIC, STRING_CALCULATION_METRIC,
+    },
     nlp::{locales::Locale, TextParser},
     types::{ComplexType, Document, DocumentList, FlattenDocument, ScalarType, ValueType},
 };
@@ -228,6 +232,11 @@ impl CollectionsWriter {
         document_list: DocumentList,
     ) -> Result<()> {
         info!("Inserting batch of {} documents", document_list.len());
+        ADDED_DOCUMENTS_COUNTER
+            .create(AddedDocumentsLabels {
+                collection: collection_id.0.clone(),
+            })
+            .increment_by(document_list.len());
 
         let collection = self
             .collections
@@ -334,6 +343,11 @@ impl FieldIndexer for StringField {
         field_id: FieldId,
         doc: &FlattenDocument,
     ) -> Result<Vec<WriteOperation>> {
+        let metric = STRING_CALCULATION_METRIC.create(StringCalculationLabels {
+            collection: coll_id.0.clone(),
+            field: field_name.to_string(),
+        });
+
         let value = doc.get(field_name);
 
         let data = match value {
@@ -418,6 +432,8 @@ impl FieldIndexer for StringField {
             }
         }
 
+        drop(metric);
+
         let op = WriteOperation::Collection(
             coll_id,
             CollectionWriteOperation::IndexString {
@@ -455,9 +471,13 @@ impl FieldIndexer for EmbeddingField {
             })
             .collect();
 
-        // TODO: do this better
+        let metric = EMBEDDING_CALCULATION_METRIC.create(EmbeddingCalculationLabels {
+            collection: coll_id.0.clone(),
+            model: self.model.model_name().to_string(),
+        });
         let mut output = self.model.embed(vec![input], None)?;
         let output = output.remove(0);
+        drop(metric);
 
         Ok(vec![WriteOperation::Collection(
             coll_id.clone(),

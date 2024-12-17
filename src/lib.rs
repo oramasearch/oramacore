@@ -7,6 +7,7 @@ use collection_manager::sides::{
     write::{CollectionsWriter, WriteOperation},
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use serde::Deserialize;
 use tokio::sync::broadcast::Receiver;
 use tracing::info;
@@ -27,6 +28,8 @@ pub mod embeddings;
 
 mod capped_heap;
 pub mod js;
+
+mod metrics;
 
 #[cfg(test)]
 pub mod test_utils;
@@ -56,12 +59,20 @@ pub struct RustoramaConfig {
 }
 
 pub async fn start(config: RustoramaConfig) -> Result<()> {
+    let prometheus_hadler = if config.http.with_prometheus {
+        Some(
+            PrometheusBuilder::new()
+                .install_recorder()
+                .context("failed to install recorder")?,
+        )
+    } else {
+        None
+    };
+
     let (writer, reader, mut receiver) =
         build_orama(config.embeddings, config.writer_side, config.reader_side).await?;
 
-    let web_server = WebServer::new(writer, reader.clone());
-
-    let collections_reader = reader.unwrap();
+    let collections_reader = reader.clone().unwrap();
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
             collections_reader.update(op).await.expect("OUCH!");
@@ -73,6 +84,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         config.http.host, config.http.port
     );
 
+    let web_server = WebServer::new(writer, reader, prometheus_hadler);
     web_server.start(config.http).await?;
 
     Ok(())

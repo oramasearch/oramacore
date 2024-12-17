@@ -1,14 +1,15 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use axum::{response::IntoResponse, Json, Router};
+use axum::{extract::State, response::IntoResponse, Json, Router};
 use axum_openapi3::{
     build_openapi, endpoint, reset_openapi,
     utoipa::openapi::{InfoBuilder, OpenApiBuilder},
     AddRoute,
 };
 use http::Request;
+use metrics_exporter_prometheus::PrometheusHandle;
 use tower_http::trace::TraceLayer;
-use tracing::info_span;
+use tracing::{info, info_span};
 
 use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
 mod collection;
@@ -16,11 +17,23 @@ mod collection;
 pub fn api_config(
     writers: Option<Arc<CollectionsWriter>>,
     readers: Option<Arc<CollectionsReader>>,
+    prometheus_handle: Option<PrometheusHandle>,
 ) -> Router {
     reset_openapi();
 
     // build our application with a route
     let router = Router::new().add(index()).add(health()).add(openapi());
+
+    let router = if let Some(prometheus_handle) = prometheus_handle {
+        let metric = Router::new()
+            .add(prometheus_handler())
+            .with_state(Arc::new(prometheus_handle));
+        info!("Prometheus metrics enabled");
+        router.nest("/", metric)
+    } else {
+        router
+    };
+
     let router = router.nest("/", collection::apis(writers, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
@@ -38,18 +51,21 @@ pub fn api_config(
     )
 }
 
+#[endpoint(method = "GET", path = "/metrics", description = "Prometheus Metric")]
+async fn prometheus_handler(prometheus_handle: State<Arc<PrometheusHandle>>) -> impl IntoResponse {
+    prometheus_handle.render()
+}
+
 static INDEX_MESSAGE: &str = "hi! welcome to Orama";
 
 #[endpoint(method = "GET", path = "/", description = "Welcome to Orama")]
 async fn index() -> Json<&'static str> {
-    println!("index");
     Json(INDEX_MESSAGE)
 }
 
 static HEALTH_MESSAGE: &str = "up";
 #[endpoint(method = "GET", path = "/health", description = "Health check")]
 async fn health() -> Json<&'static str> {
-    println!("health");
     Json(HEALTH_MESSAGE)
 }
 

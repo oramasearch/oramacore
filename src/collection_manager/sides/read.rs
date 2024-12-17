@@ -32,6 +32,11 @@ use crate::{
         string::{scorer::bm25::BM25Score, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
+    metrics::{
+        CollectionAddedLabels, CollectionOperationLabels, SearchFilterLabels, SearchLabels,
+        COLLECTION_ADDED_COUNTER, COLLECTION_OPERATION_COUNTER, SEARCH_FILTER_HISTOGRAM,
+        SEARCH_FILTER_METRIC, SEARCH_METRIC,
+    },
     nlp::TextParser,
     types::Document,
 };
@@ -73,6 +78,11 @@ impl CollectionsReader {
         match op {
             WriteOperation::Generic(GenericWriteOperation::CreateCollection { id }) => {
                 info!("CreateCollection {:?}", id);
+                COLLECTION_ADDED_COUNTER
+                    .create(CollectionAddedLabels {
+                        collection: id.0.to_string(),
+                    })
+                    .increment_by_one();
 
                 let collection_data_dir = self.data_config.data_dir.join(&id.0);
 
@@ -102,6 +112,12 @@ impl CollectionsReader {
             }
             WriteOperation::Collection(collection_id, coll_op) => {
                 let collections = self.collections.read().await;
+
+                COLLECTION_OPERATION_COUNTER
+                    .create(CollectionOperationLabels {
+                        collection: collection_id.0.to_string(),
+                    })
+                    .increment_by_one();
 
                 let collection_reader = match collections.get(&collection_id) {
                     Some(collection_reader) => collection_reader,
@@ -329,6 +345,11 @@ impl CollectionReader {
         if where_filter.is_empty() {
             return Ok(None);
         }
+
+        let metric = SEARCH_FILTER_METRIC.create(SearchFilterLabels {
+            collection: self.id.0.to_string(),
+        });
+
         let filters: Result<Vec<_>> = where_filter
             .into_iter()
             .map(|(field_name, value)| {
@@ -392,7 +413,14 @@ impl CollectionReader {
             doc_ids = doc_ids.intersection(&doc_ids_).copied().collect();
         }
 
-        info!("Matching doc from filters: {:?}", doc_ids);
+        drop(metric);
+
+        SEARCH_FILTER_HISTOGRAM
+            .create(SearchFilterLabels {
+                collection: self.id.0.to_string(),
+            })
+            .record_usize(doc_ids.len());
+        info!("Matching doc from filters: {:?}", doc_ids.len());
 
         Ok(Some(doc_ids))
     }
@@ -415,6 +443,9 @@ impl CollectionReader {
 
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult, anyhow::Error> {
+        let metric = SEARCH_METRIC.create(SearchLabels {
+            collection: self.id.0.to_string(),
+        });
         let SearchParams {
             mode,
             properties,
@@ -501,6 +532,8 @@ impl CollectionReader {
                 }
             })
             .collect();
+
+        drop(metric);
 
         Ok(SearchResult {
             count,

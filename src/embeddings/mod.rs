@@ -156,6 +156,10 @@ impl LoadedModel {
         self.dimensions
     }
 
+    pub fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
     pub fn embed(&self, input: Vec<String>, batch_size: Option<usize>) -> Result<Vec<Vec<f32>>> {
         // The following "clone" is ugly: we are cloing every input string
         // Unfortunatelly, `embed` method required `Vec` and not `&Vec`.

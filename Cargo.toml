@@ -64,7 +64,7 @@ strum_macros = "0.26.4"
 ndarray = "=0.15.6"
 reductive = "0.9.0"
 rand_chacha = "0.3.1"
-reqwest = { version = "0.12.9", features = ["blocking"] }
+reqwest = { version = "0.12.9", features = ["blocking", "json"] }
 quick-js = "0.4.1"
 
 # Tracing
@@ -73,6 +73,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 duration-string = "0.4.0"
 deno_core = "0.325.0"
 serde_v8 = "0.234.0"
+
+# prometheus
+metrics-exporter-prometheus = "0.16.0"
+metrics = "0.24.1"
+metrics-util = "0.18.0"
 
 [build-dependencies]
 cc="1"
@@ -91,6 +96,10 @@ rand = "0.8.5"
 [[bin]]
 name = "rustorama"
 path = "src/bin/rustorama.rs"
+
+[[bin]]
+name = "insert_documents"
+path = "src/bin/insert_documents.rs"
 
 ##### BIN FOR TEST #####
 #[[bin]]
