@@ -29,7 +29,7 @@ use crate::{
     indexes::{
         bool::BoolIndex,
         number::{Number, NumberFilter, NumberIndex},
-        string::{scorer::bm25::BM25Score, StringIndex},
+        string::{scorer::BM25Scorer, StringIndex},
         vector::{VectorIndex, VectorIndexConfig},
     },
     metrics::{
@@ -154,7 +154,6 @@ impl CollectionsReader {
                     } => {
                         collection_reader
                             .index_string(doc_id, field_id, terms)
-                            .await
                             .context("cannot index string")?;
                     }
                     CollectionWriteOperation::InsertDocument { doc_id, doc } => {
@@ -285,13 +284,13 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self, terms), level="debug", fields(self.id = ?self.id))]
-    async fn index_string(
+    fn index_string(
         &self,
         doc_id: DocumentId,
         field_id: FieldId,
         terms: InsertStringTerms,
     ) -> Result<()> {
-        self.string_index.insert(doc_id, field_id, terms).await?;
+        self.string_index.insert(doc_id, field_id, terms)?;
         Ok(())
     }
 
@@ -308,7 +307,7 @@ impl CollectionReader {
 
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
     async fn insert_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
-        self.string_index.new_document_inserted().await;
+        // self.string_index.increment_total_document().await;
         self.document_storage.add_document(doc_id, doc).await
     }
 
@@ -552,6 +551,7 @@ impl CollectionReader {
         let text_parser = TextParser::from_language(crate::nlp::locales::Locale::EN);
         let tokens = text_parser.tokenize(term);
 
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
         self.string_index
             .search(
                 tokens,
@@ -561,12 +561,14 @@ impl CollectionReader {
                 // Anyway the production code should always pass the properties
                 // So we could avoid this option
                 // TODO: remove this option
-                Some(properties),
+                Some(&properties),
                 boost,
-                BM25Score::default(),
+                &mut scorer,
                 filtered_doc_ids.as_ref(),
             )
-            .await
+            .await?;
+
+        Ok(scorer.get_scores())
     }
 
     async fn search_vector(

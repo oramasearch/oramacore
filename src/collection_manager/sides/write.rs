@@ -16,7 +16,7 @@ use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
     document_storage::DocumentId,
     embeddings::{EmbeddingService, LoadedModel},
-    indexes::{number::Number, string::Posting},
+    indexes::number::Number,
     metrics::{
         AddedDocumentsLabels, EmbeddingCalculationLabels, StringCalculationLabels,
         ADDED_DOCUMENTS_COUNTER, EMBEDDING_CALCULATION_METRIC, STRING_CALCULATION_METRIC,
@@ -39,7 +39,16 @@ pub enum GenericWriteOperation {
     },
 }
 
-pub type InsertStringTerms = HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Term(pub String);
+
+#[derive(Debug, Clone)]
+pub struct TermStringField {
+    pub positions: Vec<usize>,
+    pub field_length: u16,
+}
+
+pub type InsertStringTerms = HashMap<Term, TermStringField>;
 type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
 
 #[derive(Debug, Clone)]
@@ -288,7 +297,7 @@ impl CollectionsWriter {
     }
 }
 
-trait FieldIndexer: Sync + Send + Debug {
+pub trait FieldIndexer: Sync + Send + Debug {
     fn get_write_operations(
         &self,
         coll_id: CollectionId,
@@ -334,6 +343,12 @@ impl FieldIndexer for NumberField {
 pub struct StringField {
     parser: Arc<TextParser>,
 }
+impl StringField {
+    pub fn new(parser: Arc<TextParser>) -> Self {
+        Self { parser }
+    }
+}
+
 impl FieldIndexer for StringField {
     fn get_write_operations(
         &self,
@@ -358,9 +373,9 @@ impl FieldIndexer for StringField {
             },
         };
 
-        let doc_length = data.len().min(u16::MAX as usize - 1) as u16;
+        let field_length = data.len().min(u16::MAX as usize - 1) as u16;
 
-        let mut terms: InsertStringTerms = Default::default();
+        let mut terms: HashMap<Term, TermStringField> = Default::default();
         for (position, (original, stemmeds)) in data.into_iter().enumerate() {
             // This `for` loop wants to build the `terms` hashmap
             // it is a `HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>`
@@ -373,60 +388,35 @@ impl FieldIndexer for StringField {
             // `original` & `stemmeds` appears in the `terms` hashmap with the "same value"
             // ie: the position of the origin and stemmed term are the same.
 
+            let original = Term(original);
             match terms.entry(original) {
                 Entry::Occupied(mut entry) => {
-                    let v = entry.get_mut();
-                    v.0 += 1; // Term frequency inside the doc for this field
-
-                    let p = v.1.entry((doc_id, field_id)).or_insert_with(|| Posting {
-                        document_id: doc_id,
-                        field_id,
-                        positions: vec![],
-                        term_frequency: 0.0,
-                        doc_length,
-                    });
+                    let p: &mut TermStringField = entry.get_mut();
 
                     p.positions.push(position);
-                    p.term_frequency += 1.0;
                 }
                 Entry::Vacant(entry) => {
-                    let p = Posting {
-                        document_id: doc_id,
-                        field_id,
+                    let p = TermStringField {
                         positions: vec![position],
-                        term_frequency: 1.0,
-                        doc_length,
+                        field_length,
                     };
-                    entry.insert((1, HashMap::from_iter([((doc_id, field_id), p)])));
+                    entry.insert(p);
                 }
             };
 
             for stemmed in stemmeds {
+                let stemmed = Term(stemmed);
                 match terms.entry(stemmed) {
                     Entry::Occupied(mut entry) => {
-                        let v = entry.get_mut();
-                        v.0 += 1; // Term frequency inside the doc for this field
-
-                        let p = v.1.entry((doc_id, field_id)).or_insert_with(|| Posting {
-                            document_id: doc_id,
-                            field_id,
-                            positions: vec![],
-                            term_frequency: 0.0,
-                            doc_length,
-                        });
-
+                        let p: &mut TermStringField = entry.get_mut();
                         p.positions.push(position);
-                        p.term_frequency += 1.0;
                     }
                     Entry::Vacant(entry) => {
-                        let p = Posting {
-                            document_id: doc_id,
-                            field_id,
+                        let p = TermStringField {
                             positions: vec![position],
-                            term_frequency: 1.0,
-                            doc_length,
+                            field_length,
                         };
-                        entry.insert((1, HashMap::from_iter([((doc_id, field_id), p)])));
+                        entry.insert(p);
                     }
                 };
             }

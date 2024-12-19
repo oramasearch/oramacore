@@ -121,9 +121,9 @@ path = "src/bin/insert_documents.rs"
 name = "deno"
 path = "src/bin/js/deno.rs"
 
-[[bench]]
-name = "string_index_bench"
-harness = false
+# [[bench]]
+# name = "string_index_bench"
+# harness = false
 
 [workspace]
 members = [
