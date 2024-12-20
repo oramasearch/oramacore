@@ -4,7 +4,7 @@ use anyhow::Result;
 use fst::{Automaton, IntoStreamer, Map, Streamer};
 use tracing::warn;
 
-use crate::document_storage::DocumentId;
+use crate::{document_storage::DocumentId, nlp::stop_words::fi};
 
 use super::{scorer::BM25Scorer, GlobalInfo};
 
@@ -42,6 +42,137 @@ impl CommittedStringFieldIndex {
     }
 
     pub fn search(
+        &self,
+        tokens: &[String],
+        boost: f32,
+        scorer: &mut BM25Scorer<DocumentId>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        global_info: &GlobalInfo,
+    ) -> Result<()> {
+        if tokens.is_empty() {
+            return Ok(());
+        }
+
+        if tokens.len() == 1 {
+            self.search_without_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+        } else {
+            self.search_with_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+        }
+    }
+
+    pub fn search_with_phrase_match(
+        &self,
+        tokens: &[String],
+        boost: f32,
+        scorer: &mut BM25Scorer<DocumentId>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        global_info: &GlobalInfo,
+    ) -> Result<()> {
+        let total_field_length = global_info.total_document_length as f32;
+        let total_documents_with_field = global_info.total_documents as f32;
+        let average_field_length = total_field_length / total_documents_with_field;
+
+        struct Foo {
+            positions: HashSet<usize>,
+            matches: Vec<(u32, usize, usize)>,
+        }
+        let mut foo: HashMap<DocumentId, Foo> = HashMap::new();
+
+        for token in tokens {
+            let automaton = fst::automaton::Str::new(token).starts_with();
+            let mut stream = self.fst_map.search(automaton).into_stream();
+
+            // We don't "boost" the exact match at all.
+            // Should we boost if the match is "perfect"?
+            // TODO: think about this
+
+            while let Some((_, posting_list_id)) = stream.next() {
+                let postings = match self.storage.get(&posting_list_id) {
+                    Some(postings) => postings,
+                    None => {
+                        warn!("posting list not found: skipping");
+                        continue;
+                    }
+                };
+
+                let total_documents_with_term_in_field = postings.len();
+
+                for (doc_id, positions) in postings {
+                    if let Some(filtered_doc_ids) = filtered_doc_ids {
+                        if !filtered_doc_ids.contains(doc_id) {
+                            continue;
+                        }
+                    }
+
+                    let v = foo.entry(*doc_id).or_insert_with(|| Foo {
+                        positions: Default::default(),
+                        matches: Default::default(),
+                    });
+                    v.positions.extend(positions);
+
+                    let field_length =
+                        *self.document_lengths_per_document.get(doc_id).unwrap_or(&1);
+                    v.matches.push((
+                        field_length,
+                        positions.len(),
+                        total_documents_with_term_in_field,
+                    ));
+                }
+            }
+        }
+
+        for (doc_id, Foo { matches, positions }) in foo {
+            let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
+            ordered_positions.sort_unstable(); // asc order
+
+            let sequences_count = ordered_positions
+                .windows(2)
+                .filter(|window| {
+                    let first = window[0];
+                    let second = window[1];
+
+                    // TODO: make this "1" configurable
+                    (second - first) < 1
+                })
+                .count();
+
+            let total_boost = (sequences_count as f32 * 2.0) + boost;
+
+            for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
+                matches
+            {
+                scorer.add(
+                    doc_id,
+                    term_occurrence_in_field as u32,
+                    field_length,
+                    average_field_length,
+                    global_info.total_documents as f32,
+                    total_documents_with_term_in_field,
+                    1.2,
+                    0.75,
+                    total_boost,
+                );
+            }
+        }
+
+        /*
+        scorer.add(
+            *doc_id,
+            positions.len() as u32,
+            field_length,
+            average_field_length,
+            global_info.total_documents as f32,
+            total_documents_with_term_in_field,
+            1.2,
+            0.75,
+            boost,
+        );
+        */
+
+        Ok(())
+    }
+
+    pub fn search_without_phrase_match(
         &self,
         tokens: &[String],
         boost: f32,
@@ -96,8 +227,6 @@ impl CommittedStringFieldIndex {
                     );
                 }
             }
-
-            // TODO: Add phrase match boost
         }
 
         Ok(())
@@ -206,38 +335,6 @@ impl CommittedStringFieldIndex {
     }
     */
 
-    fn is_phrase_match(&self, token_positions: &[Vec<usize>]) -> bool {
-        if token_positions.is_empty() {
-            return false;
-        }
-
-        let position_sets: Vec<std::collections::HashSet<usize>> = token_positions
-            .iter()
-            .skip(1)
-            .map(|positions| positions.iter().copied().collect())
-            .collect();
-
-        for &start_pos in &token_positions[0] {
-            let mut current_pos = start_pos;
-            let mut matched = true;
-
-            for positions in &position_sets {
-                let next_pos = current_pos + 1;
-                if positions.contains(&next_pos) {
-                    current_pos = next_pos;
-                } else {
-                    matched = false;
-                    break;
-                }
-            }
-
-            if matched {
-                return true;
-            }
-        }
-
-        false
-    }
 }
 */
 

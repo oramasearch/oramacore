@@ -21,9 +21,9 @@ use crate::{
 
 mod committed;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmarking"))]
 pub use committed::merge;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "benchmarking")))]
 use committed::merge;
 
 // pub mod posting_storage;

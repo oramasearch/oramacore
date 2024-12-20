@@ -80,13 +80,14 @@ metrics = "0.24.1"
 metrics-util = "0.18.0"
 assert_approx_eq = "1.1.0"
 
+tempdir = { version ="0.3.7", optional = true }
+
 [build-dependencies]
 cc="1"
 
 [dev-dependencies]
 hurl = "6.0.0"
 hurl_core = "6.0.0"
-tempdir = "0.3.7"
 pretty_assertions = "1.4.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 http-body-util = "0.1.2"
@@ -122,9 +123,13 @@ path = "src/bin/insert_documents.rs"
 name = "deno"
 path = "src/bin/js/deno.rs"
 
-# [[bench]]
-# name = "string_index_bench"
-# harness = false
+[[bench]]
+name = "phrase_match"
+harness = false
+
+[features]
+default = ["benchmarking"]
+benchmarking = [ "tempdir" ]
 
 [workspace]
 members = [
