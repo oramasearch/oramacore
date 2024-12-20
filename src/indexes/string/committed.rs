@@ -4,7 +4,7 @@ use anyhow::Result;
 use fst::{Automaton, IntoStreamer, Map, Streamer};
 use tracing::warn;
 
-use crate::{document_storage::DocumentId, nlp::stop_words::fi};
+use crate::document_storage::DocumentId;
 
 use super::{scorer::BM25Scorer, GlobalInfo};
 
@@ -72,11 +72,11 @@ impl CommittedStringFieldIndex {
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
-        struct Foo {
+        struct PhraseMatchStorage {
             positions: HashSet<usize>,
             matches: Vec<(u32, usize, usize)>,
         }
-        let mut foo: HashMap<DocumentId, Foo> = HashMap::new();
+        let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
@@ -104,10 +104,12 @@ impl CommittedStringFieldIndex {
                         }
                     }
 
-                    let v = foo.entry(*doc_id).or_insert_with(|| Foo {
-                        positions: Default::default(),
-                        matches: Default::default(),
-                    });
+                    let v = storage
+                        .entry(*doc_id)
+                        .or_insert_with(|| PhraseMatchStorage {
+                            positions: Default::default(),
+                            matches: Default::default(),
+                        });
                     v.positions.extend(positions);
 
                     let field_length =
@@ -121,7 +123,7 @@ impl CommittedStringFieldIndex {
             }
         }
 
-        for (doc_id, Foo { matches, positions }) in foo {
+        for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
 
@@ -154,20 +156,6 @@ impl CommittedStringFieldIndex {
                 );
             }
         }
-
-        /*
-        scorer.add(
-            *doc_id,
-            positions.len() as u32,
-            field_length,
-            average_field_length,
-            global_info.total_documents as f32,
-            total_documents_with_term_in_field,
-            1.2,
-            0.75,
-            boost,
-        );
-        */
 
         Ok(())
     }
@@ -232,111 +220,6 @@ impl CommittedStringFieldIndex {
         Ok(())
     }
 }
-/*
-impl CommittedStringFieldIndex {
-    /*
-    pub async fn search(
-        &self,
-        tokens: &[String],
-        global_info: &GlobalInfo,
-        search_on: Option<&[FieldId]>,
-        boost: &HashMap<FieldId, f32>,
-        scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
-    ) -> Result<()> {
-
-        let mut all_postings: Vec<(Vec<Posting>, usize)> = Vec::new();
-
-        if let Some(fst) = self.fst_map.read().await.as_ref() {
-
-            // We threat the current token as the postfixes
-            // Should we boost if the match is "perfect"?
-            // TODO: think about this
-
-            for token in tokens {
-                let automaton = fst::automaton::Str::new(token).starts_with();
-                let mut stream = fst.search(automaton).into_stream();
-
-                while let Some(result) = stream.next() {
-                    let (_, packed_value) = result;
-                    let posting_list_id = PostingListId((packed_value >> 32) as u32);
-                    let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
-
-                    // if let Ok(postings) = self.posting_storage.get(posting_list_id) {
-                    //     all_postings.push((postings, term_frequency));
-                    // }
-                }
-            }
-        } else {
-            warn!("fst map is empty: returning empty search results");
-            return Ok(());
-        }
-
-        let in_filtered = move |posting: &Posting| -> bool {
-            if let Some(filtered_doc_ids) = filtered_doc_ids {
-                filtered_doc_ids.contains(&posting.document_id)
-            } else {
-                true
-            }
-        };
-
-        let mut filtered_postings: HashMap<DocumentId, Vec<(Posting, usize)>> = HashMap::new();
-        for (postings, term_freq) in all_postings {
-            for posting in postings.into_iter().filter(in_filtered) {
-                if search_on
-                    .as_ref()
-                    .map(|search_on| search_on.contains(&posting.field_id))
-                    .unwrap_or(true)
-                {
-                    filtered_postings
-                        .entry(posting.document_id)
-                        .or_default()
-                        .push((posting, term_freq));
-                }
-            }
-        }
-
-        for (doc_id, postings) in filtered_postings {
-            let mut token_positions: Vec<Vec<usize>> = postings
-                .iter()
-                .map(|(posting, _)| posting.positions.clone())
-                .collect();
-
-            token_positions
-                .iter_mut()
-                .for_each(|positions| positions.sort_unstable());
-
-            let is_phrase_match =  self.is_phrase_match(&token_positions);
-
-            for (posting, term_freq) in postings {
-                let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                let boost_per_field = if is_phrase_match {
-                    // If the query token positions matches the document token positions, we boost the score
-                    // The `25` here is arbitrary and we should probably make it configurable
-                    // TODO: Make this `25` configurable
-                    boost_per_field * 25.0
-                } else {
-                    boost_per_field
-                };
-                // scorer.add_entry(global_info, &posting, term_freq as f32, boost_per_field);
-
-                /*
-                scorer.add(
-                    doc_id,
-                    posting.field_id,
-
-                );
-                */
-            }
-        }
-
-
-        Ok(())
-    }
-    */
-
-}
-*/
 
 pub mod merge {
     use std::{

@@ -68,7 +68,6 @@ mod bench {
             });
         });
 
-
         c.bench_function("two word - phrase", |b| {
             b.iter(|| {
                 string_index
@@ -96,7 +95,6 @@ mod bench {
             });
         });
     }
-
 }
 
 #[cfg(not(feature = "benchmarking"))]
