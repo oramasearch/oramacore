@@ -1,5 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet}, ops::AddAssign, sync::{atomic::AtomicU64, Arc}
+    collections::{HashMap, HashSet},
+    ops::AddAssign,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::Result;
@@ -144,11 +146,11 @@ So, where this field id came from?"#,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
-        let search_on: HashSet<_> = if 
-        let Some(v) = search_on {
+        let search_on: HashSet<_> = if let Some(v) = search_on {
             v.iter().copied().collect()
         } else {
-            self.uncommitted.iter()
+            self.uncommitted
+                .iter()
                 .map(|e| *e.key())
                 .chain(self.committed.iter().map(|e| *e.key()))
                 .collect()
@@ -160,7 +162,9 @@ So, where this field id came from?"#,
             let uncommitted = self.uncommitted.get(&field_id);
             let committed = self.committed.get(&field_id);
 
-            let mut global_info = committed.as_ref().map(|c| c.get_global_info())
+            let mut global_info = committed
+                .as_ref()
+                .map(|c| c.get_global_info())
                 .unwrap_or_default();
 
             // We share the global info between committed and uncommitted indexes
@@ -175,7 +179,13 @@ So, where this field id came from?"#,
 
             if let Some(uncommitted) = uncommitted {
                 global_info += uncommitted.get_global_info();
-                uncommitted.search(&tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)?;
+                uncommitted.search(
+                    &tokens,
+                    boost / 10.0,
+                    scorer,
+                    filtered_doc_ids,
+                    &global_info,
+                )?;
             }
 
             if let Some(committed) = committed {
@@ -192,64 +202,84 @@ mod tests {
     use assert_approx_eq::assert_approx_eq;
     use serde_json::json;
 
-    use crate::{collection_manager::sides::write::{Term, TermStringField}, test_utils::create_string_index};
+    use crate::{
+        collection_manager::sides::write::{Term, TermStringField},
+        test_utils::create_string_index,
+    };
 
     use super::*;
 
     #[tokio::test]
-    async fn test_indexes_string_insert_search_commit_search() -> Result<()>{
+    async fn test_indexes_string_insert_search_commit_search() -> Result<()> {
         let mut string_index = create_string_index(
+            vec![(FieldId(0), "field".to_string())],
             vec![
-                (FieldId(0), "field".to_string()),
+                json!({
+                    "field": "hello hello world",
+                })
+                .try_into()?,
+                json!({
+                    "field": "hello tom",
+                })
+                .try_into()?,
             ],
-            vec![
-            json!({
-                "field": "hello hello world",
-            })
-            .try_into()?,
-            json!({
-                "field": "hello tom",
-            })
-            .try_into()?,
-        ])?;
+        )?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let before_output = scorer.get_scores();
 
         string_index.commit()?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_output = scorer.get_scores();
 
-        assert_approx_eq!(after_output[&DocumentId(0)] / 10.0, before_output[&DocumentId(0)]);
-        assert_approx_eq!(after_output[&DocumentId(1)] / 10.0, before_output[&DocumentId(1)]);
+        assert_approx_eq!(
+            after_output[&DocumentId(0)] / 10.0,
+            before_output[&DocumentId(0)]
+        );
+        assert_approx_eq!(
+            after_output[&DocumentId(1)] / 10.0,
+            before_output[&DocumentId(1)]
+        );
 
-        string_index.insert(DocumentId(2), FieldId(0), 1, HashMap::from_iter([
-            (Term("hello".to_string()), TermStringField { positions: vec![1] }),
-        ]))?;
+        string_index.insert(
+            DocumentId(2),
+            FieldId(0),
+            1,
+            HashMap::from_iter([(
+                Term("hello".to_string()),
+                TermStringField { positions: vec![1] },
+            )]),
+        )?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_insert_output = scorer.get_scores();
 
         assert_eq!(after_insert_output.len(), 3);
@@ -260,13 +290,15 @@ mod tests {
         string_index.commit()?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_insert_commit_output = scorer.get_scores();
 
         assert_eq!(after_insert_commit_output.len(), 3);

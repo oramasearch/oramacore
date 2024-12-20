@@ -47,9 +47,8 @@ impl CommittedStringFieldIndex {
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
-        global_info: &GlobalInfo
+        global_info: &GlobalInfo,
     ) -> Result<()> {
-
         let total_field_length = global_info.total_document_length as f32;
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
@@ -57,7 +56,6 @@ impl CommittedStringFieldIndex {
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
             let mut stream = self.fst_map.search(automaton).into_stream();
-
 
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
@@ -68,8 +66,8 @@ impl CommittedStringFieldIndex {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
-                        continue
-                    },
+                        continue;
+                    }
                 };
 
                 let total_documents_with_term_in_field = postings.len();
@@ -303,7 +301,6 @@ pub mod merge {
 
             match (uncommitted, committed) {
                 (Some((uncommitted_key, _)), Some((committed_key, _))) => {
-
                     let cmp = uncommitted_key.cmp(committed_key);
                     match cmp {
                         std::cmp::Ordering::Less => {
@@ -380,8 +377,7 @@ pub mod merge {
         type Item = (Vec<u8>, u64);
 
         fn next(&mut self) -> Option<Self::Item> {
-            self.stream.next()
-                .map(|(key, value)| (key.to_vec(), value))
+            self.stream.next().map(|(key, value)| (key.to_vec(), value))
         }
     }
 
@@ -415,7 +411,8 @@ pub mod merge {
             committed_storage: &mut committed_storage,
             committed_iter: FTSIter {
                 stream: committed.fst_map.stream(),
-            }.peekable(),
+            }
+            .peekable(),
 
             uncommitted_iter,
         };
@@ -440,10 +437,13 @@ pub mod merge {
 
     #[cfg(test)]
     mod tests {
-        use serde_json::json;
-        use crate::indexes::string::scorer::BM25Scorer;
-        use crate::test_utils::{create_committed_string_field_index, create_uncommitted_string_field_index, create_uncommitted_string_field_index_from};
         use super::*;
+        use crate::indexes::string::scorer::BM25Scorer;
+        use crate::test_utils::{
+            create_committed_string_field_index, create_uncommitted_string_field_index,
+            create_uncommitted_string_field_index_from,
+        };
+        use serde_json::json;
 
         #[test]
         fn test_indexes_string_committed_from_uncommitted() -> Result<()> {
@@ -459,7 +459,13 @@ pub mod merge {
             ])?;
 
             let mut scorer = BM25Scorer::new();
-            index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+            index.search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )?;
             let before_output = scorer.get_scores();
 
             let new_committed = merge(
@@ -475,7 +481,13 @@ pub mod merge {
             )?;
 
             let mut scorer = BM25Scorer::new();
-            new_committed.search(&["hello".to_string()], 1.0, &mut scorer, None, &new_committed.get_global_info())?;
+            new_committed.search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &new_committed.get_global_info(),
+            )?;
             let after_output = scorer.get_scores();
 
             assert_eq!(before_output, after_output);
@@ -487,31 +499,42 @@ pub mod merge {
         fn test_indexes_string_merge_equal() -> Result<()> {
             let _ = tracing_subscriber::fmt::try_init();
 
-            let (committed_index, posting_id_generator) = create_committed_string_field_index(vec![
-                json!({
-                    "field": "hello hello world",
-                })
-                .try_into()?,
-                json!({
-                    "field": "hello tom",
-                })
-                .try_into()?,
-            ])?;
-            let uncommitted_index = create_uncommitted_string_field_index_from(vec![
-                json!({
-                    "field": "hello hello world",
-                })
-                .try_into()?,
-                json!({
-                    "field": "hello tom",
-                })
-                .try_into()?,
-            ], 2)?;
+            let (committed_index, posting_id_generator) =
+                create_committed_string_field_index(vec![
+                    json!({
+                        "field": "hello hello world",
+                    })
+                    .try_into()?,
+                    json!({
+                        "field": "hello tom",
+                    })
+                    .try_into()?,
+                ])?;
+            let uncommitted_index = create_uncommitted_string_field_index_from(
+                vec![
+                    json!({
+                        "field": "hello hello world",
+                    })
+                    .try_into()?,
+                    json!({
+                        "field": "hello tom",
+                    })
+                    .try_into()?,
+                ],
+                2,
+            )?;
 
-            let new_committed_index = merge(posting_id_generator, uncommitted_index, committed_index)?;
+            let new_committed_index =
+                merge(posting_id_generator, uncommitted_index, committed_index)?;
 
             let mut scorer = BM25Scorer::new();
-            new_committed_index.search(&["hello".to_string()], 1.0, &mut scorer, None, &new_committed_index.get_global_info())?;
+            new_committed_index.search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &new_committed_index.get_global_info(),
+            )?;
             let new_committed_output = scorer.get_scores();
 
             assert_eq!(new_committed_output.len(), 4);
@@ -523,22 +546,30 @@ pub mod merge {
         fn test_indexes_string_merge_no_uncommitted() -> Result<()> {
             let _ = tracing_subscriber::fmt::try_init();
 
-            let (committed_index, posting_id_generator) = create_committed_string_field_index(vec![
-                json!({
-                    "field": "hello hello world",
-                })
-                .try_into()?,
-                json!({
-                    "field": "hello tom",
-                })
-                .try_into()?,
-            ])?;
+            let (committed_index, posting_id_generator) =
+                create_committed_string_field_index(vec![
+                    json!({
+                        "field": "hello hello world",
+                    })
+                    .try_into()?,
+                    json!({
+                        "field": "hello tom",
+                    })
+                    .try_into()?,
+                ])?;
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 2)?;
 
-            let new_committed_index = merge(posting_id_generator, uncommitted_index, committed_index)?;
+            let new_committed_index =
+                merge(posting_id_generator, uncommitted_index, committed_index)?;
 
             let mut scorer = BM25Scorer::new();
-            new_committed_index.search(&["hello".to_string()], 1.0, &mut scorer, None, &new_committed_index.get_global_info())?;
+            new_committed_index.search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &new_committed_index.get_global_info(),
+            )?;
             let new_committed_output = scorer.get_scores();
 
             assert_eq!(new_committed_output.len(), 2);
@@ -550,13 +581,21 @@ pub mod merge {
         fn test_indexes_string_merge_both_empty() -> Result<()> {
             let _ = tracing_subscriber::fmt::try_init();
 
-            let (committed_index, posting_id_generator) = create_committed_string_field_index(vec![])?;
+            let (committed_index, posting_id_generator) =
+                create_committed_string_field_index(vec![])?;
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 0)?;
 
-            let new_committed_index = merge(posting_id_generator, uncommitted_index, committed_index)?;
+            let new_committed_index =
+                merge(posting_id_generator, uncommitted_index, committed_index)?;
 
             let mut scorer = BM25Scorer::new();
-            new_committed_index.search(&["hello".to_string()], 1.0, &mut scorer, None, &new_committed_index.get_global_info())?;
+            new_committed_index.search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &new_committed_index.get_global_info(),
+            )?;
             let new_committed_output = scorer.get_scores();
 
             assert_eq!(new_committed_output.len(), 0);
@@ -592,7 +631,13 @@ mod tests {
 
         // Exact match
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let exact_match_output = scorer.get_scores();
         assert_eq!(
             exact_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -602,7 +647,13 @@ mod tests {
 
         // Prefix match
         let mut scorer = BM25Scorer::new();
-        index.search(&["hel".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hel".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let prefix_match_output = scorer.get_scores();
         assert_eq!(
             prefix_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -627,17 +678,35 @@ mod tests {
 
         // 1.0
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let base_output = scorer.get_scores();
 
         // 0.5
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 0.5, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            0.5,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let half_boost_output = scorer.get_scores();
 
         // 2.0
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 2.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            2.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let twice_boost_output = scorer.get_scores();
 
         assert!(base_output[&DocumentId(0)] > half_boost_output[&DocumentId(0)]);
@@ -663,7 +732,13 @@ mod tests {
         ])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["nonexistent".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["nonexistent".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
 
         assert!(
@@ -694,7 +769,8 @@ mod tests {
                 &["hello".to_string()],
                 1.0,
                 &mut scorer,
-                Some(&HashSet::from_iter([DocumentId(0)])), &index.get_global_info()
+                Some(&HashSet::from_iter([DocumentId(0)])),
+                &index.get_global_info(),
             )?;
             let output = scorer.get_scores();
             assert!(output.contains_key(&DocumentId(0)),);
@@ -708,7 +784,8 @@ mod tests {
                 &["hello".to_string()],
                 1.0,
                 &mut scorer,
-                Some(&HashSet::new()), &index.get_global_info()
+                Some(&HashSet::new()),
+                &index.get_global_info(),
             )?;
             let output = scorer.get_scores();
             assert!(output.is_empty(),);
@@ -722,7 +799,13 @@ mod tests {
         let (index, _) = create_committed_string_field_index(vec![])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
         assert!(output.is_empty(),);
 
@@ -737,7 +820,13 @@ mod tests {
         .try_into()?])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["word".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["word".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
         assert_eq!(
             output.len(),

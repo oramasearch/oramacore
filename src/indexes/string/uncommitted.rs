@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::{AtomicU64, Ordering}, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
+    },
 };
 
 use anyhow::Result;
@@ -90,9 +93,7 @@ impl UncommittedStringFieldIndex {
 
         let mut tree = match self.inner.write() {
             Ok(tree) => tree,
-            Err(poison_error) => {
-                poison_error.into_inner()
-            }
+            Err(poison_error) => poison_error.into_inner(),
         };
 
         let max_position = terms
@@ -149,9 +150,7 @@ impl UncommittedStringFieldIndex {
     ) -> Result<()> {
         let tree = match self.inner.read() {
             Ok(tree) => tree,
-            Err(poison_error) => {
-                poison_error.into_inner()
-            }
+            Err(poison_error) => poison_error.into_inner(),
         };
 
         let total_field_length = global_info.total_document_length as f32;
@@ -240,7 +239,13 @@ mod tests {
 
         // Exact match
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let exact_match_output = scorer.get_scores();
         assert_eq!(
             exact_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -250,7 +255,13 @@ mod tests {
 
         // Prefix match
         let mut scorer = BM25Scorer::new();
-        index.search(&["hel".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hel".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let prefix_match_output = scorer.get_scores();
         assert_eq!(
             prefix_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -275,17 +286,35 @@ mod tests {
 
         // 1.0
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let base_output = scorer.get_scores();
 
         // 0.5
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 0.5, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            0.5,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let half_boost_output = scorer.get_scores();
 
         // 2.0
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 2.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            2.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let twice_boost_output = scorer.get_scores();
 
         assert!(base_output[&DocumentId(0)] > half_boost_output[&DocumentId(0)]);
@@ -311,7 +340,13 @@ mod tests {
         ])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["nonexistent".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["nonexistent".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
 
         assert!(
@@ -343,7 +378,7 @@ mod tests {
                 1.0,
                 &mut scorer,
                 Some(&HashSet::from_iter([DocumentId(0)])),
-                &index.get_global_info()
+                &index.get_global_info(),
             )?;
             let output = scorer.get_scores();
             assert!(output.contains_key(&DocumentId(0)),);
@@ -357,7 +392,8 @@ mod tests {
                 &["hello".to_string()],
                 1.0,
                 &mut scorer,
-                Some(&HashSet::new()), &index.get_global_info()
+                Some(&HashSet::new()),
+                &index.get_global_info(),
             )?;
             let output = scorer.get_scores();
             assert!(output.is_empty(),);
@@ -371,7 +407,13 @@ mod tests {
         let index = create_uncommitted_string_field_index(vec![])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["hello".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["hello".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
         assert!(output.is_empty(),);
 
@@ -386,7 +428,13 @@ mod tests {
         .try_into()?])?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(&["word".to_string()], 1.0, &mut scorer, None, &index.get_global_info())?;
+        index.search(
+            &["word".to_string()],
+            1.0,
+            &mut scorer,
+            None,
+            &index.get_global_info(),
+        )?;
         let output = scorer.get_scores();
         assert_eq!(
             output.len(),

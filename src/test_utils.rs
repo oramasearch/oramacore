@@ -32,32 +32,40 @@ pub fn generate_new_path() -> PathBuf {
 
 pub fn create_string_index(
     fields: Vec<(FieldId, String)>,
-    documents: Vec<Document>
+    documents: Vec<Document>,
 ) -> Result<StringIndex> {
     let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
 
-    let string_fields: Vec<_> = fields.into_iter().map(|(field_id, field_name)| {
-        (
-            field_id,
-            field_name,
-            StringField::new(Arc::new(TextParser::from_language(
-                crate::nlp::locales::Locale::EN,
-            )))
-        )
-    }).collect();
+    let string_fields: Vec<_> = fields
+        .into_iter()
+        .map(|(field_id, field_name)| {
+            (
+                field_id,
+                field_name,
+                StringField::new(Arc::new(TextParser::from_language(
+                    crate::nlp::locales::Locale::EN,
+                ))),
+            )
+        })
+        .collect();
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(id as u32);
         let flatten = doc.into_flatten();
 
-        let operations: Vec<_> = string_fields.iter().flat_map(|(field_id, field_name, string_field)| {
-            string_field.get_write_operations(
-                CollectionId("collection".to_string()),
-                document_id,
-                field_name,
-                *field_id,
-                &flatten,
-            ).unwrap()
-        }).collect();
+        let operations: Vec<_> = string_fields
+            .iter()
+            .flat_map(|(field_id, field_name, string_field)| {
+                string_field
+                    .get_write_operations(
+                        CollectionId("collection".to_string()),
+                        document_id,
+                        field_name,
+                        *field_id,
+                        &flatten,
+                    )
+                    .unwrap()
+            })
+            .collect();
 
         for operation in operations {
             match operation {
