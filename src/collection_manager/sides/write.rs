@@ -45,7 +45,6 @@ pub struct Term(pub String);
 #[derive(Debug, Clone)]
 pub struct TermStringField {
     pub positions: Vec<usize>,
-    pub field_length: u16,
 }
 
 pub type InsertStringTerms = HashMap<Term, TermStringField>;
@@ -65,6 +64,7 @@ pub enum CollectionWriteOperation {
     IndexString {
         doc_id: DocumentId,
         field_id: FieldId,
+        field_length: u16,
         terms: InsertStringTerms,
     },
     IndexEmbedding {
@@ -398,7 +398,6 @@ impl FieldIndexer for StringField {
                 Entry::Vacant(entry) => {
                     let p = TermStringField {
                         positions: vec![position],
-                        field_length,
                     };
                     entry.insert(p);
                 }
@@ -414,7 +413,6 @@ impl FieldIndexer for StringField {
                     Entry::Vacant(entry) => {
                         let p = TermStringField {
                             positions: vec![position],
-                            field_length,
                         };
                         entry.insert(p);
                     }
@@ -429,6 +427,7 @@ impl FieldIndexer for StringField {
             CollectionWriteOperation::IndexString {
                 doc_id,
                 field_id,
+                field_length,
                 terms,
             },
         );

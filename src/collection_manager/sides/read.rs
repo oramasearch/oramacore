@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     ops::Deref,
     path::PathBuf,
-    sync::{atomic::AtomicU32, Arc},
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -56,7 +56,7 @@ pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     document_storage: Arc<dyn DocumentStorage>,
-    posting_id_generator: Arc<AtomicU32>,
+    posting_id_generator: Arc<AtomicU64>,
     data_config: DataConfig,
 }
 impl CollectionsReader {
@@ -69,7 +69,7 @@ impl CollectionsReader {
             embedding_service,
             collections: Default::default(),
             document_storage,
-            posting_id_generator: Arc::new(AtomicU32::new(0)),
+            posting_id_generator: Arc::new(AtomicU64::new(0)),
             data_config,
         }
     }
@@ -150,10 +150,11 @@ impl CollectionsReader {
                     CollectionWriteOperation::IndexString {
                         doc_id,
                         field_id,
+                        field_length,
                         terms,
                     } => {
                         collection_reader
-                            .index_string(doc_id, field_id, terms)
+                            .index_string(doc_id, field_id, field_length, terms)
                             .context("cannot index string")?;
                     }
                     CollectionWriteOperation::InsertDocument { doc_id, doc } => {
@@ -288,9 +289,11 @@ impl CollectionReader {
         &self,
         doc_id: DocumentId,
         field_id: FieldId,
+        field_length: u16,
         terms: InsertStringTerms,
     ) -> Result<()> {
-        self.string_index.insert(doc_id, field_id, terms)?;
+        self.string_index
+            .insert(doc_id, field_id, field_length, terms)?;
         Ok(())
     }
 

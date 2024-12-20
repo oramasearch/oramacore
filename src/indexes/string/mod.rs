@@ -1,25 +1,35 @@
 use std::{
-    collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU32, Arc},
+    collections::{HashMap, HashSet}, ops::AddAssign, sync::{atomic::AtomicU64, Arc}
 };
 
 use anyhow::Result;
+
+pub use committed::CommittedStringFieldIndex;
 use dashmap::DashMap;
-use posting_storage::PostingListId;
+
 use scorer::BM25Scorer;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
-use uncommitted::UncommittedStringFieldIndex;
+pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
     collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
     document_storage::DocumentId,
 };
 
-pub mod posting_storage;
+mod committed;
+
+#[cfg(test)]
+pub use committed::merge;
+#[cfg(not(test))]
+use committed::merge;
+
+// pub mod posting_storage;
 pub mod scorer;
 mod uncommitted;
-// mod committed;
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct PostingListId(pub u32);
 
 pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
 
@@ -41,22 +51,28 @@ pub struct StringIndexValue {
 
 pub struct StringIndex {
     uncommitted: DashMap<FieldId, UncommittedStringFieldIndex>,
-    // committed: CommittedStringIndex,
-    id_generator: Arc<AtomicU32>,
+    committed: DashMap<FieldId, CommittedStringFieldIndex>,
+    posting_id_generator: Arc<AtomicU64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GlobalInfo {
     pub total_documents: usize,
     pub total_document_length: usize,
 }
+impl AddAssign for GlobalInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.total_documents += rhs.total_documents;
+        self.total_document_length += rhs.total_document_length;
+    }
+}
 
 impl StringIndex {
-    pub fn new(id_generator: Arc<AtomicU32>) -> Self {
+    pub fn new(posting_id_generator: Arc<AtomicU64>) -> Self {
         StringIndex {
             uncommitted: DashMap::new(),
-            // committed: CommittedStringIndex::new(PostingStorage::new(id_generator.clone())),
-            id_generator,
+            committed: DashMap::new(),
+            posting_id_generator,
         }
     }
 
@@ -65,88 +81,57 @@ impl StringIndex {
         &self,
         doc_id: DocumentId,
         field_id: FieldId,
+        field_length: u16,
         terms: InsertStringTerms,
     ) -> Result<()> {
-        let uncommitted = self
-            .uncommitted
-            .entry(field_id)
-            .or_insert_with(|| UncommittedStringFieldIndex::new(self.id_generator.clone()));
-        uncommitted.insert(doc_id, terms)?;
+        let uncommitted = self.uncommitted.entry(field_id).or_default();
+        uncommitted.insert(doc_id, field_length, terms)?;
 
-        /*
-        let total_documents_length: u32 = terms
+        Ok(())
+    }
+
+    pub fn commit(&mut self) -> Result<()> {
+        let uncommitted = std::mem::take(&mut self.uncommitted);
+        let committed = std::mem::take(&mut self.committed);
+
+        let all_fields = uncommitted
             .iter()
-            .map(|(_, (_, postings))| {
-                postings
-                    .iter()
-                    .map(|p| p.1.positions.len() as u32)
-                    .sum::<u32>()
-            })
-            .sum();
+            .map(|e| *e.key())
+            .chain(committed.iter().map(|e| *e.key()))
+            .collect::<HashSet<_>>();
 
-        use std::collections::hash_map::Entry;
-        let mut p: HashMap<_, _> = Default::default();
+        for field_id in all_fields {
+            let uncommitted = uncommitted.remove(&field_id);
+            let committed = committed.remove(&field_id);
 
-        let l = self.fst_map.read().await;
-        if let Some(m) = l.as_ref() {
-            debug!("Copy previous fst map");
-            let mut keys = m.keys();
-            while let Some(k) = keys.next() {
-                p.insert(String::from_utf8_lossy(k).to_string(), m.get(k).unwrap());
-            }
-        } else {
-            debug!("No previous fst map");
-        }
+            match (uncommitted, committed) {
+                (Some((_, uncommitted)), Some((_, committed))) => {
+                    let committed =
+                        merge::merge(self.posting_id_generator.clone(), uncommitted, committed)?;
 
-        debug!("New terms: {:?}", terms);
-        for (term, (freq, postings)) in terms {
-            let k = term;
-
-            match p.entry(k) {
-                Entry::Occupied(mut e) => {
-                    let v = e.get_mut();
-                    let posting_list_id = PostingListId((*v >> 32) as u32);
-                    let mut f = (*v & 0xFFFFFFFF) as u32;
-                    f += freq;
-                    *v = ((posting_list_id.0 as u64) << 32) | f as u64;
-                    self.posting_storage.add_or_create(
-                        posting_list_id,
-                        vec![postings.values().cloned().collect()],
+                    self.committed.insert(field_id, committed);
+                }
+                (Some((_, uncommitted)), None) => {
+                    let committed = merge::merge(
+                        self.posting_id_generator.clone(),
+                        uncommitted,
+                        CommittedStringFieldIndex::default(),
                     )?;
+                    self.committed.insert(field_id, committed);
                 }
-                Entry::Vacant(e) => {
-                    let posting_list_id = self.posting_storage.generate_new_id();
-                    let f = freq;
-                    let v: u64 = ((posting_list_id.0 as u64) << 32) | f as u64;
-                    let postings: Vec<Posting> = postings.into_values().collect();
-                    self.posting_storage
-                        .add_or_create(posting_list_id, vec![postings])?;
-                    e.insert(v);
+                (None, Some((_, committed))) => {
+                    self.committed.insert(field_id, committed);
                 }
-            }
+                (None, None) => {
+                    warn!(
+                        r#"No uncommitted or committed index found for field_id: {:?}.
+This should never happen because the field id list is kept from uncommitted and committed field index.
+So, where this field id came from?"#,
+                        field_id
+                    );
+                }
+            };
         }
-
-        let mut sorted_entries: Vec<_> = p.into_iter().collect();
-        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        debug!("building new fst map");
-
-        let mut builder = MapBuilder::memory();
-
-        for (key, value) in sorted_entries {
-            builder.insert(key, value)?;
-        }
-
-        let fst = builder.into_map();
-        drop(l);
-
-        let mut l = self.fst_map.write().await;
-        l.replace(fst);
-        drop(l);
-
-        self.total_document_length
-            .fetch_add(total_documents_length as usize, Ordering::Relaxed);
-        */
 
         Ok(())
     }
@@ -159,25 +144,135 @@ impl StringIndex {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
-        let search_on = if let Some(v) = search_on {
-            v.to_vec()
+        let search_on: HashSet<_> = if 
+        let Some(v) = search_on {
+            v.iter().copied().collect()
         } else {
-            self.uncommitted.iter().map(|e| *e.key()).collect()
+            self.uncommitted.iter()
+                .map(|e| *e.key())
+                .chain(self.committed.iter().map(|e| *e.key()))
+                .collect()
         };
 
         for field_id in search_on {
-            let uncommitted = match self.uncommitted.get(&field_id) {
-                Some(v) => v,
-                None => {
-                    warn!("FieldId {:?} not found in uncommitted index", field_id);
-                    continue;
-                }
-            };
-
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            uncommitted.search(&tokens, boost, scorer, filtered_doc_ids)?;
+            let uncommitted = self.uncommitted.get(&field_id);
+            let committed = self.committed.get(&field_id);
+
+            let mut global_info = committed.as_ref().map(|c| c.get_global_info())
+                .unwrap_or_default();
+
+            // We share the global info between committed and uncommitted indexes
+            // Anyway the postings aren't shared, so if a word is in both indexes:
+            // - it will be scored twice
+            // - the occurrence (stored in the posting) will be different
+            // We can fix this, but it count be hard.
+            // Anyway, the impact of this is low, so we can ignore it for now.
+            // Also because soon or later, we will merge the uncommitted index into the committed one.
+            // So for now, we "/10" the boost of the uncommitted index, where "10" is an arbitrary number.
+            // TODO: evaluate the impact of this and fix it if needed
+
+            if let Some(uncommitted) = uncommitted {
+                global_info += uncommitted.get_global_info();
+                uncommitted.search(&tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)?;
+            }
+
+            if let Some(committed) = committed {
+                committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;
+            }
         }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_approx_eq::assert_approx_eq;
+    use serde_json::json;
+
+    use crate::{collection_manager::sides::write::{Term, TermStringField}, test_utils::create_string_index};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_indexes_string_insert_search_commit_search() -> Result<()>{
+        let mut string_index = create_string_index(
+            vec![
+                (FieldId(0), "field".to_string()),
+            ],
+            vec![
+            json!({
+                "field": "hello hello world",
+            })
+            .try_into()?,
+            json!({
+                "field": "hello tom",
+            })
+            .try_into()?,
+        ])?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index.search(
+            vec!["hello".to_string()],
+            None,
+            Default::default(),
+            &mut scorer,
+            None,
+        ).await?;
+        let before_output = scorer.get_scores();
+
+        string_index.commit()?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index.search(
+            vec!["hello".to_string()],
+            None,
+            Default::default(),
+            &mut scorer,
+            None,
+        ).await?;
+        let after_output = scorer.get_scores();
+
+        assert_approx_eq!(after_output[&DocumentId(0)] / 10.0, before_output[&DocumentId(0)]);
+        assert_approx_eq!(after_output[&DocumentId(1)] / 10.0, before_output[&DocumentId(1)]);
+
+        string_index.insert(DocumentId(2), FieldId(0), 1, HashMap::from_iter([
+            (Term("hello".to_string()), TermStringField { positions: vec![1] }),
+        ]))?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index.search(
+            vec!["hello".to_string()],
+            None,
+            Default::default(),
+            &mut scorer,
+            None,
+        ).await?;
+        let after_insert_output = scorer.get_scores();
+
+        assert_eq!(after_insert_output.len(), 3);
+        assert!(after_insert_output.contains_key(&DocumentId(0)));
+        assert!(after_insert_output.contains_key(&DocumentId(1)));
+        assert!(after_insert_output.contains_key(&DocumentId(2)));
+
+        string_index.commit()?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index.search(
+            vec!["hello".to_string()],
+            None,
+            Default::default(),
+            &mut scorer,
+            None,
+        ).await?;
+        let after_insert_commit_output = scorer.get_scores();
+
+        assert_eq!(after_insert_commit_output.len(), 3);
+        assert!(after_insert_commit_output.contains_key(&DocumentId(0)));
+        assert!(after_insert_commit_output.contains_key(&DocumentId(1)));
+        assert!(after_insert_commit_output.contains_key(&DocumentId(2)));
 
         Ok(())
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /**
  *
@@ -70,23 +70,24 @@ fn bm25_score(
     idf * (f * (k + 1.0)) / (f + k * (1.0 - b + b * (l / avgdl)))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BM25Scorer<K: Eq + Hash> {
     scores: HashMap<K, f32>,
 }
 
-impl<K: Eq + Hash> BM25Scorer<K> {
+impl<K: Eq + Hash + Debug> BM25Scorer<K> {
     pub fn new() -> Self {
         Self {
             scores: Default::default(),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add(
         &mut self,
         key: K,
-        term_occurrence_in_document: u32,
-        document_length: u32,
+        term_occurrence_in_field: u32,
+        field_length: u32,
         average_field_length: f32,
         total_documents_with_field: f32,
         total_documents_with_term_in_field: usize,
@@ -95,8 +96,8 @@ impl<K: Eq + Hash> BM25Scorer<K> {
         boost: f32,
     ) {
         let score = bm25_score(
-            term_occurrence_in_document as usize,
-            document_length,
+            term_occurrence_in_field as usize,
+            field_length,
             average_field_length,
             total_documents_with_field,
             total_documents_with_term_in_field,
@@ -114,84 +115,32 @@ impl<K: Eq + Hash> BM25Scorer<K> {
     }
 }
 
-/*
-
 #[cfg(test)]
 mod tests {
-
-    use crate::collection_manager::dto::FieldId;
+    use assert_approx_eq::assert_approx_eq;
 
     use super::*;
 
     #[test]
-    fn test_bm25_basic_scoring() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 10,
-            total_document_length: 1000,
-        };
+    fn test_indexes_string_scorer_bm25() {
+        let mut scorer = BM25Scorer::new();
 
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            occurrence: 5,
-            field_length: 100,
-            positions: vec![1, 2, 3, 4, 5],
-        };
+        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0);
 
-        scorer.add_entry(&global_info, &posting, 1.0, 1.0);
         let scores = scorer.get_scores();
-        assert!(scores.contains_key(&DocumentId(1)));
-        assert!(scores[&DocumentId(1)] > 0.0);
+        assert_eq!(scores.len(), 1);
+        assert_approx_eq!(scores["doc1"], 1.2297773);
     }
 
     #[test]
-    fn test_bm25_empty_document() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 1,
-            total_document_length: 0,
-        };
-
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            occurrence: 0,
-            field_length: 0,
-            positions: vec![],
-        };
-
-        scorer.add_entry(&global_info, &posting, 1.0, 1.0);
+    fn test_indexes_string_scorer_bm25_boost() {
+        let mut scorer = BM25Scorer::new();
+        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0);
+        scorer.add("doc2", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 2.0);
+        scorer.add("doc3", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 0.5);
         let scores = scorer.get_scores();
-        assert_eq!(scores[&DocumentId(1)], 0.0);
-    }
 
-    #[test]
-    fn test_bm25_boost_effect() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 10,
-            total_document_length: 1000,
-        };
-
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            occurrence: 5,
-            field_length: 100,
-            positions: vec![1, 2, 3, 4, 5],
-        };
-
-        // Test with different boost values
-        scorer.add_entry(&global_info, &posting, 1.0, 1.0);
-        let normal_scores = scorer.get_scores();
-
-        let scorer = bm25::BM25Score::new();
-        scorer.add_entry(&global_info, &posting, 1.0, 2.0);
-        let boosted_scores = scorer.get_scores();
-
-        assert!(boosted_scores[&DocumentId(1)] > normal_scores[&DocumentId(1)]);
+        assert!(scores["doc2"] > scores["doc1"]);
+        assert!(scores["doc3"] < scores["doc1"]);
     }
 }
-
-*/
