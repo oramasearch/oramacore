@@ -1,5 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet}, ops::AddAssign, path::PathBuf, sync::{atomic::AtomicU64, Arc}
+    collections::{HashMap, HashSet},
+    ops::AddAssign,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::Result;
@@ -108,8 +111,12 @@ impl StringIndex {
 
             match (uncommitted, committed) {
                 (Some((_, uncommitted)), Some((_, committed))) => {
-                    let committed =
-                        merge::merge(self.posting_id_generator.clone(), uncommitted, committed, field_new_path)?;
+                    let committed = merge::merge(
+                        self.posting_id_generator.clone(),
+                        uncommitted,
+                        committed,
+                        field_new_path,
+                    )?;
 
                     self.committed.insert(field_id, committed);
                 }

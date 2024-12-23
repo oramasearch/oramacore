@@ -107,14 +107,17 @@ pub fn create_uncommitted_string_field_index_from(
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u32);
         let flatten = doc.into_flatten();
-        let operations = string_field.get_write_operations(
-            CollectionId("collection".to_string()),
-            document_id,
-            "field",
-            FieldId(1),
-            &flatten,
-        )
-            .with_context(|| format!("Test get_write_operations {:?} {:?}", document_id, flatten))?;
+        let operations = string_field
+            .get_write_operations(
+                CollectionId("collection".to_string()),
+                document_id,
+                "field",
+                FieldId(1),
+                &flatten,
+            )
+            .with_context(|| {
+                format!("Test get_write_operations {:?} {:?}", document_id, flatten)
+            })?;
 
         for operation in operations {
             match operation {
@@ -126,8 +129,11 @@ pub fn create_uncommitted_string_field_index_from(
                         ..
                     },
                 ) => {
-                    index.insert(document_id, field_length, terms)
-                        .with_context(|| format!("test cannot insert index_string {:?}", document_id))?;
+                    index
+                        .insert(document_id, field_length, terms)
+                        .with_context(|| {
+                            format!("test cannot insert index_string {:?}", document_id)
+                        })?;
                 }
                 _ => unreachable!(),
             };

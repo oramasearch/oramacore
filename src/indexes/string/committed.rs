@@ -239,7 +239,10 @@ impl CommittedStringFieldIndex {
 
 pub mod merge {
     use std::{
-        collections::HashMap, iter::Peekable, path::PathBuf, sync::{atomic::AtomicU64, Arc}
+        collections::HashMap,
+        iter::Peekable,
+        path::PathBuf,
+        sync::{atomic::AtomicU64, Arc},
     };
 
     use anyhow::{Context, Result};
@@ -394,8 +397,9 @@ pub mod merge {
         } = uncommitted;
 
         if let Some(parent) = new_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create parent dir for merge fts map: {:?}", new_path))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("cannot create parent dir for merge fts map: {:?}", new_path)
+            })?;
         }
 
         let inner = inner.read().unwrap();
@@ -430,18 +434,16 @@ pub mod merge {
         let mut build = MapBuilder::new(wtr)?;
 
         for (key, value) in merge_iterator {
-            build.insert(key, value)
+            build
+                .insert(key, value)
                 .context("Cannot insert value to FST map")?;
         }
 
-        build.finish()
-            .context("Cannot finish build of FST map")?;
+        build.finish().context("Cannot finish build of FST map")?;
 
-        let file = std::fs::File::open(new_path)
-            .context("Cannot open file after writing to it")?;
+        let file = std::fs::File::open(new_path).context("Cannot open file after writing to it")?;
         let mmap = unsafe { Mmap::map(&file)? };
-        let fst_map = Map::new(mmap)
-            .context("Cannot create fst map from mmap")?;
+        let fst_map = Map::new(mmap).context("Cannot create fst map from mmap")?;
 
         committed_document_count += document_length_per_doc.len();
         committed_document_lengths_per_document.extend(document_length_per_doc);
@@ -506,7 +508,7 @@ pub mod merge {
                 },
                 new_path.clone(),
             )
-                .with_context(|| format!("Cannot merge at path {:?}", &new_path))?;
+            .with_context(|| format!("Cannot merge at path {:?}", &new_path))?;
 
             let mut scorer = BM25Scorer::new();
             new_committed.search(
@@ -552,8 +554,12 @@ pub mod merge {
                 2,
             )?;
 
-            let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
+            let new_committed_index = merge(
+                posting_id_generator,
+                uncommitted_index,
+                committed_index,
+                generate_new_path().join("test.bin"),
+            )?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(
@@ -587,8 +593,12 @@ pub mod merge {
                 ])?;
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 2)?;
 
-            let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
+            let new_committed_index = merge(
+                posting_id_generator,
+                uncommitted_index,
+                committed_index,
+                generate_new_path().join("test.bin"),
+            )?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(
@@ -613,8 +623,12 @@ pub mod merge {
                 create_committed_string_field_index(vec![])?;
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 0)?;
 
-            let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
+            let new_committed_index = merge(
+                posting_id_generator,
+                uncommitted_index,
+                committed_index,
+                generate_new_path().join("test.bin"),
+            )?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(
