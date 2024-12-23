@@ -10,7 +10,7 @@ use super::{scorer::BM25Scorer, GlobalInfo};
 
 #[derive(Default, Debug)]
 pub struct CommittedStringFieldIndex {
-    fst_map: Map<Vec<u8>>,
+    fst_map: Option<Map<memmap::Mmap>>,
     document_lengths_per_document: HashMap<DocumentId, u32>,
     sum_of_total_field_length: usize,
     storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
@@ -19,7 +19,7 @@ pub struct CommittedStringFieldIndex {
 
 impl CommittedStringFieldIndex {
     pub fn new(
-        fst_map: Map<Vec<u8>>,
+        fst_map: Option<Map<memmap::Mmap>>,
         document_lengths_per_document: HashMap<DocumentId, u32>,
         sum_of_total_field_length: usize,
         storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
@@ -78,9 +78,17 @@ impl CommittedStringFieldIndex {
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
+        let fst_map = match self.fst_map {
+            Some(ref fst_map) => fst_map,
+            None => {
+                warn!("fst map not found: skipping");
+                return Ok(());
+            }
+        };
+
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
-            let mut stream = self.fst_map.search(automaton).into_stream();
+            let mut stream = fst_map.search(automaton).into_stream();
 
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
@@ -172,9 +180,17 @@ impl CommittedStringFieldIndex {
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
+        let fst_map = match self.fst_map {
+            Some(ref fst_map) => fst_map,
+            None => {
+                warn!("fst map not found: skipping");
+                return Ok(());
+            }
+        };
+
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
-            let mut stream = self.fst_map.search(automaton).into_stream();
+            let mut stream = fst_map.search(automaton).into_stream();
 
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
@@ -223,13 +239,12 @@ impl CommittedStringFieldIndex {
 
 pub mod merge {
     use std::{
-        collections::HashMap,
-        iter::Peekable,
-        sync::{atomic::AtomicU64, Arc},
+        collections::HashMap, iter::Peekable, path::PathBuf, sync::{atomic::AtomicU64, Arc}
     };
 
-    use anyhow::Result;
-    use fst::{Map, Streamer};
+    use anyhow::{Context, Result};
+    use fst::{Map, MapBuilder, Streamer};
+    use memmap::Mmap;
 
     use crate::{
         document_storage::DocumentId,
@@ -349,7 +364,7 @@ pub mod merge {
     }
 
     struct FTSIter<'stream> {
-        stream: fst::map::Stream<'stream>,
+        stream: Option<fst::map::Stream<'stream>>,
     }
     impl<'stream> Iterator for FTSIter<'stream> {
         // The Item allocate memory, but we could avoid it by using a reference
@@ -357,7 +372,11 @@ pub mod merge {
         type Item = (Vec<u8>, u64);
 
         fn next(&mut self) -> Option<Self::Item> {
-            self.stream.next().map(|(key, value)| (key.to_vec(), value))
+            let stream = match &mut self.stream {
+                Some(stream) => stream,
+                None => return None,
+            };
+            stream.next().map(|(key, value)| (key.to_vec(), value))
         }
     }
 
@@ -365,6 +384,7 @@ pub mod merge {
         posting_id_generator: Arc<AtomicU64>,
         uncommitted: UncommittedStringFieldIndex,
         committed: CommittedStringFieldIndex,
+        new_path: PathBuf,
     ) -> Result<CommittedStringFieldIndex> {
         let UncommittedStringFieldIndex {
             inner,
@@ -372,6 +392,11 @@ pub mod merge {
             total_field_length,
             ..
         } = uncommitted;
+
+        if let Some(parent) = new_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create parent dir for merge fts map: {:?}", new_path))?;
+        }
 
         let inner = inner.read().unwrap();
         let iter = inner.iter();
@@ -385,19 +410,38 @@ pub mod merge {
         let mut committed_storage = committed.storage;
         let mut committed_document_count = committed.number_of_documents;
 
+        let committed_fst_map = committed.fst_map;
+
         let merge_iterator = MergeIterator {
             posting_id_generator,
 
             committed_storage: &mut committed_storage,
             committed_iter: FTSIter {
-                stream: committed.fst_map.stream(),
+                stream: committed_fst_map.as_ref().map(|p| p.stream()),
             }
             .peekable(),
 
             uncommitted_iter,
         };
 
-        let fst_map: Map<Vec<u8>> = Map::from_iter(merge_iterator)?;
+        let file = std::fs::File::create(new_path.clone())
+            .with_context(|| format!("Cannot create file at {:?}", new_path))?;
+        let wtr = std::io::BufWriter::new(file);
+        let mut build = MapBuilder::new(wtr)?;
+
+        for (key, value) in merge_iterator {
+            build.insert(key, value)
+                .context("Cannot insert value to FST map")?;
+        }
+
+        build.finish()
+            .context("Cannot finish build of FST map")?;
+
+        let file = std::fs::File::open(new_path)
+            .context("Cannot open file after writing to it")?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let fst_map = Map::new(mmap)
+            .context("Cannot create fst map from mmap")?;
 
         committed_document_count += document_length_per_doc.len();
         committed_document_lengths_per_document.extend(document_length_per_doc);
@@ -405,7 +449,7 @@ pub mod merge {
             total_field_length.load(std::sync::atomic::Ordering::Relaxed);
 
         let new_committed = CommittedStringFieldIndex::new(
-            fst_map,
+            Some(fst_map),
             committed_document_lengths_per_document,
             committed_sum_of_total_field_length as usize,
             committed_storage,
@@ -421,8 +465,9 @@ pub mod merge {
         use crate::indexes::string::scorer::BM25Scorer;
         use crate::test_utils::{
             create_committed_string_field_index, create_uncommitted_string_field_index,
-            create_uncommitted_string_field_index_from,
+            create_uncommitted_string_field_index_from, generate_new_path,
         };
+        use anyhow::Context;
         use serde_json::json;
 
         #[test]
@@ -448,17 +493,20 @@ pub mod merge {
             )?;
             let before_output = scorer.get_scores();
 
+            let new_path = generate_new_path().join("test.bin");
             let new_committed = merge(
                 Arc::new(AtomicU64::new(0)),
                 index,
                 CommittedStringFieldIndex {
-                    fst_map: Map::default(),
+                    fst_map: None,
                     document_lengths_per_document: HashMap::new(),
                     sum_of_total_field_length: 0,
                     storage: HashMap::new(),
                     number_of_documents: 0,
                 },
-            )?;
+                new_path.clone(),
+            )
+                .with_context(|| format!("Cannot merge at path {:?}", &new_path))?;
 
             let mut scorer = BM25Scorer::new();
             new_committed.search(
@@ -505,7 +553,7 @@ pub mod merge {
             )?;
 
             let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index)?;
+                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(
@@ -540,7 +588,7 @@ pub mod merge {
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 2)?;
 
             let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index)?;
+                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(
@@ -566,7 +614,7 @@ pub mod merge {
             let uncommitted_index = create_uncommitted_string_field_index_from(vec![], 0)?;
 
             let new_committed_index =
-                merge(posting_id_generator, uncommitted_index, committed_index)?;
+                merge(posting_id_generator, uncommitted_index, committed_index, generate_new_path().join("test.bin"))?;
 
             let mut scorer = BM25Scorer::new();
             new_committed_index.search(

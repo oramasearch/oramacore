@@ -1,7 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    ops::AddAssign,
-    sync::{atomic::AtomicU64, Arc},
+    collections::{HashMap, HashSet}, ops::AddAssign, path::PathBuf, sync::{atomic::AtomicU64, Arc}
 };
 
 use anyhow::Result;
@@ -92,7 +90,7 @@ impl StringIndex {
         Ok(())
     }
 
-    pub fn commit(&mut self) -> Result<()> {
+    pub fn commit(&mut self, new_path: PathBuf) -> Result<()> {
         let uncommitted = std::mem::take(&mut self.uncommitted);
         let committed = std::mem::take(&mut self.committed);
 
@@ -106,10 +104,12 @@ impl StringIndex {
             let uncommitted = uncommitted.remove(&field_id);
             let committed = committed.remove(&field_id);
 
+            let field_new_path = new_path.join(format!("{}.bin", field_id.0));
+
             match (uncommitted, committed) {
                 (Some((_, uncommitted)), Some((_, committed))) => {
                     let committed =
-                        merge::merge(self.posting_id_generator.clone(), uncommitted, committed)?;
+                        merge::merge(self.posting_id_generator.clone(), uncommitted, committed, field_new_path)?;
 
                     self.committed.insert(field_id, committed);
                 }
@@ -118,6 +118,7 @@ impl StringIndex {
                         self.posting_id_generator.clone(),
                         uncommitted,
                         CommittedStringFieldIndex::default(),
+                        field_new_path,
                     )?;
                     self.committed.insert(field_id, committed);
                 }
@@ -204,7 +205,7 @@ mod tests {
 
     use crate::{
         collection_manager::sides::write::{Term, TermStringField},
-        test_utils::create_string_index,
+        test_utils::{create_string_index, generate_new_path},
     };
 
     use super::*;
@@ -237,7 +238,7 @@ mod tests {
             .await?;
         let before_output = scorer.get_scores();
 
-        string_index.commit()?;
+        string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
         string_index
@@ -287,7 +288,7 @@ mod tests {
         assert!(after_insert_output.contains_key(&DocumentId(1)));
         assert!(after_insert_output.contains_key(&DocumentId(2)));
 
-        string_index.commit()?;
+        string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
         string_index

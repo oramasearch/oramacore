@@ -5,8 +5,7 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
-use anyhow::Result;
-use fst::Map;
+use anyhow::{Context, Result};
 use tempdir::TempDir;
 
 use crate::{
@@ -114,7 +113,8 @@ pub fn create_uncommitted_string_field_index_from(
             "field",
             FieldId(1),
             &flatten,
-        )?;
+        )
+            .with_context(|| format!("Test get_write_operations {:?} {:?}", document_id, flatten))?;
 
         for operation in operations {
             match operation {
@@ -126,7 +126,8 @@ pub fn create_uncommitted_string_field_index_from(
                         ..
                     },
                 ) => {
-                    index.insert(document_id, field_length, terms)?;
+                    index.insert(document_id, field_length, terms)
+                        .with_context(|| format!("test cannot insert index_string {:?}", document_id))?;
                 }
                 _ => unreachable!(),
             };
@@ -145,7 +146,8 @@ pub fn create_committed_string_field_index(
     let committed_index = merge(
         posting_id_generator.clone(),
         uncommitted,
-        CommittedStringFieldIndex::new(Map::default(), HashMap::new(), 0, HashMap::new(), 0),
+        CommittedStringFieldIndex::new(None, HashMap::new(), 0, HashMap::new(), 0),
+        generate_new_path(),
     )?;
 
     Ok((committed_index, posting_id_generator))
