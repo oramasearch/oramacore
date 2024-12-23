@@ -129,6 +129,7 @@ impl IntoIterator for Schema {
     }
 }
 
+#[derive(Debug)]
 pub struct FlattenDocument(Map<String, Value>);
 
 impl FlattenDocument {

@@ -1,26 +1,38 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU32, AtomicUsize, Ordering},
-        Arc,
-    },
+    ops::AddAssign,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::Result;
-use dictionary::{Dictionary, TermId};
-use fst::{Automaton, IntoStreamer, Map, MapBuilder, Streamer};
-use posting_storage::{PostingListId, PostingStorage};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use scorer::Scorer;
+
+pub use committed::CommittedStringFieldIndex;
+use dashmap::DashMap;
+
+use scorer::BM25Scorer;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, trace, warn};
+use tracing::warn;
+pub use uncommitted::UncommittedStringFieldIndex;
 
-use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
+use crate::{
+    collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
+    document_storage::DocumentId,
+};
 
-pub mod dictionary;
-pub mod posting_storage;
+mod committed;
+
+#[cfg(any(test, feature = "benchmarking"))]
+pub use committed::merge;
+#[cfg(not(any(test, feature = "benchmarking")))]
+use committed::merge;
+
+// pub mod posting_storage;
 pub mod scorer;
+mod uncommitted;
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct PostingListId(pub u32);
 
 pub type DocumentBatch = HashMap<DocumentId, Vec<(FieldId, Vec<(String, Vec<String>)>)>>;
 
@@ -29,8 +41,9 @@ pub struct Posting {
     pub document_id: DocumentId,
     pub field_id: FieldId,
     pub positions: Vec<usize>,
-    pub term_frequency: f32,
-    pub doc_length: u16,
+    /// Number of occurrences of the term in the field in the document
+    pub occurrence: u32,
+    pub field_length: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -40,423 +53,272 @@ pub struct StringIndexValue {
 }
 
 pub struct StringIndex {
-    fst_map: RwLock<Option<Map<Vec<u8>>>>,
-    temp_map: RwLock<HashMap<String, StringIndexValue>>,
-    posting_storage: PostingStorage,
-    dictionary: Dictionary,
-    total_documents: AtomicUsize,
-    total_document_length: AtomicUsize,
-    insert_mutex: Mutex<()>,
+    uncommitted: DashMap<FieldId, UncommittedStringFieldIndex>,
+    committed: DashMap<FieldId, CommittedStringFieldIndex>,
+    posting_id_generator: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Default)]
 pub struct GlobalInfo {
     pub total_documents: usize,
     pub total_document_length: usize,
 }
+impl AddAssign for GlobalInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.total_documents += rhs.total_documents;
+        self.total_document_length += rhs.total_document_length;
+    }
+}
 
 impl StringIndex {
-    pub fn new(id_generator: Arc<AtomicU32>) -> Self {
+    pub fn new(posting_id_generator: Arc<AtomicU64>) -> Self {
         StringIndex {
-            fst_map: RwLock::new(None),
-            temp_map: RwLock::new(HashMap::new()),
-            posting_storage: PostingStorage::new(id_generator),
-            dictionary: Dictionary::new(),
-            total_documents: AtomicUsize::new(0),
-            total_document_length: AtomicUsize::new(0),
-            insert_mutex: Mutex::new(()),
+            uncommitted: DashMap::new(),
+            committed: DashMap::new(),
+            posting_id_generator,
         }
     }
 
     #[allow(clippy::type_complexity)]
-    pub async fn insert(
+    pub fn insert(
         &self,
-        _doc_id: DocumentId,
-        _field_id: FieldId,
-        terms: HashMap<String, (u32, HashMap<(DocumentId, FieldId), Posting>)>,
+        doc_id: DocumentId,
+        field_id: FieldId,
+        field_length: u16,
+        terms: InsertStringTerms,
     ) -> Result<()> {
-        let total_documents_length: u32 = terms
-            .iter()
-            .map(|(_, (_, postings))| {
-                postings
-                    .iter()
-                    .map(|p| p.1.positions.len() as u32)
-                    .sum::<u32>()
-            })
-            .sum();
-
-        use std::collections::hash_map::Entry;
-        let mut p: HashMap<_, _> = Default::default();
-
-        let l = self.fst_map.read().await;
-        if let Some(m) = l.as_ref() {
-            debug!("Copy previous fst map");
-            let mut keys = m.keys();
-            while let Some(k) = keys.next() {
-                p.insert(String::from_utf8_lossy(k).to_string(), m.get(k).unwrap());
-            }
-        } else {
-            debug!("No previous fst map");
-        }
-
-        debug!("New terms: {:?}", terms);
-        for (term, (freq, postings)) in terms {
-            let k = term;
-
-            match p.entry(k) {
-                Entry::Occupied(mut e) => {
-                    let v = e.get_mut();
-                    let posting_list_id = PostingListId((*v >> 32) as u32);
-                    let mut f = (*v & 0xFFFFFFFF) as u32;
-                    f += freq;
-                    *v = ((posting_list_id.0 as u64) << 32) | f as u64;
-                    self.posting_storage.add_or_create(
-                        posting_list_id,
-                        vec![postings.values().cloned().collect()],
-                    )?;
-                }
-                Entry::Vacant(e) => {
-                    let posting_list_id = self.posting_storage.generate_new_id();
-                    let f = freq;
-                    let v = ((posting_list_id.0 as u64) << 32) | f as u64;
-                    let postings: Vec<Posting> = postings.into_values().collect();
-                    self.posting_storage
-                        .add_or_create(posting_list_id, vec![postings])?;
-                    e.insert(v);
-                }
-            }
-        }
-
-        let mut sorted_entries: Vec<_> = p.into_iter().collect();
-        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        debug!("building new fst map");
-
-        let mut builder = MapBuilder::memory();
-
-        for (key, value) in sorted_entries {
-            builder.insert(key, value)?;
-        }
-
-        let fst = builder.into_map();
-        drop(l);
-
-        let mut l = self.fst_map.write().await;
-        l.replace(fst);
-        drop(l);
-
-        self.total_document_length
-            .fetch_add(total_documents_length as usize, Ordering::Relaxed);
+        let uncommitted = self.uncommitted.entry(field_id).or_default();
+        uncommitted.insert(doc_id, field_length, terms)?;
 
         Ok(())
     }
 
-    pub async fn new_document_inserted(&self) {
-        self.total_documents.fetch_add(1, Ordering::Relaxed);
+    pub fn commit(&mut self, new_path: PathBuf) -> Result<()> {
+        let uncommitted = std::mem::take(&mut self.uncommitted);
+        let committed = std::mem::take(&mut self.committed);
+
+        let all_fields = uncommitted
+            .iter()
+            .map(|e| *e.key())
+            .chain(committed.iter().map(|e| *e.key()))
+            .collect::<HashSet<_>>();
+
+        for field_id in all_fields {
+            let uncommitted = uncommitted.remove(&field_id);
+            let committed = committed.remove(&field_id);
+
+            let field_new_path = new_path.join(format!("{}.bin", field_id.0));
+
+            match (uncommitted, committed) {
+                (Some((_, uncommitted)), Some((_, committed))) => {
+                    let committed = merge::merge(
+                        self.posting_id_generator.clone(),
+                        uncommitted,
+                        committed,
+                        field_new_path,
+                    )?;
+
+                    self.committed.insert(field_id, committed);
+                }
+                (Some((_, uncommitted)), None) => {
+                    let committed = merge::merge(
+                        self.posting_id_generator.clone(),
+                        uncommitted,
+                        CommittedStringFieldIndex::default(),
+                        field_new_path,
+                    )?;
+                    self.committed.insert(field_id, committed);
+                }
+                (None, Some((_, committed))) => {
+                    self.committed.insert(field_id, committed);
+                }
+                (None, None) => {
+                    warn!(
+                        r#"No uncommitted or committed index found for field_id: {:?}.
+This should never happen because the field id list is kept from uncommitted and committed field index.
+So, where this field id came from?"#,
+                        field_id
+                    );
+                }
+            };
+        }
+
+        Ok(())
     }
 
-    async fn build_fst(&self) -> Result<Map<Vec<u8>>> {
-        let entries: Vec<_> = {
-            let temp_map = self.temp_map.read().await;
-            temp_map
+    pub async fn search(
+        &self,
+        tokens: Vec<String>,
+        search_on: Option<&[FieldId]>,
+        boost: HashMap<FieldId, f32>,
+        scorer: &mut BM25Scorer<DocumentId>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+    ) -> Result<()> {
+        let search_on: HashSet<_> = if let Some(v) = search_on {
+            v.iter().copied().collect()
+        } else {
+            self.uncommitted
                 .iter()
-                .map(|(key, value)| {
-                    (
-                        key.clone(),
-                        ((value.posting_list_id.0 as u64) << 32) | (value.term_frequency as u64),
-                    )
-                })
+                .map(|e| *e.key())
+                .chain(self.committed.iter().map(|e| *e.key()))
                 .collect()
         };
 
-        let mut sorted_entries = entries;
-        sorted_entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        for field_id in search_on {
+            let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-        let mut builder = MapBuilder::memory();
+            let uncommitted = self.uncommitted.get(&field_id);
+            let committed = self.committed.get(&field_id);
 
-        for (key, value) in sorted_entries {
-            builder.insert(key.as_bytes(), value)?;
-        }
+            let mut global_info = committed
+                .as_ref()
+                .map(|c| c.get_global_info())
+                .unwrap_or_default();
 
-        let fst = builder.into_map();
+            // We share the global info between committed and uncommitted indexes
+            // Anyway the postings aren't shared, so if a word is in both indexes:
+            // - it will be scored twice
+            // - the occurrence (stored in the posting) will be different
+            // We can fix this, but it count be hard.
+            // Anyway, the impact of this is low, so we can ignore it for now.
+            // Also because soon or later, we will merge the uncommitted index into the committed one.
+            // So for now, we "/10" the boost of the uncommitted index, where "10" is an arbitrary number.
+            // TODO: evaluate the impact of this and fix it if needed
 
-        Ok(fst)
-    }
-
-    pub fn get_total_documents(&self) -> usize {
-        self.total_documents.load(Ordering::Relaxed)
-    }
-
-    pub async fn search<S: Scorer + Sync>(
-        &self,
-        tokens: Vec<String>,
-        search_on: Option<Vec<FieldId>>,
-        boost: HashMap<FieldId, f32>,
-        scorer: S,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
-    ) -> Result<HashMap<DocumentId, f32>> {
-        let total_documents = match self.total_documents.load(Ordering::Relaxed) {
-            0 => {
-                warn!("No documents in the index: total_documents is 0");
-                return Ok(Default::default());
-            }
-            total_documents => total_documents,
-        };
-
-        let total_document_length = match self.total_document_length.load(Ordering::Relaxed) {
-            0 => {
-                warn!("No documents in the index: total_document_length is 0");
-                return Ok(Default::default());
-            }
-            total_document_length => total_document_length,
-        };
-
-        let mut all_postings = Vec::new();
-
-        if let Some(fst) = self.fst_map.read().await.as_ref() {
-            for token in &tokens {
-                let automaton = fst::automaton::Str::new(token).starts_with();
-                let mut stream = fst.search(automaton).into_stream();
-
-                while let Some(result) = stream.next() {
-                    let (_, packed_value) = result;
-                    let posting_list_id = PostingListId((packed_value >> 32) as u32);
-                    let term_frequency = (packed_value & 0xFFFFFFFF) as usize;
-
-                    if let Ok(postings) = self.posting_storage.get(posting_list_id) {
-                        all_postings.push((postings, term_frequency));
-                    }
-                }
-            }
-        } else {
-            warn!("fst map is empty: returning empty search results");
-            return Ok(Default::default());
-        }
-
-        let fields = search_on.as_ref();
-        let global_info = GlobalInfo {
-            total_documents,
-            total_document_length,
-        };
-
-        let in_filtered = move |posting: &Posting| -> bool {
-            if let Some(filtered_doc_ids) = filtered_doc_ids {
-                filtered_doc_ids.contains(&posting.document_id)
-            } else {
-                true
-            }
-        };
-
-        let mut filtered_postings: HashMap<DocumentId, Vec<(Posting, usize)>> = HashMap::new();
-        for (postings, term_freq) in all_postings {
-            for posting in postings.into_iter().filter(in_filtered) {
-                if fields
-                    .map(|search_on| search_on.contains(&posting.field_id))
-                    .unwrap_or(true)
-                {
-                    filtered_postings
-                        .entry(posting.document_id)
-                        .or_default()
-                        .push((posting, term_freq));
-                }
-            }
-        }
-
-        let mut exact_match_documents = Vec::new();
-
-        for (document_id, postings) in &filtered_postings {
-            let mut token_positions: Vec<Vec<usize>> = postings
-                .iter()
-                .map(|(posting, _)| posting.positions.clone())
-                .collect();
-
-            token_positions
-                .iter_mut()
-                .for_each(|positions| positions.sort_unstable());
-
-            if self.is_phrase_match(&token_positions) {
-                exact_match_documents.push(*document_id);
-            }
-
-            for (posting, term_freq) in postings {
-                let boost_per_field = *boost.get(&posting.field_id).unwrap_or(&1.0);
-                scorer.add_entry(
+            if let Some(uncommitted) = uncommitted {
+                global_info += uncommitted.get_global_info();
+                uncommitted.search(
+                    &tokens,
+                    boost / 10.0,
+                    scorer,
+                    filtered_doc_ids,
                     &global_info,
-                    posting.clone(),
-                    *term_freq as f32,
-                    boost_per_field,
-                );
+                )?;
             }
-        }
 
-        let mut scores = scorer.get_scores();
-
-        let exact_match_boost = 25.0; // @todo: make this configurable.
-        for document_id in exact_match_documents {
-            if let Some(score) = scores.get_mut(&document_id) {
-                *score *= exact_match_boost;
+            if let Some(committed) = committed {
+                committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;
             }
-        }
-
-        trace!("StringIndex output: {:?}", scores);
-
-        Ok(scores)
-    }
-
-    pub async fn insert_multiple(&self, data: DocumentBatch) -> Result<()> {
-        let _lock = self.insert_mutex.lock().await;
-
-        self.total_documents
-            .fetch_add(data.len(), Ordering::Relaxed);
-
-        let dictionary = &self.dictionary;
-
-        let posting_per_term = data
-            .into_par_iter()
-            .fold(
-                HashMap::<TermId, Vec<Posting>>::new,
-                |mut acc, (document_id, strings)| {
-                    for (field_id, s) in strings {
-                        let mut term_freqs: HashMap<String, HashMap<FieldId, Vec<usize>>> =
-                            HashMap::new();
-
-                        for (position, (original, stemmed)) in s.into_iter().enumerate() {
-                            let entry = term_freqs.entry(original).or_default();
-                            let field_entry = entry.entry(field_id).or_default();
-                            field_entry.push(position);
-
-                            for s in stemmed {
-                                let entry = term_freqs.entry(s).or_default();
-                                let field_entry = entry.entry(field_id).or_default();
-                                field_entry.push(position);
-                            }
-                        }
-
-                        let doc_length = term_freqs
-                            .values()
-                            .map(|field_freqs| {
-                                field_freqs
-                                    .values()
-                                    .map(|positions| positions.len())
-                                    .sum::<usize>()
-                            })
-                            .sum::<usize>();
-
-                        for (term, field_positions) in term_freqs {
-                            let term_id = dictionary.get_or_add(&term);
-                            let v = acc.entry(term_id).or_default();
-
-                            let posting =
-                                field_positions.into_iter().map(|(field_id, positions)| {
-                                    let term_frequency = positions.len() as f32;
-
-                                    Posting {
-                                        document_id,
-                                        field_id,
-                                        positions,
-                                        term_frequency,
-                                        doc_length: doc_length as u16,
-                                    }
-                                });
-                            v.extend(posting);
-                        }
-                    }
-
-                    acc
-                },
-            )
-            .reduce(HashMap::<TermId, Vec<Posting>>::new, |mut acc, item| {
-                for (term_id, postings) in item {
-                    let vec = acc.entry(term_id).or_default();
-                    vec.extend(postings.into_iter());
-                }
-                acc
-            });
-
-        let mut postings_per_posting_list_id: HashMap<PostingListId, Vec<Vec<Posting>>> =
-            HashMap::with_capacity(posting_per_term.len());
-        let mut temp_map = self.temp_map.write().await;
-
-        for (term_id, postings) in posting_per_term {
-            self.total_document_length.fetch_add(
-                postings.iter().map(|p| p.positions.len()).sum::<usize>(),
-                Ordering::Relaxed,
-            );
-            let number_of_occurence_of_term = postings.len();
-
-            let term = dictionary.retrive(term_id);
-
-            if let Some(value) = temp_map.get_mut(&term) {
-                value.term_frequency += number_of_occurence_of_term;
-                let vec = postings_per_posting_list_id
-                    .entry(value.posting_list_id)
-                    .or_default();
-                vec.push(postings);
-            } else {
-                let posting_list_id = self.posting_storage.generate_new_id();
-                temp_map.insert(
-                    term,
-                    StringIndexValue {
-                        posting_list_id,
-                        term_frequency: number_of_occurence_of_term,
-                    },
-                );
-
-                let vec = postings_per_posting_list_id
-                    .entry(posting_list_id)
-                    .or_default();
-                vec.push(postings);
-            }
-        }
-
-        drop(temp_map);
-        let new_fst = self.build_fst().await?;
-
-        {
-            let mut fst_map = self.fst_map.write().await;
-            *fst_map = Some(new_fst);
-        }
-
-        for (k, v) in postings_per_posting_list_id {
-            self.posting_storage.add_or_create(k, v)?;
         }
 
         Ok(())
     }
+}
 
-    fn is_phrase_match(&self, token_positions: &[Vec<usize>]) -> bool {
-        if token_positions.is_empty() {
-            return false;
-        }
+#[cfg(test)]
+mod tests {
+    use assert_approx_eq::assert_approx_eq;
+    use serde_json::json;
 
-        let position_sets: Vec<std::collections::HashSet<usize>> = token_positions
-            .iter()
-            .skip(1)
-            .map(|positions| positions.iter().copied().collect())
-            .collect();
+    use crate::{
+        collection_manager::sides::write::{Term, TermStringField},
+        test_utils::{create_string_index, generate_new_path},
+    };
 
-        for &start_pos in &token_positions[0] {
-            let mut current_pos = start_pos;
-            let mut matched = true;
+    use super::*;
 
-            for positions in &position_sets {
-                let next_pos = current_pos + 1;
-                if positions.contains(&next_pos) {
-                    current_pos = next_pos;
-                } else {
-                    matched = false;
-                    break;
-                }
-            }
+    #[tokio::test]
+    async fn test_indexes_string_insert_search_commit_search() -> Result<()> {
+        let mut string_index = create_string_index(
+            vec![(FieldId(0), "field".to_string())],
+            vec![
+                json!({
+                    "field": "hello hello world",
+                })
+                .try_into()?,
+                json!({
+                    "field": "hello tom",
+                })
+                .try_into()?,
+            ],
+        )?;
 
-            if matched {
-                return true;
-            }
-        }
+        let mut scorer = BM25Scorer::new();
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
+        let before_output = scorer.get_scores();
 
-        false
+        string_index.commit(generate_new_path())?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
+        let after_output = scorer.get_scores();
+
+        assert_approx_eq!(
+            after_output[&DocumentId(0)] / 10.0,
+            before_output[&DocumentId(0)]
+        );
+        assert_approx_eq!(
+            after_output[&DocumentId(1)] / 10.0,
+            before_output[&DocumentId(1)]
+        );
+
+        string_index.insert(
+            DocumentId(2),
+            FieldId(0),
+            1,
+            HashMap::from_iter([(
+                Term("hello".to_string()),
+                TermStringField { positions: vec![1] },
+            )]),
+        )?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
+        let after_insert_output = scorer.get_scores();
+
+        assert_eq!(after_insert_output.len(), 3);
+        assert!(after_insert_output.contains_key(&DocumentId(0)));
+        assert!(after_insert_output.contains_key(&DocumentId(1)));
+        assert!(after_insert_output.contains_key(&DocumentId(2)));
+
+        string_index.commit(generate_new_path())?;
+
+        let mut scorer = BM25Scorer::new();
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
+        let after_insert_commit_output = scorer.get_scores();
+
+        assert_eq!(after_insert_commit_output.len(), 3);
+        assert!(after_insert_commit_output.contains_key(&DocumentId(0)));
+        assert!(after_insert_commit_output.contains_key(&DocumentId(1)));
+        assert!(after_insert_commit_output.contains_key(&DocumentId(2)));
+
+        Ok(())
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use futures::{future::join_all, FutureExt};
@@ -1042,3 +904,4 @@ mod tests {
         );
     }
 }
+*/

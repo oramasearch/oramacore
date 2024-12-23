@@ -1,185 +1,146 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
-use crate::document_storage::DocumentId;
+/**
+ *
+ * (coll_id, field_id) => {
+ *    average_field_length: f32,
+ *    total_documents_with_field: usize,
+ *    
+ *    (, doc_id) => {
+ *      document_length
+ *    }
+ *
+ *    (, term) => {
+ *      total_documents_with_term_in_field: usize
+ *      (, doc_id) => {
+ *       term_occurrence_in_document: usize
+ *      }
+ *    }
+ * }
+ *
+ */
 
-use super::{GlobalInfo, Posting};
+/*
+ * (coll_id, field_id) => [average_field_length, total_documents_with_field]
+ *
+ * (coll_id, field_id, term) => [total_documents_with_term_in_field]
+ *
+ * (coll_id, field_id, doc_id) => [document_length]
+ *
+ * (coll_id, field_id, doc_id, term) => [term_occurrence_in_document]
+ */
 
-pub trait Scorer {
-    fn add_entry(
-        &self,
-        global_info: &GlobalInfo,
-        posting: Posting,
-        total_token_count: f32,
-        boost_per_field: f32,
-    );
-    fn get_scores(self) -> HashMap<DocumentId, f32>;
+/// BM25 scoring function
+///
+/// # Arguments
+///
+/// * `term_occurrence_in_document` - occurrence of the term in the field in the document
+///   (coll_id, doc_id, field_id, term_id)
+/// * `document_length` - length of the field of the document in words
+///   (coll_id, field_id, doc_id)
+/// * `average_field_length` - average field length in the collection
+///   (coll_id, field_id)
+/// * `total_documents_with_field` - number of documents that has that field in the collection
+///   (coll_id, field_id)
+/// * `total_documents_with_term_in_field` - number of documents that has that term in the field in the collection
+///   (coll_id, field_id, term_id)
+/// * `k` - k parameter
+/// * `b` - b parameter
+///
+/// # Returns
+///
+/// * `f32` - BM25 score
+fn bm25_score(
+    term_occurrence_in_document: usize,
+    document_length: u32,
+    average_field_length: f32,
+    total_documents_with_field: f32,
+    total_documents_with_term_in_field: usize,
+    k: f32,
+    b: f32,
+) -> f32 {
+    let f = term_occurrence_in_document as f32;
+    let l = document_length as f32;
+    let avgdl = average_field_length;
+
+    let ni = total_documents_with_term_in_field as f32;
+
+    let idf = ((total_documents_with_field - ni + 0.5_f32) / (ni + 0.5_f32)).ln_1p();
+
+    idf * (f * (k + 1.0)) / (f + k * (1.0 - b + b * (l / avgdl)))
 }
 
-pub mod bm25 {
-    use std::collections::HashMap;
+#[derive(Debug, Default)]
+pub struct BM25Scorer<K: Eq + Hash> {
+    scores: HashMap<K, f32>,
+}
 
-    use dashmap::DashMap;
-
-    use crate::{
-        document_storage::DocumentId,
-        indexes::string::{GlobalInfo, Posting},
-    };
-
-    use super::Scorer;
-
-    #[derive(Debug, Default)]
-    pub struct BM25Score {
-        scores: DashMap<DocumentId, f32>,
-    }
-    impl BM25Score {
-        pub fn new() -> Self {
-            Self {
-                scores: DashMap::new(),
-            }
-        }
-
-        #[inline]
-        fn calculate_score(
-            tf: f32,
-            idf: f32,
-            doc_length: f32,
-            avg_doc_length: f32,
-            boost: f32,
-        ) -> f32 {
-            if tf == 0.0 || doc_length == 0.0 || avg_doc_length == 0.0 {
-                return 0.0;
-            }
-
-            let k1 = 1.5;
-            let b = 0.75;
-            let numerator = tf * (k1 + 1.0);
-            let denominator = tf + k1 * (1.0 - b + b * (doc_length / avg_doc_length));
-
-            // @todo: find a better way to avoid division by 0
-            if denominator == 0.0 {
-                return 0.0;
-            }
-
-            idf * (numerator / denominator) * boost
+impl<K: Eq + Hash + Debug> BM25Scorer<K> {
+    pub fn new() -> Self {
+        Self {
+            scores: Default::default(),
         }
     }
 
-    impl Scorer for BM25Score {
-        #[inline]
-        fn add_entry(
-            &self,
-            global_info: &GlobalInfo,
-            posting: Posting,
-            total_token_count: f32,
-            boost_per_field: f32,
-        ) {
-            let term_frequency = posting.term_frequency;
-            let doc_length = posting.doc_length as f32;
-            let total_documents = global_info.total_documents as f32;
+    #[allow(clippy::too_many_arguments)]
+    pub fn add(
+        &mut self,
+        key: K,
+        term_occurrence_in_field: u32,
+        field_length: u32,
+        average_field_length: f32,
+        total_documents_with_field: f32,
+        total_documents_with_term_in_field: usize,
+        k: f32,
+        b: f32,
+        boost: f32,
+    ) {
+        let score = bm25_score(
+            term_occurrence_in_field as usize,
+            field_length,
+            average_field_length,
+            total_documents_with_field,
+            total_documents_with_term_in_field,
+            k,
+            b,
+        );
+        let score = score * boost;
 
-            if total_documents == 0.0 {
-                self.scores.insert(posting.document_id, 0.0);
-                return;
-            }
+        let old_score = self.scores.entry(key).or_default();
+        *old_score += score;
+    }
 
-            let avg_doc_length = global_info.total_document_length as f32 / total_documents;
-            let idf =
-                ((total_documents - total_token_count + 0.5) / (total_token_count + 0.5)).ln_1p();
-
-            let score = Self::calculate_score(
-                term_frequency,
-                idf,
-                doc_length,
-                avg_doc_length,
-                boost_per_field,
-            );
-
-            self.scores
-                .entry(posting.document_id)
-                .and_modify(|e| *e += score)
-                .or_insert(score);
-        }
-
-        fn get_scores(self) -> HashMap<DocumentId, f32> {
-            self.scores.into_iter().collect()
-        }
+    pub fn get_scores(self) -> HashMap<K, f32> {
+        self.scores
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use crate::collection_manager::dto::FieldId;
+    use assert_approx_eq::assert_approx_eq;
 
     use super::*;
 
     #[test]
-    fn test_bm25_basic_scoring() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 10,
-            total_document_length: 1000,
-        };
+    fn test_indexes_string_scorer_bm25() {
+        let mut scorer = BM25Scorer::new();
 
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            term_frequency: 5.0,
-            doc_length: 100,
-            positions: vec![1, 2, 3, 4, 5],
-        };
+        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0);
 
-        scorer.add_entry(&global_info, posting, 1.0, 1.0);
         let scores = scorer.get_scores();
-        assert!(scores.contains_key(&DocumentId(1)));
-        assert!(scores[&DocumentId(1)] > 0.0);
+        assert_eq!(scores.len(), 1);
+        assert_approx_eq!(scores["doc1"], 1.2297773);
     }
 
     #[test]
-    fn test_bm25_empty_document() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 1,
-            total_document_length: 0,
-        };
-
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            term_frequency: 0.0,
-            doc_length: 0,
-            positions: vec![],
-        };
-
-        scorer.add_entry(&global_info, posting, 1.0, 1.0);
+    fn test_indexes_string_scorer_bm25_boost() {
+        let mut scorer = BM25Scorer::new();
+        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0);
+        scorer.add("doc2", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 2.0);
+        scorer.add("doc3", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 0.5);
         let scores = scorer.get_scores();
-        assert_eq!(scores[&DocumentId(1)], 0.0);
-    }
 
-    #[test]
-    fn test_bm25_boost_effect() {
-        let scorer = bm25::BM25Score::new();
-        let global_info = GlobalInfo {
-            total_documents: 10,
-            total_document_length: 1000,
-        };
-
-        let posting = Posting {
-            field_id: FieldId(1),
-            document_id: DocumentId(1),
-            term_frequency: 5.0,
-            doc_length: 100,
-            positions: vec![1, 2, 3, 4, 5],
-        };
-
-        // Test with different boost values
-        scorer.add_entry(&global_info, posting.clone(), 1.0, 1.0);
-        let normal_scores = scorer.get_scores();
-
-        let scorer = bm25::BM25Score::new();
-        scorer.add_entry(&global_info, posting, 1.0, 2.0);
-        let boosted_scores = scorer.get_scores();
-
-        assert!(boosted_scores[&DocumentId(1)] > normal_scores[&DocumentId(1)]);
+        assert!(scores["doc2"] > scores["doc1"]);
+        assert!(scores["doc3"] < scores["doc1"]);
     }
 }

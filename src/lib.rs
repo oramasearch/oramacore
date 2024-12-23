@@ -31,7 +31,7 @@ pub mod js;
 
 mod metrics;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
