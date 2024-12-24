@@ -1,34 +1,36 @@
 use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashSet},
+    collections::HashSet,
     path::PathBuf,
 };
 
 use anyhow::Result;
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
+use committed::CommittedNumberFieldIndex;
 use dashmap::DashMap;
-use linear::{FromIterConfig, LinearNumberIndex};
-use merge_iter::{MergeIter, MergeIterState};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
+use uncommitted::UncommittedNumberFieldIndex;
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
-mod linear;
-mod merge_iter;
-mod serializable_number;
-mod stats;
-mod r#type;
+// mod linear;
+// mod merge_iter;
+// mod serializable_number;
+// mod stats;
+mod n;
+mod uncommitted;
+mod committed;
 
-pub use r#type::Number;
+pub use n::Number;
 
 pub struct CommitConfig {}
 
 #[derive(Debug)]
 pub struct NumberIndex {
-    uncommitted: DashMap<FieldId, BTreeMap<Number, HashSet<DocumentId>>>,
-    committed: LinearNumberIndex,
+    uncommitted: DashMap<FieldId, UncommittedNumberFieldIndex>,
+    committed: DashMap<FieldId, CommittedNumberFieldIndex>,
+    // committed: LinearNumberIndex,
     base_path: PathBuf,
     max_size_per_chunk: usize,
 }
@@ -38,7 +40,8 @@ impl NumberIndex {
         std::fs::create_dir_all(&base_path)?;
         Ok(Self {
             uncommitted: Default::default(),
-            committed: LinearNumberIndex::from_fs(base_path.clone(), max_size_per_chunk)?,
+            committed: Default::default(),
+            // committed: LinearNumberIndex::from_fs(base_path.clone(), max_size_per_chunk)?,
             base_path,
             max_size_per_chunk,
         })
@@ -49,69 +52,42 @@ impl NumberIndex {
             "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
             doc_id, field_id, value
         );
-        let mut btree = self.uncommitted.entry(field_id).or_default();
-        let doc_ids = btree.entry(value).or_default();
-        doc_ids.insert(doc_id);
+        let mut uncommitted = self.uncommitted.entry(field_id).or_default();
+
+        uncommitted.insert(value, doc_id);
     }
 
     pub fn filter(&self, field_id: FieldId, filter: NumberFilter) -> Result<HashSet<DocumentId>> {
-        use std::ops::Bound;
+        let mut doc_ids = if let Some(committed) = self.committed.get(&field_id) {
+            committed.filter(&filter)?
+        } else {
+            HashSet::new()
+        };
 
-        let mut doc_ids = self.committed.filter(field_id, &filter, 0)?;
-
-        if let Some(btree) = self.uncommitted.get(&field_id) {
-            match filter {
-                NumberFilter::Equal(value) => {
-                    if let Some(d) = btree.get(&value) {
-                        doc_ids.extend(d.iter().cloned());
-                    }
-                }
-                NumberFilter::LessThan(value) => doc_ids.extend(
-                    btree
-                        .range((Bound::Unbounded, Bound::Excluded(&value)))
-                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
-                ),
-                NumberFilter::LessThanOrEqual(value) => doc_ids.extend(
-                    btree
-                        .range((Bound::Unbounded, Bound::Included(&value)))
-                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
-                ),
-                NumberFilter::GreaterThan(value) => doc_ids.extend(
-                    btree
-                        .range((Bound::Excluded(&value), Bound::Unbounded))
-                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
-                ),
-                NumberFilter::GreaterThanOrEqual(value) => doc_ids.extend(
-                    btree
-                        .range((Bound::Included(&value), Bound::Unbounded))
-                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
-                ),
-                NumberFilter::Between((min, max)) => doc_ids.extend(
-                    btree
-                        .range((Bound::Included(&min), Bound::Included(&max)))
-                        .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
-                ),
-            }
+        if let Some(uncommitted) = self.uncommitted.get(&field_id) {
+            uncommitted.filter(filter, &mut doc_ids);
         };
 
         Ok(doc_ids)
     }
 
-    pub fn commit(&mut self, _config: CommitConfig) -> Result<()> {
-        let committed = self.committed.iter();
+    pub fn commit(&self, _config: CommitConfig) -> Result<()> {
+        for entry in &self.uncommitted {
+            let field_id = entry.key();
+            let uncommitted = entry.value();
+            
+            let committed = self.committed.get(field_id);
 
-        let mut dd: BTreeMap<Number, Cow<Vec<(DocumentId, FieldId)>>> = BTreeMap::new();
-        for e in self.uncommitted.iter() {
-            let field_id = *e.key();
-            let btree = e.value();
-            for (number, doc_ids) in btree.iter() {
-                let a = dd.entry(*number).or_default();
-                for doc_id in doc_ids.iter() {
-                    a.to_mut().push((*doc_id, field_id));
-                }
-            }
+            // 
+
+            let a = if let Some(committed) = committed {
+                panic!("Not implemented");
+            } else {
+                CommittedNumberFieldIndex::from_iter(uncommitted.iter())
+            };
         }
 
+        /*
         let merge_iter = MergeIter {
             iter1: committed.map(|p| p.unwrap()),
             iter2: dd.into_iter(),
@@ -130,6 +106,7 @@ impl NumberIndex {
         // So no concurrent access is possible.
         self.committed = new_linear;
         self.uncommitted.clear();
+        */
 
         Ok(())
     }
