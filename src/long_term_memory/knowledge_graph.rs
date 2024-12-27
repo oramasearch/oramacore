@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-type Metadata = HashMap<String, serde_json::Value>;
-type Timestamp = DateTime<Utc>;
-type SemanticSearchResult = Vec<(String, f32, Metadata)>;
+pub type Metadata = HashMap<String, serde_json::Value>;
+pub type Timestamp = DateTime<Utc>;
+pub type SemanticSearchResult = Vec<(String, f32, Metadata)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Message {
