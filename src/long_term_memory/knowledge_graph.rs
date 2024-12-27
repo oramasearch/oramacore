@@ -51,7 +51,8 @@ struct ConversationalKG {
 impl ConversationalKG {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let embedding_config = EmbeddingConfig {
-            cache_path: "~/cache".to_string(),
+            // @todo: make this configurable
+            cache_path: "~/orama-cache".to_string(),
             hugging_face: None,
             preload: EmbeddingPreload::List(vec![OramaModel::Fastembed(
                 OramaFastembedModel::MultilingualE5Base,
@@ -185,6 +186,7 @@ impl ConversationalKG {
 
         let mut similarities: SemanticSearchResult = Vec::new();
 
+        // @todo: avoid linear search, even when the graph is small
         for node_idx in self.graph.node_indices() {
             if let NodeType::Message(message) = &self.graph[node_idx] {
                 let similarity =
