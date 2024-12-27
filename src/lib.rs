@@ -31,6 +31,7 @@ pub mod js;
 
 mod metrics;
 
+mod long_term_memory;
 #[cfg(test)]
 pub mod test_utils;
 

@@ -78,6 +78,9 @@ serde_v8 = "0.234.0"
 metrics-exporter-prometheus = "0.16.0"
 metrics = "0.24.1"
 metrics-util = "0.18.0"
+chrono = "0.4.39"
+petgraph = "0.6.5"
+uuid = { version = "1.11.0", features = ["v4"] }
 
 [build-dependencies]
 cc="1"
