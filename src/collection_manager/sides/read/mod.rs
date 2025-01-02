@@ -1,6 +1,9 @@
 mod collection;
 mod collections;
 
+mod insert;
+mod search;
+
 pub use collection::CollectionReader;
 pub use collections::{CollectionsReader, IndexesConfig};
 

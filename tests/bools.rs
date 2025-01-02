@@ -117,7 +117,6 @@ async fn test_bools_filter() -> Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn test_bools_facets() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
@@ -140,10 +139,7 @@ async fn test_bools_facets() -> Result<()> {
         )
         .await?;
 
-    let facet_results = output.facets.as_ref()
-        .unwrap()
-        .get("bool")
-        .unwrap();
+    let facet_results = output.facets.as_ref().unwrap().get("bool").unwrap();
 
     assert_eq!(facet_results.count, 2);
     assert_eq!(facet_results.values.get("true").unwrap(), &3);
