@@ -74,7 +74,7 @@ async fn init() -> (Arc<CollectionsReader>, CollectionId) {
 }
 
 #[tokio::test]
-async fn test_bools() -> Result<()> {
+async fn test_bools_filter() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let (reader, collection_id) = INSTANCE.get_or_init(init).await;
 
@@ -113,6 +113,41 @@ async fn test_bools() -> Result<()> {
         actual_doc_ids,
         HashSet::from_iter(["doc1".to_string(), "doc2".to_string(), "doc4".to_string()])
     );
+
+    Ok(())
+}
+
+
+#[tokio::test]
+async fn test_bools_facets() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let (reader, collection_id) = INSTANCE.get_or_init(init).await;
+
+    let collection = reader.get_collection(collection_id.clone()).await.unwrap();
+    let output = collection
+        .search(
+            json!({
+                "term": "doc",
+                "facets": {
+                    "bool": {
+                        "true": true,
+                        "false": true,
+                    },
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+
+    let facet_results = output.facets.as_ref()
+        .unwrap()
+        .get("bool")
+        .unwrap();
+
+    assert_eq!(facet_results.count, 2);
+    assert_eq!(facet_results.values.get("true").unwrap(), &3);
+    assert_eq!(facet_results.values.get("false").unwrap(), &2);
 
     Ok(())
 }

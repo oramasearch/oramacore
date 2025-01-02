@@ -120,10 +120,19 @@ pub struct NumberFacetDefinition {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BoolFacetDefinition {
+    #[serde(rename = "true")]
+    pub r#true: bool,
+    #[serde(rename = "false")]
+    pub r#false: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 
 pub enum FacetDefinition {
     Number(#[schema(inline)] NumberFacetDefinition),
-    Bool,
+    #[serde(untagged)]
+    Bool(#[schema(inline)] BoolFacetDefinition),
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
