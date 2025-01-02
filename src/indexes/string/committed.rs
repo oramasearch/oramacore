@@ -278,7 +278,6 @@ pub mod merge {
         uncommitted_iter: Peekable<UncommittedIterType>,
     }
     impl<
-            'a,
             UncommittedIterType: Iterator<
                 Item = (
                     Vec<u8>,
@@ -289,7 +288,7 @@ pub mod merge {
                 ),
             >,
             CommittedIterType: Iterator<Item = (Vec<u8>, u64)>,
-        > Iterator for MergeIterator<'a, UncommittedIterType, CommittedIterType>
+        > Iterator for MergeIterator<'_, UncommittedIterType, CommittedIterType>
     {
         type Item = (Vec<u8>, u64);
 
@@ -369,7 +368,7 @@ pub mod merge {
     struct FTSIter<'stream> {
         stream: Option<fst::map::Stream<'stream>>,
     }
-    impl<'stream> Iterator for FTSIter<'stream> {
+    impl Iterator for FTSIter<'_> {
         // The Item allocate memory, but we could avoid it by using a reference
         // TODO: resolve lifetime issue with reference here
         type Item = (Vec<u8>, u64);

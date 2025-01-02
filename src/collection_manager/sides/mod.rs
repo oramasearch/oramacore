@@ -12,7 +12,7 @@ mod tests {
     use anyhow::Result;
     use document_storage::{DocumentStorage, InMemoryDocumentStorage};
 
-    use read::{CollectionsReader, DataConfig};
+    use read::{CollectionsReader, IndexesConfig};
     use serde_json::json;
 
     use write::CollectionsWriter;
@@ -56,7 +56,7 @@ mod tests {
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
                 max_size_per_chunk: 2048,
             },
@@ -129,7 +129,7 @@ mod tests {
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
                 max_size_per_chunk: 2048,
             },
@@ -212,7 +212,7 @@ mod tests {
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
                 max_size_per_chunk: 2048,
             },

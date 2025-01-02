@@ -5,7 +5,7 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use rustorama::collection_manager::sides::read::DataConfig;
+use rustorama::collection_manager::sides::read::IndexesConfig;
 use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -60,7 +60,7 @@ async fn start_server() {
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            data: DataConfig {
+            data: IndexesConfig {
                 data_dir: generate_new_path(),
                 max_size_per_chunk: 2048,
             },

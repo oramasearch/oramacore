@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-};
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::Result;
 use axum_openapi3::utoipa;
@@ -18,9 +15,9 @@ use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 // mod merge_iter;
 // mod serializable_number;
 // mod stats;
+mod committed;
 mod n;
 mod uncommitted;
-mod committed;
 
 pub use n::Number;
 
@@ -75,10 +72,10 @@ impl NumberIndex {
         for entry in &self.uncommitted {
             let field_id = entry.key();
             let uncommitted = entry.value();
-            
+
             let committed = self.committed.get(field_id);
 
-            // 
+            //
 
             let a = if let Some(committed) = committed {
                 panic!("Not implemented");
@@ -140,7 +137,7 @@ mod tests {
         ($fn_name: ident, $b: expr) => {
             #[test]
             fn $fn_name() {
-                let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+                let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
                 index.add(DocumentId(0), FieldId(0), 0.into());
                 index.add(DocumentId(1), FieldId(0), 1.into());
@@ -227,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_number_commit() {
-        let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+        let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
         index.add(DocumentId(0), FieldId(0), 0.into());
         index.add(DocumentId(1), FieldId(0), 1.into());
@@ -257,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
-        let mut index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+        let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
 
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
         for (number, (doc_id, field_id)) in iter {

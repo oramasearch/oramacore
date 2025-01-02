@@ -1,5 +1,9 @@
 use core::{f32, panic};
-use std::{collections::HashSet, io::{BufReader, BufWriter, Write}, path::PathBuf};
+use std::{
+    collections::HashSet,
+    io::{BufReader, BufWriter, Write},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -8,7 +12,6 @@ use tracing::error;
 use crate::document_storage::DocumentId;
 
 use super::{Number, NumberFilter};
-
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Item {
@@ -59,11 +62,7 @@ struct Page {
 }
 
 impl Page {
-    fn filter(
-        &self,
-        filter: &NumberFilter,
-        matching_docs: &mut HashSet<DocumentId>,
-    ) -> Result<()> {
+    fn filter(&self, filter: &NumberFilter, matching_docs: &mut HashSet<DocumentId>) -> Result<()> {
         // self.usage.increment(epoch);
 
         match &self.pointer {
@@ -127,10 +126,7 @@ pub struct CommittedNumberFieldIndex {
 }
 
 impl CommittedNumberFieldIndex {
-    pub fn filter(
-        &self,
-        filter: &NumberFilter,
-    ) -> Result<HashSet<DocumentId>> {
+    pub fn filter(&self, filter: &NumberFilter) -> Result<HashSet<DocumentId>> {
         let pages = match filter {
             NumberFilter::Equal(value) => {
                 let page = match self.find_page(value) {
@@ -258,7 +254,9 @@ impl CommittedNumberFieldIndex {
             // 1000 is a magic number.
             if current_page_count > 1000 {
                 current_page.max = value;
-                committed_number_field_index.bounds.push(((current_page.min, current_page.max), current_page.id));
+                committed_number_field_index
+                    .bounds
+                    .push(((current_page.min, current_page.max), current_page.id));
                 committed_number_field_index.pages.push(current_page);
 
                 page_id += 1;
@@ -283,12 +281,13 @@ impl CommittedNumberFieldIndex {
                     panic!("This should not happen");
                 }
             };
-
         }
 
         current_page.max = Number::F32(f32::INFINITY);
 
-        committed_number_field_index.bounds.push(((current_page.min, current_page.max), current_page.id));
+        committed_number_field_index
+            .bounds
+            .push(((current_page.min, current_page.max), current_page.id));
         committed_number_field_index.pages.push(current_page);
 
         committed_number_field_index
@@ -398,7 +397,14 @@ pub mod merge {
         iter2: Peekable<I2>,
         merger: Merger,
     }
-    impl<K: Ord + Eq, V, I1: Iterator<Item = (K, V)>, I2: Iterator<Item = (K, V)>, Merger: Fn(&K, V, V) -> V> Iterator for MergedIterator<K, V, I1, I2, Merger> {
+    impl<
+            K: Ord + Eq,
+            V,
+            I1: Iterator<Item = (K, V)>,
+            I2: Iterator<Item = (K, V)>,
+            Merger: Fn(&K, V, V) -> V,
+        > Iterator for MergedIterator<K, V, I1, I2, Merger>
+    {
         type Item = (K, V);
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -426,7 +432,6 @@ pub mod merge {
         }
     }
 
-
     /// This function should merge committed and uncommitted data.
     /// The idea is to have 2 iterators, one for each data source.
     /// The iterators should be already sorted.
@@ -451,7 +456,6 @@ pub mod merge {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -472,8 +476,7 @@ mod tests {
             v1
         };
 
-        let merged: Vec<_> = merge(iter1, iter2, &merger)
-            .collect();
+        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
 
         assert_eq!(
             vec![(1, vec![1, 1]), (2, vec![2, 2]), (3, vec![3, 3])],
@@ -490,11 +493,17 @@ mod tests {
             panic!("This should not be called");
         };
 
-        let merged: Vec<_> = merge(iter1, iter2, &merger)
-            .collect();
+        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
 
         assert_eq!(
-            vec![(1, vec![1]), (2, vec![1]), (3, vec![2]), (4, vec![2]), (5, vec![3]), (6, vec![3])],
+            vec![
+                (1, vec![1]),
+                (2, vec![1]),
+                (3, vec![2]),
+                (4, vec![2]),
+                (5, vec![3]),
+                (6, vec![3])
+            ],
             merged
         );
     }
@@ -508,11 +517,17 @@ mod tests {
             panic!("This should not be called");
         };
 
-        let merged: Vec<_> = merge(iter1, iter2, &merger)
-            .collect();
+        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
 
         assert_eq!(
-            vec![(1, vec![1]), (2, vec![1]), (3, vec![2]), (4, vec![2]), (5, vec![3]), (6, vec![3])],
+            vec![
+                (1, vec![1]),
+                (2, vec![1]),
+                (3, vec![2]),
+                (4, vec![2]),
+                (5, vec![3]),
+                (6, vec![3])
+            ],
             merged
         );
     }
@@ -526,11 +541,17 @@ mod tests {
             panic!("This should not be called");
         };
 
-        let merged: Vec<_> = merge(iter1, iter2, &merger)
-            .collect();
+        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
 
         assert_eq!(
-            vec![(1, vec![1]), (2, vec![2]), (3, vec![3]), (4, vec![1]), (5, vec![2]), (6, vec![3])],
+            vec![
+                (1, vec![1]),
+                (2, vec![2]),
+                (3, vec![3]),
+                (4, vec![1]),
+                (5, vec![2]),
+                (6, vec![3])
+            ],
             merged
         );
     }
@@ -544,11 +565,17 @@ mod tests {
             panic!("This should not be called");
         };
 
-        let merged: Vec<_> = merge(iter1, iter2, &merger)
-            .collect();
+        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
 
         assert_eq!(
-            vec![(1, vec![1]), (2, vec![2]), (3, vec![3]), (4, vec![1]), (5, vec![2]), (6, vec![3])],
+            vec![
+                (1, vec![1]),
+                (2, vec![2]),
+                (3, vec![3]),
+                (4, vec![1]),
+                (5, vec![2]),
+                (6, vec![3])
+            ],
             merged
         );
     }
@@ -570,7 +597,8 @@ mod tests {
 
         let committed_number_field_index = CommittedNumberFieldIndex::from_iter(data);
 
-        let output = committed_number_field_index.filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;
+        let output = committed_number_field_index
+            .filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;
         assert_eq!(output, HashSet::from_iter([DocumentId(0)]));
 
         Ok(())

@@ -4,7 +4,7 @@ use anyhow::Result;
 use rustorama::{
     build_orama,
     collection_manager::sides::{
-        read::{CollectionsReader, DataConfig},
+        read::{CollectionsReader, IndexesConfig},
         write::CollectionsWriter,
     },
     embeddings::{EmbeddingConfig, EmbeddingPreload},
@@ -33,7 +33,7 @@ pub async fn start_all() -> Result<(
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            data: DataConfig {
+            data: IndexesConfig {
                 data_dir: generate_new_path(),
                 max_size_per_chunk: 2048,
             },

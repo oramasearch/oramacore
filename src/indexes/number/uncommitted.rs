@@ -1,4 +1,7 @@
-use std::{collections::{BTreeMap, HashSet}, ops::Bound};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ops::Bound,
+};
 
 use crate::document_storage::DocumentId;
 
@@ -57,7 +60,6 @@ impl UncommittedNumberFieldIndex {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
-        self.inner.iter()
-            .map(|(k, v)| (*k, v.clone()))
+        self.inner.iter().map(|(k, v)| (*k, v.clone()))
     }
 }

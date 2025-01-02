@@ -3,7 +3,7 @@ use std::sync::{atomic::AtomicU32, Arc};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     document_storage::{DocumentStorage, InMemoryDocumentStorage},
-    read::{CollectionsReader, DataConfig},
+    read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
@@ -47,7 +47,7 @@ pub struct WriteSideConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
-    pub data: DataConfig,
+    pub data: IndexesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
