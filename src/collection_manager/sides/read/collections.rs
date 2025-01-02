@@ -9,7 +9,10 @@ use crate::{
     collection_manager::{
         sides::{
             document_storage::DocumentStorage,
-            write::{CollectionWriteOperation, GenericWriteOperation, WriteOperation},
+            write::{
+                CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
+                WriteOperation,
+            },
         },
         CollectionId,
     },
@@ -65,7 +68,7 @@ impl CollectionsReader {
                     })
                     .increment_by_one();
 
-                let collection_reader = CollectionReader::new(
+                let collection_reader = CollectionReader::try_new(
                     id.clone(),
                     self.embedding_service.clone(),
                     Arc::clone(&self.document_storage),
@@ -103,41 +106,37 @@ impl CollectionsReader {
                             .await
                             .context("Cannot create field")?;
                     }
-                    CollectionWriteOperation::IndexEmbedding {
-                        doc_id,
-                        field_id,
-                        value,
-                    } => {
-                        collection_reader
-                            .index_embedding(doc_id, field_id, value)
-                            .context("cannot index embedding")?;
-                    }
-                    CollectionWriteOperation::IndexString {
-                        doc_id,
-                        field_id,
-                        field_length,
-                        terms,
-                    } => {
-                        collection_reader
-                            .index_string(doc_id, field_id, field_length, terms)
-                            .context("cannot index string")?;
-                    }
                     CollectionWriteOperation::InsertDocument { doc_id, doc } => {
                         collection_reader
                             .insert_document(doc_id, doc)
                             .await
                             .context("cannot insert document")?;
                     }
-                    CollectionWriteOperation::IndexNumber {
-                        doc_id,
-                        field_id,
-                        value,
-                    } => {
-                        collection_reader
-                            .index_number(doc_id, field_id, value)
-                            .await
-                            .context("cannot index number")?;
-                    }
+                    CollectionWriteOperation::Index(doc_id, field_id, field_op) => match field_op {
+                        DocumentFieldIndexOperation::IndexBoolean { value } => {
+                            collection_reader
+                                .index_boolean(doc_id, field_id, value)
+                                .context("cannot index boolean")?;
+                        }
+                        DocumentFieldIndexOperation::IndexNumber { value } => {
+                            collection_reader
+                                .index_number(doc_id, field_id, value)
+                                .context("cannot index number")?;
+                        }
+                        DocumentFieldIndexOperation::IndexString {
+                            field_length,
+                            terms,
+                        } => {
+                            collection_reader
+                                .index_string(doc_id, field_id, field_length, terms)
+                                .context("cannot index string")?;
+                        }
+                        DocumentFieldIndexOperation::IndexEmbedding { value } => {
+                            collection_reader
+                                .index_embedding(doc_id, field_id, value)
+                                .context("cannot index embedding")?;
+                        }
+                    },
                 }
             }
         };

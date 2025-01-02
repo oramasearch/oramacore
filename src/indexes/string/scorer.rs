@@ -1,7 +1,5 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
-
-/**
- *
+/** The structure of data needed for BM25 scoring:
+ * ```text
  * (coll_id, field_id) => {
  *    average_field_length: f32,
  *    total_documents_with_field: usize,
@@ -17,10 +15,10 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
  *      }
  *    }
  * }
+ * ```
  *
- */
-
-/*
+ * RAW data:
+ * ```text
  * (coll_id, field_id) => [average_field_length, total_documents_with_field]
  *
  * (coll_id, field_id, term) => [total_documents_with_term_in_field]
@@ -28,7 +26,9 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
  * (coll_id, field_id, doc_id) => [document_length]
  *
  * (coll_id, field_id, doc_id, term) => [term_occurrence_in_document]
+ * ```
  */
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// BM25 scoring function
 ///

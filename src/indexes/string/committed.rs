@@ -240,6 +240,7 @@ impl CommittedStringFieldIndex {
 pub mod merge {
     use std::{
         collections::HashMap,
+        io::Write,
         iter::Peekable,
         path::PathBuf,
         sync::{atomic::AtomicU64, Arc},
@@ -427,10 +428,10 @@ pub mod merge {
             uncommitted_iter,
         };
 
-        let file = std::fs::File::create(new_path.clone())
+        let mut file = std::fs::File::create(new_path.clone())
             .with_context(|| format!("Cannot create file at {:?}", new_path))?;
-        let wtr = std::io::BufWriter::new(file);
-        let mut build = MapBuilder::new(wtr)?;
+        let mut wtr = std::io::BufWriter::new(&mut file);
+        let mut build = MapBuilder::new(&mut wtr)?;
 
         for (key, value) in merge_iterator {
             build
@@ -439,6 +440,11 @@ pub mod merge {
         }
 
         build.finish().context("Cannot finish build of FST map")?;
+
+        wtr.flush().context("Cannot flush FST map")?;
+        drop(wtr);
+        file.sync_data().context("Cannot sync data to disk")?;
+        file.flush().context("Cannot flush file")?;
 
         let file = std::fs::File::open(new_path).context("Cannot open file after writing to it")?;
         let mmap = unsafe { Mmap::map(&file)? };

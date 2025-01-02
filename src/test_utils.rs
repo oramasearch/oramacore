@@ -11,12 +11,16 @@ use tempdir::TempDir;
 use crate::{
     collection_manager::{
         dto::FieldId,
-        sides::write::{CollectionWriteOperation, FieldIndexer, StringField, WriteOperation},
+        sides::write::{
+            CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer, StringField,
+            WriteOperation,
+        },
         CollectionId,
     },
     document_storage::DocumentId,
     indexes::string::{
-        merge::merge, CommittedStringFieldIndex, StringIndex, UncommittedStringFieldIndex,
+        merge::merge, CommittedStringFieldIndex, StringIndex, StringIndexConfig,
+        UncommittedStringFieldIndex,
     },
     nlp::TextParser,
     types::Document,
@@ -33,7 +37,10 @@ pub fn create_string_index(
     fields: Vec<(FieldId, String)>,
     documents: Vec<Document>,
 ) -> Result<StringIndex> {
-    let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
+    let index = StringIndex::new(StringIndexConfig {
+        posting_id_generator: Arc::new(AtomicU64::new(0)),
+        base_path: generate_new_path(),
+    });
 
     let string_fields: Vec<_> = fields
         .into_iter()
@@ -70,13 +77,14 @@ pub fn create_string_index(
             match operation {
                 WriteOperation::Collection(
                     _,
-                    CollectionWriteOperation::IndexString {
-                        field_length,
-                        terms,
-                        field_id,
+                    CollectionWriteOperation::Index(
                         doc_id,
-                        ..
-                    },
+                        field_id,
+                        DocumentFieldIndexOperation::IndexString {
+                            field_length,
+                            terms,
+                        },
+                    ),
                 ) => {
                     index.insert(doc_id, field_id, field_length, terms)?;
                 }
@@ -123,11 +131,14 @@ pub fn create_uncommitted_string_field_index_from(
             match operation {
                 WriteOperation::Collection(
                     _,
-                    CollectionWriteOperation::IndexString {
-                        field_length,
-                        terms,
-                        ..
-                    },
+                    CollectionWriteOperation::Index(
+                        _,
+                        _,
+                        DocumentFieldIndexOperation::IndexString {
+                            field_length,
+                            terms,
+                        },
+                    ),
                 ) => {
                     index
                         .insert(document_id, field_length, terms)

@@ -18,12 +18,12 @@ use crate::{
 
 use super::{scorer::BM25Scorer, GlobalInfo};
 
-/**
- *
+/* The structure of data needed for BM25 scoring:
+ * ```text
  * (coll_id, field_id) => {
  *    average_field_length: f32,
  *    total_documents_with_field: usize,
- *    
+ *
  *    (, doc_id) => {
  *      document_length
  *    }
@@ -36,6 +36,7 @@ use super::{scorer::BM25Scorer, GlobalInfo};
  *      }
  *    }
  * }
+ * ```
  */
 
 /// Total number of documents that contains a term in a field in the collection

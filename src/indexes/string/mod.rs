@@ -10,7 +10,6 @@ use anyhow::Result;
 pub use committed::CommittedStringFieldIndex;
 use dashmap::DashMap;
 
-use scorer::BM25Scorer;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 pub use uncommitted::UncommittedStringFieldIndex;
@@ -27,9 +26,10 @@ pub use committed::merge;
 #[cfg(not(any(test, feature = "benchmarking")))]
 use committed::merge;
 
-// pub mod posting_storage;
-pub mod scorer;
+mod scorer;
 mod uncommitted;
+
+pub use scorer::BM25Scorer;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PostingListId(pub u32);
@@ -52,12 +52,6 @@ pub struct StringIndexValue {
     pub term_frequency: usize,
 }
 
-pub struct StringIndex {
-    uncommitted: DashMap<FieldId, UncommittedStringFieldIndex>,
-    committed: DashMap<FieldId, CommittedStringFieldIndex>,
-    posting_id_generator: Arc<AtomicU64>,
-}
-
 #[derive(Debug, Default)]
 pub struct GlobalInfo {
     pub total_documents: usize,
@@ -70,12 +64,24 @@ impl AddAssign for GlobalInfo {
     }
 }
 
+pub struct StringIndexConfig {
+    pub posting_id_generator: Arc<AtomicU64>,
+    pub base_path: PathBuf,
+}
+pub struct StringIndex {
+    uncommitted: DashMap<FieldId, UncommittedStringFieldIndex>,
+    committed: DashMap<FieldId, CommittedStringFieldIndex>,
+    posting_id_generator: Arc<AtomicU64>,
+    base_path: PathBuf,
+}
+
 impl StringIndex {
-    pub fn new(posting_id_generator: Arc<AtomicU64>) -> Self {
+    pub fn new(config: StringIndexConfig) -> Self {
         StringIndex {
             uncommitted: DashMap::new(),
             committed: DashMap::new(),
-            posting_id_generator,
+            posting_id_generator: config.posting_id_generator,
+            base_path: config.base_path,
         }
     }
 

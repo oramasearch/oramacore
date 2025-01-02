@@ -11,10 +11,6 @@ use uncommitted::UncommittedNumberFieldIndex;
 
 use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
 
-// mod linear;
-// mod merge_iter;
-// mod serializable_number;
-// mod stats;
 mod committed;
 mod n;
 mod uncommitted;
@@ -33,7 +29,7 @@ pub struct NumberIndex {
 }
 
 impl NumberIndex {
-    pub fn new(base_path: PathBuf, max_size_per_chunk: usize) -> Result<Self> {
+    pub fn try_new(base_path: PathBuf, max_size_per_chunk: usize) -> Result<Self> {
         std::fs::create_dir_all(&base_path)?;
         Ok(Self {
             uncommitted: Default::default(),
@@ -137,7 +133,7 @@ mod tests {
         ($fn_name: ident, $b: expr) => {
             #[test]
             fn $fn_name() {
-                let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+                let index = NumberIndex::try_new(generate_new_path(), 2048).unwrap();
 
                 index.add(DocumentId(0), FieldId(0), 0.into());
                 index.add(DocumentId(1), FieldId(0), 1.into());
@@ -224,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_number_commit() {
-        let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+        let index = NumberIndex::try_new(generate_new_path(), 2048).unwrap();
 
         index.add(DocumentId(0), FieldId(0), 0.into());
         index.add(DocumentId(1), FieldId(0), 1.into());
@@ -254,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
-        let index = NumberIndex::new(generate_new_path(), 2048).unwrap();
+        let index = NumberIndex::try_new(generate_new_path(), 2048).unwrap();
 
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
         for (number, (doc_id, field_id)) in iter {

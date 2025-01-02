@@ -51,6 +51,23 @@ pub type InsertStringTerms = HashMap<Term, TermStringField>;
 type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
 
 #[derive(Debug, Clone)]
+pub enum DocumentFieldIndexOperation {
+    IndexString {
+        field_length: u16,
+        terms: InsertStringTerms,
+    },
+    IndexEmbedding {
+        value: Vec<f32>,
+    },
+    IndexNumber {
+        value: Number,
+    },
+    IndexBoolean {
+        value: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub enum CollectionWriteOperation {
     InsertDocument {
         doc_id: DocumentId,
@@ -61,22 +78,7 @@ pub enum CollectionWriteOperation {
         field_name: String,
         field: TypedField,
     },
-    IndexString {
-        doc_id: DocumentId,
-        field_id: FieldId,
-        field_length: u16,
-        terms: InsertStringTerms,
-    },
-    IndexEmbedding {
-        doc_id: DocumentId,
-        field_id: FieldId,
-        value: Vec<f32>,
-    },
-    IndexNumber {
-        doc_id: DocumentId,
-        field_id: FieldId,
-        value: Number,
-    },
+    Index(DocumentId, FieldId, DocumentFieldIndexOperation),
 }
 
 #[derive(Debug, Clone)]
@@ -192,7 +194,15 @@ impl CollectionsWriter {
                         ),
                     );
                 }
-                TypedField::Bool => unimplemented!("Bool field not implemented yet"),
+                TypedField::Bool => {
+                    collection.fields.insert(
+                        field_name.clone(),
+                        (
+                            ValueType::Scalar(ScalarType::Boolean),
+                            Arc::new(Box::new(BoolField { })),
+                        ),
+                    );
+                },
             }
 
             let field_id = collection.get_field_id_by_name(&field_name);
@@ -328,11 +338,46 @@ impl FieldIndexer for NumberField {
 
         let op = WriteOperation::Collection(
             coll_id,
-            CollectionWriteOperation::IndexNumber {
+            CollectionWriteOperation::Index(
                 doc_id,
                 field_id,
-                value,
+                DocumentFieldIndexOperation::IndexNumber { value },
+            ),
+        );
+
+        Ok(vec![op])
+    }
+}
+
+#[derive(Debug)]
+struct BoolField {}
+
+impl FieldIndexer for BoolField {
+    fn get_write_operations(
+        &self,
+        coll_id: CollectionId,
+        doc_id: DocumentId,
+        field_name: &str,
+        field_id: FieldId,
+        doc: &FlattenDocument,
+    ) -> Result<Vec<WriteOperation>> {
+        let value = doc.get(field_name);
+
+        let value = match value {
+            None => return Ok(vec![]),
+            Some(value) => match value.as_bool() {
+                None => return Ok(vec![]),
+                Some(value) => value,
             },
+        };
+
+        let op = WriteOperation::Collection(
+            coll_id,
+            CollectionWriteOperation::Index(
+                doc_id,
+                field_id,
+                DocumentFieldIndexOperation::IndexBoolean { value },
+            ),
         );
 
         Ok(vec![op])
@@ -424,12 +469,14 @@ impl FieldIndexer for StringField {
 
         let op = WriteOperation::Collection(
             coll_id,
-            CollectionWriteOperation::IndexString {
+            CollectionWriteOperation::Index(
                 doc_id,
                 field_id,
-                field_length,
-                terms,
-            },
+                DocumentFieldIndexOperation::IndexString {
+                    field_length,
+                    terms,
+                },
+            ),
         );
 
         Ok(vec![op])
@@ -464,17 +511,22 @@ impl FieldIndexer for EmbeddingField {
             collection: coll_id.0.clone(),
             model: self.model.model_name().to_string(),
         });
+        // The input could be:
+        // - empty: we should skip this (???)
+        // - "normal": it is ok
+        // - "too long": we should chunk it in a smart way
+        // TODO: implement that logic
         let mut output = self.model.embed(vec![input], None)?;
         let output = output.remove(0);
         drop(metric);
 
         Ok(vec![WriteOperation::Collection(
             coll_id.clone(),
-            CollectionWriteOperation::IndexEmbedding {
+            CollectionWriteOperation::Index(
                 doc_id,
                 field_id,
-                value: output,
-            },
+                DocumentFieldIndexOperation::IndexEmbedding { value: output },
+            ),
         )])
     }
 }
@@ -567,7 +619,14 @@ impl CollectionWriter {
                     );
                     TypedField::Number
                 }
-                _ => unimplemented!("Field type not implemented yet"),
+                ValueType::Scalar(ScalarType::Boolean) => {
+                    self.fields.insert(
+                        field_name.clone(),
+                        (value_type, Arc::new(Box::new(BoolField {}))),
+                    );
+                    TypedField::Bool
+                }
+                x => unimplemented!("Field type not implemented yet {:?}", x),
             };
 
             writer

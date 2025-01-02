@@ -25,7 +25,7 @@ use crate::{
     indexes::{
         bool::BoolIndex,
         number::{Number, NumberFilter, NumberIndex},
-        string::{scorer::BM25Scorer, StringIndex},
+        string::{BM25Scorer, StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
     },
     metrics::{
@@ -57,7 +57,7 @@ pub struct CollectionReader {
 }
 
 impl CollectionReader {
-    pub fn new(
+    pub fn try_new(
         id: CollectionId,
         embedding_service: Arc<EmbeddingService>,
         document_storage: Arc<dyn DocumentStorage>,
@@ -71,9 +71,12 @@ impl CollectionReader {
         })
         .context("Cannot create vector index during collection creation")?;
 
-        let string_index = StringIndex::new(posting_id_generator);
+        let string_index = StringIndex::new(StringIndexConfig {
+            posting_id_generator,
+            base_path: collection_data_dir.join("strings"),
+        });
 
-        let number_index = NumberIndex::new(
+        let number_index = NumberIndex::try_new(
             collection_data_dir.join("numbers"),
             indexes_config.max_size_per_chunk,
         )?;
@@ -154,13 +157,14 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self, value), level="debug", fields(self.id = ?self.id))]
-    pub async fn index_number(
-        &self,
-        doc_id: DocumentId,
-        field_id: FieldId,
-        value: Number,
-    ) -> Result<()> {
+    pub fn index_number(&self, doc_id: DocumentId, field_id: FieldId, value: Number) -> Result<()> {
         self.number_index.add(doc_id, field_id, value);
+        Ok(())
+    }
+
+    #[instrument(skip(self, value), level="debug", fields(self.id = ?self.id))]
+    pub fn index_boolean(&self, doc_id: DocumentId, field_id: FieldId, value: bool) -> Result<()> {
+        self.bool_index.add(doc_id, field_id, value);
         Ok(())
     }
 
