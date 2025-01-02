@@ -95,10 +95,24 @@ async fn test_bools() -> Result<()> {
     assert_eq!(output.hits.len(), 3);
     assert_eq!(output.count, 3);
 
-    let actual_doc_ids: HashSet<_> = output.hits.into_iter().map(|h| h.document.unwrap().get("id").unwrap().as_str().unwrap().to_string())
+    let actual_doc_ids: HashSet<_> = output
+        .hits
+        .into_iter()
+        .map(|h| {
+            h.document
+                .unwrap()
+                .get("id")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
         .collect();
 
-    assert_eq!(actual_doc_ids, HashSet::from_iter(["doc1".to_string(), "doc2".to_string(), "doc4".to_string()]));
+    assert_eq!(
+        actual_doc_ids,
+        HashSet::from_iter(["doc1".to_string(), "doc2".to_string(), "doc4".to_string()])
+    );
 
     Ok(())
 }

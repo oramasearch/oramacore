@@ -199,10 +199,10 @@ impl CollectionsWriter {
                         field_name.clone(),
                         (
                             ValueType::Scalar(ScalarType::Boolean),
-                            Arc::new(Box::new(BoolField { })),
+                            Arc::new(Box::new(BoolField {})),
                         ),
                     );
-                },
+                }
             }
 
             let field_id = collection.get_field_id_by_name(&field_name);
