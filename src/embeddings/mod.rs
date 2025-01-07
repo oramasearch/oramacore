@@ -179,6 +179,7 @@ impl LoadedModel {
     }
 }
 
+#[derive(Debug)]
 pub struct EmbeddingService {
     loaded_models: DashMap<OramaModel, Arc<LoadedModel>>,
     builder: EmbeddingBuilder,
@@ -268,6 +269,7 @@ impl EmbeddingService {
     }
 }
 
+#[derive(Debug)]
 pub struct EmbeddingBuilder {
     config: EmbeddingConfig,
 }

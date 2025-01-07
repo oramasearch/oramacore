@@ -33,8 +33,6 @@ mod tests {
 
     use super::*;
 
-    use crate::test_utils::generate_new_path;
-
     #[tokio::test]
     async fn test_sides_error_on_unknow_filter_field() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
@@ -53,13 +51,7 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(
-            embedding_service,
-            document_storage,
-            IndexesConfig {
-                data_dir: generate_new_path(),
-            },
-        );
+        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -125,13 +117,7 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(
-            embedding_service,
-            document_storage,
-            IndexesConfig {
-                data_dir: generate_new_path(),
-            },
-        );
+        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -207,13 +193,7 @@ mod tests {
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
         let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(
-            embedding_service,
-            document_storage,
-            IndexesConfig {
-                data_dir: generate_new_path(),
-            },
-        );
+        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),

@@ -14,6 +14,7 @@ use uncommitted::UncommittedVectorIndex;
 mod committed;
 mod uncommitted;
 
+#[derive(Debug)]
 pub struct VectorIndex {
     uncommitted: UncommittedVectorIndex,
     commited: DashMap<FieldId, CommittedState>,

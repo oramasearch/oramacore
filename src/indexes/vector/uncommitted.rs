@@ -10,6 +10,7 @@ use crate::{
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
+#[derive(Debug)]
 pub struct UncommittedVectorIndex {
     data: RwLock<Vec<(DocumentId, FieldId, Vec<VectorWithMagnetude>)>>,
 }

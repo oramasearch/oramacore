@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{io::Write, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::{
@@ -18,8 +19,9 @@ use crate::{
     },
 };
 
-use super::{commit::CollectionDescriptorDump, IndexesConfig};
+use super::IndexesConfig;
 
+#[derive(Debug)]
 pub struct CollectionReader {
     pub(super) id: CollectionId,
     pub(super) embedding_service: Arc<EmbeddingService>,
@@ -43,22 +45,17 @@ impl CollectionReader {
         id: CollectionId,
         embedding_service: Arc<EmbeddingService>,
         document_storage: Arc<dyn DocumentStorage>,
-        indexes_config: IndexesConfig,
+        _: IndexesConfig,
     ) -> Result<Self> {
-        let collection_data_dir = indexes_config.data_dir.join(&id.0);
+        // let collection_data_dir = indexes_config.data_dir.join(&id.0);
 
         let vector_index = VectorIndex::try_new(VectorIndexConfig {
-            base_path: collection_data_dir.join("vectors"),
+            // FIX ME!!
+            base_path: PathBuf::new(),
         })
         .context("Cannot create vector index during collection creation")?;
 
-        let mut string_index = StringIndex::new(StringIndexConfig {
-            // posting_id_generator,
-            // base_path: collection_data_dir.join("strings"),
-        });
-        string_index
-            .load(collection_data_dir.join("strings"))
-            .context("Cannot load string index")?;
+        let string_index = StringIndex::new(StringIndexConfig {});
 
         let number_index = NumberIndex::try_new(NumberIndexConfig {})?;
 
@@ -102,8 +99,37 @@ impl CollectionReader {
             .ok_or_else(|| anyhow!("Field not found"))
     }
 
-    pub(super) fn get_collection_descriptor_dump(&self) -> Result<CollectionDescriptorDump> {
-        Ok(CollectionDescriptorDump {
+    pub fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
+        self.string_index
+            .load(collection_data_dir.join("strings"))
+            .context("Cannot load string index")?;
+
+        let coll_desc_file_path = collection_data_dir.join("desc.json");
+        let coll_desc_file = std::fs::File::open(&coll_desc_file_path).with_context(|| {
+            format!(
+                "Cannot open file for collection {:?} at {:?}",
+                self.id, coll_desc_file_path
+            )
+        })?;
+        let dump: CollectionDescriptorDump =
+            serde_json::from_reader(coll_desc_file).with_context(|| {
+                format!(
+                    "Cannot deserialize collection descriptor for {:?} to file {:?}",
+                    self.id, coll_desc_file_path
+                )
+            })?;
+        for (field_name, (field_id, field_type)) in dump.fields {
+            self.fields.insert(field_name, (field_id, field_type));
+        }
+
+        Ok(())
+    }
+
+    pub fn commit(&self, commit_config: CommitConfig) -> Result<()> {
+        self.string_index
+            .commit(commit_config.folder_to_commit.join("strings"))?;
+
+        let dump = CollectionDescriptorDump {
             id: self.id.clone(),
             fields: self
                 .fields
@@ -121,8 +147,53 @@ impl CollectionReader {
                     (model.model_name().to_string(), field_ids.clone())
                 })
                 .collect(),
-        })
+        };
+
+        let coll_desc_file_path = commit_config.folder_to_commit.join("desc.json");
+        let mut coll_desc_file =
+            std::fs::File::create(&coll_desc_file_path).with_context(|| {
+                format!(
+                    "Cannot create file for collection {:?} at {:?}",
+                    self.id, coll_desc_file_path
+                )
+            })?;
+        println!("dump: {:#?} at {:?}", dump, coll_desc_file);
+        serde_json::to_writer(&mut coll_desc_file, &dump).with_context(|| {
+            format!(
+                "Cannot serialize collection descriptor for {:?} to file {:?}",
+                self.id, coll_desc_file_path
+            )
+        })?;
+        coll_desc_file.flush().with_context(|| {
+            format!(
+                "Cannot flush collection descriptor for {:?} to file {:?}",
+                self.id, coll_desc_file_path
+            )
+        })?;
+        coll_desc_file.sync_data().with_context(|| {
+            format!(
+                "Cannot sync collection descriptor for {:?} to file {:?}",
+                self.id, coll_desc_file_path
+            )
+        })?;
+
+        Ok(())
     }
 }
 
-impl CollectionReader {}
+pub struct CommitConfig {
+    pub folder_to_commit: PathBuf,
+    pub epoch: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Committed {
+    pub epoch: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CollectionDescriptorDump {
+    pub id: CollectionId,
+    pub fields: Vec<(String, (FieldId, TypedField))>,
+    pub used_models: Vec<(String, Vec<FieldId>)>,
+}

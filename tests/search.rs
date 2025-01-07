@@ -60,9 +60,8 @@ async fn start_server() {
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            data: IndexesConfig {
-                data_dir: generate_new_path(),
-            },
+            config: IndexesConfig {},
+            data_dir: generate_new_path(),
         },
     )
     .await

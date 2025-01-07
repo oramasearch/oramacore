@@ -33,9 +33,8 @@ pub async fn start_all() -> Result<(
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            data: IndexesConfig {
-                data_dir: generate_new_path(),
-            },
+            config: IndexesConfig {},
+            data_dir: generate_new_path(),
         },
     )
     .await?;

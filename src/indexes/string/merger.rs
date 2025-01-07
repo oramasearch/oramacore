@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
 
 use std::iter::Peekable;
@@ -124,13 +125,13 @@ impl Iterator for FTSIter<'_> {
 }
 
 pub fn merge(
-    posting_id_generator: Arc<AtomicU64>,
     uncommitted: &UncommittedStringFieldIndex,
     committed: &CommittedStringFieldIndex,
     document_length_new_path: PathBuf,
     fst_new_path: PathBuf,
     posting_new_path: PathBuf,
     global_info_new_path: PathBuf,
+    posting_id_new_path: PathBuf,
 ) -> Result<()> {
     let data_to_commit = uncommitted.take()?;
 
@@ -142,9 +143,12 @@ pub fn merge(
         )
         .context("Cannot merge document lengths")?;
 
+    let max_posting_id = committed.posting_id_generator.load(Ordering::Relaxed);
+    let posting_id_generator = Arc::new(AtomicU64::new(max_posting_id + 1));
+
     let uncommitted_iter = data_to_commit.iter();
     let storage_updates = merge_iter(
-        posting_id_generator,
+        posting_id_generator.clone(),
         uncommitted_iter,
         committed.fst_map_path.clone(),
         fst_new_path,
@@ -165,20 +169,34 @@ pub fn merge(
         .sync_data()
         .context("Cannot sync data to disk")?;
 
+    let mut posting_id_file =
+        File::create(posting_id_new_path).context("Cannot create file for posting id")?;
+    serde_json::to_writer(
+        &mut posting_id_file,
+        &posting_id_generator.load(Ordering::Relaxed),
+    )
+    .context("Cannot write posting id to file")?;
+    posting_id_file.flush().context("Cannot flush file")?;
+    posting_id_file
+        .sync_data()
+        .context("Cannot sync data to disk")?;
+
     data_to_commit.done();
 
     Ok(())
 }
 
 pub fn create(
-    posting_id_generator: Arc<AtomicU64>,
     uncommitted: &UncommittedStringFieldIndex,
     document_length_new_path: PathBuf,
     fst_new_path: PathBuf,
     posting_new_path: PathBuf,
     global_info_new_path: PathBuf,
+    posting_id_new_path: PathBuf,
 ) -> Result<()> {
     let data_to_commit = uncommitted.take().context("Cannot take from uncommitted")?;
+
+    let posting_id_generator = AtomicU64::new(0);
 
     DocumentLengthsPerDocument::create(
         data_to_commit.get_document_lengths(),
@@ -234,11 +252,24 @@ pub fn create(
         .sync_data()
         .context("Cannot sync data to disk")?;
 
+    let mut posting_id_file =
+        File::create(posting_id_new_path).context("Cannot create file for posting id")?;
+    serde_json::to_writer(
+        &mut posting_id_file,
+        &posting_id_generator.load(Ordering::Relaxed),
+    )
+    .context("Cannot write posting id to file")?;
+    posting_id_file.flush().context("Cannot flush file")?;
+    posting_id_file
+        .sync_data()
+        .context("Cannot sync data to disk")?;
+
     data_to_commit.done();
 
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn merge_iter<UncommittedIter>(
     posting_id_generator: Arc<AtomicU64>,
     uncommitted_iter: UncommittedIter,

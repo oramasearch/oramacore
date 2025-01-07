@@ -4,7 +4,7 @@ use crate::{
     collection_manager::{
         sides::{
             document_storage::DocumentStorage,
-            read::CommitConfig,
+            read::collection::CommitConfig,
             write::{
                 CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                 WriteOperation,
@@ -22,16 +22,14 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use super::collection::CollectionReader;
-use super::commit::CollectionDescriptorDump;
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct IndexesConfig {
-    pub data_dir: PathBuf,
-}
+pub struct IndexesConfig {}
 
+#[derive(Debug)]
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
@@ -148,14 +146,11 @@ impl CollectionsReader {
         CollectionReadLock::try_new(r, id)
     }
 
-    #[instrument(skip(self))]
-    pub fn load_from_disk(&mut self) -> Result<()> {
-        info!(
-            "Loading collections from disk '{:?}'.",
-            self.indexes_config.data_dir
-        );
+    #[instrument(skip(self, data_dir))]
+    pub async fn load_from_disk(&mut self, data_dir: PathBuf) -> Result<()> {
+        info!("Loading collections from disk '{:?}'.", data_dir);
 
-        match std::fs::exists(&self.indexes_config.data_dir) {
+        match std::fs::exists(&data_dir) {
             Err(e) => {
                 return Err(anyhow::anyhow!(
                     "Error while checking if the data directory exists: {:?}",
@@ -167,48 +162,53 @@ impl CollectionsReader {
             }
             Ok(false) => {
                 info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(&self.indexes_config.data_dir)
-                    .context("Cannot create data directory")?;
+                std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
             }
         }
 
-        let base_dir_for_collections = self.indexes_config.data_dir.join("collections");
+        let base_dir_for_collections = data_dir.join("collections");
 
         let files = std::fs::read_dir(&base_dir_for_collections).with_context(|| {
             format!(
-                "Cannot read collections directory '{:?}'",
+                "Cannot read collections directory {:?}",
                 base_dir_for_collections
             )
         })?;
         for f in files {
             let f = f.context("Cannot read file")?;
 
-            let f_name = f
-                .file_name()
-                .into_string()
-                .map_err(|e| anyhow::anyhow!("Cannot convert file name: {:?}", e))?;
-            if !f_name.ends_with(".json") {
+            let metadata = f.metadata().context("Cannot get file metadata")?;
+
+            if !metadata.is_dir() {
+                warn!("File {:?} is not a directory. Skipping.", f.path());
                 continue;
             }
 
-            let collection_path = f.path();
-            let collection_metadata_file = std::fs::File::open(&collection_path)
-                .with_context(|| format!("Cannot open file '{:?}'", f.path()))?;
-            let collection_descriptor: CollectionDescriptorDump =
-                serde_json::from_reader(collection_metadata_file).with_context(|| {
-                    format!(
-                        "Cannot deserialize collection descriptor from file '{:?}'",
-                        collection_path
-                    )
-                })?;
+            info!("Loading collection {:?}", f.path());
+
+            let collection_id = CollectionId(f.file_name().to_string_lossy().to_string());
+
+            let mut collection = CollectionReader::try_new(
+                collection_id.clone(),
+                self.embedding_service.clone(),
+                self.document_storage.clone(),
+                self.indexes_config.clone(),
+            )?;
+
+            collection.load(base_dir_for_collections.join(&collection.id.0))?;
+
+            let mut guard = self.collections.write().await;
+            guard.insert(collection_id, collection);
         }
 
         info!("Collections loaded from disk.");
-        todo!()
+
+        Ok(())
     }
 
-    pub async fn commit(&self) -> Result<()> {
-        match std::fs::exists(&self.indexes_config.data_dir) {
+    #[instrument(skip(self, data_dir))]
+    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        match std::fs::exists(&data_dir) {
             Err(e) => {
                 return Err(anyhow::anyhow!(
                     "Error while checking if the data directory exists: {:?}",
@@ -220,38 +220,19 @@ impl CollectionsReader {
             }
             Ok(false) => {
                 info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(&self.indexes_config.data_dir)
-                    .context("Cannot create data directory")?;
+                std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
             }
         };
 
         let col = self.collections.read().await;
         let col = &*col;
 
-        let collections_dir = self.indexes_config.data_dir.join("collections");
+        let collections_dir = data_dir.join("collections");
         std::fs::create_dir_all(&collections_dir)
             .context("Cannot create 'collections' directory")?;
 
         for (id, reader) in col {
             info!("Committing collection {:?}", id);
-            let desc = reader
-                .get_collection_descriptor_dump()
-                .context("Cannot create collection description dump")?;
-
-            let coll_desc_file_path = collections_dir.join(format!("{}.json", id.0));
-            let coll_desc_file =
-                std::fs::File::create(&coll_desc_file_path).with_context(|| {
-                    format!(
-                        "Cannot create file for collection {:?} at {:?}",
-                        id, coll_desc_file_path
-                    )
-                })?;
-            serde_json::to_writer(coll_desc_file, &desc).with_context(|| {
-                format!(
-                    "Cannot serialize collection descriptor for {:?} to file {:?}",
-                    id, coll_desc_file_path
-                )
-            })?;
 
             reader.commit(CommitConfig {
                 folder_to_commit: collections_dir.join(&id.0),

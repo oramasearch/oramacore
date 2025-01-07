@@ -1,4 +1,7 @@
-use std::sync::{atomic::AtomicU32, Arc};
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicU32, Arc},
+};
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
@@ -47,7 +50,8 @@ pub struct WriteSideConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
-    pub data: IndexesConfig,
+    pub data_dir: PathBuf,
+    pub config: IndexesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -123,9 +127,11 @@ pub async fn build_orama(
 
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
     let mut collections_reader =
-        CollectionsReader::new(embedding_service, document_storage, reader_side.data);
+        CollectionsReader::new(embedding_service, document_storage, reader_side.config);
 
-    collections_reader.load_from_disk()?;
+    collections_reader
+        .load_from_disk(reader_side.data_dir)
+        .await?;
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));

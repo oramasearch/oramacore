@@ -17,7 +17,7 @@ use fst::Map;
 use memmap::Mmap;
 use posting_storage::{PostingIdStorage, PostingListId};
 use serde::{Deserialize, Serialize};
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
@@ -79,7 +79,6 @@ pub struct StringIndexConfig {}
 pub struct StringIndex {
     uncommitted: DashMap<FieldId, UncommittedStringFieldIndex>,
     committed: DashMap<FieldId, CommittedStringFieldIndex>,
-    posting_id_generator: Arc<AtomicU64>,
 }
 
 impl StringIndex {
@@ -87,7 +86,6 @@ impl StringIndex {
         StringIndex {
             uncommitted: DashMap::new(),
             committed: DashMap::new(),
-            posting_id_generator: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -137,19 +135,20 @@ impl StringIndex {
             let mut posting_new_path = field_new_path.join("posting.bin");
             let mut document_length_new_path = field_new_path.join("dl.bin");
             let mut global_info_new_path = field_new_path.join("global_info.bin");
+            let mut posting_id_new_path = field_new_path.join("posting_id.bin");
 
             match (data_to_commit, committed) {
                 (Some(data_to_commit), Some(committed)) => {
                     info!("Merging field_id: {:?}", field_id);
 
                     merger::merge(
-                        self.posting_id_generator.clone(),
                         &data_to_commit,
                         &committed,
                         document_length_new_path.clone(),
                         fst_new_path.clone(),
                         posting_new_path.clone(),
                         global_info_new_path.clone(),
+                        posting_id_new_path.clone(),
                     )
                     .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
                 }
@@ -157,12 +156,12 @@ impl StringIndex {
                     info!("Creating field_id: {:?}", field_id);
 
                     merger::create(
-                        self.posting_id_generator.clone(),
                         &data_to_commit,
                         document_length_new_path.clone(),
                         fst_new_path.clone(),
                         posting_new_path.clone(),
                         global_info_new_path.clone(),
+                        posting_id_new_path.clone(),
                     )
                     .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
                 }
@@ -176,6 +175,7 @@ impl StringIndex {
                     document_length_new_path = committed.document_lengths_per_document.path.clone();
                     posting_new_path = committed.storage.path.clone();
                     global_info_new_path = committed.global_info_path.clone();
+                    posting_id_new_path = committed.max_posting_id_path.clone();
                 }
                 (None, None) => {
                     unreachable!(
@@ -192,6 +192,7 @@ impl StringIndex {
                 document_length_new_path,
                 posting_new_path,
                 global_info_new_path,
+                posting_id_new_path,
             };
 
             // Reload field
@@ -219,6 +220,7 @@ impl StringIndex {
                 field_dump.fst_new_path.clone(),
                 DocumentLengthsPerDocument::new(field_dump.document_length_new_path.clone()),
                 PostingIdStorage::new(field_dump.posting_new_path.clone()),
+                field_dump.posting_id_new_path.clone(),
                 global_info,
                 field_dump.global_info_new_path.clone(),
             );
@@ -261,6 +263,8 @@ impl StringIndex {
         let dump: StringFieldsDump = serde_json::from_reader(file)
             .with_context(|| format!("Cannot read fields file at {:?}", field_file))?;
 
+        debug!("Dump: {:?}", dump);
+
         for (field_id, field_dump) in dump.fields {
             let global_file =
                 File::open(field_dump.global_info_new_path.clone()).with_context(|| {
@@ -281,14 +285,20 @@ impl StringIndex {
             let mmap = unsafe { Mmap::map(&file)? };
             let map = Map::new(mmap)?;
 
-            let committed = CommittedStringFieldIndex::new(
+            let mut committed = CommittedStringFieldIndex::new(
                 map,
                 field_dump.fst_new_path,
                 DocumentLengthsPerDocument::new(field_dump.document_length_new_path),
                 PostingIdStorage::new(field_dump.posting_new_path),
+                field_dump.posting_id_new_path.clone(),
                 global_info,
                 field_dump.global_info_new_path,
             );
+
+            let posting_id = std::fs::read(field_dump.posting_id_new_path.clone()).unwrap();
+            let posting_id: u64 = serde_json::from_slice(&posting_id).unwrap();
+            committed.posting_id_generator = Arc::new(AtomicU64::new(posting_id));
+
             self.committed.insert(field_id, committed);
         }
 
@@ -303,15 +313,32 @@ impl StringIndex {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
+        println!("self.committed {:?}", self.committed);
+
+        println!("search on {:?}", search_on);
+
         let search_on: HashSet<_> = if let Some(v) = search_on {
             v.iter().copied().collect()
         } else {
+            let mut p = HashSet::new();
+            p.extend(self.uncommitted.iter().map(|e| *e.key()));
+            p.extend(self.committed.iter().map(|e| *e.key()));
+
+            p
+        };
+
+        println!(
+            "Searching uncommitted on: {:?}",
             self.uncommitted
                 .iter()
                 .map(|e| *e.key())
-                .chain(self.committed.iter().map(|e| *e.key()))
-                .collect()
-        };
+                .collect::<Vec<_>>()
+        );
+        println!(
+            "Searching committed on: {:?}",
+            self.committed.iter().map(|e| *e.key()).collect::<Vec<_>>()
+        );
+        println!("Searching on: {:?}", search_on);
 
         for field_id in search_on {
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
@@ -345,6 +372,8 @@ impl StringIndex {
                 )?;
             }
 
+            println!("Committed: {:?}", committed);
+
             if let Some(committed) = committed {
                 committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;
             }
@@ -359,7 +388,7 @@ impl StringIndex {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct StringFieldDumpData {
     field_id: FieldId,
     version: u64,
@@ -367,8 +396,9 @@ struct StringFieldDumpData {
     document_length_new_path: PathBuf,
     posting_new_path: PathBuf,
     global_info_new_path: PathBuf,
+    posting_id_new_path: PathBuf,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct StringFieldsDump {
     version: u64,
     fields: HashMap<FieldId, StringFieldDumpData>,

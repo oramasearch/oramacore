@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{Context, Result};
@@ -21,6 +22,8 @@ pub struct CommittedStringFieldIndex {
     pub(super) document_lengths_per_document: DocumentLengthsPerDocument,
 
     pub(super) storage: PostingIdStorage,
+    pub(super) posting_id_generator: Arc<AtomicU64>,
+    pub(super) max_posting_id_path: PathBuf,
 
     global_info: GlobalInfo,
     pub(super) global_info_path: PathBuf,
@@ -32,6 +35,7 @@ impl CommittedStringFieldIndex {
         fst_map_path: PathBuf,
         document_lengths_per_document: DocumentLengthsPerDocument,
         storage: PostingIdStorage,
+        max_posting_id_path: PathBuf,
         global_info: GlobalInfo,
         global_info_path: PathBuf,
     ) -> Self {
@@ -40,6 +44,8 @@ impl CommittedStringFieldIndex {
             fst_map_path,
             document_lengths_per_document,
             storage,
+            max_posting_id_path,
+            posting_id_generator: Arc::new(AtomicU64::new(0)),
             global_info,
             global_info_path,
         }
