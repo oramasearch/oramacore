@@ -1,10 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
 import grpc
+from grpc_reflection.v1alpha import reflection
+
 import service_pb2
 import service_pb2_grpc
-from grpc_reflection.v1alpha import reflection
-from concurrent.futures import ThreadPoolExecutor
-
-
 from service_pb2 import (
     OramaModel as ProtoOramaModel,
     OramaIntent as ProtoOramaIntent,
@@ -33,10 +32,8 @@ class CalculateEmbeddingService(service_pb2_grpc.CalculateEmbeddingsServiceServi
 def serve(config, embeddings_service):
     print(f"Starting gRPC server on port {config.embeddings_grpc_port}")
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
-
-    service_pb2_grpc.add_CalculateEmbeddingsServiceServicer_to_server(
-        CalculateEmbeddingService(embeddings_service), server
-    )
+    service = CalculateEmbeddingService(embeddings_service)
+    service_pb2_grpc.add_CalculateEmbeddingsServiceServicer_to_server(service, server)
 
     SERVICE_NAMES = (
         service_pb2.DESCRIPTOR.services_by_name["CalculateEmbeddingsService"].full_name,

@@ -20,6 +20,10 @@ class EmbeddingService:
         self.app = create_app(self)
 
     def _initialize_embeddings_service(self):
+        import os
+
+        os.environ["ONNXRUNTIME_PROVIDERS"] = "CPUExecutionProvider"
+
         extend_fastembed_supported_models()
         initialize_thread_executor(max_workers=self.config.total_threads // 2)
         return EmbeddingsModels(self.config, selected_models=ModelGroups[self.config.default_model_group].value)

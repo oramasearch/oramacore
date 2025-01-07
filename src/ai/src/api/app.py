@@ -1,6 +1,6 @@
 import asyncio
-from functools import wraps, partial
 from fastapi import FastAPI
+from functools import wraps, partial
 from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
 
