@@ -24,7 +24,7 @@ pub async fn start_all() -> Result<(
 )> {
     let (collections_writer, collections_reader, mut receiver) = build_orama(
         EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_str().unwrap().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         },
@@ -35,7 +35,6 @@ pub async fn start_all() -> Result<(
             input: rustorama::SideChannelType::InMemory,
             data: IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
         },
     )

@@ -100,7 +100,12 @@ impl Page {
     fn move_to_fs(&mut self, page_file: PathBuf) -> Result<()> {
         let items = match &self.pointer {
             PagePointer::InMemory(items) => items,
-            PagePointer::OnFile(_) => return Ok(()),
+            PagePointer::OnFile(p) => {
+                if p != &page_file {
+                    std::fs::copy(p, &page_file)?;
+                }
+                return Ok(());
+            }
         };
 
         let mut file = std::fs::File::create(page_file.clone())?;
@@ -234,7 +239,10 @@ And this should not happen. Return the last page."#);
 }
 
 impl CommittedNumberFieldIndex {
-    pub fn from_iter<T: IntoIterator<Item = (Number, HashSet<DocumentId>)>>(iter: T) -> Self {
+    pub fn from_iter<T: IntoIterator<Item = (Number, HashSet<DocumentId>)>>(
+        iter: T,
+        base_dir: PathBuf,
+    ) -> Result<Self> {
         let mut committed_number_field_index = CommittedNumberFieldIndex {
             pages: Vec::new(),
             bounds: Vec::new(),
@@ -257,6 +265,9 @@ impl CommittedNumberFieldIndex {
                 committed_number_field_index
                     .bounds
                     .push(((current_page.min, current_page.max), current_page.id));
+                current_page
+                    .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
+                    .context("Cannot move the page to fs")?;
                 committed_number_field_index.pages.push(current_page);
 
                 page_id += 1;
@@ -288,9 +299,26 @@ impl CommittedNumberFieldIndex {
         committed_number_field_index
             .bounds
             .push(((current_page.min, current_page.max), current_page.id));
+
+        current_page
+            .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
+            .context("Cannot move the page to fs")?;
         committed_number_field_index.pages.push(current_page);
 
-        committed_number_field_index
+        Ok(committed_number_field_index)
+    }
+}
+
+impl CommittedNumberFieldIndex {
+    pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
+        self.pages.iter().flat_map(|page| {
+            let items = match &page.pointer {
+                PagePointer::InMemory(items) => items,
+                PagePointer::OnFile(_) => panic!("This should not happen"),
+            };
+
+            items.iter().map(|item| (item.key.0, item.values.clone()))
+        })
     }
 }
 
@@ -397,6 +425,27 @@ pub mod merge {
         iter2: Peekable<I2>,
         merger: Merger,
     }
+
+    impl<
+        K: Ord + Eq,
+        V,
+        I1: Iterator<Item = (K, V)>,
+        I2: Iterator<Item = (K, V)>,
+        Merger: Fn(&K, V, V) -> V,
+    > MergedIterator<K, V, I1, I2, Merger> {
+        pub fn new(
+            iter1: I1,
+            iter2: I2,
+            merger: Merger,
+        ) -> Self {
+            Self {
+                iter1: iter1.peekable(),
+                iter2: iter2.peekable(),
+                merger,
+            }
+        }
+    }
+
     impl<
             K: Ord + Eq,
             V,
@@ -462,7 +511,9 @@ mod tests {
 
     use anyhow::Result;
 
-    use crate::{document_storage::DocumentId, indexes::number::Number};
+    use crate::{
+        document_storage::DocumentId, indexes::number::Number, test_utils::generate_new_path,
+    };
 
     use super::{merge::*, CommittedNumberFieldIndex};
 
@@ -595,7 +646,8 @@ mod tests {
             (Number::I32(9), HashSet::from_iter([DocumentId(9)])),
         ];
 
-        let committed_number_field_index = CommittedNumberFieldIndex::from_iter(data);
+        let committed_number_field_index =
+            CommittedNumberFieldIndex::from_iter(data, generate_new_path())?;
 
         let output = committed_number_field_index
             .filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;

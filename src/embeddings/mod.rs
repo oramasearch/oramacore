@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug},
     hash::Hash,
+    path::PathBuf,
     sync::Arc,
 };
 use strum::EnumIter;
@@ -29,7 +30,7 @@ pub enum EmbeddingPreload {
 #[derive(Debug, Deserialize, Clone)]
 pub struct EmbeddingConfig {
     pub preload: EmbeddingPreload,
-    pub cache_path: String,
+    pub cache_path: PathBuf,
     pub hugging_face: Option<HuggingFaceConfiguration>,
 }
 
@@ -297,7 +298,7 @@ impl EmbeddingBuilder {
                 let text_embedding = TextEmbedding::try_new(
                     InitOptions::new(embedding_model)
                         .with_show_download_progress(false)
-                        .with_cache_dir(self.config.cache_path.clone().into()),
+                        .with_cache_dir(self.config.cache_path.clone()),
                 )
                 .with_context(|| {
                     format!("Failed to initialize the Fastembed: {orama_embedding_model}")
@@ -338,7 +339,7 @@ mod tests {
 
         // We don't want to download the model every time we run the test
         // So we use a standard temp directory, without any cleanup logic
-        let temp_dir = std::env::temp_dir().to_str().unwrap().to_string();
+        let temp_dir = std::env::temp_dir();
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: temp_dir.clone(),

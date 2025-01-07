@@ -12,13 +12,13 @@ use crate::{
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{
         bool::BoolIndex,
-        number::NumberIndex,
+        number::{NumberIndex, NumberIndexConfig},
         string::{StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
     },
 };
 
-use super::IndexesConfig;
+use super::{commit::CollectionDescriptorDump, IndexesConfig};
 
 pub struct CollectionReader {
     pub(super) id: CollectionId,
@@ -43,7 +43,6 @@ impl CollectionReader {
         id: CollectionId,
         embedding_service: Arc<EmbeddingService>,
         document_storage: Arc<dyn DocumentStorage>,
-        posting_id_generator: Arc<AtomicU64>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         let collection_data_dir = indexes_config.data_dir.join(&id.0);
@@ -53,15 +52,14 @@ impl CollectionReader {
         })
         .context("Cannot create vector index during collection creation")?;
 
-        let string_index = StringIndex::new(StringIndexConfig {
-            posting_id_generator,
-            base_path: collection_data_dir.join("strings"),
+        let mut string_index = StringIndex::new(StringIndexConfig {
+            // posting_id_generator,
+            // base_path: collection_data_dir.join("strings"),
         });
+        string_index.load(collection_data_dir.join("strings"))
+            .context("Cannot load string index")?;
 
-        let number_index = NumberIndex::try_new(
-            collection_data_dir.join("numbers"),
-            indexes_config.max_size_per_chunk,
-        )?;
+        let number_index = NumberIndex::try_new(NumberIndexConfig {})?;
 
         let bool_index = BoolIndex::new();
 
@@ -101,6 +99,28 @@ impl CollectionReader {
             .get(field_name)
             .map(|v| v.clone())
             .ok_or_else(|| anyhow!("Field not found"))
+    }
+
+    pub(super) fn get_collection_descriptor_dump(&self) -> Result<CollectionDescriptorDump> {
+        Ok(CollectionDescriptorDump {
+            id: self.id.clone(),
+            fields: self
+                .fields
+                .iter()
+                .map(|v| {
+                    let (field_name, (field_id, typed_field)) = v.pair();
+                    (field_name.clone(), (*field_id, typed_field.clone()))
+                })
+                .collect(),
+            used_models: self
+                .fields_per_model
+                .iter()
+                .map(|v| {
+                    let (model, field_ids) = v.pair();
+                    (model.model_name().to_string(), field_ids.clone())
+                })
+                .collect(),
+        })
     }
 }
 

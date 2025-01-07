@@ -19,8 +19,7 @@ use crate::{
     },
     document_storage::DocumentId,
     indexes::string::{
-        merge::merge, CommittedStringFieldIndex, StringIndex, StringIndexConfig,
-        UncommittedStringFieldIndex,
+        document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage, CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex
     },
     nlp::TextParser,
     types::Document,
@@ -37,10 +36,7 @@ pub fn create_string_index(
     fields: Vec<(FieldId, String)>,
     documents: Vec<Document>,
 ) -> Result<StringIndex> {
-    let index = StringIndex::new(StringIndexConfig {
-        posting_id_generator: Arc::new(AtomicU64::new(0)),
-        base_path: generate_new_path(),
-    });
+    let index = StringIndex::new(StringIndexConfig {});
 
     let string_fields: Vec<_> = fields
         .into_iter()
@@ -156,16 +152,16 @@ pub fn create_uncommitted_string_field_index_from(
 
 pub fn create_committed_string_field_index(
     documents: Vec<Document>,
-) -> Result<(CommittedStringFieldIndex, Arc<AtomicU64>)> {
-    let uncommitted = create_uncommitted_string_field_index(documents)?;
+) -> Result<Option<CommittedStringFieldIndex>> {
+    let index = create_string_index(vec![
+        (FieldId(1), "field".to_string())
+    ], documents)?;
 
-    let posting_id_generator: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
-    let committed_index = merge(
-        posting_id_generator.clone(),
-        uncommitted,
-        CommittedStringFieldIndex::new(None, HashMap::new(), 0, HashMap::new(), 0),
-        generate_new_path(),
-    )?;
+    println!("index {:#?}", index);
 
-    Ok((committed_index, posting_id_generator))
+    index.commit(generate_new_path())?;
+
+    println!("index {:#?}", index);
+
+    Ok(index.remove_committed_field(FieldId(1)))
 }

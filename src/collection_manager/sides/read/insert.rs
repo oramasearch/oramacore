@@ -72,7 +72,7 @@ impl CollectionReader {
 
     #[instrument(skip(self, value), level="debug", fields(self.id = ?self.id))]
     pub fn index_number(&self, doc_id: DocumentId, field_id: FieldId, value: Number) -> Result<()> {
-        self.number_index.add(doc_id, field_id, value);
+        self.number_index.add(doc_id, field_id, value)?;
         Ok(())
     }
 

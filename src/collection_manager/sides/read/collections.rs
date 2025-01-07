@@ -8,11 +8,10 @@ use std::{
 use crate::{
     collection_manager::{
         sides::{
-            document_storage::DocumentStorage,
-            write::{
+            document_storage::DocumentStorage, read::CommitConfig, write::{
                 CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                 WriteOperation,
-            },
+            }
         },
         CollectionId,
     },
@@ -26,21 +25,20 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{error, info};
+use tracing::{debug, error, info, instrument};
 
 use super::collection::CollectionReader;
+use super::commit::CollectionDescriptorDump;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IndexesConfig {
     pub data_dir: PathBuf,
-    pub max_size_per_chunk: usize,
 }
 
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     document_storage: Arc<dyn DocumentStorage>,
-    posting_id_generator: Arc<AtomicU64>,
     indexes_config: IndexesConfig,
 }
 impl CollectionsReader {
@@ -53,7 +51,6 @@ impl CollectionsReader {
             embedding_service,
             collections: Default::default(),
             document_storage,
-            posting_id_generator: Arc::new(AtomicU64::new(0)),
             indexes_config,
         }
     }
@@ -72,7 +69,6 @@ impl CollectionsReader {
                     id.clone(),
                     self.embedding_service.clone(),
                     Arc::clone(&self.document_storage),
-                    self.posting_id_generator.clone(),
                     self.indexes_config.clone(),
                 )?;
 
@@ -153,6 +149,110 @@ impl CollectionsReader {
     {
         let r = self.collections.read().await;
         CollectionReadLock::try_new(r, id)
+    }
+
+    #[instrument(skip(self))]
+    pub fn load_from_disk(&mut self) -> Result<()> {
+        info!(
+            "Loading collections from disk '{:?}'.",
+            self.indexes_config.data_dir
+        );
+
+        match std::fs::exists(&self.indexes_config.data_dir) {
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Error while checking if the data directory exists: {:?}",
+                    e
+                ));
+            }
+            Ok(true) => {
+                debug!("Data directory exists.");
+            }
+            Ok(false) => {
+                info!("Data directory does not exist. Creating it.");
+                std::fs::create_dir_all(&self.indexes_config.data_dir)
+                    .context("Cannot create data directory")?;
+            }
+        }
+
+        let base_dir_for_collections = self.indexes_config.data_dir.join("collections");
+
+        let files = std::fs::read_dir(&base_dir_for_collections).with_context(|| {
+            format!(
+                "Cannot read collections directory '{:?}'",
+                base_dir_for_collections
+            )
+        })?;
+        for f in files {
+            let f = f.context("Cannot read file")?;
+
+            let f_name = f
+                .file_name()
+                .into_string()
+                .map_err(|e| anyhow::anyhow!("Cannot convert file name: {:?}", e))?;
+            if !f_name.ends_with(".json") {
+                continue;
+            }
+
+            let collection_path = f.path();
+            let collection_metadata_file = std::fs::File::open(&collection_path)
+                .with_context(|| format!("Cannot open file '{:?}'", f.path()))?;
+            let collection_descriptor: CollectionDescriptorDump =
+                serde_json::from_reader(collection_metadata_file).with_context(|| {
+                    format!(
+                        "Cannot deserialize collection descriptor from file '{:?}'",
+                        collection_path
+                    )
+                })?;
+        }
+
+        info!("Collections loaded from disk.");
+        todo!()
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        match std::fs::exists(&self.indexes_config.data_dir) {
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Error while checking if the data directory exists: {:?}",
+                    e
+                ));
+            }
+            Ok(true) => {
+                debug!("Data directory exists.");
+            }
+            Ok(false) => {
+                info!("Data directory does not exist. Creating it.");
+                std::fs::create_dir_all(&self.indexes_config.data_dir)
+                    .context("Cannot create data directory")?;
+            }
+        };
+
+        let col = self.collections.read().await;
+        let col = &*col;
+
+        let collections_dir = self.indexes_config.data_dir.join("collections");
+        std::fs::create_dir_all(&collections_dir)
+            .context("Cannot create 'collections' directory")?;
+
+        for (id, reader) in col {
+            info!("Committing collection {:?}", id);
+            let desc = reader.get_collection_descriptor_dump()
+                .context("Cannot create collection description dump")?;
+            
+            let coll_desc_file_path = collections_dir.join(format!("{}.json", id.0));
+            let coll_desc_file = std::fs::File::create(&coll_desc_file_path)
+                .with_context(|| format!("Cannot create file for collection {:?} at {:?}", id, coll_desc_file_path))?;
+            serde_json::to_writer(coll_desc_file, &desc)
+                .with_context(|| format!("Cannot serialize collection descriptor for {:?} to file {:?}", id, coll_desc_file_path))?;
+
+            reader.commit(CommitConfig {
+                folder_to_commit: collections_dir.join(&id.0),
+                epoch: 0,
+            })?;
+        }
+
+        Ok(())
     }
 }
 

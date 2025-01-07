@@ -42,7 +42,7 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
@@ -58,7 +58,6 @@ mod tests {
             document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
         );
 
@@ -115,7 +114,7 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
@@ -131,7 +130,6 @@ mod tests {
             document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
         );
 
@@ -198,7 +196,7 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
@@ -214,7 +212,6 @@ mod tests {
             document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
         );
 

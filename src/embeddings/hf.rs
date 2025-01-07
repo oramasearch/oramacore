@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -45,23 +45,20 @@ pub struct HuggingFaceConfiguration {
 
 struct MissingFile {
     repo_path: String,
-    filesystem_path: String,
+    filesystem_path: PathBuf,
 }
 
-fn calculate_model_cache_path(model_name: String, custom_models_path: String) -> String {
-    format!("{}/{}", custom_models_path, model_name)
+fn calculate_model_cache_path(model_name: String, custom_models_path: PathBuf) -> PathBuf {
+    custom_models_path.join(model_name)
 }
 
 fn calculate_missing_files(
     hugging_face_model_repo_config: &HuggingFaceModelRepoConfig,
-    model_cache_root_path: &str,
+    model_cache_root_path: PathBuf,
 ) -> Vec<MissingFile> {
     let mut missing_files = Vec::new();
 
-    let fs_path = format!(
-        "{}/{}",
-        model_cache_root_path, hugging_face_model_repo_config.onnx_model
-    );
+    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.onnx_model);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
             repo_path: hugging_face_model_repo_config.onnx_model.clone(),
@@ -69,10 +66,7 @@ fn calculate_missing_files(
         });
     }
 
-    let fs_path = format!(
-        "{}/{}",
-        model_cache_root_path, hugging_face_model_repo_config.special_tokens_map
-    );
+    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.special_tokens_map);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
             repo_path: hugging_face_model_repo_config.special_tokens_map.clone(),
@@ -80,10 +74,7 @@ fn calculate_missing_files(
         });
     }
 
-    let fs_path = format!(
-        "{}/{}",
-        model_cache_root_path, hugging_face_model_repo_config.tokenizer
-    );
+    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.tokenizer);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
             repo_path: hugging_face_model_repo_config.tokenizer.clone(),
@@ -91,10 +82,7 @@ fn calculate_missing_files(
         });
     }
 
-    let fs_path = format!(
-        "{}/{}",
-        model_cache_root_path, hugging_face_model_repo_config.tokenizer_config
-    );
+    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.tokenizer_config);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
             repo_path: hugging_face_model_repo_config.tokenizer_config.clone(),
@@ -102,10 +90,7 @@ fn calculate_missing_files(
         });
     }
 
-    let fs_path = format!(
-        "{}/{}",
-        model_cache_root_path, hugging_face_model_repo_config.config
-    );
+    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.config);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
             repo_path: hugging_face_model_repo_config.config.clone(),
@@ -186,7 +171,7 @@ async fn follow_redirects(client: &Client, initial_url: &str) -> Result<reqwest:
     Ok(response)
 }
 
-async fn download_file(client: &Client, url: String, destination: String) -> Result<()> {
+async fn download_file(client: &Client, url: String, destination: PathBuf) -> Result<()> {
     info!("Start");
 
     let mut response = follow_redirects(client, &url).await?;
@@ -196,12 +181,12 @@ async fn download_file(client: &Client, url: String, destination: String) -> Res
     // Make sure the directory exists
     let parent = Path::new(&destination)
         .parent()
-        .with_context(|| format!("Failed to get parent directory: {}", destination))?;
+        .with_context(|| format!("Failed to get parent directory: '{:?}'", destination))?;
     std::fs::create_dir_all(parent)
-        .with_context(|| format!("Failed to create directory: {parent:?}"))?;
+        .with_context(|| format!("Failed to create directory: '{parent:?}'"))?;
 
     let mut file = File::create(&destination)
-        .with_context(|| format!("Failed to create file {}", destination))?;
+        .with_context(|| format!("Failed to create file '{:?}'", destination))?;
 
     trace!(
         "Status code: {:?}, headers {:?}",
@@ -212,7 +197,7 @@ async fn download_file(client: &Client, url: String, destination: String) -> Res
     // COpy the response body to the file
     while let Some(chunk) = response.chunk().await? {
         file.write_all(&chunk)
-            .with_context(|| format!("Failed to write to file {}", destination))?;
+            .with_context(|| format!("Failed to write to file '{:?}'", destination))?;
     }
 
     info!("Downloaded");
@@ -248,7 +233,7 @@ fn create_client(hugging_face_config: &HuggingFaceConfiguration) -> Result<Clien
 impl LoadedModel {
     pub async fn try_from_hugging_face(
         hugging_face_config: &HuggingFaceConfiguration,
-        cache_path: String,
+        cache_path: PathBuf,
         model_name: String,
     ) -> Result<Self> {
         let hugging_face_model_repo_config = hugging_face_config
@@ -275,18 +260,20 @@ impl LoadedModel {
 
 async fn try_build_text_embedding_model(
     hugging_face_config: &HuggingFaceConfiguration,
-    cache_path: String,
+    cache_path: PathBuf,
     model_name: String,
     hugging_face_model_repo_config: &HuggingFaceModelRepoConfig,
 ) -> Result<TextEmbedding> {
     let model_cache_root_path = calculate_model_cache_path(model_name.clone(), cache_path);
     // Make sure the directory exists
     std::fs::create_dir_all(model_cache_root_path.clone())
-        .with_context(|| format!("Failed to create directory: {model_cache_root_path}"))?;
+        .with_context(|| format!("Failed to create directory: {model_cache_root_path:?}"))?;
 
     // Support partial downloads
-    let missing_files =
-        calculate_missing_files(hugging_face_model_repo_config, &model_cache_root_path);
+    let missing_files = calculate_missing_files(
+        hugging_face_model_repo_config,
+        model_cache_root_path.clone(),
+    );
 
     download_missing_files(
         hugging_face_config,
@@ -295,9 +282,9 @@ async fn try_build_text_embedding_model(
     )
     .await?;
 
-    let full_path = |file: &str| format!("{}/{}", &model_cache_root_path, file);
+    let full_path = |file: &str| model_cache_root_path.join(file);
 
-    info!("Loading model from {}", &model_cache_root_path);
+    info!("Loading model from '{:?}'", &model_cache_root_path);
 
     let onnx_file = fs::read(full_path(&hugging_face_model_repo_config.onnx_model))?;
     let tokenizer_files = TokenizerFiles {
@@ -333,7 +320,7 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let tmp = tempdir::TempDir::new("test_hf_download_onnx")?;
-        let cache_path = tmp.path().to_str().unwrap().to_string();
+        let cache_path: PathBuf = tmp.path().into();
         fs::remove_dir(cache_path.clone())?;
 
         let rebranded_name = "my-model".to_string();

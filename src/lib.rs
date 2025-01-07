@@ -122,8 +122,10 @@ pub async fn build_orama(
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
 
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
-    let collections_reader =
+    let mut collections_reader =
         CollectionsReader::new(embedding_service, document_storage, reader_side.data);
+
+    collections_reader.load_from_disk()?;
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));
