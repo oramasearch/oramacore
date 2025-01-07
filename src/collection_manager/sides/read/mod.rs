@@ -19,7 +19,7 @@ mod tests {
         collection_manager::{
             dto::{FieldId, LanguageDTO, TypedField},
             sides::{
-                document_storage::{self, DiskDocumentStorage, DocumentStorage, InMemoryDocumentStorage},
+                document_storage::{DiskDocumentStorage, DocumentStorage},
                 write::{
                     CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                     Term, TermStringField, WriteOperation,
@@ -126,7 +126,6 @@ mod tests {
             document_storage.commit(data_dir.join("docs"))?;
         }
 
-
         let mut document_storage = DiskDocumentStorage::try_new(data_dir.join("docs"))?;
         document_storage.load(data_dir.join("docs"))?;
 
@@ -152,14 +151,8 @@ mod tests {
             )
             .await?;
 
-        assert_eq!(
-            result.count,
-            1
-        );
-        assert_eq!(
-            result.hits[0].id,
-            "my-id".to_string()
-        );
+        assert_eq!(result.count, 1);
+        assert_eq!(result.hits[0].id, "my-id".to_string());
 
         Ok(())
     }

@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    document_storage::{DiskDocumentStorage, DocumentStorage, InMemoryDocumentStorage},
+    document_storage::{DiskDocumentStorage, DocumentStorage},
     read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
 };

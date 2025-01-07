@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use tracing::warn;
 use std::{collections::HashMap, fmt::Debug, fs::File, path::PathBuf, sync::RwLock};
+use tracing::warn;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
@@ -75,17 +75,16 @@ struct CommittedDiskDocumentStorage {
     path: PathBuf,
 }
 impl CommittedDiskDocumentStorage {
-    fn get_documents_by_ids(
-        &self,
-        doc_ids: &[DocumentId],
-    ) -> Result<Vec<Option<Document>>> {
-
+    fn get_documents_by_ids(&self, doc_ids: &[DocumentId]) -> Result<Vec<Option<Document>>> {
         let mut result = Vec::with_capacity(doc_ids.len());
         for id in doc_ids {
             let doc_path = self.path.join(format!("{}", id.0));
             match std::fs::exists(&doc_path) {
                 Err(e) => {
-                    return Err(anyhow!("Error while checking if the document exists: {:?}", e));
+                    return Err(anyhow!(
+                        "Error while checking if the document exists: {:?}",
+                        e
+                    ));
                 }
                 std::result::Result::Ok(false) => {
                     result.push(None);
@@ -129,8 +128,7 @@ pub struct DiskDocumentStorage {
 
 impl DiskDocumentStorage {
     pub fn try_new(doc_dir: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&doc_dir)
-            .context("Cannot create document directory")?;
+        std::fs::create_dir_all(&doc_dir).context("Cannot create document directory")?;
 
         Ok(Self {
             uncommitted: Default::default(),
@@ -144,9 +142,7 @@ impl DocumentStorage for DiskDocumentStorage {
     async fn add_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
         let mut uncommitted = match self.uncommitted.write() {
             std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => {
-                e.into_inner()
-            }
+            std::result::Result::Err(e) => e.into_inner(),
         };
         if uncommitted.insert(doc_id, doc).is_some() {
             warn!("Document {:?} already exists. Overwritten.", doc_id);
@@ -162,16 +158,16 @@ impl DocumentStorage for DiskDocumentStorage {
 
         let uncommitted = match self.uncommitted.read() {
             std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => {
-                e.into_inner()
-            }
+            std::result::Result::Err(e) => e.into_inner(),
         };
         let uncommitted: Vec<_> = doc_ids
             .into_iter()
             .map(|doc_id| uncommitted.get(&doc_id).cloned())
             .collect();
 
-        let result = committed.into_iter().zip(uncommitted)
+        let result = committed
+            .into_iter()
+            .zip(uncommitted)
             .map(|(committed, uncommitted)| {
                 if let Some(doc) = uncommitted {
                     Some(doc)
@@ -188,9 +184,7 @@ impl DocumentStorage for DiskDocumentStorage {
         let mut total = self.committed.get_total_documents()?;
         let uncommitted = match self.uncommitted.read() {
             std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => {
-                e.into_inner()
-            }
+            std::result::Result::Err(e) => e.into_inner(),
         };
         total += uncommitted.len();
         Ok(total)
@@ -199,9 +193,7 @@ impl DocumentStorage for DiskDocumentStorage {
     fn commit(&self, path: PathBuf) -> Result<()> {
         let mut uncommitted = match self.uncommitted.write() {
             std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => {
-                e.into_inner()
-            }
+            std::result::Result::Err(e) => e.into_inner(),
         };
         let uncommitted: Vec<_> = uncommitted.drain().collect();
 

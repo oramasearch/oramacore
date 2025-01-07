@@ -316,7 +316,9 @@ impl StringIndex {
         let search_on: HashSet<_> = if let Some(v) = search_on {
             v.iter().copied().collect()
         } else {
-            self.uncommitted.iter().map(|e| *e.key())
+            self.uncommitted
+                .iter()
+                .map(|e| *e.key())
                 .chain(self.committed.iter().map(|e| *e.key()))
                 .collect()
         };
