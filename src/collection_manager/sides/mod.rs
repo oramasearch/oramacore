@@ -10,7 +10,7 @@ mod tests {
     };
 
     use anyhow::Result;
-    use document_storage::{DocumentStorage, InMemoryDocumentStorage};
+    use document_storage::{DiskDocumentStorage, DocumentStorage};
 
     use read::{CollectionsReader, IndexesConfig};
     use serde_json::json;
@@ -28,7 +28,7 @@ mod tests {
         embeddings::{
             EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
         },
-        indexes::number::{Number, NumberFilter},
+        indexes::number::{Number, NumberFilter}, test_utils::generate_new_path,
     };
 
     use super::*;
@@ -49,7 +49,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
@@ -115,7 +115,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
@@ -191,7 +191,7 @@ mod tests {
         let document_id_generator = Arc::new(AtomicU32::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 

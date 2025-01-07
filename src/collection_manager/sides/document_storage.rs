@@ -22,55 +22,6 @@ pub trait DocumentStorage: Sync + Send + Debug {
 }
 
 #[derive(Debug)]
-pub struct InMemoryDocumentStorage {
-    documents: DashMap<DocumentId, Document>,
-}
-impl Default for InMemoryDocumentStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl InMemoryDocumentStorage {
-    pub fn new() -> Self {
-        Self {
-            documents: Default::default(),
-        }
-    }
-}
-
-#[async_trait]
-impl DocumentStorage for InMemoryDocumentStorage {
-    async fn add_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
-        self.documents.insert(doc_id, doc);
-        Ok(())
-    }
-
-    async fn get_documents_by_ids(
-        &self,
-        doc_ids: Vec<DocumentId>,
-    ) -> Result<Vec<Option<Document>>> {
-        let docs = doc_ids
-            .into_iter()
-            .map(|doc_id| self.documents.get(&doc_id).map(|doc| doc.value().clone()))
-            .collect();
-        Ok(docs)
-    }
-
-    async fn get_total_documents(&self) -> Result<usize> {
-        Ok(self.documents.len())
-    }
-
-    fn commit(&self, path: PathBuf) -> Result<()> {
-        Ok(())
-    }
-
-    fn load(&mut self, path: PathBuf) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
 struct CommittedDiskDocumentStorage {
     path: PathBuf,
 }

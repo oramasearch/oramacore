@@ -9,8 +9,9 @@ use std::{
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
+use rand::Rng;
 use tokio::sync::broadcast::Sender;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
@@ -262,8 +263,24 @@ impl CollectionsWriter {
             .get(&collection_id)
             .ok_or_else(|| anyhow!("Collection not found"))?;
 
-        for doc in document_list {
+        for mut doc in document_list {
             let doc_id = self.generate_document_id();
+
+            let doc_id_value = doc.get("id");
+            // Forces the id to be set, if not set
+            if doc_id_value
+                .is_none() {
+                doc.inner.insert("id".to_string(), serde_json::Value::String(cuid2::create_id()));
+            } else if let Some(doc_id_value) = doc_id_value {
+                if !doc_id_value.is_string() {
+                    // The search result contains the document id and it is defined as a string.
+                    // So, if the original document id is not a string, we should overwrite it with a new one
+                    // Anyway, this implies the loss of the original document id. For instance we could support number as well
+                    // TODO: think better
+                    warn!("Document id is not a string, overwriting it with new one");
+                    doc.inner.insert("id".to_string(), serde_json::Value::String(cuid2::create_id()));
+                }
+            }
 
             collection
                 .document_count
