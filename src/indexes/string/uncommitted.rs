@@ -58,14 +58,13 @@ pub struct InnerInnerUncommittedStringFieldIndex {
     pub field_length_per_doc: HashMap<DocumentId, u32>,
 
     /// keep track of metrics for each term in the field
-    pub tree: 
-        Trie<
-            u8,
-            (
-                TotalDocumentsWithTermInField,
-                HashMap<DocumentId, Positions>,
-            ),
-        >,
+    pub tree: Trie<
+        u8,
+        (
+            TotalDocumentsWithTermInField,
+            HashMap<DocumentId, Positions>,
+        ),
+    >,
 }
 
 impl InnerInnerUncommittedStringFieldIndex {
@@ -238,8 +237,7 @@ impl InnerUncommittedStringFieldIndex {
     }
 
     pub fn get_global_info(&self) -> GlobalInfo {
-        self.left.get_global_info()
-            + self.right.get_global_info()
+        self.left.get_global_info() + self.right.get_global_info()
     }
 
     pub fn search(
@@ -250,8 +248,10 @@ impl InnerUncommittedStringFieldIndex {
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
     ) -> Result<()> {
-        self.left.search(tokens, boost, scorer, filtered_doc_ids, global_info)?;
-        self.right.search(tokens, boost, scorer, filtered_doc_ids, global_info)?;
+        self.left
+            .search(tokens, boost, scorer, filtered_doc_ids, global_info)?;
+        self.right
+            .search(tokens, boost, scorer, filtered_doc_ids, global_info)?;
         Ok(())
     }
 }
@@ -305,7 +305,6 @@ impl UncommittedStringFieldIndex {
         inner.search(tokens, boost, scorer, filtered_doc_ids, global_info)
     }
 
-
     pub fn take(&self) -> Result<DataToCommit> {
         let mut inner = match self.inner.write() {
             Ok(lock) => lock,
@@ -329,9 +328,7 @@ impl UncommittedStringFieldIndex {
             tree,
         } = data;
 
-        let mut tree: Vec<_> = tree.into_iter()
-            .map(|(k, v)| (k.to_vec(), v))
-            .collect();
+        let mut tree: Vec<_> = tree.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
         tree.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         Ok(DataToCommit {
@@ -353,7 +350,13 @@ pub struct DataToCommit<'uncommitted> {
     total_field_length: u64,
     document_ids: HashSet<DocumentId>,
     field_length_per_doc: HashMap<DocumentId, u32>,
-    tree: Vec<(Vec<u8>, (TotalDocumentsWithTermInField, HashMap<DocumentId, Positions>))>,
+    tree: Vec<(
+        Vec<u8>,
+        (
+            TotalDocumentsWithTermInField,
+            HashMap<DocumentId, Positions>,
+        ),
+    )>,
 }
 
 impl DataToCommit<'_> {
@@ -368,7 +371,17 @@ impl DataToCommit<'_> {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (Vec<u8>, (TotalDocumentsWithTermInField, HashMap<DocumentId, Positions>))> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            Vec<u8>,
+            (
+                TotalDocumentsWithTermInField,
+                HashMap<DocumentId, Positions>,
+            ),
+        ),
+    > + '_ {
         self.tree.iter().map(|(k, v)| (k.to_vec(), v.clone()))
     }
 
@@ -387,7 +400,6 @@ impl Drop for DataToCommit<'_> {
         tree.clear();
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -622,7 +634,6 @@ mod tests {
         Ok(())
     }
 
-
     #[test]
     fn test_indexes_string_uncommitted_during_commit() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
@@ -670,14 +681,14 @@ mod tests {
         assert_eq!(first_match_output, second_match_output);
 
         // Insertion is still possible
-        index.insert(DocumentId(2), 1, HashMap::from_iter([
-            (
+        index.insert(
+            DocumentId(2),
+            1,
+            HashMap::from_iter([(
                 Term("hello".to_string()),
-                TermStringField {
-                    positions: vec![0],
-                },
-            )
-        ]))?;
+                TermStringField { positions: vec![0] },
+            )]),
+        )?;
 
         // And the results are combined
         let mut scorer = BM25Scorer::new();

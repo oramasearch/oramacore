@@ -56,7 +56,8 @@ impl CollectionReader {
             // posting_id_generator,
             // base_path: collection_data_dir.join("strings"),
         });
-        string_index.load(collection_data_dir.join("strings"))
+        string_index
+            .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
 
         let number_index = NumberIndex::try_new(NumberIndexConfig {})?;

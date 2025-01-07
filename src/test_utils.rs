@@ -19,7 +19,8 @@ use crate::{
     },
     document_storage::DocumentId,
     indexes::string::{
-        document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage, CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex
+        document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,
+        CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex,
     },
     nlp::TextParser,
     types::Document,
@@ -153,9 +154,7 @@ pub fn create_uncommitted_string_field_index_from(
 pub fn create_committed_string_field_index(
     documents: Vec<Document>,
 ) -> Result<Option<CommittedStringFieldIndex>> {
-    let index = create_string_index(vec![
-        (FieldId(1), "field".to_string())
-    ], documents)?;
+    let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents)?;
 
     println!("index {:#?}", index);
 

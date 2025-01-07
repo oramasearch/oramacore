@@ -23,7 +23,8 @@ mod tests {
             sides::{
                 document_storage::InMemoryDocumentStorage,
                 write::{
-                    CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation, Term, TermStringField, WriteOperation
+                    CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
+                    Term, TermStringField, WriteOperation,
                 },
             },
             CollectionId,
@@ -106,8 +107,14 @@ mod tests {
                     DocumentFieldIndexOperation::IndexString {
                         field_length: 2,
                         terms: HashMap::from_iter([
-                            (Term("hello".to_string()), TermStringField { positions: vec![0] }),
-                            (Term("world".to_string()), TermStringField { positions: vec![1] }),
+                            (
+                                Term("hello".to_string()),
+                                TermStringField { positions: vec![0] },
+                            ),
+                            (
+                                Term("world".to_string()),
+                                TermStringField { positions: vec![1] },
+                            ),
                         ]),
                     },
                 ),

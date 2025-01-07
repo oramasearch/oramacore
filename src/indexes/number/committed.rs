@@ -427,17 +427,14 @@ pub mod merge {
     }
 
     impl<
-        K: Ord + Eq,
-        V,
-        I1: Iterator<Item = (K, V)>,
-        I2: Iterator<Item = (K, V)>,
-        Merger: Fn(&K, V, V) -> V,
-    > MergedIterator<K, V, I1, I2, Merger> {
-        pub fn new(
-            iter1: I1,
-            iter2: I2,
-            merger: Merger,
-        ) -> Self {
+            K: Ord + Eq,
+            V,
+            I1: Iterator<Item = (K, V)>,
+            I2: Iterator<Item = (K, V)>,
+            Merger: Fn(&K, V, V) -> V,
+        > MergedIterator<K, V, I1, I2, Merger>
+    {
+        pub fn new(iter1: I1, iter2: I2, merger: Merger) -> Self {
             Self {
                 iter1: iter1.peekable(),
                 iter2: iter2.peekable(),

@@ -1,5 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet}, fs::File, io::Write, ops::{Add, AddAssign}, path::PathBuf, sync::{atomic::AtomicU64, Arc}
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::Write,
+    ops::{Add, AddAssign},
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -22,7 +27,6 @@ use crate::{
 
 mod committed;
 mod merger;
-
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod document_lengths;
@@ -103,7 +107,8 @@ impl StringIndex {
 
     #[instrument(skip(self, new_path))]
     pub fn commit(&self, new_path: PathBuf) -> Result<()> {
-        let all_fields = self.uncommitted
+        let all_fields = self
+            .uncommitted
             .iter()
             .map(|e| *e.key())
             .chain(self.committed.iter().map(|e| *e.key()))
@@ -135,7 +140,6 @@ impl StringIndex {
 
             match (data_to_commit, committed) {
                 (Some(data_to_commit), Some(committed)) => {
-
                     info!("Merging field_id: {:?}", field_id);
 
                     merger::merge(
@@ -147,10 +151,9 @@ impl StringIndex {
                         posting_new_path.clone(),
                         global_info_new_path.clone(),
                     )
-                        .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
+                    .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
                 }
                 (Some(data_to_commit), None) => {
-
                     info!("Creating field_id: {:?}", field_id);
 
                     merger::create(
@@ -161,10 +164,13 @@ impl StringIndex {
                         posting_new_path.clone(),
                         global_info_new_path.clone(),
                     )
-                        .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
+                    .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
                 }
                 (None, Some(committed)) => {
-                    warn!("Field {:?} hasn't uncommitted data and is complitely committed. skip", field_id);
+                    warn!(
+                        "Field {:?} hasn't uncommitted data and is complitely committed. skip",
+                        field_id
+                    );
 
                     fst_new_path = committed.fst_map_path.clone();
                     document_length_new_path = committed.document_lengths_per_document.path.clone();
@@ -172,7 +178,10 @@ impl StringIndex {
                     global_info_new_path = committed.global_info_path.clone();
                 }
                 (None, None) => {
-                    unreachable!("Field {:?} is not present in uncommitted or committed", field_id);
+                    unreachable!(
+                        "Field {:?} is not present in uncommitted or committed",
+                        field_id
+                    );
                 }
             };
 
@@ -186,10 +195,20 @@ impl StringIndex {
             };
 
             // Reload field
-            let global_file = File::open(field_dump.global_info_new_path.clone())
-                .with_context(|| format!("Cannot open global info file at {:?}", field_dump.global_info_new_path))?;
-            let global_info: GlobalInfo = serde_json::from_reader(global_file)
-                .with_context(|| format!("Cannot read global info file at {:?}", field_dump.global_info_new_path))?;
+            let global_file =
+                File::open(field_dump.global_info_new_path.clone()).with_context(|| {
+                    format!(
+                        "Cannot open global info file at {:?}",
+                        field_dump.global_info_new_path
+                    )
+                })?;
+            let global_info: GlobalInfo =
+                serde_json::from_reader(global_file).with_context(|| {
+                    format!(
+                        "Cannot read global info file at {:?}",
+                        field_dump.global_info_new_path
+                    )
+                })?;
 
             let file = File::open(field_dump.fst_new_path.clone())?;
             let mmap = unsafe { Mmap::map(&file)? };
@@ -198,21 +217,14 @@ impl StringIndex {
             let committed = CommittedStringFieldIndex::new(
                 map,
                 field_dump.fst_new_path.clone(),
-                DocumentLengthsPerDocument::new(
-                    field_dump.document_length_new_path.clone(),
-                ),
-                PostingIdStorage::new(
-                    field_dump.posting_new_path.clone(),
-                ),
+                DocumentLengthsPerDocument::new(field_dump.document_length_new_path.clone()),
+                PostingIdStorage::new(field_dump.posting_new_path.clone()),
                 global_info,
                 field_dump.global_info_new_path.clone(),
             );
             self.committed.insert(field_id, committed);
 
-            dump.fields.insert(
-                field_id,
-                field_dump
-            );
+            dump.fields.insert(field_id, field_dump);
         }
 
         let field_file = new_path.join("fields.json");
@@ -235,10 +247,10 @@ impl StringIndex {
         match std::fs::exists(path.clone()) {
             Err(e) => {
                 return Err(anyhow!("Cannot check if path exists: {:?}", e));
-            },
+            }
             Ok(false) => {
                 info!("Path {:?} does not exist. Skip loading", path);
-                return Ok(())
+                return Ok(());
             }
             Ok(true) => {}
         };
@@ -250,11 +262,20 @@ impl StringIndex {
             .with_context(|| format!("Cannot read fields file at {:?}", field_file))?;
 
         for (field_id, field_dump) in dump.fields {
-
-            let global_file = File::open(field_dump.global_info_new_path.clone())
-                .with_context(|| format!("Cannot open global info file at {:?}", field_dump.global_info_new_path))?;
-            let global_info: GlobalInfo = serde_json::from_reader(global_file)
-                .with_context(|| format!("Cannot read global info file at {:?}", field_dump.global_info_new_path))?;
+            let global_file =
+                File::open(field_dump.global_info_new_path.clone()).with_context(|| {
+                    format!(
+                        "Cannot open global info file at {:?}",
+                        field_dump.global_info_new_path
+                    )
+                })?;
+            let global_info: GlobalInfo =
+                serde_json::from_reader(global_file).with_context(|| {
+                    format!(
+                        "Cannot read global info file at {:?}",
+                        field_dump.global_info_new_path
+                    )
+                })?;
 
             let file = File::open(field_dump.fst_new_path.clone())?;
             let mmap = unsafe { Mmap::map(&file)? };
@@ -263,12 +284,8 @@ impl StringIndex {
             let committed = CommittedStringFieldIndex::new(
                 map,
                 field_dump.fst_new_path,
-                DocumentLengthsPerDocument::new(
-                    field_dump.document_length_new_path,
-                ),
-                PostingIdStorage::new(
-                    field_dump.posting_new_path,
-                ),
+                DocumentLengthsPerDocument::new(field_dump.document_length_new_path),
+                PostingIdStorage::new(field_dump.posting_new_path),
                 global_info,
                 field_dump.global_info_new_path,
             );
@@ -338,8 +355,7 @@ impl StringIndex {
 
     #[cfg(any(test, feature = "benchmarking"))]
     pub fn remove_committed_field(&self, field_id: FieldId) -> Option<CommittedStringFieldIndex> {
-        self.committed.remove(&field_id)
-            .map(|e| e.1)
+        self.committed.remove(&field_id).map(|e| e.1)
     }
 }
 
@@ -470,7 +486,6 @@ mod tests {
         Ok(())
     }
 
-
     #[tokio::test]
     async fn test_indexes_string_commit_and_load() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
@@ -490,33 +505,37 @@ mod tests {
         )?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let before_scores = scorer.get_scores();
 
         let new_path = generate_new_path();
         string_index.commit(new_path.clone()).unwrap();
 
         let new_string_index = {
-            let mut index = StringIndex::new(StringIndexConfig {  });
+            let mut index = StringIndex::new(StringIndexConfig {});
             index.load(new_path).unwrap();
 
             index
         };
 
         let mut scorer = BM25Scorer::new();
-        new_string_index.search(
-            vec!["hello".to_string()],
-            None,
-            Default::default(),
-            &mut scorer,
-            None,
-        ).await?;
+        new_string_index
+            .search(
+                vec!["hello".to_string()],
+                None,
+                Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let scores = scorer.get_scores();
 
         // Compare scores

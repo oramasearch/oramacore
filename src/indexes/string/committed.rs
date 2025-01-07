@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
@@ -6,14 +9,17 @@ use tracing::warn;
 
 use crate::document_storage::DocumentId;
 
-use super::{document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage, scorer::BM25Scorer, GlobalInfo};
+use super::{
+    document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,
+    scorer::BM25Scorer, GlobalInfo,
+};
 
 #[derive(Debug)]
 pub struct CommittedStringFieldIndex {
     fst_map: Map<memmap::Mmap>,
     pub(super) fst_map_path: PathBuf,
     pub(super) document_lengths_per_document: DocumentLengthsPerDocument,
-    
+
     pub(super) storage: PostingIdStorage,
 
     global_info: GlobalInfo,
@@ -108,18 +114,17 @@ impl CommittedStringFieldIndex {
                         }
                     }
 
-                    let v = storage
-                        .entry(doc_id)
-                        .or_insert_with(|| PhraseMatchStorage {
-                            positions: Default::default(),
-                            matches: Default::default(),
-                        });
+                    let v = storage.entry(doc_id).or_insert_with(|| PhraseMatchStorage {
+                        positions: Default::default(),
+                        matches: Default::default(),
+                    });
                     let position_len = positions.len();
                     v.positions.extend(positions);
 
-                    let field_length =
-                        self.document_lengths_per_document.get_length(&doc_id)
-                            .context("Failed to get document length")?;
+                    let field_length = self
+                        .document_lengths_per_document
+                        .get_length(&doc_id)
+                        .context("Failed to get document length")?;
                     v.matches.push((
                         field_length,
                         position_len,
@@ -206,9 +211,10 @@ impl CommittedStringFieldIndex {
                         }
                     }
 
-                    let field_length =
-                        self.document_lengths_per_document.get_length(&doc_id)
-                            .context("Failed to get document length")?;
+                    let field_length = self
+                        .document_lengths_per_document
+                        .get_length(&doc_id)
+                        .context("Failed to get document length")?;
                     let term_occurrence_in_field = positions.len() as u32;
 
                     scorer.add(
@@ -234,7 +240,9 @@ impl CommittedStringFieldIndex {
 mod tests {
     use serde_json::json;
 
-    use crate::{indexes::string::scorer::BM25Scorer, test_utils::create_committed_string_field_index};
+    use crate::{
+        indexes::string::scorer::BM25Scorer, test_utils::create_committed_string_field_index,
+    };
 
     use super::*;
 
@@ -242,8 +250,7 @@ mod tests {
     fn test_indexes_string_committed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let index = create_committed_string_field_index(
-            vec![
+        let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
             })
@@ -252,7 +259,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?.unwrap();
+        ])?
+        .unwrap();
 
         // Exact match
         let mut scorer = BM25Scorer::new();
@@ -299,7 +307,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?.unwrap();
+        ])?
+        .unwrap();
 
         // 1.0
         let mut scorer = BM25Scorer::new();
@@ -354,7 +363,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?.unwrap();
+        ])?
+        .unwrap();
 
         let mut scorer = BM25Scorer::new();
         index.search(
@@ -385,7 +395,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?.unwrap();
+        ])?
+        .unwrap();
 
         // Exclude a doc
         {
@@ -424,7 +435,8 @@ mod tests {
         let index = create_committed_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
         })
-        .try_into()?])?.unwrap();
+        .try_into()?])?
+        .unwrap();
 
         let mut scorer = BM25Scorer::new();
         index.search(

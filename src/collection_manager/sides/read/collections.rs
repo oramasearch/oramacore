@@ -8,10 +8,12 @@ use std::{
 use crate::{
     collection_manager::{
         sides::{
-            document_storage::DocumentStorage, read::CommitConfig, write::{
+            document_storage::DocumentStorage,
+            read::CommitConfig,
+            write::{
                 CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                 WriteOperation,
-            }
+            },
         },
         CollectionId,
     },
@@ -237,14 +239,24 @@ impl CollectionsReader {
 
         for (id, reader) in col {
             info!("Committing collection {:?}", id);
-            let desc = reader.get_collection_descriptor_dump()
+            let desc = reader
+                .get_collection_descriptor_dump()
                 .context("Cannot create collection description dump")?;
-            
+
             let coll_desc_file_path = collections_dir.join(format!("{}.json", id.0));
-            let coll_desc_file = std::fs::File::create(&coll_desc_file_path)
-                .with_context(|| format!("Cannot create file for collection {:?} at {:?}", id, coll_desc_file_path))?;
-            serde_json::to_writer(coll_desc_file, &desc)
-                .with_context(|| format!("Cannot serialize collection descriptor for {:?} to file {:?}", id, coll_desc_file_path))?;
+            let coll_desc_file =
+                std::fs::File::create(&coll_desc_file_path).with_context(|| {
+                    format!(
+                        "Cannot create file for collection {:?} at {:?}",
+                        id, coll_desc_file_path
+                    )
+                })?;
+            serde_json::to_writer(coll_desc_file, &desc).with_context(|| {
+                format!(
+                    "Cannot serialize collection descriptor for {:?} to file {:?}",
+                    id, coll_desc_file_path
+                )
+            })?;
 
             reader.commit(CommitConfig {
                 folder_to_commit: collections_dir.join(&id.0),
