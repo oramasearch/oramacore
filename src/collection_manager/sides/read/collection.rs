@@ -157,7 +157,6 @@ impl CollectionReader {
                     self.id, coll_desc_file_path
                 )
             })?;
-        println!("dump: {:#?} at {:?}", dump, coll_desc_file);
         serde_json::to_writer(&mut coll_desc_file, &dump).with_context(|| {
             format!(
                 "Cannot serialize collection descriptor for {:?} to file {:?}",

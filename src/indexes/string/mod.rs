@@ -313,32 +313,13 @@ impl StringIndex {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
-        println!("self.committed {:?}", self.committed);
-
-        println!("search on {:?}", search_on);
-
         let search_on: HashSet<_> = if let Some(v) = search_on {
             v.iter().copied().collect()
         } else {
-            let mut p = HashSet::new();
-            p.extend(self.uncommitted.iter().map(|e| *e.key()));
-            p.extend(self.committed.iter().map(|e| *e.key()));
-
-            p
+            self.uncommitted.iter().map(|e| *e.key())
+                .chain(self.committed.iter().map(|e| *e.key()))
+                .collect()
         };
-
-        println!(
-            "Searching uncommitted on: {:?}",
-            self.uncommitted
-                .iter()
-                .map(|e| *e.key())
-                .collect::<Vec<_>>()
-        );
-        println!(
-            "Searching committed on: {:?}",
-            self.committed.iter().map(|e| *e.key()).collect::<Vec<_>>()
-        );
-        println!("Searching on: {:?}", search_on);
 
         for field_id in search_on {
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
@@ -355,9 +336,9 @@ impl StringIndex {
             // Anyway the postings aren't shared, so if a word is in both indexes:
             // - it will be scored twice
             // - the occurrence (stored in the posting) will be different
-            // We can fix this, but it count be hard.
-            // Anyway, the impact of this is low, so we can ignore it for now.
-            // Also because soon or later, we will merge the uncommitted index into the committed one.
+            // We can fix this, but the count would be hard.
+            // Anyway, the impact of this is low, so we can ignore it for now
+            // because, soon or later, we will merge the uncommitted index into the committed one.
             // So for now, we "/10" the boost of the uncommitted index, where "10" is an arbitrary number.
             // TODO: evaluate the impact of this and fix it if needed
 
@@ -371,8 +352,6 @@ impl StringIndex {
                     &global_info,
                 )?;
             }
-
-            println!("Committed: {:?}", committed);
 
             if let Some(committed) = committed {
                 committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;

@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    document_storage::{DocumentStorage, InMemoryDocumentStorage},
+    document_storage::{DiskDocumentStorage, DocumentStorage, InMemoryDocumentStorage},
     read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
 };
@@ -125,7 +125,9 @@ pub async fn build_orama(
     let collections_writer =
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
 
-    let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+    let document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
+        .context("Cannot create document storage")?;
+    let document_storage: Arc<dyn DocumentStorage> = Arc::new(document_storage);
     let mut collections_reader =
         CollectionsReader::new(embedding_service, document_storage, reader_side.config);
 

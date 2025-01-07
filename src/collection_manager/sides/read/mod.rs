@@ -19,7 +19,7 @@ mod tests {
         collection_manager::{
             dto::{FieldId, LanguageDTO, TypedField},
             sides::{
-                document_storage::InMemoryDocumentStorage,
+                document_storage::{self, DiskDocumentStorage, DocumentStorage, InMemoryDocumentStorage},
                 write::{
                     CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                     Term, TermStringField, WriteOperation,
@@ -56,9 +56,12 @@ mod tests {
         let collection_id = CollectionId("my-collection-name".to_string());
 
         {
+            let document_storage = DiskDocumentStorage::try_new(data_dir.join("docs"))?;
+            let document_storage = Arc::new(document_storage);
+
             let collections = CollectionsReader::new(
                 embedding_service.clone(),
-                Arc::new(InMemoryDocumentStorage::new()),
+                document_storage.clone(),
                 IndexesConfig {},
             );
 
@@ -87,6 +90,7 @@ mod tests {
                     CollectionWriteOperation::InsertDocument {
                         doc_id: DocumentId(0),
                         doc: json!({
+                            "id": "my-id",
                             "title": "hello world",
                         })
                         .try_into()?,
@@ -118,17 +122,21 @@ mod tests {
                 .await?;
 
             collections.commit(data_dir.clone()).await?;
+
+            document_storage.commit(data_dir.join("docs"))?;
         }
+
+
+        let mut document_storage = DiskDocumentStorage::try_new(data_dir.join("docs"))?;
+        document_storage.load(data_dir.join("docs"))?;
 
         let mut collections = CollectionsReader::new(
             embedding_service.clone(),
-            Arc::new(InMemoryDocumentStorage::new()),
+            Arc::new(document_storage),
             IndexesConfig {},
         );
 
         collections.load_from_disk(data_dir).await?;
-
-        println!("collections: {:#?}", collections);
 
         let reader = collections
             .get_collection(collection_id.clone())
@@ -144,7 +152,14 @@ mod tests {
             )
             .await?;
 
-        println!("result: {:#?}", result);
+        assert_eq!(
+            result.count,
+            1
+        );
+        assert_eq!(
+            result.hits[0].id,
+            "my-id".to_string()
+        );
 
         Ok(())
     }
