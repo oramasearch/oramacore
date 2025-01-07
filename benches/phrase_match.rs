@@ -39,7 +39,7 @@ mod bench {
 
     pub fn one_word(c: &mut Criterion) {
         let data = generate_test_data();
-        let (string_index, _) = create_committed_string_field_index(data).unwrap();
+        let string_index = create_committed_string_field_index(data).unwrap().unwrap();
 
         c.bench_function("one word - phrase", |b| {
             b.iter(|| {
