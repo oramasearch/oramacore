@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+
+package orama_ai_service;
+
+
+service CalculateEmbeddingsService {
+    rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
+}
+
+
+enum OramaModel {
+  BGESmall = 0;
+  BGEBase = 1;
+  BGELarge = 2;
+  MultilingualE5Small = 3;
+  MultilingualE5Base = 4;
+  MultilingualE5Large = 5;
+}
+
+enum OramaIntent {
+  query = 0;
+  passage = 1;
+}
+
+ 
+// Request message for embedding generation
+message EmbeddingRequest {
+  OramaModel model = 1;        // The model to use for embedding
+  repeated string input = 2;   // Array of input strings
+  OramaIntent intent = 3;      // Optional intent description
+}
+
+
+// Response message for embedding generation
+message EmbeddingResponse {
+  repeated Embedding embeddings_result = 1; // Array of embeddings (each an array of float16)
+  int32 dimensions = 2;                     // Dimensions of each embedding vector
+}
+
+
+// A single embedding representation as an array of float16
+message Embedding {
+  repeated float embeddings = 1; // Array of float16 values
+}
