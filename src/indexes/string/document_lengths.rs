@@ -39,7 +39,7 @@ impl DocumentLengthsPerDocument {
             serde_json::from_reader(file).context("Cannot decode from file")?;
 
         for (doc_id, length) in lengths {
-            if let Some(_) = content.insert(*doc_id, *length) {
+            if content.insert(*doc_id, *length).is_some() {
                 warn!(
                     "Document length already exists for doc {:?}, overwrite",
                     doc_id

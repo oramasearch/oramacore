@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use tempdir::TempDir;
@@ -19,7 +14,6 @@ use crate::{
     },
     document_storage::DocumentId,
     indexes::string::{
-        document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,
         CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex,
     },
     nlp::TextParser,

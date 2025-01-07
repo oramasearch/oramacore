@@ -4,7 +4,6 @@ use std::{
 };
 
 use anyhow::Result;
-use deno_core::v8::Global;
 use ptrie::Trie;
 use tracing::warn;
 

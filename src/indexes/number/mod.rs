@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::HashSet;
 
 use anyhow::Result;
 use axum_openapi3::utoipa;

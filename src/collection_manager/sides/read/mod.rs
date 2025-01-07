@@ -11,10 +11,10 @@ pub use commit::CommitConfig;
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, path::PathBuf, sync::Arc};
+    use std::{collections::HashMap, sync::Arc};
 
     use anyhow::Result;
-    use deno_core::v8::json;
+
     use serde_json::json;
 
     use crate::{
@@ -31,9 +31,7 @@ mod tests {
         },
         document_storage::DocumentId,
         embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
-        js,
         test_utils::generate_new_path,
-        types::Document,
     };
 
     use super::*;

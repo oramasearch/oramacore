@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
     collection_manager::{
