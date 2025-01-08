@@ -5,9 +5,11 @@ use std::time::Instant;
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_init = Instant::now();
+
     let mut service = AIServiceBackend::try_new(AIServiceBackendConfig::default())
         .await
         .unwrap();
+
     let init_duration = start_init.elapsed();
     println!("Service initialization took: {:?}", init_duration);
 
