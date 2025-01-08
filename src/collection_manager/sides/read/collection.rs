@@ -8,7 +8,6 @@ use crate::{
     collection_manager::{
         dto::{FieldId, TypedField},
         sides::document_storage::DocumentStorage,
-        CollectionId,
     },
     embeddings::{EmbeddingService, LoadedModel},
     indexes::{
@@ -17,6 +16,7 @@ use crate::{
         string::{StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
     },
+    types::CollectionId,
 };
 
 use super::IndexesConfig;

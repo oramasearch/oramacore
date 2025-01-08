@@ -12,7 +12,7 @@ use hora::{
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 #[derive(
     Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
@@ -164,7 +164,7 @@ mod tests {
             const N: usize = 10;
             let data = (0..N)
                 .map(|i| {
-                    let doc_id = DocumentId(i as u32);
+                    let doc_id = DocumentId(i as u64);
                     let vector: Vec<_> = (0..DIM)
                         .map(|_| {
                             let x = rand::random::<i8>();
@@ -205,7 +205,7 @@ mod tests {
         {
             let data = (0..N)
                 .map(|i| {
-                    let doc_id = DocumentId(i as u32);
+                    let doc_id = DocumentId(i as u64);
                     let vector: Vec<_> = (0..DIM)
                         .map(|_| {
                             let x = rand::random::<i8>();

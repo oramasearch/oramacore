@@ -14,13 +14,13 @@ use crate::{
         FacetDefinition, FacetResult, FieldId, Filter, SearchMode, SearchParams, SearchResult,
         SearchResultHit, TokenScore, TypedField,
     },
-    document_storage::DocumentId,
     indexes::{number::NumberFilter, string::BM25Scorer},
     metrics::{
         SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
         SEARCH_METRIC,
     },
     nlp::TextParser,
+    types::DocumentId,
 };
 
 use super::CollectionReader;

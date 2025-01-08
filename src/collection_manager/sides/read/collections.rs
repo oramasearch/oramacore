@@ -1,22 +1,17 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
-    collection_manager::{
-        sides::{
-            document_storage::DocumentStorage,
-            read::collection::CommitConfig,
-            write::{
-                CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
-                WriteOperation,
-            },
-        },
-        CollectionId,
+    collection_manager::sides::{
+        document_storage::DocumentStorage, read::collection::CommitConfig,
+        CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
+        WriteOperation,
     },
     embeddings::EmbeddingService,
     metrics::{
         CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
         COLLECTION_OPERATION_COUNTER,
     },
+    types::CollectionId,
 };
 
 use anyhow::{Context, Result};

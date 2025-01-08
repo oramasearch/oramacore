@@ -9,7 +9,7 @@ use tracing::warn;
 
 use crate::{
     collection_manager::sides::write::{InsertStringTerms, TermStringField},
-    document_storage::DocumentId,
+    types::DocumentId,
 };
 
 use super::{scorer::BM25Scorer, GlobalInfo};

@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use fst::{Map, MapBuilder, Streamer};
 use memmap::Mmap;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 use super::document_lengths::DocumentLengthsPerDocument;
 use super::posting_storage::PostingIdStorage;

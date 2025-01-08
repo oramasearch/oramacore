@@ -2,11 +2,14 @@ pub mod document_storage;
 pub mod read;
 pub mod write;
 
+#[cfg(any(test, feature = "benchmarking"))]
+pub use write::*;
+
 #[cfg(test)]
 mod tests {
     use std::{
         collections::{HashMap, HashSet},
-        sync::{atomic::AtomicU32, Arc},
+        sync::{atomic::AtomicU64, Arc},
     };
 
     use anyhow::Result;
@@ -18,17 +21,16 @@ mod tests {
     use write::CollectionsWriter;
 
     use crate::{
-        collection_manager::{
-            dto::{
-                CreateCollectionOptionDTO, EmbeddingTypedField, Filter, FulltextMode, Limit,
-                SearchMode, SearchParams, TypedField,
-            },
-            CollectionId,
+        collection_manager::dto::{
+            CreateCollectionOptionDTO, EmbeddingTypedField, Filter, FulltextMode, Limit,
+            SearchMode, SearchParams, TypedField,
         },
         embeddings::{
             EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
         },
-        indexes::number::{Number, NumberFilter}, test_utils::generate_new_path,
+        indexes::number::{Number, NumberFilter},
+        test_utils::generate_new_path,
+        types::CollectionId,
     };
 
     use super::*;
@@ -46,10 +48,11 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
+        let document_id_generator = Arc::new(AtomicU64::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+        let document_storage: Arc<dyn DocumentStorage> =
+            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
@@ -112,10 +115,11 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
+        let document_id_generator = Arc::new(AtomicU64::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+        let document_storage: Arc<dyn DocumentStorage> =
+            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 
@@ -188,10 +192,11 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
+        let document_id_generator = Arc::new(AtomicU64::new(0));
         let writer =
             CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+        let document_storage: Arc<dyn DocumentStorage> =
+            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
         let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
 

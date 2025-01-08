@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use dashmap::DashMap;
 
-use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
+use crate::{collection_manager::dto::FieldId, types::DocumentId};
 
 #[derive(Debug, Default)]
 struct BoolIndexPerField {
@@ -52,7 +52,7 @@ impl BoolIndex {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::{collection_manager::dto::FieldId, document_storage::DocumentId};
+    use crate::{collection_manager::dto::FieldId, types::DocumentId};
 
     use super::BoolIndex;
 

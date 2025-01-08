@@ -6,9 +6,8 @@ use crate::{
         dto::{FieldId, TypedField},
         sides::write::InsertStringTerms,
     },
-    document_storage::DocumentId,
     indexes::number::Number,
-    types::Document,
+    types::{Document, DocumentId},
 };
 
 use super::CollectionReader;

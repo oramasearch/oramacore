@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 use super::{Number, NumberFilter};
 

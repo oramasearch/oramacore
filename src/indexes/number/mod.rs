@@ -11,7 +11,7 @@ use uncommitted::UncommittedNumberFieldIndex;
 
 use crate::{
     collection_manager::{dto::FieldId, sides::read::CommitConfig},
-    document_storage::DocumentId,
+    types::DocumentId,
 };
 
 mod committed;
@@ -256,7 +256,7 @@ mod tests {
     fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
         let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
 
-        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u32), FieldId(0))));
+        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u64), FieldId(0))));
         for (number, (doc_id, field_id)) in iter {
             index.add(doc_id, field_id, number)?;
         }

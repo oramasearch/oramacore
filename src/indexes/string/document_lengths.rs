@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 #[derive(Default, Debug)]
 pub struct DocumentLengthsPerDocument {

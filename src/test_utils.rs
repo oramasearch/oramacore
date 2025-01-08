@@ -6,18 +6,16 @@ use tempdir::TempDir;
 use crate::{
     collection_manager::{
         dto::FieldId,
-        sides::write::{
+        sides::{
             CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer, StringField,
             WriteOperation,
         },
-        CollectionId,
     },
-    document_storage::DocumentId,
     indexes::string::{
         CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex,
     },
     nlp::TextParser,
-    types::Document,
+    types::{CollectionId, Document, DocumentId},
 };
 
 pub fn generate_new_path() -> PathBuf {
@@ -46,7 +44,7 @@ pub fn create_string_index(
         })
         .collect();
     for (id, doc) in documents.into_iter().enumerate() {
-        let document_id = DocumentId(id as u32);
+        let document_id = DocumentId(id as u64);
         let flatten = doc.into_flatten();
 
         let operations: Vec<_> = string_fields
@@ -95,7 +93,7 @@ pub fn create_uncommitted_string_field_index(
 
 pub fn create_uncommitted_string_field_index_from(
     documents: Vec<Document>,
-    starting_doc_id: u32,
+    starting_doc_id: u64,
 ) -> Result<UncommittedStringFieldIndex> {
     let index = UncommittedStringFieldIndex::new();
 
@@ -104,7 +102,7 @@ pub fn create_uncommitted_string_field_index_from(
     )));
 
     for (id, doc) in documents.into_iter().enumerate() {
-        let document_id = DocumentId(starting_doc_id + id as u32);
+        let document_id = DocumentId(starting_doc_id + id as u64);
         let flatten = doc.into_flatten();
         let operations = string_field
             .get_write_operations(

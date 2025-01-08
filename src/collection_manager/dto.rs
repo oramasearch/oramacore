@@ -5,14 +5,11 @@ use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    document_storage::DocumentId,
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
-    types::{Document, ValueType},
+    types::{CollectionId, Document, DocumentId, ValueType},
 };
-
-use super::CollectionId;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);

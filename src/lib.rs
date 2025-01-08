@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{atomic::AtomicU32, Arc},
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{Context, Result};
@@ -23,7 +23,6 @@ pub mod code_parser;
 pub mod nlp;
 
 pub mod collection_manager;
-pub mod document_storage;
 
 pub mod web_server;
 
@@ -121,7 +120,7 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
-    let document_id_generator = Arc::new(AtomicU32::new(0));
+    let document_id_generator = Arc::new(AtomicU64::new(0));
     let collections_writer =
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
 

@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 use super::{Number, NumberFilter};
 
@@ -508,9 +508,7 @@ mod tests {
 
     use anyhow::Result;
 
-    use crate::{
-        document_storage::DocumentId, indexes::number::Number, test_utils::generate_new_path,
-    };
+    use crate::{indexes::number::Number, test_utils::generate_new_path, types::DocumentId};
 
     use super::{merge::*, CommittedNumberFieldIndex};
 

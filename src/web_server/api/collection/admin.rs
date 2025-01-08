@@ -14,9 +14,8 @@ use crate::{
     collection_manager::{
         dto::{CollectionDTO, CreateCollectionOptionDTO},
         sides::write::CollectionsWriter,
-        CollectionId,
     },
-    types::DocumentList,
+    types::{CollectionId, DocumentList},
 };
 
 pub fn apis(writers: Arc<CollectionsWriter>) -> Router {

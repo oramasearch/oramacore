@@ -25,24 +25,23 @@ mod tests {
                     Term, TermStringField, WriteOperation,
                 },
             },
-            CollectionId,
         },
-        document_storage::DocumentId,
         embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
         test_utils::generate_new_path,
+        types::{CollectionId, DocumentId},
     };
 
     use super::*;
 
     #[tokio::test]
-    async fn test_reader_sync_send() {
+    async fn test_side_read_sync_send() {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsReader>();
         assert_sync_send::<CollectionReader>();
     }
 
     #[tokio::test]
-    async fn test_foo() -> Result<()> {
+    async fn test_side_read_commit_and_load() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let data_dir = generate_new_path();

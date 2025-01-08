@@ -9,7 +9,10 @@ use axum::{
 use axum_openapi3::*;
 use serde_json::json;
 
-use crate::collection_manager::{dto::SearchParams, sides::read::CollectionsReader, CollectionId};
+use crate::{
+    collection_manager::{dto::SearchParams, sides::read::CollectionsReader},
+    types::CollectionId,
+};
 
 pub fn apis(readers: Arc<CollectionsReader>) -> Router {
     Router::new()

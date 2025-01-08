@@ -4,7 +4,7 @@ use tracing::warn;
 
 use anyhow::{anyhow, Context, Ok, Result};
 
-use crate::{document_storage::DocumentId, types::Document};
+use crate::types::{Document, DocumentId};
 
 #[async_trait]
 pub trait DocumentStorage: Sync + Send + Debug {
@@ -146,7 +146,7 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(total)
     }
 
-    fn commit(&self, path: PathBuf) -> Result<()> {
+    fn commit(&self, _: PathBuf) -> Result<()> {
         // This implementation is wrong:
         // in the mean time we "dran" + "collection" + "write on FS"
         // The documents aren't reachable. So the search output will not contain them.

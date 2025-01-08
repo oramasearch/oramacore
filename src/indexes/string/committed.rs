@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
 use tracing::warn;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 use super::{
     document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,

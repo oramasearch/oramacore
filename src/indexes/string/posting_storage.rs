@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 
-use crate::document_storage::DocumentId;
+use crate::types::DocumentId;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PostingListId(pub u32);

@@ -22,7 +22,7 @@ pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
     collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
-    document_storage::DocumentId,
+    types::DocumentId,
 };
 
 mod committed;
