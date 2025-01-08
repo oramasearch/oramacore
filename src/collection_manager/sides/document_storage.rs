@@ -3,7 +3,6 @@ use std::{collections::HashMap, fmt::Debug, fs::File, path::PathBuf, sync::RwLoc
 use tracing::warn;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
 
 use crate::{document_storage::DocumentId, types::Document};
 
@@ -20,6 +19,12 @@ pub trait DocumentStorage: Sync + Send + Debug {
 
     fn load(&mut self, path: PathBuf) -> Result<()>;
 }
+
+// The `CommittedDiskDocumentStorage` implementation is not optimal.
+// Defenitely, we cannot read every time from disk, it is too heavy.
+// We should be backed by the disk, but we should also have a cache in memory.
+// We should find a good balance between memory and disk usage.
+// TODO: think about a better implementation.
 
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
@@ -142,18 +147,17 @@ impl DocumentStorage for DiskDocumentStorage {
     }
 
     fn commit(&self, path: PathBuf) -> Result<()> {
+        // This implementation is wrong:
+        // in the mean time we "dran" + "collection" + "write on FS"
+        // The documents aren't reachable. So the search output will not contain them.
+        // We should follow the same path of the indexes.
+
         let mut uncommitted = match self.uncommitted.write() {
             std::result::Result::Ok(uncommitted) => uncommitted,
             std::result::Result::Err(e) => e.into_inner(),
         };
         let uncommitted: Vec<_> = uncommitted.drain().collect();
 
-        // This implementation differs from the indexes one.
-        // In fact, in index, we "merge" committed data with uncommitted data.
-        // This is because the inner datastructure wants to have ordered data.
-        // Here instead, we could avoid to perform a similar approach.
-        // So, we can just "add a new file" to the committed storage.
-        // TODO: verify if this is ok for consistency PoV.
         self.committed.add(uncommitted);
 
         Ok(())
