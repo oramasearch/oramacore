@@ -33,6 +33,8 @@ pub mod js;
 
 mod metrics;
 
+mod file_utils;
+
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
 
@@ -121,17 +123,22 @@ pub async fn build_orama(
     );
 
     let document_id_generator = Arc::new(AtomicU64::new(0));
-    let collections_writer =
+    let mut collections_writer =
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
+    collections_writer.load(reader_side.data_dir.join("writer"))
+            .context("Cannot load collections writer")?;
 
-    let document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
+    let mut document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
         .context("Cannot create document storage")?;
+    document_storage.load(reader_side.data_dir.join("docs"))
+        .context("Cannot load document storage")?;
+
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(document_storage);
     let mut collections_reader =
         CollectionsReader::new(embedding_service, document_storage, reader_side.config);
 
     collections_reader
-        .load_from_disk(reader_side.data_dir)
+        .load_from_disk(reader_side.data_dir.join("reader"))
         .await?;
 
     let collections_writer = Some(Arc::new(collections_writer));

@@ -8,15 +8,12 @@ use crate::{
     collection_manager::{
         dto::{FieldId, TypedField},
         sides::document_storage::DocumentStorage,
-    },
-    embeddings::{EmbeddingService, LoadedModel},
-    indexes::{
+    }, embeddings::{EmbeddingService, LoadedModel}, file_utils::BufferedFile, indexes::{
         bool::BoolIndex,
         number::{NumberIndex, NumberIndexConfig},
         string::{StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
-    },
-    types::CollectionId,
+    }, types::CollectionId
 };
 
 use super::IndexesConfig;
@@ -150,31 +147,15 @@ impl CollectionReader {
         };
 
         let coll_desc_file_path = commit_config.folder_to_commit.join("desc.json");
-        let mut coll_desc_file =
-            std::fs::File::create(&coll_desc_file_path).with_context(|| {
+        BufferedFile::create(coll_desc_file_path)
+            .context("Cannot create desc.json file")?
+            .write_json_data(&dump)
+            .with_context(|| {
                 format!(
-                    "Cannot create file for collection {:?} at {:?}",
-                    self.id, coll_desc_file_path
+                    "Cannot serialize collection descriptor for {:?}",
+                    self.id
                 )
             })?;
-        serde_json::to_writer(&mut coll_desc_file, &dump).with_context(|| {
-            format!(
-                "Cannot serialize collection descriptor for {:?} to file {:?}",
-                self.id, coll_desc_file_path
-            )
-        })?;
-        coll_desc_file.flush().with_context(|| {
-            format!(
-                "Cannot flush collection descriptor for {:?} to file {:?}",
-                self.id, coll_desc_file_path
-            )
-        })?;
-        coll_desc_file.sync_data().with_context(|| {
-            format!(
-                "Cannot sync collection descriptor for {:?} to file {:?}",
-                self.id, coll_desc_file_path
-            )
-        })?;
 
         Ok(())
     }

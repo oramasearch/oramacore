@@ -21,8 +21,7 @@ use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
-    types::DocumentId,
+    collection_manager::{dto::FieldId, sides::write::InsertStringTerms}, file_utils::BufferedFile, types::DocumentId
 };
 
 mod committed;
@@ -230,12 +229,10 @@ impl StringIndex {
         }
 
         let field_file = new_path.join("fields.json");
-        let mut file = std::fs::File::create(field_file)
-            .with_context(|| format!("Cannot create fields file at {:?}", new_path))?;
-        serde_json::to_writer(&mut file, &dump)
-            .with_context(|| format!("Cannot write fields file at {:?}", new_path))?;
-        file.flush()?;
-        file.sync_all()?;
+        BufferedFile::create(field_file)
+            .context("Cannot create fields.json file")?
+            .write_json_data(&dump)
+            .context("Cannot serialize collection field")?;
 
         Ok(())
     }

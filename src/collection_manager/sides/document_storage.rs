@@ -4,7 +4,7 @@ use tracing::warn;
 
 use anyhow::{anyhow, Context, Ok, Result};
 
-use crate::types::{Document, DocumentId};
+use crate::{file_utils::BufferedFile, types::{Document, DocumentId}};
 
 #[async_trait]
 pub trait DocumentStorage: Sync + Send + Debug {
@@ -67,12 +67,17 @@ impl CommittedDiskDocumentStorage {
         Ok(total)
     }
 
-    fn add(&self, docs: Vec<(DocumentId, Document)>) {
+    fn add(&self, docs: Vec<(DocumentId, Document)>) -> Result<()> {
         for (doc_id, doc) in docs {
             let doc_path = self.path.join(format!("{}", doc_id.0));
-            let doc_file = File::create(doc_path).unwrap();
-            serde_json::to_writer(doc_file, &doc).unwrap();
+
+            BufferedFile::create(doc_path)
+                .context("Cannot create document file")?
+                .write_json_data(&doc)
+                .context("Cannot write document data")?;
         }
+
+        Ok(())
     }
 }
 
@@ -158,7 +163,8 @@ impl DocumentStorage for DiskDocumentStorage {
         };
         let uncommitted: Vec<_> = uncommitted.drain().collect();
 
-        self.committed.add(uncommitted);
+        self.committed.add(uncommitted)
+            .context("Cannot commit documents")?;
 
         Ok(())
     }

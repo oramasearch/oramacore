@@ -12,6 +12,7 @@ use dashmap::DashMap;
 use fst::{Map, MapBuilder, Streamer};
 use memmap::Mmap;
 
+use crate::file_utils::BufferedFile;
 use crate::types::DocumentId;
 
 use super::document_lengths::DocumentLengthsPerDocument;
@@ -159,27 +160,17 @@ pub fn merge(
         .storage
         .apply_delta(storage_updates, posting_new_path)?;
 
-    let mut global_info_file =
-        File::create(global_info_new_path).context("Cannot create file for global info")?;
     let global_info = data_to_commit.global_info() + committed.get_global_info();
-    serde_json::to_writer(&mut global_info_file, &global_info)
-        .context("Cannot write global info to file")?;
-    global_info_file.flush().context("Cannot flush file")?;
-    global_info_file
-        .sync_data()
-        .context("Cannot sync data to disk")?;
+    BufferedFile::create(global_info_new_path)
+        .context("Cannot create file for global info")?
+        .write_json_data(&global_info)
+        .context("Cannot serialize global info to file")?;
 
-    let mut posting_id_file =
-        File::create(posting_id_new_path).context("Cannot create file for posting id")?;
-    serde_json::to_writer(
-        &mut posting_id_file,
-        &posting_id_generator.load(Ordering::Relaxed),
-    )
-    .context("Cannot write posting id to file")?;
-    posting_id_file.flush().context("Cannot flush file")?;
-    posting_id_file
-        .sync_data()
-        .context("Cannot sync data to disk")?;
+    let posting_id = posting_id_generator.load(Ordering::Relaxed);
+    BufferedFile::create(posting_id_new_path)
+        .context("Cannot create file for posting_id")?
+        .write_json_data(&posting_id)
+        .context("Cannot serialize posting_id to file")?;
 
     data_to_commit.done();
 
@@ -209,10 +200,9 @@ pub fn create(
     let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
         Default::default();
 
-    let mut file = std::fs::File::create(fst_new_path.clone())
-        .with_context(|| format!("Cannot create file at {:?}", fst_new_path))?;
-    let mut wtr = std::io::BufWriter::new(&mut file);
-    let mut build = MapBuilder::new(&mut wtr)?;
+    let mut buf = BufferedFile::create(fst_new_path.clone())
+        .context("Cannot create fst file")?;
+    let mut build = MapBuilder::new(&mut buf)?;
 
     for (key, value) in uncommitted_iter {
         let new_posting_list_id =
@@ -234,35 +224,23 @@ pub fn create(
 
     build.finish().context("Cannot finish build of FST map")?;
 
-    wtr.flush().context("Cannot flush FST map")?;
-    drop(wtr);
-    file.sync_data().context("Cannot sync data to disk")?;
-    file.flush().context("Cannot flush file")?;
+    buf.close()
+        .context("Cannot close buffered file")?;
 
     PostingIdStorage::create(delta_committed_storage, posting_new_path)
         .context("Cannot create posting id storage")?;
 
-    let mut global_info_file =
-        File::create(global_info_new_path).context("Cannot create file for global info")?;
     let global_info = data_to_commit.global_info();
-    serde_json::to_writer(&mut global_info_file, &global_info)
+    BufferedFile::create(global_info_new_path)
+        .context("Cannot create global_info file")?
+        .write_json_data(&global_info)
         .context("Cannot write global info to file")?;
-    global_info_file.flush().context("Cannot flush file")?;
-    global_info_file
-        .sync_data()
-        .context("Cannot sync data to disk")?;
 
-    let mut posting_id_file =
-        File::create(posting_id_new_path).context("Cannot create file for posting id")?;
-    serde_json::to_writer(
-        &mut posting_id_file,
-        &posting_id_generator.load(Ordering::Relaxed),
-    )
-    .context("Cannot write posting id to file")?;
-    posting_id_file.flush().context("Cannot flush file")?;
-    posting_id_file
-        .sync_data()
-        .context("Cannot sync data to disk")?;
+    let posting_id = posting_id_generator.load(Ordering::Relaxed);
+    BufferedFile::create(posting_id_new_path)
+        .context("Cannot create posting_id file")?
+        .write_json_data(&posting_id)
+        .context("Cannot write posting_id to file")?;
 
     data_to_commit.done();
 
@@ -329,10 +307,9 @@ where
         },
     );
 
-    let mut file = std::fs::File::create(path_to_commit.clone())
-        .with_context(|| format!("Cannot create file at {:?}", path_to_commit))?;
-    let mut wtr = std::io::BufWriter::new(&mut file);
-    let mut build = MapBuilder::new(&mut wtr)?;
+    let mut f = BufferedFile::create(path_to_commit)
+        .context("Cannot create file")?;
+    let mut build = MapBuilder::new(&mut f)?;
 
     for (key, value) in merge_iterator {
         build
@@ -342,10 +319,8 @@ where
 
     build.finish().context("Cannot finish build of FST map")?;
 
-    wtr.flush().context("Cannot flush FST map")?;
-    drop(wtr);
-    file.sync_data().context("Cannot sync data to disk")?;
-    file.flush().context("Cannot flush file")?;
+    f.close()
+        .context("Cannot close buffered file")?;
 
     Ok(delta_committed_storage)
 }

@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::types::DocumentId;
+use crate::{file_utils::BufferedFile, types::DocumentId};
 
 use super::{Number, NumberFilter};
 
@@ -108,12 +108,10 @@ impl Page {
             }
         };
 
-        let mut file = std::fs::File::create(page_file.clone())?;
-        let mut buf_writer = BufWriter::new(&mut file);
-        bincode::serialize_into(&mut buf_writer, items).unwrap();
-        buf_writer.flush().unwrap();
-        drop(buf_writer);
-        file.sync_data().unwrap();
+        BufferedFile::create(page_file.clone())
+            .context("Cannot create number page file")?
+            .write_bincode_data(&items)
+            .context("Cannot serialize number page")?;
 
         self.pointer = PagePointer::OnFile(page_file);
 

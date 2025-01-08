@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use std::{path::PathBuf, sync::{atomic::AtomicU64, Arc}};
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
@@ -70,70 +70,6 @@ impl CollectionsWriter {
         );
 
         for (field_name, field_type) in typed_fields {
-            /*
-            match &field_type {
-                TypedField::Embedding(embedding_field) => {
-                    let model = self
-                        .embedding_service
-                        .get_model(embedding_field.model_name.clone())
-                        .await?;
-                    collection.fields.insert(
-                        field_name.clone(),
-                        (
-                            ValueType::Complex(ComplexType::Embedding),
-                            Arc::new(Box::new(EmbeddingField::new(
-                                model,
-                                embedding_field.document_fields.clone(),
-                            ))),
-                        ),
-                    );
-                }
-                TypedField::Text(language) => {
-                    let parser = self.get_text_parser(Some(*language));
-                    collection.fields.insert(
-                        field_name.clone(),
-                        (
-                            ValueType::Scalar(ScalarType::String),
-                            Arc::new(Box::new(StringField::new(parser))),
-                        ),
-                    );
-                }
-                TypedField::Number => {
-                    collection.fields.insert(
-                        field_name.clone(),
-                        (
-                            ValueType::Scalar(ScalarType::Number),
-                            Arc::new(Box::new(StringField::new(
-                                self.get_text_parser(None),
-                            ))),
-                        ),
-                    );
-                }
-                TypedField::Bool => {
-                    collection.fields.insert(
-                        field_name.clone(),
-                        (
-                            ValueType::Scalar(ScalarType::Boolean),
-                            Arc::new(Box::new(BoolField::new())),
-                        ),
-                    );
-                }
-            }
-
-            let field_id = collection.get_field_id_by_name(&field_name);
-
-            self.sender
-                .send(WriteOperation::Collection(
-                    id.clone(),
-                    CollectionWriteOperation::CreateField {
-                        field_id,
-                        field_name,
-                        field: field_type,
-                    },
-                ))
-                .unwrap();
-            */
-
             let field_id = collection.get_field_id_by_name(&field_name);
 
             collection
@@ -172,6 +108,16 @@ impl CollectionsWriter {
     pub fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get(&collection_id);
         collection.map(|c| c.as_dto())
+    }
+
+    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+
+        Ok(())
+    }
+
+    pub fn load(&self, data_dir: PathBuf) -> Result<()> {
+
+        Ok(())
     }
 
     pub async fn write(

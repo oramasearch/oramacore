@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 
-use crate::types::DocumentId;
+use crate::{file_utils::BufferedFile, types::DocumentId};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PostingListId(pub u32);
@@ -21,10 +21,10 @@ impl PostingIdStorage {
         content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
         new_path: PathBuf,
     ) -> Result<()> {
-        let mut file = std::fs::File::create(new_path).context("Cannot create file")?;
-        serde_json::to_writer(&mut file, &content).context("Cannot write to file")?;
-        file.flush()?;
-        file.sync_all()?;
+        BufferedFile::create(new_path)
+            .context("Cannot create posting id file")?
+            .write_json_data(&content)
+            .context("Cannot serialize posting id")?;
 
         Ok(())
     }
@@ -51,10 +51,10 @@ impl PostingIdStorage {
             entry.extend(posting);
         }
 
-        let mut file = std::fs::File::create(new_path).context("Cannot create file")?;
-        serde_json::to_writer(&mut file, &content).context("Cannot write to file")?;
-        file.flush()?;
-        file.sync_all()?;
+        BufferedFile::create(new_path)
+            .context("Cannot create posting id file")?
+            .write_json_data(&content)
+            .context("Cannot serialize posting id")?;
 
         Ok(())
     }

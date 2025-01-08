@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Write, path::PathBuf};
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
 
-use crate::types::DocumentId;
+use crate::{file_utils::BufferedFile, types::DocumentId};
 
 #[derive(Default, Debug)]
 pub struct DocumentLengthsPerDocument {
@@ -17,10 +17,11 @@ impl DocumentLengthsPerDocument {
     pub fn create(lengths: &HashMap<DocumentId, u32>, new_path: PathBuf) -> Result<()> {
         debug!("Creating new document lengths file {:?}", new_path);
 
-        let mut file = std::fs::File::create(new_path).context("Cannot create file")?;
-        serde_json::to_writer(&mut file, &lengths).context("Cannot write to file")?;
-        file.flush()?;
-        file.sync_all()?;
+        BufferedFile::create(new_path)
+            .context("Cannot create file")?
+            .write_json_data(lengths)
+            .context("Cannot serialize to file")?;
+
         Ok(())
     }
 
@@ -47,10 +48,10 @@ impl DocumentLengthsPerDocument {
             }
         }
 
-        let mut file = std::fs::File::create(new_path).context("Cannot create file")?;
-        serde_json::to_writer(&mut file, &content).context("Cannot write to file")?;
-        file.flush()?;
-        file.sync_all()?;
+        BufferedFile::create(new_path)
+            .context("Cannot create file")?
+            .write_json_data(&content)
+            .context("Cannot serialize to file")?;
 
         Ok(())
     }
