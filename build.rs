@@ -1,6 +1,9 @@
 use std::{collections::HashMap, env, fs, path::Path};
+use tonic_build;
 
 fn main() {
+    tonic_build::compile_protos("./src/ai_server/service.proto").unwrap();
+
     let stop_words: HashMap<String, String> = std::fs::read_dir("./src/nlp/stop_words")
         .expect("Failed to read stop words directory")
         .filter_map(|dir| dir.ok())
