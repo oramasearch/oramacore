@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
@@ -200,8 +198,7 @@ pub fn create(
     let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
         Default::default();
 
-    let mut buf = BufferedFile::create(fst_new_path.clone())
-        .context("Cannot create fst file")?;
+    let mut buf = BufferedFile::create(fst_new_path.clone()).context("Cannot create fst file")?;
     let mut build = MapBuilder::new(&mut buf)?;
 
     for (key, value) in uncommitted_iter {
@@ -224,8 +221,7 @@ pub fn create(
 
     build.finish().context("Cannot finish build of FST map")?;
 
-    buf.close()
-        .context("Cannot close buffered file")?;
+    buf.close().context("Cannot close buffered file")?;
 
     PostingIdStorage::create(delta_committed_storage, posting_new_path)
         .context("Cannot create posting id storage")?;
@@ -307,8 +303,7 @@ where
         },
     );
 
-    let mut f = BufferedFile::create(path_to_commit)
-        .context("Cannot create file")?;
+    let mut f = BufferedFile::create(path_to_commit).context("Cannot create file")?;
     let mut build = MapBuilder::new(&mut f)?;
 
     for (key, value) in merge_iterator {
@@ -319,8 +314,7 @@ where
 
     build.finish().context("Cannot finish build of FST map")?;
 
-    f.close()
-        .context("Cannot close buffered file")?;
+    f.close().context("Cannot close buffered file")?;
 
     Ok(delta_committed_storage)
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
@@ -30,9 +30,10 @@ impl PostingIdStorage {
     }
 
     pub fn get_posting(&self, posting_id: u64) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
-        let file = std::fs::File::open(&self.path).context("Cannot open file")?;
-        let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
-            serde_json::from_reader(file).context("Cannot decode from file")?;
+        let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
+            .context("Cannot open posting ids file")?
+            .read_json_data()
+            .context("Cannot deserialize posting ids")?;
 
         Ok(content.get(&posting_id).cloned())
     }
@@ -42,6 +43,11 @@ impl PostingIdStorage {
         delta: DashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
         new_path: PathBuf,
     ) -> Result<()> {
+        let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
+            .context("Cannot open posting ids file")?
+            .read_json_data()
+            .context("Cannot deserialize posting ids")?;
+
         let file = std::fs::File::open(&self.path).context("Cannot open file")?;
         let mut content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
             serde_json::from_reader(file).context("Cannot decode from file")?;

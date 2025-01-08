@@ -1,13 +1,20 @@
-use std::{path::PathBuf, sync::{atomic::AtomicU64, Arc}};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::{broadcast::Sender, RwLock};
 use tracing::{info, warn};
 
 use crate::{
     collection_manager::dto::CollectionDTO,
     embeddings::EmbeddingService,
+    file_utils::BufferedFile,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -20,7 +27,7 @@ pub struct CollectionsWriter {
     document_id_generator: Arc<AtomicU64>,
     sender: Sender<WriteOperation>,
     embedding_service: Arc<EmbeddingService>,
-    collections: DashMap<CollectionId, CollectionWriter>,
+    collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
 }
 
 impl CollectionsWriter {
@@ -33,7 +40,7 @@ impl CollectionsWriter {
             document_id_generator,
             sender,
             embedding_service,
-            collections: DashMap::new(),
+            collections: Default::default(),
         }
     }
 
@@ -84,39 +91,53 @@ impl CollectionsWriter {
                 .context("Cannot create field")?;
         }
 
-        // This substitute the previous value and this is wrong.
-        // We should *NOT* allow to overwrite a collection
-        // We should return an error if the collection already exists
-        // NB: the check of the existence of the collection and the insertion should be done atomically
-        // TODO: do it.
-        self.collections.insert(id.clone(), collection);
+        let mut collections = self.collections.write().await;
+        if collections.contains_key(&id) {
+            return Err(anyhow!("Collection already exists"));
+        }
+        collections.insert(id.clone(), collection);
+        drop(collections);
 
         Ok(id)
     }
 
-    pub fn list(&self) -> Vec<CollectionDTO> {
-        self.collections
-            .iter()
-            .map(|e| {
-                let coll = e.value();
+    pub async fn list(&self) -> Vec<CollectionDTO> {
+        let collections = self.collections.read().await;
 
-                coll.as_dto()
-            })
-            .collect()
+        collections.iter().map(|(_, coll)| coll.as_dto()).collect()
     }
 
-    pub fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
-        let collection = self.collections.get(&collection_id);
+    pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
+        let collections = self.collections.read().await;
+        let collection = collections.get(&collection_id);
         collection.map(|c| c.as_dto())
     }
 
-    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        // This `write lock` will not change the content of the collections
+        // But it is requered to ensure that the collections are not being modified
+        // while we are saving them to disk
+        let mut collections = self.collections.write().await;
+
+        let document_id = self.document_id_generator.load(Ordering::Relaxed);
+        BufferedFile::create(data_dir.join("document_id"))
+            .context("Cannot create document id file")?
+            .write_json_data(&document_id)
+            .context("Cannot serialize document id")?;
+
+        for (collection_id, collection) in collections.iter_mut() {
+            let collection_dir = data_dir.join(collection_id.0.clone());
+            collection.commit(collection_dir)?;
+        }
+
+        // Now it is safe to drop the lock
+        // because we safe everything to disk
+        drop(collections);
 
         Ok(())
     }
 
     pub fn load(&self, data_dir: PathBuf) -> Result<()> {
-
         Ok(())
     }
 
@@ -132,8 +153,9 @@ impl CollectionsWriter {
             })
             .increment_by(document_list.len());
 
-        let collection = self
-            .collections
+        let collections = self.collections.read().await;
+
+        let collection = collections
             .get(&collection_id)
             .ok_or_else(|| anyhow!("Collection not found"))?;
 

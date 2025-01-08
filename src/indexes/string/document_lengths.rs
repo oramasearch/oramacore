@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
@@ -26,18 +26,20 @@ impl DocumentLengthsPerDocument {
     }
 
     pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
-        let file = std::fs::File::open(&self.path).context("Cannot oper file")?;
-        let content: HashMap<DocumentId, u32> =
-            serde_json::from_reader(file).context("Cannot decode from file")?;
+        let content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
+            .context("Cannot open document length file")?
+            .read_json_data()
+            .context("Cannot deserialize document length")?;
 
         let length = content.get(doc_id).unwrap_or(&1);
         Ok(*length)
     }
 
     pub fn merge(&self, lengths: &HashMap<DocumentId, u32>, new_path: PathBuf) -> Result<()> {
-        let file = std::fs::File::open(&self.path).context("Cannot oper file")?;
-        let mut content: HashMap<DocumentId, u32> =
-            serde_json::from_reader(file).context("Cannot decode from file")?;
+        let mut content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
+            .context("Cannot open document length file")?
+            .read_json_data()
+            .context("Cannot deserialize document length")?;
 
         for (doc_id, length) in lengths {
             if content.insert(*doc_id, *length).is_some() {

@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::Write,
     ops::{Add, AddAssign},
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
@@ -21,7 +20,9 @@ use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::write::InsertStringTerms}, file_utils::BufferedFile, types::DocumentId
+    collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
+    file_utils::BufferedFile,
+    types::DocumentId,
 };
 
 mod committed;
@@ -195,20 +196,11 @@ impl StringIndex {
             };
 
             // Reload field
-            let global_file =
-                File::open(field_dump.global_info_new_path.clone()).with_context(|| {
-                    format!(
-                        "Cannot open global info file at {:?}",
-                        field_dump.global_info_new_path
-                    )
-                })?;
             let global_info: GlobalInfo =
-                serde_json::from_reader(global_file).with_context(|| {
-                    format!(
-                        "Cannot read global info file at {:?}",
-                        field_dump.global_info_new_path
-                    )
-                })?;
+                BufferedFile::open(field_dump.global_info_new_path.clone())
+                    .context("Cannot open global info file")?
+                    .read_json_data()
+                    .context("Cannot deserialize global info")?;
 
             let file = File::open(field_dump.fst_new_path.clone())?;
             let mmap = unsafe { Mmap::map(&file)? };
@@ -255,28 +247,19 @@ impl StringIndex {
         };
 
         let field_file = path.join("fields.json");
-        let file = std::fs::File::open(field_file.clone())
-            .with_context(|| format!("Cannot create fields file at {:?}", field_file))?;
-        let dump: StringFieldsDump = serde_json::from_reader(file)
-            .with_context(|| format!("Cannot read fields file at {:?}", field_file))?;
+        let dump: StringFieldsDump = BufferedFile::open(field_file.clone())
+            .context("Cannot open fields file")?
+            .read_json_data()
+            .context("Cannot deserialize fields")?;
 
         debug!("Dump: {:?}", dump);
 
         for (field_id, field_dump) in dump.fields {
-            let global_file =
-                File::open(field_dump.global_info_new_path.clone()).with_context(|| {
-                    format!(
-                        "Cannot open global info file at {:?}",
-                        field_dump.global_info_new_path
-                    )
-                })?;
             let global_info: GlobalInfo =
-                serde_json::from_reader(global_file).with_context(|| {
-                    format!(
-                        "Cannot read global info file at {:?}",
-                        field_dump.global_info_new_path
-                    )
-                })?;
+                BufferedFile::open(field_dump.global_info_new_path.clone())
+                    .context("Cannot open global info file")?
+                    .read_json_data()
+                    .context("Cannot deserialize global info")?;
 
             let file = File::open(field_dump.fst_new_path.clone())?;
             let mmap = unsafe { Mmap::map(&file)? };

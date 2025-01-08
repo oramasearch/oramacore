@@ -1,4 +1,4 @@
-use std::{io::Write, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
@@ -8,12 +8,16 @@ use crate::{
     collection_manager::{
         dto::{FieldId, TypedField},
         sides::document_storage::DocumentStorage,
-    }, embeddings::{EmbeddingService, LoadedModel}, file_utils::BufferedFile, indexes::{
+    },
+    embeddings::{EmbeddingService, LoadedModel},
+    file_utils::BufferedFile,
+    indexes::{
         bool::BoolIndex,
         number::{NumberIndex, NumberIndexConfig},
         string::{StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
-    }, types::CollectionId
+    },
+    types::CollectionId,
 };
 
 use super::IndexesConfig;
@@ -102,18 +106,11 @@ impl CollectionReader {
             .context("Cannot load string index")?;
 
         let coll_desc_file_path = collection_data_dir.join("desc.json");
-        let coll_desc_file = std::fs::File::open(&coll_desc_file_path).with_context(|| {
-            format!(
-                "Cannot open file for collection {:?} at {:?}",
-                self.id, coll_desc_file_path
-            )
-        })?;
-        let dump: CollectionDescriptorDump =
-            serde_json::from_reader(coll_desc_file).with_context(|| {
-                format!(
-                    "Cannot deserialize collection descriptor for {:?} to file {:?}",
-                    self.id, coll_desc_file_path
-                )
+        let dump: CollectionDescriptorDump = BufferedFile::open(coll_desc_file_path)
+            .context("Cannot open collection file")?
+            .read_json_data()
+            .with_context(|| {
+                format!("Cannot deserialize collection descriptor for {:?}", self.id)
             })?;
         for (field_name, (field_id, field_type)) in dump.fields {
             self.fields.insert(field_name, (field_id, field_type));
@@ -150,12 +147,7 @@ impl CollectionReader {
         BufferedFile::create(coll_desc_file_path)
             .context("Cannot create desc.json file")?
             .write_json_data(&dump)
-            .with_context(|| {
-                format!(
-                    "Cannot serialize collection descriptor for {:?}",
-                    self.id
-                )
-            })?;
+            .with_context(|| format!("Cannot serialize collection descriptor for {:?}", self.id))?;
 
         Ok(())
     }

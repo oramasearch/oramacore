@@ -82,7 +82,7 @@ pub struct CollectionDTO {
     #[schema(inline)]
     pub id: CollectionId,
     pub description: Option<String>,
-    pub document_count: u32,
+    pub document_count: u64,
     #[schema(inline)]
     pub fields: HashMap<String, ValueType>,
 }

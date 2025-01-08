@@ -123,14 +123,16 @@ pub async fn build_orama(
     );
 
     let document_id_generator = Arc::new(AtomicU64::new(0));
-    let mut collections_writer =
+    let collections_writer =
         CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-    collections_writer.load(reader_side.data_dir.join("writer"))
-            .context("Cannot load collections writer")?;
+    collections_writer
+        .load(reader_side.data_dir.join("writer"))
+        .context("Cannot load collections writer")?;
 
     let mut document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
         .context("Cannot create document storage")?;
-    document_storage.load(reader_side.data_dir.join("docs"))
+    document_storage
+        .load(reader_side.data_dir.join("docs"))
         .context("Cannot load document storage")?;
 
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(document_storage);

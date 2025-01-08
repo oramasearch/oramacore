@@ -51,7 +51,7 @@ num-traits = "0.2"
 futures = "0.3.31"
 
 # Webserver
-axum = "0.7.6"
+axum = { version = "0.7.6", features = ["macros"] }
 tower-http = { version = "0.6.1", features = ["trace", "cors"] }
 http = "1.2.0"
 axum-openapi3 = { version = "0.1.0", features = ["derive"] }

@@ -1,10 +1,13 @@
 use async_trait::async_trait;
-use std::{collections::HashMap, fmt::Debug, fs::File, path::PathBuf, sync::RwLock};
+use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
 use tracing::warn;
 
 use anyhow::{anyhow, Context, Ok, Result};
 
-use crate::{file_utils::BufferedFile, types::{Document, DocumentId}};
+use crate::{
+    file_utils::BufferedFile,
+    types::{Document, DocumentId},
+};
 
 #[async_trait]
 pub trait DocumentStorage: Sync + Send + Debug {
@@ -48,8 +51,12 @@ impl CommittedDiskDocumentStorage {
                 }
                 std::result::Result::Ok(true) => {}
             };
-            let doc_file = File::open(doc_path)?;
-            let doc: Document = serde_json::from_reader(doc_file)?;
+
+            let doc: Document = BufferedFile::open(doc_path)
+                .context("Cannot open document file")?
+                .read_json_data()
+                .context("Cannot read document data")?;
+
             result.push(Some(doc));
         }
 
@@ -163,7 +170,8 @@ impl DocumentStorage for DiskDocumentStorage {
         };
         let uncommitted: Vec<_> = uncommitted.drain().collect();
 
-        self.committed.add(uncommitted)
+        self.committed
+            .add(uncommitted)
             .context("Cannot commit documents")?;
 
         Ok(())

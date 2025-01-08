@@ -1,16 +1,21 @@
-use std::sync::{
-    atomic::{AtomicU16, AtomicU32},
-    Arc,
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU16, AtomicU64},
+        Arc,
+    },
 };
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
 use tracing::info;
 
 use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
     embeddings::EmbeddingService,
+    file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
@@ -28,9 +33,9 @@ pub struct CollectionWriter {
     default_language: LanguageDTO,
     fields: DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>,
 
-    document_count: AtomicU32,
+    document_count: AtomicU64,
 
-    field_id_generator: Arc<AtomicU16>,
+    field_id_generator: AtomicU16,
     field_id_by_name: DashMap<String, FieldId>,
 }
 
@@ -47,7 +52,7 @@ impl CollectionWriter {
             document_count: Default::default(),
             fields: Default::default(),
             field_id_by_name: DashMap::new(),
-            field_id_generator: Arc::new(AtomicU16::new(0)),
+            field_id_generator: AtomicU16::new(0),
         }
     }
 
@@ -256,4 +261,52 @@ impl CollectionWriter {
 
         Ok(self.fields.clone())
     }
+
+    pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
+        // `&mut self` is not used, but it needed to ensure no other thread is using the collection
+
+        let dump = CollectionDump {
+            id: self.id.clone(),
+            description: self.description.clone(),
+            default_language: self.default_language,
+            fields: self
+                .fields
+                .iter()
+                .map(|e| (e.key().clone(), e.value().0.clone()))
+                .collect(),
+            document_count: self
+                .document_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            field_id_generator: self
+                .field_id_generator
+                .load(std::sync::atomic::Ordering::Relaxed),
+            field_id_by_name: self
+                .field_id_by_name
+                .iter()
+                .map(|e| (e.key().clone(), *e.value()))
+                .collect(),
+        };
+
+        BufferedFile::create(path.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&dump)
+            .context("Cannot serialize collection info")?;
+
+        Ok(())
+    }
+
+    pub(super) fn load(&mut self, path: PathBuf) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionDump {
+    id: CollectionId,
+    description: Option<String>,
+    default_language: LanguageDTO,
+    fields: Vec<(String, ValueType)>,
+    document_count: u64,
+    field_id_generator: u16,
+    field_id_by_name: Vec<(String, FieldId)>,
 }

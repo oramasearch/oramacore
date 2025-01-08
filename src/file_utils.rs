@@ -1,26 +1,60 @@
-use std::{io::Write, path::PathBuf};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 
+pub struct BufferedFile;
+impl BufferedFile {
+    pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {
+        let file = std::fs::File::create_new(&path)
+            .with_context(|| format!("Cannot create file at {:?}", path))?;
+        let buf = std::io::BufWriter::new(file);
+        Ok(WriteBufferedFile {
+            path,
+            closed: false,
+            buf,
+        })
+    }
 
-pub struct BufferedFile {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<ReadBufferedFile> {
+        Ok(ReadBufferedFile {
+            path: path.as_ref().to_path_buf(),
+        })
+    }
+}
+
+pub struct ReadBufferedFile {
+    path: PathBuf,
+}
+
+impl ReadBufferedFile {
+    pub fn read_json_data<T: serde::de::DeserializeOwned>(self) -> Result<T> {
+        let file = std::fs::File::open(&self.path)
+            .with_context(|| format!("Cannot open file at {:?}", self.path))?;
+        let reader = std::io::BufReader::new(file);
+        let data = serde_json::from_reader(reader)
+            .with_context(|| format!("Cannot read json data from {:?}", self.path))?;
+        Ok(data)
+    }
+
+    pub fn read_bincode_data<T: serde::de::DeserializeOwned>(self) -> Result<T> {
+        let file = std::fs::File::open(&self.path)
+            .with_context(|| format!("Cannot open file at {:?}", self.path))?;
+        let reader = std::io::BufReader::new(file);
+        let data = bincode::deserialize_from(reader)
+            .with_context(|| format!("Cannot read bincode data from {:?}", self.path))?;
+        Ok(data)
+    }
+}
+
+pub struct WriteBufferedFile {
     path: PathBuf,
     buf: std::io::BufWriter<std::fs::File>,
     closed: bool,
 }
-
-impl BufferedFile {
-    pub fn create(path: PathBuf) -> Result<BufferedFile> {
-        let file = std::fs::File::create_new(&path)
-            .with_context(|| format!("Cannot create file at {:?}", path))?;
-        let buf = std::io::BufWriter::new(file);
-        Ok(BufferedFile {
-            path,
-            closed: false,
-            buf
-        })
-    }
-
+impl WriteBufferedFile {
     pub fn write_json_data<T: serde::Serialize>(mut self, data: &T) -> Result<()> {
         serde_json::to_writer(&mut self.buf, data)
             .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
@@ -44,13 +78,16 @@ impl BufferedFile {
 
         self.closed = true;
 
-        self.buf.flush()
+        self.buf
+            .flush()
             .with_context(|| format!("Cannot flush buffer {:?}", self.path))?;
 
         let mut inner = self.buf.get_ref();
-        inner.flush()
+        inner
+            .flush()
             .with_context(|| format!("Cannot flush file {:?}", self.path))?;
-        inner.sync_all()
+        inner
+            .sync_all()
             .with_context(|| format!("Cannot sync_all file {:?}", self.path))?;
 
         Ok(())
@@ -58,7 +95,7 @@ impl BufferedFile {
 }
 
 // Proxy all std::io::Write methods to the inner buffer
-impl std::io::Write for BufferedFile {
+impl std::io::Write for WriteBufferedFile {
     fn by_ref(&mut self) -> &mut Self {
         self.buf.by_ref();
         self
@@ -85,8 +122,9 @@ impl std::io::Write for BufferedFile {
     }
 }
 
-impl Drop for BufferedFile {
+impl Drop for WriteBufferedFile {
     fn drop(&mut self) {
-        self.drop_all().expect("BufferedFile drop failed. Use `close` method to handle errors.");
+        self.drop_all()
+            .expect("WriteBufferedFile drop failed. Use `close` method to handle errors.");
     }
 }

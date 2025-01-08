@@ -1,9 +1,5 @@
 use core::{f32, panic};
-use std::{
-    collections::HashSet,
-    io::{BufReader, BufWriter, Write},
-    path::PathBuf,
-};
+use std::{collections::HashSet, io::Write, path::PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -70,10 +66,10 @@ impl Page {
                 Self::filter_on_items(items, filter, matching_docs);
             }
             PagePointer::OnFile(p) => {
-                let f = std::fs::File::open(p).with_context(|| format!("Cannot open {p:?}"))?;
-                let buf = BufReader::new(f);
-                let items: Vec<Item> = bincode::deserialize_from(buf)
-                    .with_context(|| format!("Cannot deserialize items from {p:?}"))?;
+                let items: Vec<Item> = BufferedFile::open(p)
+                    .context("Cannot open number index page file")?
+                    .read_bincode_data()
+                    .context("Cannot deserialize number index page")?;
 
                 Self::filter_on_items(&items, filter, matching_docs);
             }

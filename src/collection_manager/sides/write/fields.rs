@@ -39,6 +39,12 @@ pub trait FieldIndexer: Sync + Send + Debug {
 #[derive(Debug)]
 pub struct NumberField {}
 
+impl Default for NumberField {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NumberField {
     pub fn new() -> Self {
         Self {}
@@ -76,6 +82,12 @@ impl FieldIndexer for NumberField {
 
 #[derive(Debug)]
 pub struct BoolField {}
+
+impl Default for BoolField {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl BoolField {
     pub fn new() -> Self {

@@ -33,7 +33,7 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
     description = "List all collections"
 )]
 async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionDTO>> {
-    let collections = writer.list();
+    let collections = writer.list().await;
     Json(collections)
 }
 
@@ -47,7 +47,7 @@ async fn get_collection_by_id(
     writer: State<Arc<CollectionsWriter>>,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collection_dto = writer.get_collection_dto(collection_id);
+    let collection_dto = writer.get_collection_dto(collection_id).await;
 
     match collection_dto {
         Some(collection_dto) => Ok(Json(collection_dto)),
