@@ -1,5 +1,4 @@
 use anyhow::Result;
-use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, Display, EnumIter};
 use tonic::{transport::Channel, Request, Response};
@@ -71,19 +70,18 @@ impl AIServiceBackend {
     }
 }
 
+impl Model {
+    pub const fn dimensions(&self) -> usize {
+        match self {
+            Self::BgeSmall | Self::MultilingualE5Small => 384,
+            Self::BgeBase | Self::MultilingualE5Base => 768,
+            Self::BgeLarge | Self::MultilingualE5Large => 1024,
+        }
+    }
+}
+
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    Hash,
-    EnumIter,
-    Display,
-    AsRefStr,
-    ToSchema,
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, EnumIter, Display, AsRefStr,
 )]
 pub enum Model {
     #[serde(rename = "bge-small")]
@@ -104,16 +102,6 @@ pub enum Model {
     #[serde(rename = "multilingual-e5-large")]
     #[strum(serialize = "multilingual-e5-large")]
     MultilingualE5Large,
-}
-
-impl Model {
-    pub const fn dimensions(&self) -> usize {
-        match self {
-            Self::BgeSmall | Self::MultilingualE5Small => 384,
-            Self::BgeBase | Self::MultilingualE5Base => 768,
-            Self::BgeLarge | Self::MultilingualE5Large => 1024,
-        }
-    }
 }
 
 impl From<Model> for i32 {
