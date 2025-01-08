@@ -31,7 +31,8 @@ pub mod js;
 
 mod metrics;
 
-mod ai_client;
+pub mod ai_client;
+
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
 

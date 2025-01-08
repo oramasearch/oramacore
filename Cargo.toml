@@ -110,9 +110,9 @@ path = "src/bin/insert_documents.rs"
 #[[bin]]
 #name = "vector_index_test"
 #path = "src/bin/vector_index_test.rs"
-#[[bin]]
-#name = "embeddings"
-#path = "src/bin/embeddings/embeddings.rs"
+[[bin]]
+name = "embeddings"
+path = "src/bin/embeddings/embeddings.rs"
 #[[bin]]
 #name = "pq_bench"
 #path = "src/bin/embeddings/pq_bench.rs"

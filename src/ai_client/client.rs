@@ -43,9 +43,10 @@ impl AIServiceBackend {
     const DEFAULT_HOST: &'static str = "localhost";
     const DEFAULT_PORT: &'static str = "50051";
 
-    pub async fn new(config: AIServiceBackendConfig) -> Result<Self> {
+    pub async fn try_new(config: AIServiceBackendConfig) -> Result<Self> {
         let addr = format!(
-            "{}:{}",
+            // We have to keep the "http" schema even though we're talking gRPC.
+            "http://{}:{}",
             config.host.as_deref().unwrap_or(Self::DEFAULT_HOST),
             config.port.as_deref().unwrap_or(Self::DEFAULT_PORT),
         );

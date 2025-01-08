@@ -1,6 +1,6 @@
-from concurrent.futures import ThreadPoolExecutor
 import grpc
 from grpc_reflection.v1alpha import reflection
+from concurrent.futures import ThreadPoolExecutor
 
 import service_pb2
 import service_pb2_grpc
@@ -10,6 +10,7 @@ from service_pb2 import (
     Embedding as EmbeddingProto,
     EmbeddingResponse as EmbeddingResponseProto,
 )
+
 from src.embeddings.models import OramaModelInfo
 
 

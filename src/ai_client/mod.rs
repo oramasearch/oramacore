@@ -1,1 +1,1 @@
-mod client;
+pub mod client;
