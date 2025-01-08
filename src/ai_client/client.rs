@@ -29,22 +29,22 @@ impl From<Intent> for OramaIntent {
 }
 
 #[derive(Debug, Default)]
-pub struct ServiceConfig {
+pub struct AIServiceBackendConfig {
     pub host: Option<String>,
     pub port: Option<String>,
     pub api_key: Option<String>,
 }
 
 #[derive(Debug)]
-pub struct EmbeddingService {
+pub struct AIServiceBackend {
     client: CalculateEmbeddingsServiceClient<Channel>,
 }
 
-impl EmbeddingService {
+impl AIServiceBackend {
     const DEFAULT_HOST: &'static str = "localhost";
     const DEFAULT_PORT: &'static str = "50051";
 
-    pub async fn new(config: ServiceConfig) -> Result<Self> {
+    pub async fn new(config: AIServiceBackendConfig) -> Result<Self> {
         let addr = format!(
             "{}:{}",
             config.host.as_deref().unwrap_or(Self::DEFAULT_HOST),
