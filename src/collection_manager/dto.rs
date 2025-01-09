@@ -77,7 +77,7 @@ impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct CollectionDTO {
     #[schema(inline)]
     pub id: CollectionId,

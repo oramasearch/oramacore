@@ -5,6 +5,32 @@ use std::{
 
 use anyhow::{Context, Result};
 
+pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Vec<PathBuf>> {
+    let mut result = vec![];
+
+    let p: PathBuf = p.as_ref().to_path_buf();
+
+    let entries =
+        std::fs::read_dir(&p).with_context(|| format!("Cannot read directory {:?}", p))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("Cannot get entry from dir {:?}", p))?;
+
+        let is_dir = entry
+            .file_type()
+            .with_context(|| format!("Cannot get file type of {:?}", entry))?
+            .is_dir();
+
+        if !is_dir {
+            continue;
+        }
+
+        let path = entry.path();
+        result.push(path);
+    }
+
+    Ok(result)
+}
+
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {

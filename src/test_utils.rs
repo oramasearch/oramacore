@@ -37,7 +37,7 @@ pub fn create_string_index(
             (
                 field_id,
                 field_name,
-                StringField::new(Arc::new(TextParser::from_language(
+                StringField::new(Arc::new(TextParser::from_locale(
                     crate::nlp::locales::Locale::EN,
                 ))),
             )
@@ -97,7 +97,7 @@ pub fn create_uncommitted_string_field_index_from(
 ) -> Result<UncommittedStringFieldIndex> {
     let index = UncommittedStringFieldIndex::new();
 
-    let string_field = StringField::new(Arc::new(TextParser::from_language(
+    let string_field = StringField::new(Arc::new(TextParser::from_locale(
         crate::nlp::locales::Locale::EN,
     )));
 

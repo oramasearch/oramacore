@@ -251,6 +251,7 @@ impl LoadedModel {
 
         Ok(Self {
             text_embedding,
+            model: super::OramaModel::HuggingFace(model_name.clone()),
             model_name,
             max_input_tokens: hugging_face_model_repo_config.max_input_tokens,
             dimensions: hugging_face_model_repo_config.dimensions,

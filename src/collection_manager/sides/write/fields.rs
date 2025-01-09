@@ -6,16 +6,17 @@ use std::{
 
 use anyhow::Result;
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::dto::FieldId,
-    embeddings::LoadedModel,
+    embeddings::{LoadedModel, OramaModel},
     indexes::number::Number,
     metrics::{
         EmbeddingCalculationLabels, StringCalculationLabels, EMBEDDING_CALCULATION_METRIC,
         STRING_CALCULATION_METRIC,
     },
-    nlp::TextParser,
+    nlp::{locales::Locale, TextParser},
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
 
@@ -24,6 +25,14 @@ use super::{
 };
 
 pub type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SerializedFieldIndexer {
+    Number,
+    Bool,
+    String(Locale),
+    Embedding(OramaModel, Vec<String>),
+}
 
 pub trait FieldIndexer: Sync + Send + Debug {
     fn get_write_operations(
@@ -34,6 +43,8 @@ pub trait FieldIndexer: Sync + Send + Debug {
         field_id: FieldId,
         doc: &FlattenDocument,
     ) -> Result<Vec<WriteOperation>>;
+
+    fn serialized(&self) -> SerializedFieldIndexer;
 }
 
 #[derive(Debug)]
@@ -77,6 +88,10 @@ impl FieldIndexer for NumberField {
         );
 
         Ok(vec![op])
+    }
+
+    fn serialized(&self) -> SerializedFieldIndexer {
+        SerializedFieldIndexer::Number
     }
 }
 
@@ -124,6 +139,10 @@ impl FieldIndexer for BoolField {
         );
 
         Ok(vec![op])
+    }
+
+    fn serialized(&self) -> SerializedFieldIndexer {
+        SerializedFieldIndexer::Bool
     }
 }
 
@@ -224,6 +243,10 @@ impl FieldIndexer for StringField {
 
         Ok(vec![op])
     }
+
+    fn serialized(&self) -> SerializedFieldIndexer {
+        SerializedFieldIndexer::String(self.parser.locale())
+    }
 }
 
 #[derive(Debug)]
@@ -280,5 +303,9 @@ impl FieldIndexer for EmbeddingField {
                 DocumentFieldIndexOperation::IndexEmbedding { value: output },
             ),
         )])
+    }
+
+    fn serialized(&self) -> SerializedFieldIndexer {
+        SerializedFieldIndexer::Embedding(self.model.model(), self.document_fields.clone())
     }
 }

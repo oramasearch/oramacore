@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
@@ -122,11 +119,10 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
-    let document_id_generator = Arc::new(AtomicU64::new(0));
-    let collections_writer =
-        CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
+    let mut collections_writer = CollectionsWriter::new(sender, embedding_service.clone());
     collections_writer
         .load(reader_side.data_dir.join("writer"))
+        .await
         .context("Cannot load collections writer")?;
 
     let mut document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
@@ -141,7 +137,8 @@ pub async fn build_orama(
 
     collections_reader
         .load_from_disk(reader_side.data_dir.join("reader"))
-        .await?;
+        .await
+        .context("Cannot load collection reader")?;
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));

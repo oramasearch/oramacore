@@ -24,7 +24,7 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    CollectionWriteOperation, WriteOperation,
+    CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
 };
 
 pub struct CollectionWriter {
@@ -158,7 +158,7 @@ impl CollectionWriter {
 
     fn get_text_parser(&self, language: LanguageDTO) -> Arc<TextParser> {
         let locale: Locale = language.into();
-        let parser = TextParser::from_language(locale);
+        let parser = TextParser::from_locale(locale);
         Arc::new(parser)
     }
 
@@ -264,6 +264,9 @@ impl CollectionWriter {
 
     pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
         // `&mut self` is not used, but it needed to ensure no other thread is using the collection
+        info!("Committing collection {}", self.id.0);
+
+        std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
         let dump = CollectionDump {
             id: self.id.clone(),
@@ -272,7 +275,11 @@ impl CollectionWriter {
             fields: self
                 .fields
                 .iter()
-                .map(|e| (e.key().clone(), e.value().0.clone()))
+                .map(|e| {
+                    let k = e.key().clone();
+                    let (_, indexer) = e.value();
+                    (k, indexer.serialized())
+                })
                 .collect(),
             document_count: self
                 .document_count
@@ -295,7 +302,53 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) fn load(&mut self, path: PathBuf) -> Result<()> {
+    pub(super) async fn load(
+        &mut self,
+        path: PathBuf,
+        embedding_service: Arc<EmbeddingService>,
+    ) -> Result<()> {
+        let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
+            .context("Cannot open info.json file")?
+            .read_json_data()
+            .context("Cannot deserialize collection info")?;
+
+        self.id = dump.id;
+        self.description = dump.description;
+        self.default_language = dump.default_language;
+        for (name, serialized) in dump.fields {
+            let (value_type, indexer): (ValueType, Arc<Box<dyn FieldIndexer>>) = match serialized {
+                SerializedFieldIndexer::String(locale) => (
+                    ValueType::Scalar(ScalarType::String),
+                    Arc::new(Box::new(StringField::new(Arc::new(
+                        TextParser::from_locale(locale),
+                    )))),
+                ),
+                SerializedFieldIndexer::Number => (
+                    ValueType::Scalar(ScalarType::Number),
+                    Arc::new(Box::new(NumberField::new())),
+                ),
+                SerializedFieldIndexer::Bool => (
+                    ValueType::Scalar(ScalarType::Boolean),
+                    Arc::new(Box::new(BoolField::new())),
+                ),
+                SerializedFieldIndexer::Embedding(model, fields) => (
+                    ValueType::Complex(ComplexType::Embedding),
+                    Arc::new(Box::new(EmbeddingField::new(
+                        embedding_service
+                            .get_model(model)
+                            .await
+                            .context("Cannot load model")?,
+                        fields,
+                    ))),
+                ),
+            };
+            self.fields.insert(name, (value_type, indexer));
+        }
+        self.document_count
+            .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
+        self.field_id_generator = AtomicU16::new(dump.field_id_generator);
+        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
+
         Ok(())
     }
 }
@@ -305,7 +358,7 @@ struct CollectionDump {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
-    fields: Vec<(String, ValueType)>,
+    fields: Vec<(String, SerializedFieldIndexer)>,
     document_count: u64,
     field_id_generator: u16,
     field_id_by_name: Vec<(String, FieldId)>,

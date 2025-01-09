@@ -112,6 +112,7 @@ impl fmt::Display for EncodingIntent {
 
 pub struct LoadedModel {
     text_embedding: TextEmbedding,
+    model: OramaModel,
     model_name: String,
     max_input_tokens: usize,
     dimensions: usize,
@@ -141,16 +142,22 @@ impl Hash for LoadedModel {
 impl LoadedModel {
     fn new(
         text_embedding: TextEmbedding,
+        model: OramaModel,
         model_name: String,
         max_input_tokens: usize,
         dimensions: usize,
     ) -> Self {
         Self {
             text_embedding,
+            model,
             model_name,
             max_input_tokens,
             dimensions,
         }
+    }
+
+    pub fn model(&self) -> OramaModel {
+        self.model.clone()
     }
 
     pub fn dimensions(&self) -> usize {
@@ -305,11 +312,14 @@ impl EmbeddingBuilder {
                 .with_context(|| {
                     format!("Failed to initialize the Fastembed: {orama_embedding_model}")
                 })?;
+                let model_name = orama_embedding_model.to_string();
+                let model_dimensions = orama_embedding_model.dimensions();
                 Ok(LoadedModel::new(
                     text_embedding,
-                    orama_embedding_model.to_string(),
+                    OramaModel::Fastembed(orama_embedding_model),
+                    model_name,
                     512,
-                    orama_embedding_model.dimensions(),
+                    model_dimensions,
                 ))
             }
             OramaModel::HuggingFace(model_name) => {

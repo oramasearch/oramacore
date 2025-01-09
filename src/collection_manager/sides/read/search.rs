@@ -243,7 +243,7 @@ impl CollectionReader {
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let text_parser = TextParser::from_language(crate::nlp::locales::Locale::EN);
+        let text_parser = TextParser::from_locale(crate::nlp::locales::Locale::EN);
         let tokens = text_parser.tokenize(term);
 
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();

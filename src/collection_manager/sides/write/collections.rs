@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use crate::{
     collection_manager::dto::CollectionDTO,
     embeddings::EmbeddingService,
-    file_utils::BufferedFile,
+    file_utils::{list_directory_in_path, BufferedFile},
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -32,12 +32,11 @@ pub struct CollectionsWriter {
 
 impl CollectionsWriter {
     pub fn new(
-        document_id_generator: Arc<AtomicU64>,
         sender: Sender<WriteOperation>,
         embedding_service: Arc<EmbeddingService>,
     ) -> CollectionsWriter {
         CollectionsWriter {
-            document_id_generator,
+            document_id_generator: Default::default(),
             sender,
             embedding_service,
             collections: Default::default(),
@@ -119,6 +118,8 @@ impl CollectionsWriter {
         // while we are saving them to disk
         let mut collections = self.collections.write().await;
 
+        std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
+
         let document_id = self.document_id_generator.load(Ordering::Relaxed);
         BufferedFile::create(data_dir.join("document_id"))
             .context("Cannot create document id file")?
@@ -137,7 +138,41 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    pub fn load(&self, data_dir: PathBuf) -> Result<()> {
+    pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
+        // `&mut self` isn't needed here
+        // but we need to ensure that the method is not called concurrently
+
+        let document_id = BufferedFile::open(data_dir.join("document_id"))
+            .context("Cannot open document id file")?
+            .read_json_data::<u64>()
+            .context("Cannot deserialize document id")?;
+
+        self.document_id_generator
+            .store(document_id, Ordering::Relaxed);
+
+        let collection_dirs =
+            list_directory_in_path(&data_dir).context("Cannot read collection list from disk")?;
+
+        for collection_dir in collection_dirs {
+            let file_name = collection_dir
+                .file_name()
+                .expect("File name is always given at this point");
+            let file_name: String = file_name.to_string_lossy().into();
+
+            let collection_id = CollectionId(file_name);
+
+            let mut collection =
+                CollectionWriter::new(collection_id.clone(), None, LanguageDTO::English);
+            collection
+                .load(collection_dir, self.embedding_service.clone())
+                .await?;
+
+            self.collections
+                .write()
+                .await
+                .insert(collection_id, collection);
+        }
+
         Ok(())
     }
 
