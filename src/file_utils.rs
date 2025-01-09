@@ -5,13 +5,21 @@ use std::{
 
 use anyhow::{Context, Result};
 
-pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Vec<PathBuf>> {
+pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Option<Vec<PathBuf>>> {
     let mut result = vec![];
 
     let p: PathBuf = p.as_ref().to_path_buf();
 
-    let entries =
-        std::fs::read_dir(&p).with_context(|| format!("Cannot read directory {:?}", p))?;
+    let entries = match std::fs::read_dir(&p) {
+        Ok(entries) => entries,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(None);
+            }
+            return Err(e).context(format!("Cannot read directory {:?}", p));
+        }
+    };
+
     for entry in entries {
         let entry = entry.with_context(|| format!("Cannot get entry from dir {:?}", p))?;
 
@@ -28,7 +36,7 @@ pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Vec<PathBuf>> {
         result.push(path);
     }
 
-    Ok(result)
+    Ok(Some(result))
 }
 
 pub struct BufferedFile;

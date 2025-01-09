@@ -57,10 +57,11 @@ async fn start_server() {
         },
         WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
+            data_dir: generate_new_path(),
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            config: IndexesConfig {},
+            config: IndexesConfig::default(),
             data_dir: generate_new_path(),
         },
     )

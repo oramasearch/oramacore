@@ -7,6 +7,7 @@ use crate::{
         WriteOperation,
     },
     embeddings::EmbeddingService,
+    file_utils::list_directory_in_path,
     metrics::{
         CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
         COLLECTION_OPERATION_COUNTER,
@@ -17,11 +18,11 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 use super::collection::CollectionReader;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct IndexesConfig {}
 
 #[derive(Debug)]
@@ -163,25 +164,29 @@ impl CollectionsReader {
 
         let base_dir_for_collections = data_dir.join("collections");
 
-        let files = std::fs::read_dir(&base_dir_for_collections).with_context(|| {
-            format!(
-                "Cannot read collections directory {:?}",
-                base_dir_for_collections
-            )
-        })?;
-        for f in files {
-            let f = f.context("Cannot read file")?;
+        let collection_dirs =
+            list_directory_in_path(&data_dir).context("Cannot read collection list from disk")?;
 
-            let metadata = f.metadata().context("Cannot get file metadata")?;
-
-            if !metadata.is_dir() {
-                warn!("File {:?} is not a directory. Skipping.", f.path());
-                continue;
+        let collection_dirs = match collection_dirs {
+            Some(collection_dirs) => collection_dirs,
+            None => {
+                info!(
+                    "No collections found in data directory {:?}. Skipping load.",
+                    data_dir
+                );
+                return Ok(());
             }
+        };
 
-            info!("Loading collection {:?}", f.path());
+        for collection_dir in collection_dirs {
+            info!("Loading collection {:?}", collection_dir);
 
-            let collection_id = CollectionId(f.file_name().to_string_lossy().to_string());
+            let file_name = collection_dir
+                .file_name()
+                .expect("File name is always given at this point");
+            let file_name: String = file_name.to_string_lossy().into();
+
+            let collection_id = CollectionId(file_name);
 
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),

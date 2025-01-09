@@ -9,13 +9,15 @@
 
     "writer_side": {
         "output": "in-memory",
+        "data_dir": "./.data/writer",
     },
     "reader_side": {
         "input": "in-memory",
 
-        "data": {
-            "data_dir": "./.data",
-            "max_size_per_chunk": 2048,
+        "data_dir": "./.data/reader",
+
+        "config": {
+            "": ""
         }
     },
 

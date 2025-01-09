@@ -52,7 +52,11 @@ mod tests {
         let document_storage: Arc<dyn DocumentStorage> =
             Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
-        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            IndexesConfig::default(),
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -117,7 +121,11 @@ mod tests {
         let document_storage: Arc<dyn DocumentStorage> =
             Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
-        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            IndexesConfig::default(),
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
@@ -192,7 +200,11 @@ mod tests {
         let document_storage: Arc<dyn DocumentStorage> =
             Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
 
-        let reader = CollectionsReader::new(embedding_service, document_storage, IndexesConfig {});
+        let reader = CollectionsReader::new(
+            embedding_service,
+            document_storage,
+            IndexesConfig::default(),
+        );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),

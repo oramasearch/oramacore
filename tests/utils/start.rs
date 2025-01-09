@@ -30,10 +30,11 @@ pub async fn start_all() -> Result<(
         },
         WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
+            data_dir: generate_new_path(),
         },
         ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            config: IndexesConfig {},
+            config: IndexesConfig::default(),
             data_dir: generate_new_path(),
         },
     )

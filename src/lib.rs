@@ -44,6 +44,7 @@ pub enum SideChannelType {
 #[derive(Debug, Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub output: SideChannelType,
+    pub data_dir: PathBuf,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -121,7 +122,7 @@ pub async fn build_orama(
 
     let mut collections_writer = CollectionsWriter::new(sender, embedding_service.clone());
     collections_writer
-        .load(reader_side.data_dir.join("writer"))
+        .load(writer_side.data_dir.join("writer"))
         .await
         .context("Cannot load collections writer")?;
 

@@ -61,7 +61,7 @@ mod tests {
             let collections = CollectionsReader::new(
                 embedding_service.clone(),
                 document_storage.clone(),
-                IndexesConfig {},
+                IndexesConfig::default(),
             );
 
             collections
@@ -131,7 +131,7 @@ mod tests {
         let mut collections = CollectionsReader::new(
             embedding_service.clone(),
             Arc::new(document_storage),
-            IndexesConfig {},
+            IndexesConfig::default(),
         );
 
         collections.load_from_disk(data_dir).await?;

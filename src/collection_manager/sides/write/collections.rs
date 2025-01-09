@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Ok, Result};
 use tokio::sync::{broadcast::Sender, RwLock};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::{
     collection_manager::dto::CollectionDTO,
@@ -138,20 +138,26 @@ impl CollectionsWriter {
         Ok(())
     }
 
+    #[instrument(skip(self, data_dir))]
     pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
         // `&mut self` isn't needed here
         // but we need to ensure that the method is not called concurrently
 
-        let document_id = BufferedFile::open(data_dir.join("document_id"))
-            .context("Cannot open document id file")?
-            .read_json_data::<u64>()
-            .context("Cannot deserialize document id")?;
-
-        self.document_id_generator
-            .store(document_id, Ordering::Relaxed);
+        info!("Loading collections from disk from {:?}", data_dir);
 
         let collection_dirs =
             list_directory_in_path(&data_dir).context("Cannot read collection list from disk")?;
+
+        let collection_dirs = match collection_dirs {
+            Some(collection_dirs) => collection_dirs,
+            None => {
+                info!(
+                    "No collections found in data directory {:?}. Skipping load.",
+                    data_dir
+                );
+                return Ok(());
+            }
+        };
 
         for collection_dir in collection_dirs {
             let file_name = collection_dir
@@ -172,6 +178,14 @@ impl CollectionsWriter {
                 .await
                 .insert(collection_id, collection);
         }
+
+        let document_id = BufferedFile::open(data_dir.join("document_id"))
+            .context("Cannot open document id file")?
+            .read_json_data::<u64>()
+            .context("Cannot deserialize document id")?;
+
+        self.document_id_generator
+            .store(document_id, Ordering::Relaxed);
 
         Ok(())
     }
