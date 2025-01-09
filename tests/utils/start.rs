@@ -4,11 +4,14 @@ use anyhow::Result;
 use rustorama::{
     build_orama,
     collection_manager::sides::{
+        document_storage::DocumentStorageConfig,
         read::{CollectionsReader, IndexesConfig},
         write::CollectionsWriter,
+        CollectionsWriterConfig,
     },
     embeddings::{EmbeddingConfig, EmbeddingPreload},
-    ReadSideConfig, WriteSideConfig,
+    web_server::HttpConfig,
+    ReadSideConfig, RustoramaConfig, WriteSideConfig,
 };
 use tempdir::TempDir;
 
@@ -22,22 +25,34 @@ pub async fn start_all() -> Result<(
     Arc<CollectionsReader>,
     tokio::task::JoinHandle<()>,
 )> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(
-        EmbeddingConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+        http: HttpConfig {
+            host: "127.0.0.1".parse().unwrap(),
+            port: 2222,
+            allow_cors: false,
+            with_prometheus: false,
+        },
+        embeddings: EmbeddingConfig {
             cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         },
-        WriteSideConfig {
+        writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
-            data_dir: generate_new_path(),
+            config: CollectionsWriterConfig {
+                data_dir: generate_new_path(),
+            },
         },
-        ReadSideConfig {
+        reader_side: ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            config: IndexesConfig::default(),
+            config: IndexesConfig {
+                data_dir: generate_new_path(),
+            },
+        },
+        doc: DocumentStorageConfig {
             data_dir: generate_new_path(),
         },
-    )
+    })
     .await?;
 
     let collections_reader_inner = collections_reader.clone().unwrap();

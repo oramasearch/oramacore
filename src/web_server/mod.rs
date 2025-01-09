@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
+use crate::collection_manager::sides::{document_storage::DocumentStorage, read::CollectionsReader, write::CollectionsWriter};
 
 mod api;
 
@@ -25,6 +25,7 @@ pub struct HttpConfig {
 pub struct WebServer {
     collections_writer: Option<Arc<CollectionsWriter>>,
     collections_reader: Option<Arc<CollectionsReader>>,
+    doc: Option<Arc<dyn DocumentStorage>>,
     prometheus_handler: Option<PrometheusHandle>,
 }
 
@@ -32,11 +33,13 @@ impl WebServer {
     pub fn new(
         collections_writer: Option<Arc<CollectionsWriter>>,
         collections_reader: Option<Arc<CollectionsReader>>,
+        doc: Option<Arc<dyn DocumentStorage>>,
         prometheus_handler: Option<PrometheusHandle>,
     ) -> Self {
         Self {
             collections_writer,
             collections_reader,
+            doc,
             prometheus_handler,
         }
     }
@@ -47,6 +50,7 @@ impl WebServer {
         let router = api_config(
             self.collections_writer,
             self.collections_reader,
+            self.doc,
             self.prometheus_handler,
         );
 

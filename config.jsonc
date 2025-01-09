@@ -7,17 +7,22 @@
         "with_prometheus": true,
     },
 
+    "doc": {
+        "data_dir": "./.data/doc",
+    },
+
     "writer_side": {
         "output": "in-memory",
-        "data_dir": "./.data/writer",
+
+        "config": {
+            "data_dir": "./.data/writer",
+        }
     },
     "reader_side": {
         "input": "in-memory",
 
-        "data_dir": "./.data/reader",
-
         "config": {
-            "": ""
+            "data_dir": "./.data/reader",
         }
     },
 

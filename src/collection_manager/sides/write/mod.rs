@@ -3,7 +3,7 @@ mod collections;
 mod fields;
 mod operation;
 
-pub use collections::CollectionsWriter;
+pub use collections::{CollectionsWriter, CollectionsWriterConfig};
 pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
@@ -37,12 +37,14 @@ mod tests {
             .with_context(|| "Failed to initialize the EmbeddingService")?;
         let embedding_service = Arc::new(embedding_service);
 
-        let dump_path = generate_new_path();
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
 
         let collection = {
             let (sender, receiver) = tokio::sync::broadcast::channel(1_0000);
 
-            let writer = CollectionsWriter::new(sender, embedding_service.clone());
+            let writer = CollectionsWriter::new(sender, embedding_service.clone(), config.clone());
 
             let collection_id = CollectionId("test-collection".to_string());
             writer
@@ -71,7 +73,7 @@ mod tests {
 
             let collections = writer.list().await;
 
-            writer.commit(dump_path.clone()).await?;
+            writer.commit().await?;
 
             drop(receiver);
 
@@ -81,10 +83,10 @@ mod tests {
         let after = {
             let (sender, receiver) = tokio::sync::broadcast::channel(1_0000);
 
-            let mut writer = CollectionsWriter::new(sender, embedding_service.clone());
+            let mut writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
 
             writer
-                .load(dump_path)
+                .load()
                 .await
                 .context("Cannot load collections writer")?;
 

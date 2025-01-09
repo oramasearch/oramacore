@@ -13,7 +13,7 @@ mod tests {
     };
 
     use anyhow::Result;
-    use document_storage::{DiskDocumentStorage, DocumentStorage};
+    use document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig};
 
     use read::{CollectionsReader, IndexesConfig};
     use serde_json::json;
@@ -48,14 +48,21 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let writer = CollectionsWriter::new(sender, embedding_service.clone());
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
         let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
+                data_dir: generate_new_path(),
+            })?);
 
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            IndexesConfig::default(),
+            IndexesConfig {
+                data_dir: generate_new_path(),
+            },
         );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
@@ -117,14 +124,21 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let writer = CollectionsWriter::new(sender, embedding_service.clone());
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
         let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
+                data_dir: generate_new_path(),
+            })?);
 
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            IndexesConfig::default(),
+            IndexesConfig {
+                data_dir: generate_new_path(),
+            },
         );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
@@ -196,14 +210,21 @@ mod tests {
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let writer = CollectionsWriter::new(sender, embedding_service.clone());
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
         let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(generate_new_path())?);
+            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
+                data_dir: generate_new_path(),
+            })?);
 
         let reader = CollectionsReader::new(
             embedding_service,
             document_storage,
-            IndexesConfig::default(),
+            IndexesConfig {
+                data_dir: generate_new_path(),
+            },
         );
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {

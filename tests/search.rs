@@ -5,8 +5,10 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
+use rustorama::collection_manager::sides::document_storage::DocumentStorageConfig;
 use rustorama::collection_manager::sides::read::IndexesConfig;
-use rustorama::{build_orama, ReadSideConfig, WriteSideConfig};
+use rustorama::collection_manager::sides::CollectionsWriterConfig;
+use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tempdir::TempDir;
@@ -49,22 +51,34 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(
-        EmbeddingConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+        http: HttpConfig {
+            host: "127.0.0.1".parse().unwrap(),
+            port: 2222,
+            allow_cors: false,
+            with_prometheus: false,
+        },
+        embeddings: EmbeddingConfig {
             cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         },
-        WriteSideConfig {
+        writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
-            data_dir: generate_new_path(),
+            config: CollectionsWriterConfig {
+                data_dir: generate_new_path(),
+            },
         },
-        ReadSideConfig {
+        reader_side: ReadSideConfig {
             input: rustorama::SideChannelType::InMemory,
-            config: IndexesConfig::default(),
+            config: IndexesConfig {
+                data_dir: generate_new_path(),
+            },
+        },
+        doc: DocumentStorageConfig {
             data_dir: generate_new_path(),
         },
-    )
+    })
     .await
     .unwrap();
 

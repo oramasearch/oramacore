@@ -148,11 +148,7 @@ pub fn create_committed_string_field_index(
 ) -> Result<Option<CommittedStringFieldIndex>> {
     let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents)?;
 
-    println!("index {:#?}", index);
-
     index.commit(generate_new_path())?;
-
-    println!("index {:#?}", index);
 
     Ok(index.remove_committed_field(FieldId(1)))
 }

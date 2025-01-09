@@ -22,8 +22,10 @@ use tracing::{debug, error, info, instrument};
 
 use super::collection::CollectionReader;
 
-#[derive(Debug, Deserialize, Clone, Default)]
-pub struct IndexesConfig {}
+#[derive(Debug, Deserialize, Clone)]
+pub struct IndexesConfig {
+    pub data_dir: PathBuf,
+}
 
 #[derive(Debug)]
 pub struct CollectionsReader {
@@ -142,11 +144,12 @@ impl CollectionsReader {
         CollectionReadLock::try_new(r, id)
     }
 
-    #[instrument(skip(self, data_dir))]
-    pub async fn load_from_disk(&mut self, data_dir: PathBuf) -> Result<()> {
+    #[instrument(skip(self))]
+    pub async fn load(&mut self) -> Result<()> {
+        let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
-        match std::fs::exists(&data_dir) {
+        match std::fs::exists(data_dir) {
             Err(e) => {
                 return Err(anyhow::anyhow!(
                     "Error while checking if the data directory exists: {:?}",
@@ -158,14 +161,14 @@ impl CollectionsReader {
             }
             Ok(false) => {
                 info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
+                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
             }
         }
 
         let base_dir_for_collections = data_dir.join("collections");
 
         let collection_dirs =
-            list_directory_in_path(&data_dir).context("Cannot read collection list from disk")?;
+            list_directory_in_path(&base_dir_for_collections).context("Cannot read collection list from disk")?;
 
         let collection_dirs = match collection_dirs {
             Some(collection_dirs) => collection_dirs,
@@ -206,9 +209,11 @@ impl CollectionsReader {
         Ok(())
     }
 
-    #[instrument(skip(self, data_dir))]
-    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        match std::fs::exists(&data_dir) {
+    #[instrument(skip(self))]
+    pub async fn commit(&self) -> Result<()> {
+        let data_dir = &self.indexes_config.data_dir;
+
+        match std::fs::exists(data_dir) {
             Err(e) => {
                 return Err(anyhow::anyhow!(
                     "Error while checking if the data directory exists: {:?}",
@@ -220,7 +225,7 @@ impl CollectionsReader {
             }
             Ok(false) => {
                 info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
+                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
             }
         };
 

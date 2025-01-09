@@ -24,7 +24,30 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
         .add(get_collection_by_id())
         .add(create_collection())
         .add(add_documents())
+        .add(dump_all())
         .with_state(writers)
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v0/writer/dump_all",
+    description = "List all collections"
+)]
+async fn dump_all(writer: State<Arc<CollectionsWriter>>) -> impl IntoResponse {
+
+    match writer.commit().await {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Error dumping all collections: {}", e);
+            // e.chain()
+            //     .skip(1)
+            //     .for_each(|cause| error!("because: {}", cause));
+        }
+    }
+    // writer.commit(data_dir)
+
+    // Json(collections)
+    Json(())
 }
 
 #[endpoint(

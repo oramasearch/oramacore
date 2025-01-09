@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Ok, Result};
+use serde::Deserialize;
 use tokio::sync::{broadcast::Sender, RwLock};
 use tracing::{info, instrument, warn};
 
@@ -28,18 +29,26 @@ pub struct CollectionsWriter {
     sender: Sender<WriteOperation>,
     embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
+    config: CollectionsWriterConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CollectionsWriterConfig {
+    pub data_dir: PathBuf,
 }
 
 impl CollectionsWriter {
     pub fn new(
         sender: Sender<WriteOperation>,
         embedding_service: Arc<EmbeddingService>,
+        config: CollectionsWriterConfig,
     ) -> CollectionsWriter {
         CollectionsWriter {
             document_id_generator: Default::default(),
             sender,
             embedding_service,
             collections: Default::default(),
+            config,
         }
     }
 
@@ -112,13 +121,15 @@ impl CollectionsWriter {
         collection.map(|c| c.as_dto())
     }
 
-    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+    pub async fn commit(&self) -> Result<()> {
+        let data_dir = &self.config.data_dir;
+
         // This `write lock` will not change the content of the collections
         // But it is requered to ensure that the collections are not being modified
         // while we are saving them to disk
         let mut collections = self.collections.write().await;
 
-        std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
+        std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
 
         let document_id = self.document_id_generator.load(Ordering::Relaxed);
         BufferedFile::create(data_dir.join("document_id"))
@@ -138,15 +149,16 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    #[instrument(skip(self, data_dir))]
-    pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
+    #[instrument(skip(self))]
+    pub async fn load(&mut self) -> Result<()> {
         // `&mut self` isn't needed here
         // but we need to ensure that the method is not called concurrently
+        let data_dir = &self.config.data_dir;
 
         info!("Loading collections from disk from {:?}", data_dir);
 
         let collection_dirs =
-            list_directory_in_path(&data_dir).context("Cannot read collection list from disk")?;
+            list_directory_in_path(data_dir).context("Cannot read collection list from disk")?;
 
         let collection_dirs = match collection_dirs {
             Some(collection_dirs) => collection_dirs,

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
 use tracing::warn;
 
@@ -18,9 +19,9 @@ pub trait DocumentStorage: Sync + Send + Debug {
 
     async fn get_total_documents(&self) -> Result<usize>;
 
-    fn commit(&self, path: PathBuf) -> Result<()>;
+    fn commit(&self) -> Result<()>;
 
-    fn load(&mut self, path: PathBuf) -> Result<()>;
+    fn load(&mut self) -> Result<()>;
 }
 
 // The `CommittedDiskDocumentStorage` implementation is not optimal.
@@ -88,6 +89,11 @@ impl CommittedDiskDocumentStorage {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct DocumentStorageConfig {
+    pub data_dir: PathBuf,
+}
+
 #[derive(Debug)]
 pub struct DiskDocumentStorage {
     uncommitted: RwLock<HashMap<DocumentId, Document>>,
@@ -95,12 +101,14 @@ pub struct DiskDocumentStorage {
 }
 
 impl DiskDocumentStorage {
-    pub fn try_new(doc_dir: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&doc_dir).context("Cannot create document directory")?;
+    pub fn try_new(config: DocumentStorageConfig) -> Result<Self> {
+        std::fs::create_dir_all(&config.data_dir).context("Cannot create document directory")?;
 
         Ok(Self {
             uncommitted: Default::default(),
-            committed: CommittedDiskDocumentStorage { path: doc_dir },
+            committed: CommittedDiskDocumentStorage {
+                path: config.data_dir,
+            },
         })
     }
 }
@@ -158,7 +166,7 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(total)
     }
 
-    fn commit(&self, _: PathBuf) -> Result<()> {
+    fn commit(&self) -> Result<()> {
         // This implementation is wrong:
         // in the mean time we "dran" + "collection" + "write on FS"
         // The documents aren't reachable. So the search output will not contain them.
@@ -177,8 +185,7 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(())
     }
 
-    fn load(&mut self, path: PathBuf) -> Result<()> {
-        self.committed = CommittedDiskDocumentStorage { path };
+    fn load(&mut self) -> Result<()> {
         Ok(())
     }
 }

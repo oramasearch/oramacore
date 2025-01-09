@@ -1,10 +1,11 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    document_storage::{DiskDocumentStorage, DocumentStorage},
+    document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
     read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
+    CollectionsWriterConfig,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -44,21 +45,21 @@ pub enum SideChannelType {
 #[derive(Debug, Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub output: SideChannelType,
-    pub data_dir: PathBuf,
+    pub config: CollectionsWriterConfig,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
-    pub data_dir: PathBuf,
     pub config: IndexesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RustoramaConfig {
-    http: HttpConfig,
-    embeddings: EmbeddingConfig,
-    writer_side: WriteSideConfig,
-    reader_side: ReadSideConfig,
+    pub http: HttpConfig,
+    pub embeddings: EmbeddingConfig,
+    pub writer_side: WriteSideConfig,
+    pub reader_side: ReadSideConfig,
+    pub doc: DocumentStorageConfig,
 }
 
 pub async fn start(config: RustoramaConfig) -> Result<()> {
@@ -72,8 +73,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         None
     };
 
-    let (writer, reader, mut receiver) =
-        build_orama(config.embeddings, config.writer_side, config.reader_side).await?;
+    let (writer, reader, doc, mut receiver) = build_orama(config.clone()).await?;
 
     let collections_reader = reader.clone().unwrap();
     tokio::spawn(async move {
@@ -87,21 +87,28 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         config.http.host, config.http.port
     );
 
-    let web_server = WebServer::new(writer, reader, prometheus_hadler);
+    let web_server = WebServer::new(writer, reader, doc, prometheus_hadler);
     web_server.start(config.http).await?;
 
     Ok(())
 }
 
 pub async fn build_orama(
-    embedding_config: EmbeddingConfig,
-    writer_side: WriteSideConfig,
-    reader_side: ReadSideConfig,
+    config: RustoramaConfig,
 ) -> Result<(
     Option<Arc<CollectionsWriter>>,
     Option<Arc<CollectionsReader>>,
+    Option<Arc<dyn DocumentStorage>>,
     Receiver<WriteOperation>,
 )> {
+    let RustoramaConfig {
+        embeddings: embedding_config,
+        writer_side,
+        reader_side,
+        doc,
+        ..
+    } = config;
+
     let embedding_service = EmbeddingService::try_new(embedding_config)
         .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
@@ -120,29 +127,35 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
-    let mut collections_writer = CollectionsWriter::new(sender, embedding_service.clone());
+    let mut collections_writer =
+        CollectionsWriter::new(sender, embedding_service.clone(), writer_side.config);
     collections_writer
-        .load(writer_side.data_dir.join("writer"))
+        .load()
         .await
         .context("Cannot load collections writer")?;
 
-    let mut document_storage = DiskDocumentStorage::try_new(reader_side.data_dir.join("docs"))
-        .context("Cannot create document storage")?;
+    let mut document_storage =
+        DiskDocumentStorage::try_new(doc).context("Cannot create document storage")?;
     document_storage
-        .load(reader_side.data_dir.join("docs"))
+        .load()
         .context("Cannot load document storage")?;
 
     let document_storage: Arc<dyn DocumentStorage> = Arc::new(document_storage);
     let mut collections_reader =
-        CollectionsReader::new(embedding_service, document_storage, reader_side.config);
+        CollectionsReader::new(embedding_service, document_storage.clone(), reader_side.config);
 
     collections_reader
-        .load_from_disk(reader_side.data_dir.join("reader"))
+        .load()
         .await
         .context("Cannot load collection reader")?;
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));
 
-    Ok((collections_writer, collections_reader, receiver))
+    Ok((
+        collections_writer,
+        collections_reader,
+        Some(document_storage),
+        receiver,
+    ))
 }

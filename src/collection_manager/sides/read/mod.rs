@@ -19,7 +19,7 @@ mod tests {
         collection_manager::{
             dto::{FieldId, LanguageDTO, TypedField},
             sides::{
-                document_storage::{DiskDocumentStorage, DocumentStorage},
+                document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
                 write::{
                     CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
                     Term, TermStringField, WriteOperation,
@@ -55,13 +55,17 @@ mod tests {
         let collection_id = CollectionId("my-collection-name".to_string());
 
         {
-            let document_storage = DiskDocumentStorage::try_new(data_dir.join("docs"))?;
-            let document_storage = Arc::new(document_storage);
+            let document_storage: Arc<dyn DocumentStorage> =
+                Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
+                    data_dir: data_dir.join("docs"),
+                })?);
 
             let collections = CollectionsReader::new(
                 embedding_service.clone(),
                 document_storage.clone(),
-                IndexesConfig::default(),
+                IndexesConfig {
+                    data_dir: data_dir.join("indexes"),
+                },
             );
 
             collections
@@ -120,21 +124,25 @@ mod tests {
                 ))
                 .await?;
 
-            collections.commit(data_dir.clone()).await?;
+            collections.commit().await?;
 
-            document_storage.commit(data_dir.join("docs"))?;
+            document_storage.commit()?;
         }
 
-        let mut document_storage = DiskDocumentStorage::try_new(data_dir.join("docs"))?;
-        document_storage.load(data_dir.join("docs"))?;
+        let mut document_storage = DiskDocumentStorage::try_new(DocumentStorageConfig {
+            data_dir: data_dir.join("docs"),
+        })?;
+        document_storage.load()?;
 
         let mut collections = CollectionsReader::new(
             embedding_service.clone(),
             Arc::new(document_storage),
-            IndexesConfig::default(),
+            IndexesConfig {
+                data_dir: data_dir.join("indexes"),
+            },
         );
 
-        collections.load_from_disk(data_dir).await?;
+        collections.load().await?;
 
         let reader = collections
             .get_collection(collection_id.clone())
