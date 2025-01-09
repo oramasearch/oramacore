@@ -25,7 +25,7 @@ pub async fn start_all() -> Result<(
     Arc<CollectionsReader>,
     tokio::task::JoinHandle<()>,
 )> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, _, mut receiver) = build_orama(RustoramaConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,

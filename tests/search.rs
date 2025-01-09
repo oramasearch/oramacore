@@ -51,7 +51,7 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, doc, mut receiver) = build_orama(RustoramaConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -82,7 +82,7 @@ async fn start_server() {
     .await
     .unwrap();
 
-    let web_server = WebServer::new(collections_writer, collections_reader.clone(), None);
+    let web_server = WebServer::new(collections_writer, collections_reader.clone(), doc, None);
 
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
