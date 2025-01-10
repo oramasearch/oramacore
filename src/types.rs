@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CollectionId(pub String);
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct DocumentId(pub u64);
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Document {
     #[serde(flatten)]

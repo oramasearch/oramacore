@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug},
     hash::Hash,
+    path::PathBuf,
     sync::Arc,
 };
 use strum::EnumIter;
@@ -29,7 +30,7 @@ pub enum EmbeddingPreload {
 #[derive(Debug, Deserialize, Clone)]
 pub struct EmbeddingConfig {
     pub preload: EmbeddingPreload,
-    pub cache_path: String,
+    pub cache_path: PathBuf,
     pub hugging_face: Option<HuggingFaceConfiguration>,
 }
 
@@ -111,6 +112,7 @@ impl fmt::Display for EncodingIntent {
 
 pub struct LoadedModel {
     text_embedding: TextEmbedding,
+    model: OramaModel,
     model_name: String,
     max_input_tokens: usize,
     dimensions: usize,
@@ -140,16 +142,22 @@ impl Hash for LoadedModel {
 impl LoadedModel {
     fn new(
         text_embedding: TextEmbedding,
+        model: OramaModel,
         model_name: String,
         max_input_tokens: usize,
         dimensions: usize,
     ) -> Self {
         Self {
             text_embedding,
+            model,
             model_name,
             max_input_tokens,
             dimensions,
         }
+    }
+
+    pub fn model(&self) -> OramaModel {
+        self.model.clone()
     }
 
     pub fn dimensions(&self) -> usize {
@@ -178,6 +186,7 @@ impl LoadedModel {
     }
 }
 
+#[derive(Debug)]
 pub struct EmbeddingService {
     loaded_models: DashMap<OramaModel, Arc<LoadedModel>>,
     builder: EmbeddingBuilder,
@@ -214,6 +223,7 @@ impl EmbeddingService {
         match loaded_model {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
+                info!("Model not found in the cache. Loading the model...");
                 let loaded_model = self.builder.try_get(model).await?;
                 let loaded_model = Arc::new(loaded_model);
                 entry.insert(loaded_model.clone());
@@ -267,6 +277,7 @@ impl EmbeddingService {
     }
 }
 
+#[derive(Debug)]
 pub struct EmbeddingBuilder {
     config: EmbeddingConfig,
 }
@@ -282,9 +293,9 @@ impl EmbeddingBuilder {
 
     #[instrument(skip(self), fields(orama_model = ?orama_model))]
     async fn try_get(&self, orama_model: OramaModel) -> Result<LoadedModel> {
-        info!("Loading model");
         match orama_model {
             OramaModel::Fastembed(orama_embedding_model) => {
+                info!("Loading Fastembed model: {orama_embedding_model}");
                 let embedding_model = match orama_embedding_model {
                     OramaFastembedModel::GTESmall => EmbeddingModel::BGESmallENV15,
                     OramaFastembedModel::GTEBase => EmbeddingModel::BGEBaseENV15,
@@ -297,19 +308,24 @@ impl EmbeddingBuilder {
                 let text_embedding = TextEmbedding::try_new(
                     InitOptions::new(embedding_model)
                         .with_show_download_progress(false)
-                        .with_cache_dir(self.config.cache_path.clone().into()),
+                        .with_cache_dir(self.config.cache_path.clone()),
                 )
                 .with_context(|| {
                     format!("Failed to initialize the Fastembed: {orama_embedding_model}")
                 })?;
+                let model_name = orama_embedding_model.to_string();
+                let model_dimensions = orama_embedding_model.dimensions();
                 Ok(LoadedModel::new(
                     text_embedding,
-                    orama_embedding_model.to_string(),
+                    OramaModel::Fastembed(orama_embedding_model),
+                    model_name,
                     512,
-                    orama_embedding_model.dimensions(),
+                    model_dimensions,
                 ))
             }
             OramaModel::HuggingFace(model_name) => {
+                info!("Loading HuggingFace model: {model_name}");
+
                 let hugging_face_config = self
                     .config
                     .hugging_face
@@ -338,7 +354,7 @@ mod tests {
 
         // We don't want to download the model every time we run the test
         // So we use a standard temp directory, without any cleanup logic
-        let temp_dir = std::env::temp_dir().to_str().unwrap().to_string();
+        let temp_dir = std::env::temp_dir();
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
             cache_path: temp_dir.clone(),

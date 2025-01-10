@@ -5,14 +5,11 @@ use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    document_storage::DocumentId,
     embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
-    types::{Document, ValueType},
+    types::{CollectionId, Document, DocumentId, ValueType},
 };
-
-use super::CollectionId;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
@@ -80,12 +77,12 @@ impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct CollectionDTO {
     #[schema(inline)]
     pub id: CollectionId,
     pub description: Option<String>,
-    pub document_count: u32,
+    pub document_count: u64,
     #[schema(inline)]
     pub fields: HashMap<String, ValueType>,
 }
@@ -120,10 +117,19 @@ pub struct NumberFacetDefinition {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BoolFacetDefinition {
+    #[serde(rename = "true")]
+    pub r#true: bool,
+    #[serde(rename = "false")]
+    pub r#false: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 
 pub enum FacetDefinition {
     Number(#[schema(inline)] NumberFacetDefinition),
-    Bool,
+    #[serde(untagged)]
+    Bool(#[schema(inline)] BoolFacetDefinition),
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

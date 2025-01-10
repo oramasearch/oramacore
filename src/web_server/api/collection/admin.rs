@@ -14,9 +14,8 @@ use crate::{
     collection_manager::{
         dto::{CollectionDTO, CreateCollectionOptionDTO},
         sides::write::CollectionsWriter,
-        CollectionId,
     },
-    types::DocumentList,
+    types::{CollectionId, DocumentList},
 };
 
 pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
@@ -25,7 +24,29 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
         .add(get_collection_by_id())
         .add(create_collection())
         .add(add_documents())
+        .add(dump_all())
         .with_state(writers)
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v0/writer/dump_all",
+    description = "List all collections"
+)]
+async fn dump_all(writer: State<Arc<CollectionsWriter>>) -> impl IntoResponse {
+    match writer.commit().await {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Error dumping all collections: {}", e);
+            // e.chain()
+            //     .skip(1)
+            //     .for_each(|cause| error!("because: {}", cause));
+        }
+    }
+    // writer.commit(data_dir)
+
+    // Json(collections)
+    Json(())
 }
 
 #[endpoint(
@@ -34,7 +55,7 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
     description = "List all collections"
 )]
 async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionDTO>> {
-    let collections = writer.list();
+    let collections = writer.list().await;
     Json(collections)
 }
 
@@ -48,7 +69,7 @@ async fn get_collection_by_id(
     writer: State<Arc<CollectionsWriter>>,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collection_dto = writer.get_collection_dto(collection_id);
+    let collection_dto = writer.get_collection_dto(collection_id).await;
 
     match collection_dto {
         Some(collection_dto) => Ok(Json(collection_dto)),

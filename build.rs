@@ -1,5 +1,4 @@
 use std::{collections::HashMap, env, fs, path::Path};
-use tonic_build;
 
 fn main() {
     tonic_build::compile_protos("./src/ai_server/service.proto").unwrap();

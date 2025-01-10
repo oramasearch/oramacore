@@ -1,10 +1,11 @@
 use crate::nlp::stop_words::{get_stop_words, StopWords};
 use anyhow::Result;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Locale {
     AR,
     BG,

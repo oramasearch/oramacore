@@ -4,12 +4,11 @@ use anyhow::Result;
 use ordered_float::NotNan;
 use tracing::info;
 
-use crate::{
-    capped_heap::CappedHeap, collection_manager::dto::FieldId, document_storage::DocumentId,
-};
+use crate::{capped_heap::CappedHeap, collection_manager::dto::FieldId, types::DocumentId};
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
+#[derive(Debug)]
 pub struct UncommittedVectorIndex {
     data: RwLock<Vec<(DocumentId, FieldId, Vec<VectorWithMagnetude>)>>,
 }

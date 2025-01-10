@@ -2,7 +2,7 @@
 mod start;
 
 use anyhow::Result;
-use rustorama::collection_manager::{sides::read::CollectionsReader, CollectionId};
+use rustorama::{collection_manager::sides::read::CollectionsReader, types::CollectionId};
 use serde_json::json;
 use start::start_all;
 use std::{sync::Arc, time::Duration};
