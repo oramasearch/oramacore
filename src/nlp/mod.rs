@@ -15,7 +15,7 @@ use crate::types::StringParser;
 
 pub struct TextParser {
     locale: Locale,
-    pub tokenizer: Tokenizer,
+    tokenizer: Tokenizer,
     stemmer: Stemmer,
 }
 
@@ -45,7 +45,7 @@ impl Clone for TextParser {
 }
 
 impl TextParser {
-    pub fn from_language(locale: Locale) -> Self {
+    pub fn from_locale(locale: Locale) -> Self {
         let (tokenizer, stemmer) = match locale {
             Locale::IT => (Tokenizer::italian(), Stemmer::create(Algorithm::Italian)),
             Locale::EN => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
@@ -57,6 +57,10 @@ impl TextParser {
             tokenizer,
             stemmer,
         }
+    }
+
+    pub fn locale(&self) -> Locale {
+        self.locale
     }
 
     pub fn tokenize(&self, input: &str) -> Vec<String> {
@@ -89,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_tokenize() {
-        let parser = TextParser::from_language(Locale::EN);
+        let parser = TextParser::from_locale(Locale::EN);
 
         let output = parser.tokenize("Hello, world!");
         assert_eq!(output, vec!["hello", "world"]);
@@ -100,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_tokenize_and_stem() {
-        let parser = TextParser::from_language(Locale::EN);
+        let parser = TextParser::from_locale(Locale::EN);
 
         let output = parser.tokenize_and_stem("Hello, world!");
         assert_eq!(

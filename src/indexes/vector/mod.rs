@@ -3,8 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::collection_manager::dto::FieldId;
-use crate::document_storage::DocumentId;
+use crate::{collection_manager::dto::FieldId, types::DocumentId};
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedState;
 use dashmap::{DashMap, Entry};
@@ -14,6 +13,7 @@ use uncommitted::UncommittedVectorIndex;
 mod committed;
 mod uncommitted;
 
+#[derive(Debug)]
 pub struct VectorIndex {
     uncommitted: UncommittedVectorIndex,
     commited: DashMap<FieldId, CommittedState>,
@@ -189,7 +189,7 @@ mod tests {
 
         let data = (0..N)
             .map(|i| {
-                let doc_id = DocumentId(i as u32);
+                let doc_id = DocumentId(i as u64);
                 let vector: Vec<_> = (0..DIM)
                     .map(|_| {
                         let x = rand::random::<i8>();

@@ -2,38 +2,34 @@ pub mod document_storage;
 pub mod read;
 pub mod write;
 
+#[cfg(any(test, feature = "benchmarking"))]
+pub use write::*;
+
 #[cfg(test)]
 mod tests {
     use std::{
         collections::{HashMap, HashSet},
-        sync::{atomic::AtomicU32, Arc},
+        sync::Arc,
     };
 
     use anyhow::Result;
-    use document_storage::{DocumentStorage, InMemoryDocumentStorage};
 
-    use read::{CollectionsReader, DataConfig};
+    use read::{CollectionsReader, IndexesConfig};
     use serde_json::json;
 
     use write::CollectionsWriter;
 
     use crate::{
-        collection_manager::{
-            dto::{
-                CreateCollectionOptionDTO, EmbeddingTypedField, Filter, FulltextMode, Limit,
-                SearchMode, SearchParams, TypedField,
-            },
-            CollectionId,
+        collection_manager::dto::{
+            CreateCollectionOptionDTO, Filter, FulltextMode, Limit, SearchMode, SearchParams,
         },
-        embeddings::{
-            EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
-        },
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
         indexes::number::{Number, NumberFilter},
+        test_utils::generate_new_path,
+        types::CollectionId,
     };
 
     use super::*;
-
-    use crate::test_utils::generate_new_path;
 
     #[tokio::test]
     async fn test_sides_error_on_unknow_filter_field() -> Result<()> {
@@ -42,37 +38,30 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
         .await?;
-        let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
-        let writer =
-            CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
 
-        let reader = CollectionsReader::new(
+        let embedding_service = Arc::new(embedding_service);
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 
@@ -115,37 +104,29 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
-        let writer =
-            CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
 
-        let reader = CollectionsReader::new(
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 
@@ -198,37 +179,29 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir().to_string_lossy().to_string(),
+            cache_path: std::env::temp_dir(),
             hugging_face: None,
             preload: EmbeddingPreload::Bool(false),
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
-        let document_id_generator = Arc::new(AtomicU32::new(0));
-        let writer =
-            CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
-        let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
+        let config = CollectionsWriterConfig {
+            data_dir: generate_new_path(),
+        };
+        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
 
-        let reader = CollectionsReader::new(
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
-            DataConfig {
+            IndexesConfig {
                 data_dir: generate_new_path(),
-                max_size_per_chunk: 2048,
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 

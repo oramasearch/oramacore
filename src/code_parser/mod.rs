@@ -135,7 +135,7 @@ impl NewParser {
     fn get<R>(&self, language: CodeLanguage, f: impl FnOnce(&mut Parser) -> R) -> Result<R> {
         let v = self.parsers.get_mut(&language);
         match v {
-            Some(mut parser) => return Ok(f(parser.value_mut())),
+            Some(mut parser) => Ok(f(parser.value_mut())),
             None => {
                 let mut parser = Parser::new();
 

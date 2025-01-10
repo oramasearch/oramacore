@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs,
-    path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use tempdir::TempDir;
@@ -11,21 +6,22 @@ use tempdir::TempDir;
 use crate::{
     collection_manager::{
         dto::FieldId,
-        sides::write::{CollectionWriteOperation, FieldIndexer, StringField, WriteOperation},
-        CollectionId,
+        sides::{
+            CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer, StringField,
+            WriteOperation,
+        },
     },
-    document_storage::DocumentId,
     indexes::string::{
-        merge::merge, CommittedStringFieldIndex, StringIndex, UncommittedStringFieldIndex,
+        CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex,
     },
     nlp::TextParser,
-    types::Document,
+    types::{CollectionId, Document, DocumentId},
 };
 
 pub fn generate_new_path() -> PathBuf {
-    let tmp_dir = TempDir::new("test").unwrap();
+    let tmp_dir = TempDir::new("test").expect("Cannot create temp dir");
     let dir = tmp_dir.path().to_path_buf();
-    fs::create_dir_all(dir.clone()).unwrap();
+    fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
 }
 
@@ -33,7 +29,7 @@ pub fn create_string_index(
     fields: Vec<(FieldId, String)>,
     documents: Vec<Document>,
 ) -> Result<StringIndex> {
-    let index = StringIndex::new(Arc::new(AtomicU64::new(0)));
+    let index = StringIndex::new(StringIndexConfig {});
 
     let string_fields: Vec<_> = fields
         .into_iter()
@@ -41,14 +37,14 @@ pub fn create_string_index(
             (
                 field_id,
                 field_name,
-                StringField::new(Arc::new(TextParser::from_language(
+                StringField::new(Arc::new(TextParser::from_locale(
                     crate::nlp::locales::Locale::EN,
                 ))),
             )
         })
         .collect();
     for (id, doc) in documents.into_iter().enumerate() {
-        let document_id = DocumentId(id as u32);
+        let document_id = DocumentId(id as u64);
         let flatten = doc.into_flatten();
 
         let operations: Vec<_> = string_fields
@@ -70,13 +66,14 @@ pub fn create_string_index(
             match operation {
                 WriteOperation::Collection(
                     _,
-                    CollectionWriteOperation::IndexString {
-                        field_length,
-                        terms,
-                        field_id,
+                    CollectionWriteOperation::Index(
                         doc_id,
-                        ..
-                    },
+                        field_id,
+                        DocumentFieldIndexOperation::IndexString {
+                            field_length,
+                            terms,
+                        },
+                    ),
                 ) => {
                     index.insert(doc_id, field_id, field_length, terms)?;
                 }
@@ -96,16 +93,16 @@ pub fn create_uncommitted_string_field_index(
 
 pub fn create_uncommitted_string_field_index_from(
     documents: Vec<Document>,
-    starting_doc_id: u32,
+    starting_doc_id: u64,
 ) -> Result<UncommittedStringFieldIndex> {
     let index = UncommittedStringFieldIndex::new();
 
-    let string_field = StringField::new(Arc::new(TextParser::from_language(
+    let string_field = StringField::new(Arc::new(TextParser::from_locale(
         crate::nlp::locales::Locale::EN,
     )));
 
     for (id, doc) in documents.into_iter().enumerate() {
-        let document_id = DocumentId(starting_doc_id + id as u32);
+        let document_id = DocumentId(starting_doc_id + id as u64);
         let flatten = doc.into_flatten();
         let operations = string_field
             .get_write_operations(
@@ -123,11 +120,14 @@ pub fn create_uncommitted_string_field_index_from(
             match operation {
                 WriteOperation::Collection(
                     _,
-                    CollectionWriteOperation::IndexString {
-                        field_length,
-                        terms,
-                        ..
-                    },
+                    CollectionWriteOperation::Index(
+                        _,
+                        _,
+                        DocumentFieldIndexOperation::IndexString {
+                            field_length,
+                            terms,
+                        },
+                    ),
                 ) => {
                     index
                         .insert(document_id, field_length, terms)
@@ -145,16 +145,10 @@ pub fn create_uncommitted_string_field_index_from(
 
 pub fn create_committed_string_field_index(
     documents: Vec<Document>,
-) -> Result<(CommittedStringFieldIndex, Arc<AtomicU64>)> {
-    let uncommitted = create_uncommitted_string_field_index(documents)?;
+) -> Result<Option<CommittedStringFieldIndex>> {
+    let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents)?;
 
-    let posting_id_generator: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
-    let committed_index = merge(
-        posting_id_generator.clone(),
-        uncommitted,
-        CommittedStringFieldIndex::new(None, HashMap::new(), 0, HashMap::new(), 0),
-        generate_new_path(),
-    )?;
+    index.commit(generate_new_path())?;
 
-    Ok((committed_index, posting_id_generator))
+    Ok(index.remove_committed_field(FieldId(1)))
 }

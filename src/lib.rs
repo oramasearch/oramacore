@@ -1,10 +1,10 @@
-use std::sync::{atomic::AtomicU32, Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    document_storage::{DocumentStorage, InMemoryDocumentStorage},
-    read::{CollectionsReader, DataConfig},
+    read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
+    CollectionsWriterConfig,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -20,7 +20,6 @@ pub mod code_parser;
 pub mod nlp;
 
 pub mod collection_manager;
-pub mod document_storage;
 
 pub mod web_server;
 
@@ -32,6 +31,9 @@ pub mod js;
 mod metrics;
 
 pub mod ai_client;
+mod file_utils;
+
+mod merger;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
@@ -45,19 +47,20 @@ pub enum SideChannelType {
 #[derive(Debug, Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub output: SideChannelType,
+    pub config: CollectionsWriterConfig,
 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
-    pub data: DataConfig,
+    pub config: IndexesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RustoramaConfig {
-    http: HttpConfig,
-    embeddings: EmbeddingConfig,
-    writer_side: WriteSideConfig,
-    reader_side: ReadSideConfig,
+    pub http: HttpConfig,
+    pub embeddings: EmbeddingConfig,
+    pub writer_side: WriteSideConfig,
+    pub reader_side: ReadSideConfig,
 }
 
 pub async fn start(config: RustoramaConfig) -> Result<()> {
@@ -71,8 +74,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         None
     };
 
-    let (writer, reader, mut receiver) =
-        build_orama(config.embeddings, config.writer_side, config.reader_side).await?;
+    let (writer, reader, mut receiver) = build_orama(config.clone()).await?;
 
     let collections_reader = reader.clone().unwrap();
     tokio::spawn(async move {
@@ -93,14 +95,19 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
 }
 
 pub async fn build_orama(
-    embedding_config: EmbeddingConfig,
-    writer_side: WriteSideConfig,
-    reader_side: ReadSideConfig,
+    config: RustoramaConfig,
 ) -> Result<(
     Option<Arc<CollectionsWriter>>,
     Option<Arc<CollectionsReader>>,
     Receiver<WriteOperation>,
 )> {
+    let RustoramaConfig {
+        embeddings: embedding_config,
+        writer_side,
+        reader_side,
+        ..
+    } = config;
+
     let embedding_service = EmbeddingService::try_new(embedding_config)
         .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
@@ -119,13 +126,20 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
-    let document_id_generator = Arc::new(AtomicU32::new(0));
-    let collections_writer =
-        CollectionsWriter::new(document_id_generator, sender, embedding_service.clone());
+    let mut collections_writer =
+        CollectionsWriter::new(sender, embedding_service.clone(), writer_side.config);
+    collections_writer
+        .load()
+        .await
+        .context("Cannot load collections writer")?;
 
-    let document_storage: Arc<dyn DocumentStorage> = Arc::new(InMemoryDocumentStorage::new());
-    let collections_reader =
-        CollectionsReader::new(embedding_service, document_storage, reader_side.data);
+    let mut collections_reader = CollectionsReader::try_new(embedding_service, reader_side.config)
+        .context("Cannot create collections reader")?;
+
+    collections_reader
+        .load()
+        .await
+        .context("Cannot load collection reader")?;
 
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));
