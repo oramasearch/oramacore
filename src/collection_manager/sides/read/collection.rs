@@ -50,11 +50,8 @@ impl CollectionReader {
     ) -> Result<Self> {
         // let collection_data_dir = indexes_config.data_dir.join(&id.0);
 
-        let vector_index = VectorIndex::try_new(VectorIndexConfig {
-            // FIX ME!!
-            base_path: PathBuf::new(),
-        })
-        .context("Cannot create vector index during collection creation")?;
+        let vector_index = VectorIndex::try_new(VectorIndexConfig {})
+            .context("Cannot create vector index during collection creation")?;
 
         let string_index = StringIndex::new(StringIndexConfig {});
 
@@ -107,6 +104,9 @@ impl CollectionReader {
         self.number_index
             .load(collection_data_dir.join("numbers"))
             .context("Cannot load number index")?;
+        self.vector_index
+            .load(collection_data_dir.join("vectors"))
+            .context("Cannot load vectors index")?;
 
         let coll_desc_file_path = collection_data_dir.join("desc.json");
         let dump: CollectionDescriptorDump = BufferedFile::open(coll_desc_file_path)
@@ -129,6 +129,9 @@ impl CollectionReader {
         self.number_index
             .commit(commit_config.folder_to_commit.join("numbers"))
             .context("Cannot commit number index")?;
+        self.vector_index
+            .commit(commit_config.folder_to_commit.join("vectors"))
+            .context("Cannot commit vectors index")?;
 
         let dump = CollectionDescriptorDump {
             id: self.id.clone(),

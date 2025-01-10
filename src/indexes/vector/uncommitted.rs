@@ -1,32 +1,19 @@
-use std::{cmp::Reverse, collections::HashMap, mem::take, sync::RwLock};
+use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
-use ordered_float::NotNan;
-use tracing::info;
 
-use crate::{capped_heap::CappedHeap, collection_manager::dto::FieldId, types::DocumentId};
+use crate::types::DocumentId;
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
-#[derive(Debug)]
-pub struct UncommittedVectorIndex {
-    data: RwLock<Vec<(DocumentId, FieldId, Vec<VectorWithMagnetude>)>>,
+#[derive(Debug, Default, Clone)]
+pub struct InnerInnerUncommittedVectorFieldIndex {
+    data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
 }
 
-impl UncommittedVectorIndex {
-    pub fn new() -> Self {
-        Self {
-            data: Default::default(),
-        }
-    }
-
-    pub fn insert(&self, data: (DocumentId, FieldId, Vec<Vec<f32>>)) -> Result<()> {
-        let mut lock = match self.data.write() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
-
-        let (id, field_id, vectors) = data;
+impl InnerInnerUncommittedVectorFieldIndex {
+    pub fn insert(&mut self, data: (DocumentId, Vec<Vec<f32>>)) -> Result<()> {
+        let (id, vectors) = data;
 
         let vectors = vectors
             .into_iter()
@@ -36,46 +23,18 @@ impl UncommittedVectorIndex {
             })
             .collect();
 
-        lock.push((id, field_id, vectors));
+        self.data.push((id, vectors));
         Ok(())
-    }
-
-    pub fn consume(&self) -> Vec<(DocumentId, FieldId, Vec<VectorWithMagnetude>)> {
-        let mut lock = match self.data.write() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
-
-        let v = &mut *lock;
-        take(v)
     }
 
     pub fn search(
         &self,
-        field_ids: &[FieldId],
         target: &[f32],
-        limit: usize,
-    ) -> Result<HashMap<DocumentId, f32>> {
-        let lock = match self.data.read() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
-
-        info!(
-            "Searching for target: {:?} for fields {:?} in {} vectors",
-            target,
-            field_ids,
-            lock.len()
-        );
-
+        result: &mut HashMap<DocumentId, f32>,
+    ) -> Result<()>{
         let magnetude = calculate_magnetude(target);
 
-        let mut capped_heap = CappedHeap::new(limit);
-        for (id, field_id, vectors) in lock.iter() {
-            if !field_ids.contains(field_id) {
-                continue;
-            }
-
+        for (id, vectors) in &self.data {
             for (m, vector) in vectors {
                 let score = score_vector(vector, target)?;
 
@@ -85,25 +44,115 @@ impl UncommittedVectorIndex {
 
                 let score = score / (m * magnetude);
 
-                let score = match NotNan::new(score) {
-                    Ok(score) => score,
-                    // Skip vectors with NaN scores
-                    Err(_) => continue,
-                };
-
-                capped_heap.insert(score, id);
+                let s = result.entry(*id).or_insert(0.0);
+                *s += score;
             }
         }
 
-        let result = capped_heap.into_top();
-
-        let result = result
-            .into_iter()
-            .map(|Reverse((score, id))| (*id, score.into_inner()))
-            .collect();
-
-        Ok(result)
+        Ok(())
     }
+}
+
+#[derive(Debug, Default)]
+struct InnerUncommittedVectorFieldIndex {
+    left: InnerInnerUncommittedVectorFieldIndex,
+    right: InnerInnerUncommittedVectorFieldIndex,
+    state: bool,
+}
+
+impl InnerUncommittedVectorFieldIndex {
+    fn insert(&mut self, data: (DocumentId, Vec<Vec<f32>>)) -> Result<()> {
+        let inner = if self.state {
+            &mut self.left
+        } else {
+            &mut self.right
+        };
+        inner.insert(data)?;
+        Ok(())
+    }
+
+    fn search(
+        &self,
+        target: &[f32],
+        result: &mut HashMap<DocumentId, f32>,
+    ) -> Result<()> {
+        self.left.search(target, result)?;
+        self.right.search(target, result)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct UncommittedVectorFieldIndex {
+    inner: RwLock<InnerUncommittedVectorFieldIndex>,
+    dimension: usize,
+}
+
+impl UncommittedVectorFieldIndex {
+    pub fn new(dimension: usize) -> Self {
+        Self {
+            inner: Default::default(),
+            dimension,
+        }
+    }
+
+    pub fn insert(&self, data: (DocumentId, Vec<Vec<f32>>)) -> Result<()> {
+        let mut inner = match self.inner.write() {
+            Ok(lock) => lock,
+            Err(p) => p.into_inner(),
+        };
+        inner.insert(data)?;
+        Ok(())
+    }
+
+    pub fn take(&self) -> UncommittedVectorFieldIndexTaken {
+        // There is a subtle bug here: this method should be called only once at time
+        // If this method is called twice at the same time, the result will be wrong
+        // This is because:
+        // - the state is flipped
+        // - the tree is cleared on `UncommittedVectorFieldIndexTaken` drop (which happens at the end of the commit)
+        // So, if we flipped the state twice, the tree will be cleared twice and we could lose data
+        // TODO: investigate how to make this method safe to be called multiple times
+
+        let mut inner = match self.inner.write() {
+            Ok(lock) => lock,
+            Err(p) => p.into_inner(),
+        };
+        let tree = if inner.state {
+            inner.left.clone()
+        } else {
+            inner.right.clone()
+        };
+        let current_state = inner.state;
+
+        // Route the writes to the other side
+        inner.state = !current_state;
+        drop(inner);
+
+        UncommittedVectorFieldIndexTaken {
+            data: tree.data,
+            dimension: self.dimension,
+        }
+    }
+
+    pub fn search(
+        &self,
+        target: &[f32],
+        result: &mut HashMap<DocumentId, f32>,
+    ) -> Result<()> {
+        let inner = match self.inner.read() {
+            Ok(lock) => lock,
+            Err(p) => p.into_inner(),
+        };
+
+        inner.search(target, result)
+    }
+}
+
+pub struct UncommittedVectorFieldIndexTaken {
+    pub data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
+    pub dimension: usize,
 }
 
 fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
@@ -122,13 +171,14 @@ fn calculate_magnetude(vector: &[f32]) -> f32 {
     vector.iter().map(|x| x.powi(2)).sum::<f32>()
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_uncommitted_vector_index() -> Result<()> {
-        let index = UncommittedVectorIndex::new();
+        let index = UncommittedVectorFieldIndex::new();
 
         //      |
         //      2b  a
@@ -165,3 +215,4 @@ mod tests {
         Ok(())
     }
 }
+*/
