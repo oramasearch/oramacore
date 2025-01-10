@@ -1,5 +1,5 @@
 use core::{f32, panic};
-use std::{collections::HashSet, path::PathBuf};
+use std::{collections::HashSet, fmt::Debug, path::PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -263,15 +263,12 @@ And this should not happen. Return the last page."#);
         })
     }
 
-    fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        for page in &self.pages {
-            page.commit(data_dir.join(format!("page_{}.bin", page.id.0)))?;
-        }
-
-        BufferedFile::create(data_dir.join("bounds.json"))
+    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        let bounds_file = data_dir.join("bounds.json");
+        BufferedFile::create(bounds_file.clone())
             .context("Cannot create bounds file")?
             .write_json_data(&self.bounds)
-            .context("Cannot serialize bounds to file")?;
+            .context("Cannot serialize bounds")?;
 
         Ok(())
     }
@@ -297,8 +294,12 @@ impl CommittedNumberFieldIndex {
             min: Number::F32(f32::NEG_INFINITY),
             max: Number::F32(f32::INFINITY),
         };
+
+        let mut prev = Number::F32(f32::NEG_INFINITY);
         let mut current_page_count = 0;
         for (value, doc_ids) in iter {
+            assert!(value > prev);
+            prev = value;
             current_page_count += doc_ids.len();
 
             // 1000 is a magic number.
@@ -390,7 +391,7 @@ fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) ->
     }
 }
 
-pub fn merge<K: Ord + Eq, V, VV: Extend<V> + IntoIterator<Item = V>, I1: Iterator<Item = (K, VV)>, I2: Iterator<Item = (K, VV)>>(
+pub fn merge<K: Ord + Eq + Debug, V: Debug, VV: Extend<V> + IntoIterator<Item = V> + Debug, I1: Iterator<Item = (K, VV)>, I2: Iterator<Item = (K, VV)>>(
     iter1: I1,
     iter2: I2,
 ) -> impl Iterator<Item = (K, VV)> {
@@ -411,7 +412,7 @@ mod tests {
 
     use anyhow::Result;
 
-    use crate::{indexes::number::{committed::merge, Number, NumberFilter}, test_utils::generate_new_path, types::DocumentId};
+    use crate::{indexes::number::{committed::merge, Number}, test_utils::generate_new_path, types::DocumentId};
 
     use super::CommittedNumberFieldIndex;
 
@@ -529,56 +530,6 @@ mod tests {
         let output = committed_number_field_index
             .filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;
         assert_eq!(output, HashSet::from_iter([DocumentId(0)]));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_indexes_number_commit_load() -> Result<()> {
-        let data: Vec<(_, HashSet<_>)> = vec![
-            (Number::I32(0), HashSet::from_iter([DocumentId(0)])),
-            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
-            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
-            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
-            (Number::I32(4), HashSet::from_iter([DocumentId(4)])),
-            (Number::I32(5), HashSet::from_iter([DocumentId(5)])),
-            (Number::I32(6), HashSet::from_iter([DocumentId(6)])),
-            (Number::I32(7), HashSet::from_iter([DocumentId(7)])),
-            (Number::I32(8), HashSet::from_iter([DocumentId(8)])),
-            (Number::I32(9), HashSet::from_iter([DocumentId(9)])),
-        ];
-
-        let data_dir = generate_new_path();
-
-        let committed_number_field_index =
-            CommittedNumberFieldIndex::from_iter(data, data_dir.clone())?;
-
-        committed_number_field_index.commit(data_dir.clone())?;
-
-        let after = CommittedNumberFieldIndex::load(data_dir)?;
-
-        let output = after.filter(&NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
-        assert_eq!(
-            output,
-            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
-        );
-
-        let new_data_dir = generate_new_path();
-        let merged = CommittedNumberFieldIndex::from_iter(
-            merge(
-            vec![
-                (Number::I32(10), HashSet::from_iter([DocumentId(10)])),
-                (Number::I32(11), HashSet::from_iter([DocumentId(11)])),
-            ].into_iter(),
-            after.iter(),
-            ),
-            new_data_dir
-        )?;
-        let output = merged.filter(&NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
-        assert_eq!(
-            output,
-            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
-        );
 
         Ok(())
     }

@@ -18,14 +18,6 @@ struct InnerUncommittedNumberFieldIndex {
 }
 
 impl InnerUncommittedNumberFieldIndex {
-    fn new() -> Self {
-        Self {
-            left: BTreeMap::new(),
-            right: BTreeMap::new(),
-            state: false,
-        }
-    }
-
     fn insert(&mut self, value: Number, document_id: DocumentId) -> Result<()> {
         let doc_ids = if self.state {
             &mut self.left
@@ -50,12 +42,6 @@ pub struct UncommittedNumberFieldIndex {
 }
 
 impl UncommittedNumberFieldIndex {
-    pub fn new() -> Self {
-        Self {
-            inner: RwLock::new(InnerUncommittedNumberFieldIndex::new()),
-        }
-    }
-
     pub fn insert(&self, value: Number, document_id: DocumentId) -> Result<()> {
         let mut inner = match self.inner.write() {
             Ok(lock) => lock,
@@ -98,8 +84,11 @@ impl UncommittedNumberFieldIndex {
         inner.state = !current_state;
         drop(inner);
 
+        let tree_len = tree.len();
+
         Ok(UncommittedNumberFieldIndexTaken {
-            tree,
+            tree: Box::new(tree.into_iter()),
+            tree_len,
             index: self,
             state: current_state,
         })
@@ -107,7 +96,8 @@ impl UncommittedNumberFieldIndex {
 }
 
 pub struct UncommittedNumberFieldIndexTaken<'index> {
-    tree: BTreeMap<Number, HashSet<DocumentId>>,
+    tree: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>>,
+    tree_len: usize,
     state: bool,
     index: &'index UncommittedNumberFieldIndex,
 }
@@ -115,7 +105,7 @@ impl Iterator for UncommittedNumberFieldIndexTaken<'_> {
     type Item = (Number, HashSet<DocumentId>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.tree.iter().next().map(|(k, v)| (*k, v.clone()))
+        self.tree.next()
     }
 }
 impl Drop for UncommittedNumberFieldIndexTaken<'_> {
@@ -131,7 +121,7 @@ impl Drop for UncommittedNumberFieldIndexTaken<'_> {
 }
 impl UncommittedNumberFieldIndexTaken<'_> {
     pub fn len(&self) -> usize {
-        self.tree.len()
+        self.tree_len
     }
 }
 
@@ -166,5 +156,31 @@ fn inner_filter(
             tree.range((Bound::Included(min), Bound::Included(max)))
                 .flat_map(|(_, doc_ids)| doc_ids.iter().cloned()),
         ),
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_indexes_number_uncommitted() -> Result<()> {
+        let index = UncommittedNumberFieldIndex::default();
+
+        index.insert(Number::I32(1), DocumentId(1))?;
+        index.insert(Number::I32(2), DocumentId(2))?;
+        index.insert(Number::I32(3), DocumentId(3))?;
+
+        let taken = index.take()?;
+
+        let collected: Vec<_> = taken.into_iter().collect();
+        assert_eq!(collected, vec![
+            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
+            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
+            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
+        ]);
+
+        Ok(())
     }
 }

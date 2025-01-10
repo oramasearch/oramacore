@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{fmt::Debug, iter::Peekable};
 
 
 pub struct MergedIterator<
@@ -37,9 +37,9 @@ impl<
 }
 
 impl<
-        K: Ord + Eq,
-        V1,
-        V2,
+        K: Ord + Eq + Debug,
+        V1: Debug,
+        V2: Debug,
         I1: Iterator<Item = (K, V1)>,
         I2: Iterator<Item = (K, V2)>,
         Transformer: FnMut(&K, V1) -> V2,
@@ -86,5 +86,27 @@ impl<
             (None, Some(_)) => self.iter2.next(),
             (None, None) => None,
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merger_iterator() {
+        let iter1 = vec![(1_u32, vec![1_u32]), (2, vec![2]), (3, vec![3])].into_iter();
+        let iter2 = std::iter::empty();
+        let transformer = |_:  &u32, v: Vec<u32>| v;
+        let merger = |_:  &u32, mut v1: Vec<u32>, v2: Vec<u32>| {
+            v1.extend(v2);
+            v1
+        };
+        let merged_iter = MergedIterator::new(iter1, iter2, transformer, merger);
+
+        let collected: Vec<_> = merged_iter.collect();
+
+        assert_eq!(collected, vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]);
     }
 }

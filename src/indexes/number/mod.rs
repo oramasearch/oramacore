@@ -38,7 +38,8 @@ impl NumberIndex {
             "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
             doc_id, field_id, value
         );
-        let uncommitted = self.uncommitted.entry(field_id).or_default();
+        let uncommitted = self.uncommitted.entry(field_id)
+            .or_default();
         uncommitted.insert(value, doc_id)?;
 
         Ok(())
@@ -60,17 +61,33 @@ impl NumberIndex {
 
     #[instrument(skip(self, data_dir))]
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        std::fs::create_dir_all(&data_dir)
+            .context("Cannot create data directory for number index")?;
+
         let all_fields = self.uncommitted
             .iter()
             .map(|entry| *entry.key())
             .chain(self.committed.iter().map(|entry| *entry.key()))
             .collect::<HashSet<_>>();
 
-        for entry in &self.uncommitted {
-            let field_id = entry.key();
-            let uncommitted = entry.value();
+        BufferedFile::create(data_dir.join("info.json"))
+            .context("Cannot create info.json")?
+            .write_json_data(&all_fields)
+            .context("Cannot serialize into info.json")?;
+
+        for field_id in all_fields {
+
+            let uncommitted = self.uncommitted.get(&field_id);
+            let uncommitted = match uncommitted {
+                Some(uncommitted) => uncommitted,
+                None => {
+                    debug!(?field_id, "No uncommitted data for field");
+                    continue
+                },
+            };
+
             let data = uncommitted.take()?;
-            let committed = self.committed.get(field_id);
+            let committed = self.committed.get(&field_id);
 
             let base_dir = data_dir.join(format!("{}", field_id.0));
 
@@ -91,19 +108,16 @@ impl NumberIndex {
                 );
                 CommittedNumberFieldIndex::from_iter(
                     merged,
-                    base_dir,
+                    base_dir.clone(),
                 )
             } else {
-                CommittedNumberFieldIndex::from_iter(data, base_dir)
+                CommittedNumberFieldIndex::from_iter(data, base_dir.clone())
             }?;
 
-            self.committed.insert(*field_id, new_committed_number);
-        }
+            new_committed_number.commit(base_dir)?;
 
-        BufferedFile::create(data_dir.join("info.json"))
-            .context("Cannot create info.json")?
-            .write_json_data(&all_fields)
-            .context("Cannot serialize into info.json")?;
+            self.committed.insert(field_id, new_committed_number);
+        }
 
         Ok(())
     }
@@ -289,6 +303,75 @@ mod tests {
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
             .unwrap();
         assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_indexes_number_commit_load() -> Result<()> {
+        let data: Vec<(_, HashSet<_>)> = vec![
+            (Number::I32(0), HashSet::from_iter([DocumentId(0)])),
+            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
+            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
+            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
+            (Number::I32(4), HashSet::from_iter([DocumentId(4)])),
+            (Number::I32(5), HashSet::from_iter([DocumentId(5)])),
+            (Number::I32(6), HashSet::from_iter([DocumentId(6)])),
+            (Number::I32(7), HashSet::from_iter([DocumentId(7)])),
+            (Number::I32(8), HashSet::from_iter([DocumentId(8)])),
+            (Number::I32(9), HashSet::from_iter([DocumentId(9)])),
+        ];
+        let field_id = FieldId(0);
+
+        let index = NumberIndex::try_new(NumberIndexConfig{})?;
+        for d in data {
+            for doc_id in d.1 {
+                index.add(doc_id, field_id, d.0)?;
+            }
+        }
+
+        // Query on uncommitted data
+        let output = index.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
+        );
+
+        let data_dir = generate_new_path();
+        index.commit(data_dir.clone())?;
+
+        let mut after = NumberIndex::try_new(NumberIndexConfig{})?;
+        after.load(data_dir)?;
+
+        // Query on committed data
+        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
+        );
+
+        after.add(DocumentId(10), field_id, Number::I32(10))?;
+        after.add(DocumentId(11), field_id, Number::I32(11))?;
+
+        // Query on committed & uncommitted data
+        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
+        );
+
+        let new_data_dir = generate_new_path();
+        after.commit(new_data_dir.clone())?;
+
+        let mut after = NumberIndex::try_new(NumberIndexConfig{})?;
+        after.load(new_data_dir)?;
+
+        // Query on committed (and merged) data
+        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
+        );
 
         Ok(())
     }

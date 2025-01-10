@@ -1,6 +1,5 @@
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
-use num_traits::Float;
 use serde::{ser::Error, Deserialize, Serialize};
 use serde_json::Value;
 
