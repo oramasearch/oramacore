@@ -22,11 +22,11 @@ class EmbeddingsModels:
     def load_models(self):
         loaded_models = {}
 
-        if not self.config.dynamically_load_models:
+        if not getattr(self.config, "dynamically_load_models", False):
             loaded_models = {
                 item.name: TextEmbedding(
                     model_name=item.value["model_name"],
-                    providers=self.config.execution_providers,
+                    providers=self.config.embeddings.execution_providers,
                 )
                 for item in self.selected_models
             }

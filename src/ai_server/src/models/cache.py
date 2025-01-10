@@ -41,11 +41,12 @@ class VLLMCacheManager:
             if cached:
                 return cached.model
 
-            # Always ensure we have room for the new model
+            # Only clear if we're loading a different model and need space
             if len(self.cache) >= self.max_parallel_models:
-                # Remove all existing models to free up memory
-                print("Clearing cache to make room for new model...")
-                self._clear_cache()
+                current_models = set(self.cache.keys())
+                if model_path not in current_models:
+                    print("Clearing cache to make room for new model...")
+                    self._clear_cache()
 
             return self._load_and_cache_model(model_path, tensor_parallel_size)
 
@@ -57,6 +58,10 @@ class VLLMCacheManager:
         return None
 
     def _load_and_cache_model(self, model_path: str, tensor_parallel_size: int) -> LLM:
+        # Check if we already have this exact model loaded
+        if model_path in self.cache:
+            return self.cache[model_path].model
+
         print(f"Loading vLLM model from {model_path}...")
 
         try:
@@ -90,11 +95,14 @@ class VLLMCacheManager:
         while True:
             with self.lock:
                 now = time.time()
-                keys_to_delete = [key for key, value in self.cache.items() if now - value.last_used > self.cache.ttl]
+                # Only clean up if models are actually expired
+                expired_models = [key for key, value in self.cache.items() if now - value.last_used > self.cache.ttl]
 
-                if keys_to_delete:
-                    print(f"Cleaning up {len(keys_to_delete)} expired models...")
-                    self._clear_cache()
+                if expired_models:
+                    print(f"Cleaning up {len(expired_models)} expired models...")
+                    for model_key in expired_models:
+                        del self.cache[model_key]
+                    torch.cuda.empty_cache()
 
             time.sleep(self.cleanup_interval)
 

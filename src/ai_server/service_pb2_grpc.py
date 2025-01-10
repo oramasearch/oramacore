@@ -101,3 +101,200 @@ class CalculateEmbeddingsService(object):
             metadata,
             _registered_method=True,
         )
+
+
+class LLMServiceStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CallLLM = channel.unary_unary(
+            "/orama_ai_service.LLMService/CallLLM",
+            request_serializer=service__pb2.LLMRequest.SerializeToString,
+            response_deserializer=service__pb2.LLMResponse.FromString,
+            _registered_method=True,
+        )
+        self.CallLLMStream = channel.unary_stream(
+            "/orama_ai_service.LLMService/CallLLMStream",
+            request_serializer=service__pb2.LLMRequest.SerializeToString,
+            response_deserializer=service__pb2.LLMStreamResponse.FromString,
+            _registered_method=True,
+        )
+
+
+class LLMServiceServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def CallLLM(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def CallLLMStream(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_LLMServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        "CallLLM": grpc.unary_unary_rpc_method_handler(
+            servicer.CallLLM,
+            request_deserializer=service__pb2.LLMRequest.FromString,
+            response_serializer=service__pb2.LLMResponse.SerializeToString,
+        ),
+        "CallLLMStream": grpc.unary_stream_rpc_method_handler(
+            servicer.CallLLMStream,
+            request_deserializer=service__pb2.LLMRequest.FromString,
+            response_serializer=service__pb2.LLMStreamResponse.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers("orama_ai_service.LLMService", rpc_method_handlers)
+
+
+# This class is part of an EXPERIMENTAL API.
+class LLMService(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CallLLM(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/orama_ai_service.LLMService/CallLLM",
+            service__pb2.LLMRequest.SerializeToString,
+            service__pb2.LLMResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def CallLLMStream(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            "/orama_ai_service.LLMService/CallLLMStream",
+            service__pb2.LLMRequest.SerializeToString,
+            service__pb2.LLMStreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+
+class VisionServiceStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CallVision = channel.unary_unary(
+            "/orama_ai_service.VisionService/CallVision",
+            request_serializer=service__pb2.VisionRequest.SerializeToString,
+            response_deserializer=service__pb2.VisionResponse.FromString,
+            _registered_method=True,
+        )
+
+
+class VisionServiceServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def CallVision(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_VisionServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        "CallVision": grpc.unary_unary_rpc_method_handler(
+            servicer.CallVision,
+            request_deserializer=service__pb2.VisionRequest.FromString,
+            response_serializer=service__pb2.VisionResponse.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.VisionService", rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers("orama_ai_service.VisionService", rpc_method_handlers)
+
+
+# This class is part of an EXPERIMENTAL API.
+class VisionService(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CallVision(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/orama_ai_service.VisionService/CallVision",
+            service__pb2.VisionRequest.SerializeToString,
+            service__pb2.VisionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )

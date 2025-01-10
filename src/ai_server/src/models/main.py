@@ -7,6 +7,7 @@ from src.models.cache import VLLMCacheManager
 class ModelsManager:
     def __init__(self, config):
         self.config = config
+        self.current_model_key = None
 
         self.cache = VLLMCacheManager(
             cache_size=1,
@@ -21,18 +22,21 @@ class ModelsManager:
             if key not in ["__dict__", "__weakref__", "__doc__"]
         }
 
-        self.models: Dict[str, Any] = {}
+        self.models = {}
+        self.sampling_params = {}
 
     def _load_model(self, model_key: str):
-        """
-        Load a vLLM model.
-        """
+        """Load a vLLM model."""
         if model_key not in self.model_configs:
             raise ValueError(f"Invalid model key: {model_key}")
 
         model_config = self.model_configs[model_key]
         if model_config is None:
             raise ValueError(f"Configuration for model {model_key} is None")
+
+        # If we already have this model loaded, return it
+        if model_key == self.current_model_key and model_key in self.models:
+            return self.models[model_key]
 
         try:
             model = self.cache.get_model(
@@ -45,24 +49,26 @@ class ModelsManager:
                 max_tokens=model_config.sampling_params.max_tokens,
             )
 
-            return {"model": model, "config": {"sampling_params": sampling_params}}
+            model_data = {"model": model, "config": {"sampling_params": sampling_params}}
+            self.models[model_key] = model_data
+            self.current_model_key = model_key
+            return model_data
 
         except Exception as e:
             print(f"Error loading model {model_key}: {e}")
             return None
 
     def get_model(self, model_key: str) -> Optional[Dict[str, Any]]:
-        """
-        Get or load a model by its key.
-        """
-        if model_key not in self.models or self.models[model_key] is None:
-            self.models[model_key] = self._load_model(model_key)
-        return self.models[model_key]
+        """Get or load a model by its key."""
+        # Check if we already have this model and it's the current one
+        if model_key == self.current_model_key and model_key in self.models:
+            return self.models[model_key]
+
+        # Otherwise, load or reload the model
+        return self._load_model(model_key)
 
     def generate_text(self, model_key: str, prompt: str) -> str:
-        """
-        Generate text using the specified model.
-        """
+        """Generate text using the specified model."""
         model_data = self.get_model(model_key)
         if not model_data:
             raise RuntimeError(f"Model {model_key} not loaded")

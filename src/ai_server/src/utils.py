@@ -8,24 +8,30 @@ from dataclasses import dataclass, field
 class EmbeddingsConfig:
     default_model_group: Optional[str] = "en"
     dynamically_load_models: Optional[bool] = False
-    execution_providers: Optional[List[str]] = field(
-        default_factory=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    )
+    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CPUExecutionProvider"])
     total_threads: Optional[int] = 8
+
+    def __post_init__(self):
+        available_providers = ["CUDAExecutionProvider", "AzureExecutionProvider", "CPUExecutionProvider"]
+        self.execution_providers = [
+            provider for provider in self.execution_providers if provider in available_providers
+        ]
+        if not self.execution_providers:
+            self.execution_providers = ["CPUExecutionProvider"]
 
 
 @dataclass
 class SamplingParams:
-    temperature: float
-    top_p: float
-    max_tokens: int
+    temperature: float = 0.8
+    top_p: float = 0.95
+    max_tokens: int = 512
 
 
 @dataclass
 class ModelConfig:
-    id: str
-    tensor_parallel_size: int
-    sampling_params: SamplingParams
+    id: str = "microsoft/Phi-3.5-mini-instruct"
+    tensor_parallel_size: int = 1
+    sampling_params: SamplingParams = field(default_factory=SamplingParams)
 
 
 @dataclass
@@ -61,6 +67,7 @@ class OramaAIConfig:
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     LLMs: Optional[LLMs] = field(default_factory=LLMs)
+    total_threads: Optional[int] = 12
 
     def __post_init__(self):
         if Path("config.yaml").exists():

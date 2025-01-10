@@ -1,6 +1,5 @@
 import os
 import uvicorn
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from src.embeddings.models import (
@@ -21,20 +20,15 @@ class EmbeddingService:
         self.app = create_app(self)
 
     def _initialize_embeddings_service(self):
-
         os.environ["ONNXRUNTIME_PROVIDERS"] = "CUDAExecutionProvider"
-
         extend_fastembed_supported_models()
         initialize_thread_executor(max_workers=self.config.total_threads // 2)
         return EmbeddingsModels(
             self.config,
-            selected_models=ModelGroups[self.config.default_model_group].value,
+            selected_models=ModelGroups[self.config.embeddings.default_model_group].value,
         )
 
     def start(self):
-        grpc_thread = threading.Thread(target=lambda: serve(self.config, self.embeddings_service), daemon=True)
-        grpc_thread.start()
-
         uvicorn.run(
             self.app,
             host=self.config.host,
