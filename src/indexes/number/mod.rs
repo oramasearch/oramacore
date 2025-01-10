@@ -97,9 +97,6 @@ impl NumberIndex {
                 "Committing number index at {base_dir:?}"
             );
 
-            // We could avoid this if `data` is empty
-            // TODO: avoid it
-
             let new_committed_number = if let Some(committed) = committed {
                 let merged = merge(data.into_iter(), committed.iter());
                 CommittedNumberFieldIndex::from_iter(merged, base_dir.clone())
