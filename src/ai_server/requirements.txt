@@ -17,3 +17,7 @@ torchaudio
 opentelemetry-api
 opentelemetry-sdk
 pyyaml
+cachetools
+onnxruntime-gpu
+transformers
+optimum[onnxruntime]
