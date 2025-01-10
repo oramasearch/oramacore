@@ -1,10 +1,33 @@
-# Rustorama
+# Orama Core
+
+**Orama Core** is the actual database you need for your AI projects, answer engines, copilots, and search.
+
+It includes a fully-fledged full-text search engine, vector database, LLM interface, and many more utilities.
 
 ## Requirements
+
+To run **Orama Core** locally, you need to have the following programming languages installed:
+
+- Python 3.11
+- Rust 1.83.0
+
+The Rust part of Orama Core communicates with Python via gRPC. So you'll also need to install a protobuf compiler:
 
 ```bash
 apt-get install protobuf-compiler
 ```
+
+After that, just install the dependencies:
+
+```bash
+cargo build
+```
+
+```bash
+cd ./src/ai_server && pip install -r requirements.txt
+```
+
+An NVIDIA GPU is highly recommended for running the application.
 
 ## Getting Started
 
@@ -18,8 +41,6 @@ RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin rustorama --release
 ```
 
 The configuration file is located at `config.jsonc` and contains an example of the configuration.
-
-NB: on MacOS, mistralrs uses `metal` as the default backend, for other OS, CPU is used as the default backend.
 
 ## Tests
 
@@ -42,15 +63,6 @@ hurl --very-verbose --test --variables-file api-test.hurl.property api-test.hurl
 
 NB: you need to have the server running before running the tests.
 
+## License
 
-## Run embedding examples
-
-### Product quantization
-
-Download the dataset at [https://www.kaggle.com/datasets/notshrirang/spotify-million-song-dataset](https://www.kaggle.com/datasets/notshrirang/spotify-million-song-dataset) and place it under `/src/bin/datasets`.
-
-Then:
-
-```bash
-cargo run --release --bin pq_bench
-```
+AGPLv3
