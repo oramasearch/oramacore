@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde::Deserialize;
 use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
 use tracing::warn;
 
@@ -89,7 +88,7 @@ impl CommittedDiskDocumentStorage {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug)]
 pub struct DocumentStorageConfig {
     pub data_dir: PathBuf,
 }

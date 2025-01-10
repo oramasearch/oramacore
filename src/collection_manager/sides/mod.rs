@@ -13,7 +13,6 @@ mod tests {
     };
 
     use anyhow::Result;
-    use document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig};
 
     use read::{CollectionsReader, IndexesConfig};
     use serde_json::json;
@@ -22,12 +21,9 @@ mod tests {
 
     use crate::{
         collection_manager::dto::{
-            CreateCollectionOptionDTO, EmbeddingTypedField, Filter, FulltextMode, Limit,
-            SearchMode, SearchParams, TypedField,
+            CreateCollectionOptionDTO, Filter, FulltextMode, Limit, SearchMode, SearchParams,
         },
-        embeddings::{
-            EmbeddingConfig, EmbeddingPreload, EmbeddingService, OramaFastembedModel, OramaModel,
-        },
+        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
         indexes::number::{Number, NumberFilter},
         test_utils::generate_new_path,
         types::CollectionId,
@@ -47,35 +43,25 @@ mod tests {
             preload: EmbeddingPreload::Bool(false),
         })
         .await?;
+
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
         };
         let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
-        let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
-                data_dir: generate_new_path(),
-            })?);
 
-        let reader = CollectionsReader::new(
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 
@@ -128,30 +114,19 @@ mod tests {
             data_dir: generate_new_path(),
         };
         let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
-        let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
-                data_dir: generate_new_path(),
-            })?);
 
-        let reader = CollectionsReader::new(
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 
@@ -214,30 +189,19 @@ mod tests {
             data_dir: generate_new_path(),
         };
         let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
-        let document_storage: Arc<dyn DocumentStorage> =
-            Arc::new(DiskDocumentStorage::try_new(DocumentStorageConfig {
-                data_dir: generate_new_path(),
-            })?);
 
-        let reader = CollectionsReader::new(
+        let reader = CollectionsReader::try_new(
             embedding_service,
-            document_storage,
             IndexesConfig {
                 data_dir: generate_new_path(),
             },
-        );
+        )?;
 
         let create_collection_request: CreateCollectionOptionDTO = CreateCollectionOptionDTO {
             id: "my-collection".to_string(),
             description: None,
             language: None,
-            typed_fields: HashMap::from_iter([(
-                "embedding".to_string(),
-                TypedField::Embedding(EmbeddingTypedField {
-                    model_name: OramaModel::Fastembed(OramaFastembedModel::GTESmall),
-                    document_fields: vec!["title".to_string()],
-                }),
-            )]),
+            typed_fields: HashMap::from_iter([]),
         };
         writer.create_collection(create_collection_request).await?;
 

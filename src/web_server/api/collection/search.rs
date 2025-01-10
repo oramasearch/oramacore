@@ -11,50 +11,24 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    collection_manager::{dto::SearchParams, sides::{document_storage::DocumentStorage, read::CollectionsReader}},
+    collection_manager::{dto::SearchParams, sides::read::CollectionsReader},
     types::CollectionId,
 };
 
-struct ReaderAPIState {
-    readers: Arc<CollectionsReader>,
-    doc: Arc<dyn DocumentStorage>,
-}
-
-pub fn apis(readers: Arc<CollectionsReader>, doc: Arc<dyn DocumentStorage>) -> Router {
+pub fn apis(readers: Arc<CollectionsReader>) -> Router {
     Router::new()
         .add(search())
         .add(dump_all())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
-        .with_state(Arc::new(ReaderAPIState {
-            readers,
-            doc,
-        }))
+        .with_state(readers)
 }
 
-
-#[endpoint(
-    method = "POST",
-    path = "/v0/reader/dump_all",
-    description = "Dump"
-)]
-async fn dump_all(
-    state: State<Arc<ReaderAPIState>>,
-) -> impl IntoResponse {
-
-    match state.readers.commit().await {
+#[endpoint(method = "POST", path = "/v0/reader/dump_all", description = "Dump")]
+async fn dump_all(state: State<Arc<CollectionsReader>>) -> impl IntoResponse {
+    match state.commit().await {
         Ok(_) => {}
         Err(e) => {
             error!("Error dumping all collections: {}", e);
-            // e.chain()
-            //     .skip(1)
-            //     .for_each(|cause| error!("because: {}", cause));
-        }
-    }
-
-    match state.doc.commit() {
-        Ok(_) => {}
-        Err(e) => {
-            error!("Error dumping all documents: {}", e);
             // e.chain()
             //     .skip(1)
             //     .for_each(|cause| error!("because: {}", cause));
@@ -72,12 +46,12 @@ async fn dump_all(
 #[axum::debug_handler]
 async fn search(
     Path(id): Path<String>,
-    state: State<Arc<ReaderAPIState>>,
+    state: State<Arc<CollectionsReader>>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
-    let collection = state.readers.get_collection(collection_id).await;
+    let collection = state.get_collection(collection_id).await;
 
     let collection = match collection {
         Some(collection) => collection,

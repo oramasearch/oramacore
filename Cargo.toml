@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-config = { git = "https://github.com/allevo/config-rs.git", branch = "feat/error-path-on-deserialization", features = ["json5", "path_to_error"] }
+config = { version = "0.15.4", features = ["json5"] }
 
 anyhow = "1"
 thiserror = "2"

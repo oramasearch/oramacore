@@ -34,7 +34,6 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
     description = "List all collections"
 )]
 async fn dump_all(writer: State<Arc<CollectionsWriter>>) -> impl IntoResponse {
-
     match writer.commit().await {
         Ok(_) => {}
         Err(e) => {

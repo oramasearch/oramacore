@@ -72,6 +72,7 @@ impl CollectionsWriter {
 
         let id = CollectionId(id);
 
+        info!("Creating collection {:?}", id);
         self.sender
             .send(WriteOperation::Generic(
                 GenericWriteOperation::CreateCollection { id: id.clone() },

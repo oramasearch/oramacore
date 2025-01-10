@@ -223,6 +223,7 @@ impl EmbeddingService {
         match loaded_model {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
+                info!("Model not found in the cache. Loading the model...");
                 let loaded_model = self.builder.try_get(model).await?;
                 let loaded_model = Arc::new(loaded_model);
                 entry.insert(loaded_model.clone());
@@ -292,9 +293,9 @@ impl EmbeddingBuilder {
 
     #[instrument(skip(self), fields(orama_model = ?orama_model))]
     async fn try_get(&self, orama_model: OramaModel) -> Result<LoadedModel> {
-        info!("Loading model");
         match orama_model {
             OramaModel::Fastembed(orama_embedding_model) => {
+                info!("Loading Fastembed model: {orama_embedding_model}");
                 let embedding_model = match orama_embedding_model {
                     OramaFastembedModel::GTESmall => EmbeddingModel::BGESmallENV15,
                     OramaFastembedModel::GTEBase => EmbeddingModel::BGEBaseENV15,
@@ -323,6 +324,8 @@ impl EmbeddingBuilder {
                 ))
             }
             OramaModel::HuggingFace(model_name) => {
+                info!("Loading HuggingFace model: {model_name}");
+
                 let hugging_face_config = self
                     .config
                     .hugging_face

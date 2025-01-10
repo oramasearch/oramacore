@@ -7,10 +7,6 @@
         "with_prometheus": true,
     },
 
-    "doc": {
-        "data_dir": "./.data/doc",
-    },
-
     "writer_side": {
         "output": "in-memory",
 

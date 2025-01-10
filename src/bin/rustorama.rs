@@ -25,7 +25,7 @@ fn load_config() -> Result<RustoramaConfig> {
     info!("Deserializing configuration");
 
     settings
-        .try_deserialize_with_error_path::<RustoramaConfig>()
+        .try_deserialize::<RustoramaConfig>()
         .context("Failed to deserialize configuration")
 }
 

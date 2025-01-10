@@ -2,7 +2,8 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
     collection_manager::sides::{
-        document_storage::DocumentStorage, read::collection::CommitConfig,
+        document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
+        read::collection::CommitConfig,
         CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
         WriteOperation,
     },
@@ -35,17 +36,23 @@ pub struct CollectionsReader {
     indexes_config: IndexesConfig,
 }
 impl CollectionsReader {
-    pub fn new(
+    pub fn try_new(
         embedding_service: Arc<EmbeddingService>,
-        document_storage: Arc<dyn DocumentStorage>,
         indexes_config: IndexesConfig,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let document_storage = DiskDocumentStorage::try_new(DocumentStorageConfig {
+            data_dir: indexes_config.data_dir.join("docs"),
+        })
+        .context("Cannot create document storage")?;
+
+        let document_storage = Arc::new(document_storage);
+
+        Ok(Self {
             embedding_service,
             collections: Default::default(),
             document_storage,
             indexes_config,
-        }
+        })
     }
 
     pub async fn update(&self, op: WriteOperation) -> Result<()> {
@@ -149,6 +156,12 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
+        let document_storage = Arc::get_mut(&mut self.document_storage)
+            .expect("`load` should be called at the beginning of the program");
+        document_storage
+            .load()
+            .context("Cannot load document storage")?;
+
         match std::fs::exists(data_dir) {
             Err(e) => {
                 return Err(anyhow::anyhow!(
@@ -167,8 +180,8 @@ impl CollectionsReader {
 
         let base_dir_for_collections = data_dir.join("collections");
 
-        let collection_dirs =
-            list_directory_in_path(&base_dir_for_collections).context("Cannot read collection list from disk")?;
+        let collection_dirs = list_directory_in_path(&base_dir_for_collections)
+            .context("Cannot read collection list from disk")?;
 
         let collection_dirs = match collection_dirs {
             Some(collection_dirs) => collection_dirs,
@@ -244,6 +257,10 @@ impl CollectionsReader {
                 epoch: 0,
             })?;
         }
+
+        self.document_storage
+            .commit()
+            .context("Cannot commit document storage")?;
 
         Ok(())
     }

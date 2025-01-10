@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
     read::{CollectionsReader, IndexesConfig},
     write::{CollectionsWriter, WriteOperation},
     CollectionsWriterConfig,
@@ -59,7 +58,6 @@ pub struct RustoramaConfig {
     pub embeddings: EmbeddingConfig,
     pub writer_side: WriteSideConfig,
     pub reader_side: ReadSideConfig,
-    pub doc: DocumentStorageConfig,
 }
 
 pub async fn start(config: RustoramaConfig) -> Result<()> {
@@ -73,7 +71,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         None
     };
 
-    let (writer, reader, doc, mut receiver) = build_orama(config.clone()).await?;
+    let (writer, reader, mut receiver) = build_orama(config.clone()).await?;
 
     let collections_reader = reader.clone().unwrap();
     tokio::spawn(async move {
@@ -87,7 +85,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
         config.http.host, config.http.port
     );
 
-    let web_server = WebServer::new(writer, reader, doc, prometheus_hadler);
+    let web_server = WebServer::new(writer, reader, prometheus_hadler);
     web_server.start(config.http).await?;
 
     Ok(())
@@ -98,14 +96,12 @@ pub async fn build_orama(
 ) -> Result<(
     Option<Arc<CollectionsWriter>>,
     Option<Arc<CollectionsReader>>,
-    Option<Arc<dyn DocumentStorage>>,
     Receiver<WriteOperation>,
 )> {
     let RustoramaConfig {
         embeddings: embedding_config,
         writer_side,
         reader_side,
-        doc,
         ..
     } = config;
 
@@ -134,15 +130,8 @@ pub async fn build_orama(
         .await
         .context("Cannot load collections writer")?;
 
-    let mut document_storage =
-        DiskDocumentStorage::try_new(doc).context("Cannot create document storage")?;
-    document_storage
-        .load()
-        .context("Cannot load document storage")?;
-
-    let document_storage: Arc<dyn DocumentStorage> = Arc::new(document_storage);
-    let mut collections_reader =
-        CollectionsReader::new(embedding_service, document_storage.clone(), reader_side.config);
+    let mut collections_reader = CollectionsReader::try_new(embedding_service, reader_side.config)
+        .context("Cannot create collections reader")?;
 
     collections_reader
         .load()
@@ -152,10 +141,5 @@ pub async fn build_orama(
     let collections_writer = Some(Arc::new(collections_writer));
     let collections_reader = Some(Arc::new(collections_reader));
 
-    Ok((
-        collections_writer,
-        collections_reader,
-        Some(document_storage),
-        receiver,
-    ))
+    Ok((collections_writer, collections_reader, receiver))
 }

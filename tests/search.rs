@@ -5,7 +5,6 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use rustorama::collection_manager::sides::document_storage::DocumentStorageConfig;
 use rustorama::collection_manager::sides::read::IndexesConfig;
 use rustorama::collection_manager::sides::CollectionsWriterConfig;
 use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
@@ -51,7 +50,7 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
-    let (collections_writer, collections_reader, doc, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -75,14 +74,11 @@ async fn start_server() {
                 data_dir: generate_new_path(),
             },
         },
-        doc: DocumentStorageConfig {
-            data_dir: generate_new_path(),
-        },
     })
     .await
     .unwrap();
 
-    let web_server = WebServer::new(collections_writer, collections_reader.clone(), doc, None);
+    let web_server = WebServer::new(collections_writer, collections_reader.clone(), None);
 
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {

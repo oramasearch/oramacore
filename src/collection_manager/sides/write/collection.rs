@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
@@ -162,6 +162,7 @@ impl CollectionWriter {
         Arc::new(parser)
     }
 
+    #[instrument(skip(self, sender, embedding_service))]
     pub(super) async fn create_field(
         &self,
         field_id: FieldId,
@@ -226,6 +227,7 @@ impl CollectionWriter {
                 },
             ))
             .context("Cannot sent creation field")?;
+        info!("Field created");
 
         Ok(())
     }
