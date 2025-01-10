@@ -19,9 +19,9 @@ use crate::{
 };
 
 pub fn generate_new_path() -> PathBuf {
-    let tmp_dir = TempDir::new("test").unwrap();
+    let tmp_dir = TempDir::new("test").expect("Cannot create temp dir");
     let dir = tmp_dir.path().to_path_buf();
-    fs::create_dir_all(dir.clone()).unwrap();
+    fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
 }
 

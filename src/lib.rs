@@ -33,6 +33,8 @@ mod metrics;
 pub mod ai_client;
 mod file_utils;
 
+mod merger;
+
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
 
