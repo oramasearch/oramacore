@@ -1,3 +1,4 @@
 .venv
 __pycache__
 loader.py
+output.txt

@@ -1,46 +1,51 @@
-from vllm import SamplingParams
+from vllm import SamplingParams, LLM
 from typing import Dict, Any, Optional
-
-from src.models.cache import VLLMCacheManager
+import torch
+import threading
+from service_pb2 import LLMType
 
 
 class ModelsManager:
     def __init__(self, config):
         self.config = config
-        self.current_model_key = None
-
-        self.cache = VLLMCacheManager(
-            cache_size=1,
-            ttl_seconds=600,
-            gpu_memory_utilization=0.85,
-            max_parallel_models=1,
-        )
-
+        # Convert enum names to lowercase to match protobuf enum values
         self.model_configs = {
-            key: value
+            key.lower(): value
             for key, value in vars(self.config.LLMs).items()
             if key not in ["__dict__", "__weakref__", "__doc__"]
         }
+        self._models: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
-        self.models = {}
-        self.sampling_params = {}
+        print(f"Available models: {list(self.model_configs.keys())}")
 
-    def _load_model(self, model_key: str):
-        """Load a vLLM model."""
+        print("Pre-loading all models...")
+        for model_key in self.model_configs:
+            self._preload_model(model_key)
+
+    def _preload_model(self, model_key: str) -> None:
+        """Preload a model during initialization."""
         if model_key not in self.model_configs:
-            raise ValueError(f"Invalid model key: {model_key}")
+            print(f"Model key {model_key} not found in configs")
+            return
 
         model_config = self.model_configs[model_key]
         if model_config is None:
-            raise ValueError(f"Configuration for model {model_key} is None")
-
-        # If we already have this model loaded, return it
-        if model_key == self.current_model_key and model_key in self.models:
-            return self.models[model_key]
+            print(f"Configuration for model {model_key} is None")
+            return
 
         try:
-            model = self.cache.get_model(
-                model_path=model_config.id, tensor_parallel_size=model_config.tensor_parallel_size
+            print(f"Loading model {model_config.id}...")
+
+            model = LLM(
+                model=model_config.id,
+                tensor_parallel_size=model_config.tensor_parallel_size,
+                gpu_memory_utilization=0.85,
+                max_model_len=2048,
+                enforce_eager=True,
+                max_num_batched_tokens=4096,
+                max_num_seqs=256,
+                trust_remote_code=True,
             )
 
             sampling_params = SamplingParams(
@@ -50,46 +55,50 @@ class ModelsManager:
             )
 
             model_data = {"model": model, "config": {"sampling_params": sampling_params}}
-            self.models[model_key] = model_data
-            self.current_model_key = model_key
-            return model_data
+
+            # Run a warmup prompt
+            warmup_prompt = "test"
+            _ = model.generate([warmup_prompt], sampling_params)
+
+            self._models[model_key] = model_data
+            print(f"Successfully loaded model {model_config.id}")
 
         except Exception as e:
-            print(f"Error loading model {model_key}: {e}")
-            return None
+            print(f"Error preloading model {model_key}: {e}")
+            if model_key in self._models:
+                del self._models[model_key]
 
     def get_model(self, model_key: str) -> Optional[Dict[str, Any]]:
-        """Get or load a model by its key."""
-        # Check if we already have this model and it's the current one
-        if model_key == self.current_model_key and model_key in self.models:
-            return self.models[model_key]
-
-        # Otherwise, load or reload the model
-        return self._load_model(model_key)
+        """Get a preloaded model."""
+        model_key = model_key.lower()  # Convert to lowercase for consistency
+        with self._lock:
+            if model_key not in self._models:
+                print(f"Requested model {model_key} not found. Available models: {list(self._models.keys())}")
+                raise RuntimeError(f"Model {model_key} is not loaded")
+            return self._models[model_key]
 
     def generate_text(self, model_key: str, prompt: str) -> str:
-        """Generate text using the specified model."""
-        model_data = self.get_model(model_key)
-        if not model_data:
-            raise RuntimeError(f"Model {model_key} not loaded")
-
-        model = model_data["model"]
-        sampling_params = model_data["config"]["sampling_params"]
-
+        """Generate text using a preloaded model."""
         try:
+            model_data = self.get_model(model_key)
+            if not model_data:
+                raise RuntimeError(f"Model {model_key} is not available")
+
+            model = model_data["model"]
+            sampling_params = model_data["config"]["sampling_params"]
+
             outputs = model.generate([prompt], sampling_params)
             return outputs[0].outputs[0].text.strip()
         except Exception as e:
             print(f"Error generating text with {model_key}: {e}")
+            print(f"Currently loaded models: {list(self._models.keys())}")
             raise
 
     def process_batch(self, model_key: str, prompts: list[str]) -> list[str]:
-        """
-        Process a batch of prompts using the specified model.
-        """
+        """Process a batch using a preloaded model."""
         model_data = self.get_model(model_key)
         if not model_data:
-            raise RuntimeError(f"Model {model_key} not loaded")
+            raise RuntimeError(f"Model {model_key} is not available")
 
         model = model_data["model"]
         sampling_params = model_data["config"]["sampling_params"]
@@ -102,7 +111,7 @@ class ModelsManager:
             raise
 
     def cleanup(self):
-        """
-        Clean up all loaded models and free resources.
-        """
-        self.models.clear()
+        """Clean up models and free GPU memory."""
+        with self._lock:
+            self._models.clear()
+            torch.cuda.empty_cache()
