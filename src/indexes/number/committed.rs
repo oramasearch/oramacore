@@ -1,13 +1,13 @@
 use core::{f32, panic};
-use std::{collections::HashSet, io::Write, path::PathBuf};
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::{file_utils::BufferedFile, types::DocumentId};
+use crate::{file_utils::BufferedFile, merger::MergedIterator, types::DocumentId};
 
-use super::{Number, NumberFilter};
+use super::{n::SerializableNumber, Number, NumberFilter};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Item {
@@ -57,6 +57,13 @@ struct Page {
     max: Number,
 }
 
+fn load_items(p: &PathBuf) -> Result<Vec<Item>> {
+    BufferedFile::open(p)
+        .context("Cannot open number index page file")?
+        .read_bincode_data()
+        .context("Cannot deserialize number index page")
+}
+
 impl Page {
     fn filter(&self, filter: &NumberFilter, matching_docs: &mut HashSet<DocumentId>) -> Result<()> {
         // self.usage.increment(epoch);
@@ -66,11 +73,7 @@ impl Page {
                 Self::filter_on_items(items, filter, matching_docs);
             }
             PagePointer::OnFile(p) => {
-                let items: Vec<Item> = BufferedFile::open(p)
-                    .context("Cannot open number index page file")?
-                    .read_bincode_data()
-                    .context("Cannot deserialize number index page")?;
-
+                let items = load_items(p)?;
                 Self::filter_on_items(&items, filter, matching_docs);
             }
         };
@@ -93,7 +96,7 @@ impl Page {
         );
     }
 
-    fn move_to_fs(&mut self, page_file: PathBuf) -> Result<()> {
+    fn commit(&self, page_file: PathBuf) -> Result<()> {
         let items = match &self.pointer {
             PagePointer::InMemory(items) => items,
             PagePointer::OnFile(p) => {
@@ -104,13 +107,17 @@ impl Page {
             }
         };
 
-        BufferedFile::create(page_file.clone())
+        BufferedFile::create(page_file)
             .context("Cannot create number page file")?
             .write_bincode_data(&items)
             .context("Cannot serialize number page")?;
 
-        self.pointer = PagePointer::OnFile(page_file);
+        Ok(())
+    }
 
+    fn move_to_fs(&mut self, page_file: PathBuf) -> Result<()> {
+        self.commit(page_file.clone())?;
+        self.pointer = PagePointer::OnFile(page_file);
         Ok(())
     }
 }
@@ -121,7 +128,7 @@ pub struct CommittedNumberFieldIndex {
     pages: Vec<Page>,
     /// Map of the bounds of each chunk.
     /// Lower bound is inclusive, upper bound is exclusive.
-    bounds: Vec<((Number, Number), ChunkId)>,
+    bounds: Vec<((SerializableNumber, SerializableNumber), ChunkId)>,
 }
 
 impl CommittedNumberFieldIndex {
@@ -205,7 +212,7 @@ impl CommittedNumberFieldIndex {
 
         let pos = self
             .bounds
-            .binary_search_by_key(value, |(bounds, _)| bounds.0);
+            .binary_search_by_key(value, |(bounds, _)| bounds.0.0);
 
         let page = pos.map(|pos| &self.pages[pos])
             // If the value i'm looking for is contained in a boud, the `binary_search_by_key` returns a error.
@@ -230,6 +237,44 @@ And this should not happen. Return the last page."#);
 
         Ok(page)
     }
+
+    pub fn load(data_dir: PathBuf) -> Result<Self> {
+        let bounds: Vec<((SerializableNumber, SerializableNumber), ChunkId)> = BufferedFile::open(data_dir.join("bounds.json"))
+            .context("Cannot open bounds file")?
+            .read_json_data()
+            .context("Cannot deserialize bounds file")?;
+
+        let mut pages = Vec::with_capacity(bounds.len());
+        for (bounds, id) in &bounds {
+            let page_file = data_dir.join(format!("page_{}.bin", id.0));
+            let (min, max) = bounds;
+
+            pages.push(Page {
+                id: *id,
+                pointer: PagePointer::OnFile(page_file),
+                min: min.0,
+                max: max.0,
+            });
+        }
+
+        Ok(CommittedNumberFieldIndex {
+            bounds,
+            pages,
+        })
+    }
+
+    fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        for page in &self.pages {
+            page.commit(data_dir.join(format!("page_{}.bin", page.id.0)))?;
+        }
+
+        BufferedFile::create(data_dir.join("bounds.json"))
+            .context("Cannot create bounds file")?
+            .write_json_data(&self.bounds)
+            .context("Cannot serialize bounds to file")?;
+
+        Ok(())
+    }
 }
 
 impl CommittedNumberFieldIndex {
@@ -237,6 +282,9 @@ impl CommittedNumberFieldIndex {
         iter: T,
         base_dir: PathBuf,
     ) -> Result<Self> {
+        std::fs::create_dir_all(&base_dir)
+            .context("Cannot create the base directory for the committed number index")?;
+
         let mut committed_number_field_index = CommittedNumberFieldIndex {
             pages: Vec::new(),
             bounds: Vec::new(),
@@ -258,7 +306,7 @@ impl CommittedNumberFieldIndex {
                 current_page.max = value;
                 committed_number_field_index
                     .bounds
-                    .push(((current_page.min, current_page.max), current_page.id));
+                    .push(((SerializableNumber(current_page.min), SerializableNumber(current_page.max)), current_page.id));
                 current_page
                     .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
                     .context("Cannot move the page to fs")?;
@@ -292,7 +340,7 @@ impl CommittedNumberFieldIndex {
 
         committed_number_field_index
             .bounds
-            .push(((current_page.min, current_page.max), current_page.id));
+            .push(((SerializableNumber(current_page.min), SerializableNumber(current_page.max)), current_page.id));
 
         current_page
             .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
@@ -306,91 +354,28 @@ impl CommittedNumberFieldIndex {
 impl CommittedNumberFieldIndex {
     pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
         self.pages.iter().flat_map(|page| {
-            let items = match &page.pointer {
-                PagePointer::InMemory(items) => items,
-                PagePointer::OnFile(_) => panic!("This should not happen"),
-            };
 
-            items.iter().map(|item| (item.key.0, item.values.clone()))
-        })
-    }
-}
+            // We `collect` the items. This is not the best approach.
+            // We should avoid it
+            // TODO: think about this.
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SerializableNumber(pub Number);
-
-impl Serialize for SerializableNumber {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        use serde::ser::SerializeTuple;
-
-        match &self.0 {
-            Number::F32(v) => {
-                let mut tuple = serializer.serialize_tuple(2)?;
-                tuple.serialize_element(&1_u8)?;
-                tuple.serialize_element(v)?;
-                tuple.end()
-            }
-            Number::I32(v) => {
-                let mut tuple = serializer.serialize_tuple(2)?;
-                tuple.serialize_element(&2_u8)?;
-                tuple.serialize_element(v)?;
-                tuple.end()
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for SerializableNumber {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{Error, Visitor};
-
-        struct SerializableNumberVisitor;
-
-        impl<'de> Visitor<'de> for SerializableNumberVisitor {
-            type Value = SerializableNumber;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(
-                    formatter,
-                    "a tuple of size 2 consisting of a u64 discriminant and a value"
-                )
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let discriminant: u8 = seq
-                    .next_element()?
-                    .ok_or_else(|| A::Error::invalid_length(0, &self))?;
-                match discriminant {
-                    1_u8 => {
-                        let x = seq
-                            .next_element()?
-                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
-                        Ok(SerializableNumber(Number::F32(x)))
-                    }
-                    2 => {
-                        let y = seq
-                            .next_element()?
-                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
-                        Ok(SerializableNumber(Number::I32(y)))
-                    }
-                    d => Err(A::Error::invalid_value(
-                        serde::de::Unexpected::Unsigned(d.into()),
-                        &"1, 2",
-                    )),
+            match &page.pointer {
+                PagePointer::InMemory(items) => {
+                    items
+                        .iter()
+                        .map(|item| (item.key.0, item.values.clone()))
+                        .collect::<Vec<_>>()
+                }
+                PagePointer::OnFile(p) => {
+                    // `load_items` can fail. We should propagate the error.
+                    // TODO: think about this.
+                    let items = load_items(p).expect("Cannot load items");
+                    items.into_iter()
+                        .map(|item| (item.key.0, item.values))
+                        .collect::<Vec<_>>()
                 }
             }
-        }
-
-        deserializer.deserialize_tuple(2, SerializableNumberVisitor)
+        })
     }
 }
 
@@ -405,95 +390,19 @@ fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) ->
     }
 }
 
-pub mod merge {
-    use std::iter::Peekable;
-
-    pub struct MergedIterator<
-        K,
-        V,
-        I1: Iterator<Item = (K, V)>,
-        I2: Iterator<Item = (K, V)>,
-        Merger: Fn(&K, V, V) -> V,
-    > {
-        iter1: Peekable<I1>,
-        iter2: Peekable<I2>,
-        merger: Merger,
-    }
-
-    impl<
-            K: Ord + Eq,
-            V,
-            I1: Iterator<Item = (K, V)>,
-            I2: Iterator<Item = (K, V)>,
-            Merger: Fn(&K, V, V) -> V,
-        > MergedIterator<K, V, I1, I2, Merger>
-    {
-        pub fn new(iter1: I1, iter2: I2, merger: Merger) -> Self {
-            Self {
-                iter1: iter1.peekable(),
-                iter2: iter2.peekable(),
-                merger,
-            }
+pub fn merge<K: Ord + Eq, V, VV: Extend<V> + IntoIterator<Item = V>, I1: Iterator<Item = (K, VV)>, I2: Iterator<Item = (K, VV)>>(
+    iter1: I1,
+    iter2: I2,
+) -> impl Iterator<Item = (K, VV)> {
+    MergedIterator::new(
+        iter1,
+        iter2,
+        |_, v| v,
+        |_, mut v1, v2| {
+            v1.extend(v2);
+            v1
         }
-    }
-
-    impl<
-            K: Ord + Eq,
-            V,
-            I1: Iterator<Item = (K, V)>,
-            I2: Iterator<Item = (K, V)>,
-            Merger: Fn(&K, V, V) -> V,
-        > Iterator for MergedIterator<K, V, I1, I2, Merger>
-    {
-        type Item = (K, V);
-
-        fn next(&mut self) -> Option<Self::Item> {
-            let first = self.iter1.peek();
-            let second = self.iter2.peek();
-
-            match (first, second) {
-                (Some((k1, _)), Some((k2, _))) => {
-                    let cmp = k1.cmp(k2);
-                    match cmp {
-                        std::cmp::Ordering::Less => self.iter1.next(),
-                        std::cmp::Ordering::Greater => self.iter2.next(),
-                        std::cmp::Ordering::Equal => {
-                            let (k1, v1) = self.iter1.next().unwrap();
-                            let (_, v2) = self.iter2.next().unwrap();
-                            let v = (self.merger)(&k1, v1, v2);
-                            Some((k1, v))
-                        }
-                    }
-                }
-                (Some(_), None) => self.iter1.next(),
-                (None, Some(_)) => self.iter2.next(),
-                (None, None) => None,
-            }
-        }
-    }
-
-    /// This function should merge committed and uncommitted data.
-    /// The idea is to have 2 iterators, one for each data source.
-    /// The iterators should be already sorted.
-    /// The merged iterator should be sorted too.
-    /// The merger function is called to resolve conflicts on the same key.
-    pub fn merge<
-        K: Ord + Eq,
-        V,
-        I1: Iterator<Item = (K, V)>,
-        I2: Iterator<Item = (K, V)>,
-        Merger: Fn(&K, V, V) -> V,
-    >(
-        iter1: I1,
-        iter2: I2,
-        merger: Merger,
-    ) -> MergedIterator<K, V, I1, I2, Merger> {
-        MergedIterator {
-            iter1: iter1.peekable(),
-            iter2: iter2.peekable(),
-            merger,
-        }
-    }
+    )
 }
 
 #[cfg(test)]
@@ -502,21 +411,16 @@ mod tests {
 
     use anyhow::Result;
 
-    use crate::{indexes::number::Number, test_utils::generate_new_path, types::DocumentId};
+    use crate::{indexes::number::{committed::merge, Number, NumberFilter}, test_utils::generate_new_path, types::DocumentId};
 
-    use super::{merge::*, CommittedNumberFieldIndex};
+    use super::CommittedNumberFieldIndex;
 
     #[test]
     fn test_indexes_number_merge() {
         let iter1 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
         let iter2 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
 
-        let merger = |_: &i32, mut v1: Vec<i32>, v2: Vec<i32>| {
-            v1.extend(v2);
-            v1
-        };
-
-        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
+        let merged: Vec<_> = merge(iter1, iter2).collect();
 
         assert_eq!(
             vec![(1, vec![1, 1]), (2, vec![2, 2]), (3, vec![3, 3])],
@@ -529,11 +433,7 @@ mod tests {
         let iter1 = vec![(1, vec![1]), (3, vec![2]), (5, vec![3])].into_iter();
         let iter2 = vec![(2, vec![1]), (4, vec![2]), (6, vec![3])].into_iter();
 
-        let merger = |_: &i32, _: Vec<i32>, _: Vec<i32>| {
-            panic!("This should not be called");
-        };
-
-        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
+        let merged: Vec<_> = merge(iter1, iter2).collect();
 
         assert_eq!(
             vec![
@@ -553,11 +453,7 @@ mod tests {
         let iter1 = vec![(2, vec![1]), (4, vec![2]), (6, vec![3])].into_iter();
         let iter2 = vec![(1, vec![1]), (3, vec![2]), (5, vec![3])].into_iter();
 
-        let merger = |_: &i32, _: Vec<i32>, _: Vec<i32>| {
-            panic!("This should not be called");
-        };
-
-        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
+        let merged: Vec<_> = merge(iter1, iter2).collect();
 
         assert_eq!(
             vec![
@@ -577,11 +473,7 @@ mod tests {
         let iter1 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
         let iter2 = vec![(4, vec![1]), (5, vec![2]), (6, vec![3])].into_iter();
 
-        let merger = |_: &i32, _: Vec<i32>, _: Vec<i32>| {
-            panic!("This should not be called");
-        };
-
-        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
+        let merged: Vec<_> = merge(iter1, iter2).collect();
 
         assert_eq!(
             vec![
@@ -601,11 +493,7 @@ mod tests {
         let iter1 = vec![(4, vec![1]), (5, vec![2]), (6, vec![3])].into_iter();
         let iter2 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
 
-        let merger = |_: &i32, _: Vec<i32>, _: Vec<i32>| {
-            panic!("This should not be called");
-        };
-
-        let merged: Vec<_> = merge(iter1, iter2, &merger).collect();
+        let merged: Vec<_> = merge(iter1, iter2).collect();
 
         assert_eq!(
             vec![
@@ -641,6 +529,56 @@ mod tests {
         let output = committed_number_field_index
             .filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;
         assert_eq!(output, HashSet::from_iter([DocumentId(0)]));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_indexes_number_commit_load() -> Result<()> {
+        let data: Vec<(_, HashSet<_>)> = vec![
+            (Number::I32(0), HashSet::from_iter([DocumentId(0)])),
+            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
+            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
+            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
+            (Number::I32(4), HashSet::from_iter([DocumentId(4)])),
+            (Number::I32(5), HashSet::from_iter([DocumentId(5)])),
+            (Number::I32(6), HashSet::from_iter([DocumentId(6)])),
+            (Number::I32(7), HashSet::from_iter([DocumentId(7)])),
+            (Number::I32(8), HashSet::from_iter([DocumentId(8)])),
+            (Number::I32(9), HashSet::from_iter([DocumentId(9)])),
+        ];
+
+        let data_dir = generate_new_path();
+
+        let committed_number_field_index =
+            CommittedNumberFieldIndex::from_iter(data, data_dir.clone())?;
+
+        committed_number_field_index.commit(data_dir.clone())?;
+
+        let after = CommittedNumberFieldIndex::load(data_dir)?;
+
+        let output = after.filter(&NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
+        );
+
+        let new_data_dir = generate_new_path();
+        let merged = CommittedNumberFieldIndex::from_iter(
+            merge(
+            vec![
+                (Number::I32(10), HashSet::from_iter([DocumentId(10)])),
+                (Number::I32(11), HashSet::from_iter([DocumentId(11)])),
+            ].into_iter(),
+            after.iter(),
+            ),
+            new_data_dir
+        )?;
+        let output = merged.filter(&NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
+        assert_eq!(
+            output,
+            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
+        );
 
         Ok(())
     }

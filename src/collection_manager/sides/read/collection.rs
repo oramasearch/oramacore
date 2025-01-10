@@ -104,6 +104,9 @@ impl CollectionReader {
         self.string_index
             .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
+        self.number_index
+            .load(collection_data_dir.join("numbers"))
+            .context("Cannot load number index")?;
 
         let coll_desc_file_path = collection_data_dir.join("desc.json");
         let dump: CollectionDescriptorDump = BufferedFile::open(coll_desc_file_path)
@@ -121,7 +124,11 @@ impl CollectionReader {
 
     pub fn commit(&self, commit_config: CommitConfig) -> Result<()> {
         self.string_index
-            .commit(commit_config.folder_to_commit.join("strings"))?;
+            .commit(commit_config.folder_to_commit.join("strings"))
+            .context("Cannot commit string index")?;
+        self.number_index
+            .commit(commit_config.folder_to_commit.join("numbers"))
+            .context("Cannot commit number index")?;
 
         let dump = CollectionDescriptorDump {
             id: self.id.clone(),

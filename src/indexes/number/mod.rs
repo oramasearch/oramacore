@@ -1,18 +1,15 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
-use committed::{merge::merge, CommittedNumberFieldIndex};
+use committed::{merge, CommittedNumberFieldIndex};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info, instrument};
 use uncommitted::UncommittedNumberFieldIndex;
 
-use crate::{
-    collection_manager::{dto::FieldId, sides::read::CommitConfig},
-    types::DocumentId,
-};
+use crate::{collection_manager::dto::FieldId, file_utils::BufferedFile, types::DocumentId};
 
 mod committed;
 mod n;
@@ -61,39 +58,69 @@ impl NumberIndex {
         Ok(doc_ids)
     }
 
-    pub fn commit(&self, config: &CommitConfig) -> Result<()> {
+    #[instrument(skip(self, data_dir))]
+    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        let all_fields = self.uncommitted
+            .iter()
+            .map(|entry| *entry.key())
+            .chain(self.committed.iter().map(|entry| *entry.key()))
+            .collect::<HashSet<_>>();
+
         for entry in &self.uncommitted {
             let field_id = entry.key();
             let uncommitted = entry.value();
-
+            let data = uncommitted.take()?;
             let committed = self.committed.get(field_id);
 
-            let base_dir = config.folder_to_commit.join(format!("{}", field_id.0));
+            let base_dir = data_dir.join(format!("{}", field_id.0));
+
+            info!(
+                ?field_id,
+                committed = committed.is_some(),
+                uncommitted_count = data.len(),
+                "Committing number index at {base_dir:?}"
+            );
+
+            // We could avoid this if `data` is empty
+            // TODO: avoid it
 
             let new_committed_number = if let Some(committed) = committed {
-                let data = uncommitted.take()?;
-
+                let merged = merge(
+                    data.into_iter(),
+                    committed.iter(),
+                );
                 CommittedNumberFieldIndex::from_iter(
-                    merge(
-                        committed.iter(),
-                        data.into_iter(),
-                        |_, mut committed, uncommitted| {
-                            committed.extend(uncommitted);
-                            committed
-                        },
-                    ),
+                    merged,
                     base_dir,
                 )
             } else {
-                let data = uncommitted.take()?;
                 CommittedNumberFieldIndex::from_iter(data, base_dir)
             }?;
 
             self.committed.insert(*field_id, new_committed_number);
         }
 
-        let p = config.folder_to_commit.join("committed");
-        std::fs::write(p, config.epoch.to_string())?;
+        BufferedFile::create(data_dir.join("info.json"))
+            .context("Cannot create info.json")?
+            .write_json_data(&all_fields)
+            .context("Cannot serialize into info.json")?;
+
+        Ok(())
+    }
+
+    pub fn load(&mut self, data_dir: PathBuf) -> Result<()> {
+        let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
+            .context("Cannot open info.json")?
+            .read_json_data()
+            .context("Cannot deserialize info.json")?;
+
+        for field_id in field_ids {
+            let field_dir = data_dir.join(format!("{}", field_id.0));
+            let committed = CommittedNumberFieldIndex::load(field_dir)
+                .context("Cannot load field")?;
+
+            self.committed.insert(field_id, committed);
+        }
 
         Ok(())
     }
@@ -140,12 +167,7 @@ mod tests {
 
                 a(&index);
 
-                index
-                    .commit(&CommitConfig {
-                        folder_to_commit: generate_new_path(),
-                        epoch: 0,
-                    })
-                    .unwrap();
+                index.commit(generate_new_path()).unwrap();
 
                 a(&index);
             }
@@ -236,12 +258,7 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
 
-        index
-            .commit(&CommitConfig {
-                folder_to_commit: generate_new_path(),
-                epoch: 0,
-            })
-            .unwrap();
+        index.commit(generate_new_path()).unwrap();
 
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
@@ -266,10 +283,7 @@ mod tests {
             .unwrap();
         assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
 
-        index.commit(&CommitConfig {
-            folder_to_commit: generate_new_path(),
-            epoch: 0,
-        })?;
+        index.commit(generate_new_path())?;
 
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))

@@ -118,7 +118,6 @@ impl Iterator for UncommittedNumberFieldIndexTaken<'_> {
         self.tree.iter().next().map(|(k, v)| (*k, v.clone()))
     }
 }
-
 impl Drop for UncommittedNumberFieldIndexTaken<'_> {
     fn drop(&mut self) {
         let mut lock = self.index.inner.write().unwrap();
@@ -128,6 +127,11 @@ impl Drop for UncommittedNumberFieldIndexTaken<'_> {
             &mut lock.right
         };
         tree.clear();
+    }
+}
+impl UncommittedNumberFieldIndexTaken<'_> {
+    pub fn len(&self) -> usize {
+        self.tree.len()
     }
 }
 
