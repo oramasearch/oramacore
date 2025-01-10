@@ -159,7 +159,6 @@ fn inner_filter(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,11 +174,14 @@ mod tests {
         let taken = index.take()?;
 
         let collected: Vec<_> = taken.into_iter().collect();
-        assert_eq!(collected, vec![
-            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
-            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
-            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
-        ]);
+        assert_eq!(
+            collected,
+            vec![
+                (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
+                (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
+                (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
+            ]
+        );
 
         Ok(())
     }

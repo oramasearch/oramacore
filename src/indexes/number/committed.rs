@@ -212,7 +212,7 @@ impl CommittedNumberFieldIndex {
 
         let pos = self
             .bounds
-            .binary_search_by_key(value, |(bounds, _)| bounds.0.0);
+            .binary_search_by_key(value, |(bounds, _)| bounds.0 .0);
 
         let page = pos.map(|pos| &self.pages[pos])
             // If the value i'm looking for is contained in a boud, the `binary_search_by_key` returns a error.
@@ -239,10 +239,11 @@ And this should not happen. Return the last page."#);
     }
 
     pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let bounds: Vec<((SerializableNumber, SerializableNumber), ChunkId)> = BufferedFile::open(data_dir.join("bounds.json"))
-            .context("Cannot open bounds file")?
-            .read_json_data()
-            .context("Cannot deserialize bounds file")?;
+        let bounds: Vec<((SerializableNumber, SerializableNumber), ChunkId)> =
+            BufferedFile::open(data_dir.join("bounds.json"))
+                .context("Cannot open bounds file")?
+                .read_json_data()
+                .context("Cannot deserialize bounds file")?;
 
         let mut pages = Vec::with_capacity(bounds.len());
         for (bounds, id) in &bounds {
@@ -257,10 +258,7 @@ And this should not happen. Return the last page."#);
             });
         }
 
-        Ok(CommittedNumberFieldIndex {
-            bounds,
-            pages,
-        })
+        Ok(CommittedNumberFieldIndex { bounds, pages })
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
@@ -305,9 +303,13 @@ impl CommittedNumberFieldIndex {
             // 1000 is a magic number.
             if current_page_count > 1000 {
                 current_page.max = value;
-                committed_number_field_index
-                    .bounds
-                    .push(((SerializableNumber(current_page.min), SerializableNumber(current_page.max)), current_page.id));
+                committed_number_field_index.bounds.push((
+                    (
+                        SerializableNumber(current_page.min),
+                        SerializableNumber(current_page.max),
+                    ),
+                    current_page.id,
+                ));
                 current_page
                     .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
                     .context("Cannot move the page to fs")?;
@@ -339,9 +341,13 @@ impl CommittedNumberFieldIndex {
 
         current_page.max = Number::F32(f32::INFINITY);
 
-        committed_number_field_index
-            .bounds
-            .push(((SerializableNumber(current_page.min), SerializableNumber(current_page.max)), current_page.id));
+        committed_number_field_index.bounds.push((
+            (
+                SerializableNumber(current_page.min),
+                SerializableNumber(current_page.max),
+            ),
+            current_page.id,
+        ));
 
         current_page
             .move_to_fs(base_dir.join(format!("page_{}.bin", page_id)))
@@ -355,23 +361,21 @@ impl CommittedNumberFieldIndex {
 impl CommittedNumberFieldIndex {
     pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
         self.pages.iter().flat_map(|page| {
-
             // We `collect` the items. This is not the best approach.
             // We should avoid it
             // TODO: think about this.
 
             match &page.pointer {
-                PagePointer::InMemory(items) => {
-                    items
-                        .iter()
-                        .map(|item| (item.key.0, item.values.clone()))
-                        .collect::<Vec<_>>()
-                }
+                PagePointer::InMemory(items) => items
+                    .iter()
+                    .map(|item| (item.key.0, item.values.clone()))
+                    .collect::<Vec<_>>(),
                 PagePointer::OnFile(p) => {
                     // `load_items` can fail. We should propagate the error.
                     // TODO: think about this.
                     let items = load_items(p).expect("Cannot load items");
-                    items.into_iter()
+                    items
+                        .into_iter()
                         .map(|item| (item.key.0, item.values))
                         .collect::<Vec<_>>()
                 }
@@ -391,7 +395,13 @@ fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) ->
     }
 }
 
-pub fn merge<K: Ord + Eq + Debug, V: Debug, VV: Extend<V> + IntoIterator<Item = V> + Debug, I1: Iterator<Item = (K, VV)>, I2: Iterator<Item = (K, VV)>>(
+pub fn merge<
+    K: Ord + Eq + Debug,
+    V: Debug,
+    VV: Extend<V> + IntoIterator<Item = V> + Debug,
+    I1: Iterator<Item = (K, VV)>,
+    I2: Iterator<Item = (K, VV)>,
+>(
     iter1: I1,
     iter2: I2,
 ) -> impl Iterator<Item = (K, VV)> {
@@ -402,7 +412,7 @@ pub fn merge<K: Ord + Eq + Debug, V: Debug, VV: Extend<V> + IntoIterator<Item = 
         |_, mut v1, v2| {
             v1.extend(v2);
             v1
-        }
+        },
     )
 }
 
@@ -412,7 +422,11 @@ mod tests {
 
     use anyhow::Result;
 
-    use crate::{indexes::number::{committed::merge, Number}, test_utils::generate_new_path, types::DocumentId};
+    use crate::{
+        indexes::number::{committed::merge, Number},
+        test_utils::generate_new_path,
+        types::DocumentId,
+    };
 
     use super::CommittedNumberFieldIndex;
 

@@ -38,8 +38,7 @@ impl NumberIndex {
             "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
             doc_id, field_id, value
         );
-        let uncommitted = self.uncommitted.entry(field_id)
-            .or_default();
+        let uncommitted = self.uncommitted.entry(field_id).or_default();
         uncommitted.insert(value, doc_id)?;
 
         Ok(())
@@ -64,7 +63,8 @@ impl NumberIndex {
         std::fs::create_dir_all(&data_dir)
             .context("Cannot create data directory for number index")?;
 
-        let all_fields = self.uncommitted
+        let all_fields = self
+            .uncommitted
             .iter()
             .map(|entry| *entry.key())
             .chain(self.committed.iter().map(|entry| *entry.key()))
@@ -76,14 +76,13 @@ impl NumberIndex {
             .context("Cannot serialize into info.json")?;
 
         for field_id in all_fields {
-
             let uncommitted = self.uncommitted.get(&field_id);
             let uncommitted = match uncommitted {
                 Some(uncommitted) => uncommitted,
                 None => {
                     debug!(?field_id, "No uncommitted data for field");
-                    continue
-                },
+                    continue;
+                }
             };
 
             let data = uncommitted.take()?;
@@ -102,14 +101,8 @@ impl NumberIndex {
             // TODO: avoid it
 
             let new_committed_number = if let Some(committed) = committed {
-                let merged = merge(
-                    data.into_iter(),
-                    committed.iter(),
-                );
-                CommittedNumberFieldIndex::from_iter(
-                    merged,
-                    base_dir.clone(),
-                )
+                let merged = merge(data.into_iter(), committed.iter());
+                CommittedNumberFieldIndex::from_iter(merged, base_dir.clone())
             } else {
                 CommittedNumberFieldIndex::from_iter(data, base_dir.clone())
             }?;
@@ -130,8 +123,8 @@ impl NumberIndex {
 
         for field_id in field_ids {
             let field_dir = data_dir.join(format!("{}", field_id.0));
-            let committed = CommittedNumberFieldIndex::load(field_dir)
-                .context("Cannot load field")?;
+            let committed =
+                CommittedNumberFieldIndex::load(field_dir).context("Cannot load field")?;
 
             self.committed.insert(field_id, committed);
         }
@@ -323,7 +316,7 @@ mod tests {
         ];
         let field_id = FieldId(0);
 
-        let index = NumberIndex::try_new(NumberIndexConfig{})?;
+        let index = NumberIndex::try_new(NumberIndexConfig {})?;
         for d in data {
             for doc_id in d.1 {
                 index.add(doc_id, field_id, d.0)?;
@@ -331,7 +324,10 @@ mod tests {
         }
 
         // Query on uncommitted data
-        let output = index.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
+        let output = index.filter(
+            field_id,
+            NumberFilter::Between((Number::I32(-1), Number::I32(10))),
+        )?;
         assert_eq!(
             output,
             HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
@@ -340,11 +336,14 @@ mod tests {
         let data_dir = generate_new_path();
         index.commit(data_dir.clone())?;
 
-        let mut after = NumberIndex::try_new(NumberIndexConfig{})?;
+        let mut after = NumberIndex::try_new(NumberIndexConfig {})?;
         after.load(data_dir)?;
 
         // Query on committed data
-        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(10))))?;
+        let output = after.filter(
+            field_id,
+            NumberFilter::Between((Number::I32(-1), Number::I32(10))),
+        )?;
         assert_eq!(
             output,
             HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
@@ -354,7 +353,10 @@ mod tests {
         after.add(DocumentId(11), field_id, Number::I32(11))?;
 
         // Query on committed & uncommitted data
-        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
+        let output = after.filter(
+            field_id,
+            NumberFilter::Between((Number::I32(-1), Number::I32(12))),
+        )?;
         assert_eq!(
             output,
             HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
@@ -363,11 +365,14 @@ mod tests {
         let new_data_dir = generate_new_path();
         after.commit(new_data_dir.clone())?;
 
-        let mut after = NumberIndex::try_new(NumberIndexConfig{})?;
+        let mut after = NumberIndex::try_new(NumberIndexConfig {})?;
         after.load(new_data_dir)?;
 
         // Query on committed (and merged) data
-        let output = after.filter(field_id, NumberFilter::Between((Number::I32(-1), Number::I32(12))))?;
+        let output = after.filter(
+            field_id,
+            NumberFilter::Between((Number::I32(-1), Number::I32(12))),
+        )?;
         assert_eq!(
             output,
             HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))

@@ -176,12 +176,8 @@ impl<'de> Deserialize<'de> for SerializableNumber {
                             .ok_or_else(|| A::Error::invalid_length(1, &self))?;
                         Ok(SerializableNumber(Number::I32(y)))
                     }
-                    3 => {
-                        Ok(SerializableNumber(Number::F32(f32::INFINITY)))
-                    }
-                    4 => {
-                        Ok(SerializableNumber(Number::F32(f32::NEG_INFINITY)))
-                    }
+                    3 => Ok(SerializableNumber(Number::F32(f32::INFINITY))),
+                    4 => Ok(SerializableNumber(Number::F32(f32::NEG_INFINITY))),
                     d => Err(A::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(d.into()),
                         &"1, 2",

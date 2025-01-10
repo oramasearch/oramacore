@@ -43,10 +43,11 @@ impl PostingIdStorage {
         delta: DashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
         new_path: PathBuf,
     ) -> Result<()> {
-        let mut content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
-            .context("Cannot open posting ids file")?
-            .read_json_data()
-            .context("Cannot deserialize posting ids")?;
+        let mut content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
+            BufferedFile::open(&self.path)
+                .context("Cannot open posting ids file")?
+                .read_json_data()
+                .context("Cannot deserialize posting ids")?;
 
         for (posting_id, posting) in delta {
             let entry = content.entry(posting_id).or_default();

@@ -1,6 +1,5 @@
 use std::{fmt::Debug, iter::Peekable};
 
-
 pub struct MergedIterator<
     K,
     V1,
@@ -89,7 +88,6 @@ impl<
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,8 +96,8 @@ mod tests {
     fn test_merger_iterator() {
         let iter1 = vec![(1_u32, vec![1_u32]), (2, vec![2]), (3, vec![3])].into_iter();
         let iter2 = std::iter::empty();
-        let transformer = |_:  &u32, v: Vec<u32>| v;
-        let merger = |_:  &u32, mut v1: Vec<u32>, v2: Vec<u32>| {
+        let transformer = |_: &u32, v: Vec<u32>| v;
+        let merger = |_: &u32, mut v1: Vec<u32>, v2: Vec<u32>| {
             v1.extend(v2);
             v1
         };
