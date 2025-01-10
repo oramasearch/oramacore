@@ -111,10 +111,22 @@ def get_supported_models_info():
     }
 
     raw_models = {
-        "BAAI/bge-small-en-v1.5-raw": {"dimensions": 384, "model_name": "BAAI/bge-small-en-v1.5-raw"},
-        "BAAI/bge-base-en-v1.5-raw": {"dimensions": 768, "model_name": "BAAI/bge-base-en-v1.5-raw"},
-        "BAAI/bge-large-en-v1.5-raw": {"dimensions": 1024, "model_name": "BAAI/bge-large-en-v1.5-raw"},
-        "intfloat/multilingual-e5-large-raw": {"dimensions": 1024, "model_name": "intfloat/multilingual-e5-large-raw"},
+        "BAAI/bge-small-en-v1.5-raw": {
+            "dimensions": 384,
+            "model_name": "BAAI/bge-small-en-v1.5-raw",
+        },
+        "BAAI/bge-base-en-v1.5-raw": {
+            "dimensions": 768,
+            "model_name": "BAAI/bge-base-en-v1.5-raw",
+        },
+        "BAAI/bge-large-en-v1.5-raw": {
+            "dimensions": 1024,
+            "model_name": "BAAI/bge-large-en-v1.5-raw",
+        },
+        "intfloat/multilingual-e5-large-raw": {
+            "dimensions": 1024,
+            "model_name": "intfloat/multilingual-e5-large-raw",
+        },
     }
 
     supported_models.update(raw_models)
@@ -148,5 +160,9 @@ class ModelGroups(Enum):
         OramaModelInfo.MultilingualE5Small,
         OramaModelInfo.MultilingualE5Base,
     ]
-    small = [OramaModelInfo.BGESmallRaw, OramaModelInfo.BGESmall, OramaModelInfo.MultilingualE5Small]
+    small = [
+        OramaModelInfo.BGESmallRaw,
+        OramaModelInfo.BGESmall,
+        OramaModelInfo.MultilingualE5Small,
+    ]
     all = list(OramaModelInfo)

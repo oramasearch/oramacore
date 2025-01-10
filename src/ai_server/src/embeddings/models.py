@@ -24,7 +24,10 @@ class EmbeddingsModels:
 
         if not self.config.dynamically_load_models:
             loaded_models = {
-                item.name: TextEmbedding(model_name=item.value["model_name"], providers=self.config.execution_providers)
+                item.name: TextEmbedding(
+                    model_name=item.value["model_name"],
+                    providers=self.config.execution_providers,
+                )
                 for item in self.selected_models
             }
 
@@ -46,12 +49,12 @@ class EmbeddingsModels:
         if model_name in self.loaded_models:
             return embed_alternative(self.loaded_models[model_name], input_strings)
 
-        if self.config.dynamically_load_models:
+        if self.config.embeddings.dynamically_load_models:
             with self.model_loading_lock:
                 if not model_name in self.loaded_models:
                     self.loaded_models[model_name] = TextEmbedding(
                         model_name=OramaModelInfo[model_name].value["model_name"],
-                        providers=self.config.execution_providers,
+                        providers=self.config.embeddings.execution_providers,
                     )
 
                 return embed_alternative(self.loaded_models[model_name], input_strings)

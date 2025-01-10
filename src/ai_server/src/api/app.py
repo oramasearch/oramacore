@@ -33,7 +33,9 @@ def create_app(service):
     @route_in_threadpool
     def post_embedding(request: FastApiEmbeddingRequest):
         embeddings = service.embeddings_service.calculate_embeddings(
-            request.input, request.intent.name if request.intent else request.intent, request.model.name
+            request.input,
+            request.intent.name if request.intent else request.intent,
+            request.model.name,
         )
         return JSONResponse(content={"data": [{"object": "embedding", "embedding": e.tolist()} for e in embeddings]})
 
