@@ -17,3 +17,4 @@ opentelemetry-sdk
 pyyaml
 cachetools
 vllm
+json-repair

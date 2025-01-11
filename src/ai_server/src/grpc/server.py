@@ -119,6 +119,8 @@ def serve(config, embeddings_service, models_manager):
     )
     reflection.enable_server_reflection(SERVICE_NAMES, server)
 
+    logger.info(f"Available gRPC services: {SERVICE_NAMES}")
+
     server.add_insecure_port(f"[::]:{config.grpc_port}")
     server.start()
     server.wait_for_termination()

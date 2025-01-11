@@ -11,12 +11,12 @@ embeddings:
 
 LLMs:
   content_expansion:
-    id: "microsoft/Phi-3.5-mini-instruct"
+    id: "Qwen/Qwen2.5-3B-Instruct"
     tensor_parallel_size: 1
     sampling_params:
       temperature: 0.2
       top_p: 0.95
-      max_tokens: 512
+      max_tokens: 256
 
   vision:
     id: "microsoft/Phi-3.5-vision-instruct"
@@ -27,7 +27,7 @@ LLMs:
       max_tokens: 512
 
   google_query_translator:
-    id: "microsoft/Phi-3.5-mini-instruct"
+    id: "Qwen/Qwen2.5-3B-Instruct"
     tensor_parallel_size: 1
     sampling_params:
       temperature: 0.2

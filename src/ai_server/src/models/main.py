@@ -1,6 +1,7 @@
 import torch
 import logging
 import threading
+from json_repair import repair_json
 from vllm import SamplingParams, LLM
 from typing import Dict, Any, Optional, Set
 
@@ -122,8 +123,9 @@ class ModelsManager:
                 {"role": "user", "content": PROMPT_TEMPLATES[f"{model_key}:user"](prompt)},
             ]
 
-            outputs = model.chat(conversation_history, sampling_params)
-            return outputs[0].outputs[0].text.strip()
+            outputs = model.chat(conversation_history, sampling_params=sampling_params)
+
+            return repair_json(outputs[0].outputs[0].text.strip())
 
         except Exception as e:
             logger.error(f"Error generating text with {model_key}: {e}")

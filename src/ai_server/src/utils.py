@@ -4,10 +4,10 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 
 
-DEFAULT_GENERAL_MODEL = "microsoft/Phi-3.5-mini-instruct"
+DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_VISION_MODEL = "microsoft/Phi-3.5-vision-instruct"
-DEFAULT_CONTENT_EXPANSION_MODEL = "microsoft/Phi-3.5-mini-instruct"
-DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "microsoft/Phi-3.5-mini-instruct"
+DEFAULT_CONTENT_EXPANSION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
 @dataclass
@@ -67,7 +67,7 @@ class LLMs:
 
 @dataclass
 class OramaAIConfig:
-    models_cache_dir: Optional[str] = ".embeddins_models_cache"
+    models_cache_dir: Optional[str] = ".embeddings_models_cache"
     api_key: Optional[str] = None
     grpc_port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
