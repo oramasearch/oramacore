@@ -14,7 +14,7 @@ DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "microsoft/Phi-3.5-mini-instruct"
 class EmbeddingsConfig:
     default_model_group: Optional[str] = "en"
     dynamically_load_models: Optional[bool] = False
-    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CPUExecutionProvider"])
+    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CUDAExecutionProvider"])
     total_threads: Optional[int] = 8
 
     def __post_init__(self):
@@ -82,6 +82,17 @@ class OramaAIConfig:
     def update_from_yaml(self, path: str = "config.yaml"):
         with open(path) as f:
             config = yaml.safe_load(f)
+
             for k, v in config.items():
-                if hasattr(self, k) and v is not None:
-                    setattr(self, k, v)
+                if hasattr(self, k):
+                    if k == "embeddings" and v is not None:
+                        self.embeddings = EmbeddingsConfig(**v)
+                    elif k == "LLMs" and v is not None:
+                        llm_configs = {}
+                        for model_key, model_config in v.items():
+                            if model_config:
+                                sampling_params = SamplingParams(**model_config.pop("sampling_params", {}))
+                                llm_configs[model_key] = ModelConfig(**model_config, sampling_params=sampling_params)
+                        self.LLMs = LLMs(**llm_configs)
+                    else:
+                        setattr(self, k, v)

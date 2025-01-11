@@ -2,7 +2,9 @@ import torch
 import logging
 import threading
 from vllm import SamplingParams, LLM
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
+
+from src.models.prompts import PROMPT_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
@@ -16,32 +18,35 @@ class ModelsManager:
             for key, value in vars(self.config.LLMs).items()
             if key not in ["__dict__", "__weakref__", "__doc__"]
         }
-        self._models: Dict[str, Dict[str, Any]] = {}
+        self._models: Dict[str, Dict[str, Any]] = {}  # Stores unique model instances by model ID
+        self._model_refs: Dict[str, str] = {}  # Maps model_key to model_id
         self._lock = threading.Lock()
 
         logger.info(f"Available models: {list(self.model_configs.keys())}")
 
-        logger.info("Pre-loading all models...")
-        for model_key in self.model_configs:
-            self._preload_model(model_key)
+        # Get unique model IDs
+        unique_models = self._get_unique_model_ids()
+        logger.info(f"Unique models to load: {unique_models}")
 
-    def _preload_model(self, model_key: str) -> None:
-        """Preload a model during initialization."""
-        if model_key not in self.model_configs:
-            logger.info(f"Model key {model_key} not found in configs")
-            return
+        # Preload unique models
+        for model_id in unique_models:
+            self._preload_unique_model(model_id)
 
-        model_config = self.model_configs[model_key]
-        if model_config is None:
-            logger.info(f"Configuration for model {model_key} is None")
-            return
+        # Set up model references and sampling params
+        self._setup_model_references()
 
+    def _get_unique_model_ids(self) -> Set[str]:
+        """Get set of unique model IDs from configurations."""
+        return {config.id for config in self.model_configs.values() if config is not None}
+
+    def _preload_unique_model(self, model_id: str) -> None:
+        """Preload a unique model instance."""
         try:
-            logger.info(f"Loading model {model_config.id}...")
+            logger.info(f"Loading model {model_id}...")
 
             model = LLM(
-                model=model_config.id,
-                tensor_parallel_size=model_config.tensor_parallel_size,
+                model=model_id,
+                tensor_parallel_size=1,
                 gpu_memory_utilization=0.85,
                 max_model_len=2048,
                 enforce_eager=True,
@@ -50,37 +55,60 @@ class ModelsManager:
                 trust_remote_code=True,
             )
 
-            sampling_params = SamplingParams(
-                temperature=model_config.sampling_params.temperature,
-                top_p=model_config.sampling_params.top_p,
-                max_tokens=model_config.sampling_params.max_tokens,
-            )
-
-            model_data = {"model": model, "config": {"sampling_params": sampling_params}}
-
             # Run a warmup prompt
-            warmup_prompt = "test"
-            _ = model.generate([warmup_prompt], sampling_params)
+            warmup_prompt = "hello"
+            _ = model.generate([warmup_prompt], SamplingParams(temperature=0.2, top_p=0.95, max_tokens=5))
 
-            self._models[model_key] = model_data
-            logger.info(f"Successfully loaded model {model_config.id}")
+            self._models[model_id] = {"model": model, "configs": {}}
+            logger.info(f"Successfully loaded model {model_id}")
 
         except Exception as e:
-            logger.info(f"Error preloading model {model_key}: {e}")
-            if model_key in self._models:
-                del self._models[model_key]
+            logger.error(f"Error preloading model {model_id}: {e}")
+            if model_id in self._models:
+                del self._models[model_id]
+            raise
+
+    def _setup_model_references(self) -> None:
+        """Set up model references and sampling parameters for each model key."""
+        for model_key, config in self.model_configs.items():
+            if config is None:
+                continue
+
+            model_id = config.id
+            if model_id not in self._models:
+                logger.warning(f"Model {model_id} not loaded, skipping {model_key} setup")
+                continue
+
+            # Store the reference
+            self._model_refs[model_key] = model_id
+
+            # Store the sampling parameters for this configuration
+            sampling_params = SamplingParams(
+                temperature=config.sampling_params.temperature,
+                top_p=config.sampling_params.top_p,
+                max_tokens=config.sampling_params.max_tokens,
+            )
+            self._models[model_id]["configs"][model_key] = {"sampling_params": sampling_params}
 
     def get_model(self, model_key: str) -> Optional[Dict[str, Any]]:
-        """Get a preloaded model."""
-        model_key = model_key.lower()  # Convert to lowercase for consistency
+        """Get a model and its configuration by model_key."""
+        model_key = model_key.lower()
         with self._lock:
-            if model_key not in self._models:
-                logger.info(f"Requested model {model_key} not found. Available models: {list(self._models.keys())}")
-                raise RuntimeError(f"Model {model_key} is not loaded")
-            return self._models[model_key]
+            if model_key not in self._model_refs:
+                logger.error(f"Model key {model_key} not found in references")
+                return None
+
+            model_id = self._model_refs[model_key]
+            model_data = self._models.get(model_id)
+
+            if not model_data:
+                logger.error(f"Model {model_id} not found in loaded models")
+                return None
+
+            return {"model": model_data["model"], "config": model_data["configs"][model_key]}
 
     def generate_text(self, model_key: str, prompt: str) -> str:
-        """Generate text using a preloaded model."""
+        """Generate text using a model."""
         try:
             model_data = self.get_model(model_key)
             if not model_data:
@@ -89,15 +117,21 @@ class ModelsManager:
             model = model_data["model"]
             sampling_params = model_data["config"]["sampling_params"]
 
-            outputs = model.generate([prompt], sampling_params)
+            conversation_history = [
+                {"role": "system", "content": PROMPT_TEMPLATES[f"{model_key}:system"]},
+                {"role": "user", "content": PROMPT_TEMPLATES[f"{model_key}:user"](prompt)},
+            ]
+
+            outputs = model.chat(conversation_history, sampling_params)
             return outputs[0].outputs[0].text.strip()
+
         except Exception as e:
             logger.error(f"Error generating text with {model_key}: {e}")
             logger.error(f"Currently loaded models: {list(self._models.keys())}")
             raise
 
     def process_batch(self, model_key: str, prompts: list[str]) -> list[str]:
-        """Process a batch using a preloaded model."""
+        """Process a batch of prompts."""
         model_data = self.get_model(model_key)
         if not model_data:
             raise RuntimeError(f"Model {model_key} is not available")
@@ -116,4 +150,5 @@ class ModelsManager:
         """Clean up models and free GPU memory."""
         with self._lock:
             self._models.clear()
+            self._model_refs.clear()
             torch.cuda.empty_cache()
