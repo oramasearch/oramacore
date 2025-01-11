@@ -2,3 +2,4 @@
 __pycache__
 loader.py
 output.txt
+.embeddins_models_cache

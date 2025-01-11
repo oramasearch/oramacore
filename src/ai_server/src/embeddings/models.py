@@ -1,18 +1,32 @@
+import os
+import logging
 import threading
 from typing import List
 from fastembed import TextEmbedding
+
 from src.utils import OramaAIConfig
-from fastembed.text.onnx_embedding import supported_onnx_models
-from fastembed.text.e5_onnx_embedding import supported_multilingual_e5_models
 from src.embeddings.embeddings import embed_alternative, ModelGroups, OramaModelInfo
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingsModels:
     def __init__(self, config: OramaAIConfig, selected_models: List[OramaModelInfo]):
+        logger.info("Initializing EmbeddingsModels...")
         self.config = config
         self.selected_models = selected_models
         self.selected_model_names = [item.name for item in selected_models]
+
+        logger.info(f"Creating cache directory: {config.models_cache_dir}")
+        os.makedirs(config.models_cache_dir, exist_ok=True)
+
+        logger.info("Setting FastEmbed cache directory...")
+        os.environ["FASTEMBED_CACHE_DIR"] = os.path.abspath(config.models_cache_dir)
+
+        logger.info("Loading models...")
         self.loaded_models = self.load_models()
+        logger.info("Models loaded successfully")
+
         self.model_loading_lock = threading.RLock()
         self.model_last_used = {}
 
@@ -60,79 +74,3 @@ class EmbeddingsModels:
                 return embed_alternative(self.loaded_models[model_name], input_strings)
         else:
             raise ValueError(f"Model {model_name} is not loaded")
-
-
-def extend_fastembed_supported_models():
-    supported_onnx_models.extend(
-        [
-            {
-                "model": "intfloat/multilingual-e5-small",
-                "dim": 384,
-                "description": "Text embeddings, Unimodal (text), Multilingual (~100 languages), 512 input tokens truncation, Prefixes for queries/documents: necessary, 2024 year.",
-                "license": "mit",
-                "size_in_GB": 0.4,
-                "sources": {
-                    "hf": "intfloat/multilingual-e5-small",
-                },
-                "model_file": "onnx/model.onnx",
-            },
-            {
-                "model": "intfloat/multilingual-e5-base",
-                "dim": 768,
-                "description": "Text embeddings, Unimodal (text), Multilingual (~100 languages), 512 input tokens truncation, Prefixes for queries/documents: necessary, 2024 year.",
-                "license": "mit",
-                "size_in_GB": 1.11,
-                "sources": {
-                    "hf": "intfloat/multilingual-e5-base",
-                },
-                "model_file": "onnx/model.onnx",
-            },
-            {
-                "model": "BAAI/bge-small-en-v1.5-raw",
-                "dim": 384,
-                "description": "Text embeddings, Unimodal (text), English, 512 input tokens truncation, Prefixes for queries/documents: not so necessary, 2023 year.",
-                "license": "mit",
-                "size_in_GB": 0.4,
-                "sources": {
-                    "hf": "BAAI/bge-small-en-v1.5",
-                },
-                "model_file": "onnx/model.onnx",
-            },
-            {
-                "model": "BAAI/bge-base-en-v1.5-raw",
-                "dim": 768,
-                "description": "Text embeddings, Unimodal (text), English, 512 input tokens truncation, Prefixes for queries/documents: not so necessary, 2023 year.",
-                "license": "mit",
-                "size_in_GB": 1.11,
-                "sources": {
-                    "hf": "BAAI/bge-base-en-v1.5",
-                },
-                "model_file": "onnx/model.onnx",
-            },
-            {
-                "model": "BAAI/bge-large-en-v1.5-raw",
-                "dim": 1024,
-                "description": "Text embeddings, Unimodal (text), English, 512 input tokens truncation, Prefixes for queries/documents: not so necessary, 2023 year.",
-                "license": "mit",
-                "size_in_GB": 1.20,
-                "sources": {
-                    "hf": "BAAI/bge-large-en-v1.5",
-                },
-                "model_file": "onnx/model.onnx",
-            },
-        ]
-    )
-    supported_multilingual_e5_models.append(
-        {
-            "model": "intfloat/multilingual-e5-large-raw",
-            "dim": 1024,
-            "description": "Text embeddings, Unimodal (text), Multilingual (~100 languages), 512 input tokens truncation, Prefixes for queries/documents: necessary, 2024 year.",
-            "license": "mit",
-            "size_in_GB": 2.24,
-            "sources": {
-                "hf": "intfloat/multilingual-e5-large",
-            },
-            "model_file": "onnx/model.onnx",
-            "additional_files": ["onnx/model.onnx_data"],
-        }
-    )

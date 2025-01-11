@@ -1,8 +1,10 @@
+import torch
+import logging
+import threading
 from vllm import SamplingParams, LLM
 from typing import Dict, Any, Optional
-import torch
-import threading
-from service_pb2 import LLMType
+
+logger = logging.getLogger(__name__)
 
 
 class ModelsManager:
@@ -17,25 +19,25 @@ class ModelsManager:
         self._models: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-        print(f"Available models: {list(self.model_configs.keys())}")
+        logger.info(f"Available models: {list(self.model_configs.keys())}")
 
-        print("Pre-loading all models...")
+        logger.info("Pre-loading all models...")
         for model_key in self.model_configs:
             self._preload_model(model_key)
 
     def _preload_model(self, model_key: str) -> None:
         """Preload a model during initialization."""
         if model_key not in self.model_configs:
-            print(f"Model key {model_key} not found in configs")
+            logger.info(f"Model key {model_key} not found in configs")
             return
 
         model_config = self.model_configs[model_key]
         if model_config is None:
-            print(f"Configuration for model {model_key} is None")
+            logger.info(f"Configuration for model {model_key} is None")
             return
 
         try:
-            print(f"Loading model {model_config.id}...")
+            logger.info(f"Loading model {model_config.id}...")
 
             model = LLM(
                 model=model_config.id,
@@ -61,10 +63,10 @@ class ModelsManager:
             _ = model.generate([warmup_prompt], sampling_params)
 
             self._models[model_key] = model_data
-            print(f"Successfully loaded model {model_config.id}")
+            logger.info(f"Successfully loaded model {model_config.id}")
 
         except Exception as e:
-            print(f"Error preloading model {model_key}: {e}")
+            logger.info(f"Error preloading model {model_key}: {e}")
             if model_key in self._models:
                 del self._models[model_key]
 
@@ -73,7 +75,7 @@ class ModelsManager:
         model_key = model_key.lower()  # Convert to lowercase for consistency
         with self._lock:
             if model_key not in self._models:
-                print(f"Requested model {model_key} not found. Available models: {list(self._models.keys())}")
+                logger.info(f"Requested model {model_key} not found. Available models: {list(self._models.keys())}")
                 raise RuntimeError(f"Model {model_key} is not loaded")
             return self._models[model_key]
 
@@ -90,8 +92,8 @@ class ModelsManager:
             outputs = model.generate([prompt], sampling_params)
             return outputs[0].outputs[0].text.strip()
         except Exception as e:
-            print(f"Error generating text with {model_key}: {e}")
-            print(f"Currently loaded models: {list(self._models.keys())}")
+            logger.error(f"Error generating text with {model_key}: {e}")
+            logger.error(f"Currently loaded models: {list(self._models.keys())}")
             raise
 
     def process_batch(self, model_key: str, prompts: list[str]) -> list[str]:
@@ -107,7 +109,7 @@ class ModelsManager:
             outputs = model.generate(prompts, sampling_params)
             return [output.outputs[0].text.strip() for output in outputs]
         except Exception as e:
-            print(f"Error processing batch with {model_key}: {e}")
+            logger.error(f"Error processing batch with {model_key}: {e}")
             raise
 
     def cleanup(self):

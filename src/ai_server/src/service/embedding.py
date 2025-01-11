@@ -1,37 +1,46 @@
 import os
-import uvicorn
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from src.embeddings.models import (
     EmbeddingsModels,
-    extend_fastembed_supported_models,
     ModelGroups,
 )
 from src.embeddings.embeddings import initialize_thread_executor
-from src.api.app import create_app
-from src.grpc.server import serve
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
     def __init__(self, config):
+        logger.info("Starting EmbeddingService initialization...")
+
+        logger.info("Setting up thread executor...")
         self.config = config
         self.thread_executor = ThreadPoolExecutor(max_workers=config.total_threads // 2)
+
+        logger.info("Initializing embeddings service...")
         self.embeddings_service = self._initialize_embeddings_service()
-        self.app = create_app(self)
+        logger.info("EmbeddingService initialization complete")
 
     def _initialize_embeddings_service(self):
+        logger.info("Setting ONNXRUNTIME_PROVIDERS...")
         os.environ["ONNXRUNTIME_PROVIDERS"] = "CUDAExecutionProvider"
-        extend_fastembed_supported_models()
-        initialize_thread_executor(max_workers=self.config.total_threads // 2)
-        return EmbeddingsModels(
-            self.config,
-            selected_models=ModelGroups[self.config.embeddings.default_model_group].value,
-        )
 
-    def start(self):
-        uvicorn.run(
-            self.app,
-            host=self.config.host,
-            port=int(self.config.http_port),
-            log_level="error",
-        )
+        logger.info("Initializing thread executor...")
+        initialize_thread_executor(max_workers=self.config.total_threads // 2)
+
+        logger.info("Creating EmbeddingsModels instance...")
+        try:
+            model_group = self.config.embeddings.default_model_group
+            logger.info(f"Using model group: {model_group}")
+            selected_models = ModelGroups[model_group].value
+            logger.info(f"Selected models: {[model.name for model in selected_models]}")
+
+            return EmbeddingsModels(
+                self.config,
+                selected_models=selected_models,
+            )
+        except Exception as e:
+            logger.error(f"Error initializing EmbeddingsModels: {str(e)}", exc_info=True)
+            raise

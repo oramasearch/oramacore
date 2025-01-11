@@ -61,9 +61,9 @@ class LLMs:
 
 @dataclass
 class OramaAIConfig:
+    models_cache_dir: Optional[str] = ".embeddins_models_cache"
     api_key: Optional[str] = None
     grpc_port: Optional[int] = 50051
-    http_port: Optional[int] = 5000
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     LLMs: Optional[LLMs] = field(default_factory=LLMs)

@@ -1,13 +1,11 @@
-# Puython 3.10 suggested
+# Puython 3.11 suggested
 
 numpy
-fastapi
 grpcio-tools
 grpcio
 python-dotenv
 fastembed-gpu
 nvidia-cudnn-cu12
-uvicorn
 grpcio-reflection
 argparse
 --extra-index-url https://download.pytorch.org/whl/cu124

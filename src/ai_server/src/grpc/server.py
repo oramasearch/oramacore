@@ -1,4 +1,5 @@
 import grpc
+import logging
 from grpc_reflection.v1alpha import reflection
 from concurrent.futures import ThreadPoolExecutor
 
@@ -97,8 +98,10 @@ class VisionService(service_pb2_grpc.VisionServiceServicer):
 
 
 def serve(config, embeddings_service, models_manager):
-    print(f"Starting gRPC server on port {config.grpc_port}")
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting gRPC server on port {config.grpc_port}")
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
+    logger.info("gRPC server created")
 
     embedding_service = CalculateEmbeddingService(embeddings_service)
     llm_service = LLMService(models_manager)
