@@ -7,7 +7,7 @@ use crate::{collection_manager::dto::FieldId, file_utils::BufferedFile, types::D
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedVectorFieldIndex;
 use dashmap::DashMap;
-use tracing::{debug, trace};
+use tracing::{debug, info, instrument, trace};
 use uncommitted::UncommittedVectorFieldIndex;
 
 mod committed;
@@ -56,6 +56,7 @@ impl VectorIndex {
         Ok(())
     }
 
+    #[instrument(skip(self, data_dir))]
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
         std::fs::create_dir_all(&data_dir).context("Cannot create directory for vector index")?;
 
@@ -65,6 +66,8 @@ impl VectorIndex {
             .map(|e| *e.key())
             .chain(self.committed.iter().map(|e| *e.key()))
             .collect::<HashSet<_>>();
+
+        info!("Committing vector index with fields: {:?}", all_field_ids);
 
         BufferedFile::create(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -104,11 +107,14 @@ impl VectorIndex {
         Ok(())
     }
 
+    #[instrument(skip(self, data_dir))]
     pub fn load(&self, data_dir: PathBuf) -> Result<()> {
         let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json file")?;
+
+        info!("Loading vector index with fields: {:?}", field_ids);
 
         for field_id in field_ids {
             let data_dir = data_dir.join(field_id.0.to_string());
