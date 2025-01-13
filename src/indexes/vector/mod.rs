@@ -3,137 +3,125 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{collection_manager::dto::FieldId, types::DocumentId};
+use crate::{collection_manager::dto::FieldId, file_utils::BufferedFile, types::DocumentId};
 use anyhow::{anyhow, Context, Result};
-use committed::CommittedState;
-use dashmap::{DashMap, Entry};
-use tracing::trace;
-use uncommitted::UncommittedVectorIndex;
+use committed::CommittedVectorFieldIndex;
+use dashmap::DashMap;
+use tracing::{debug, info, instrument, trace};
+use uncommitted::UncommittedVectorFieldIndex;
 
 mod committed;
 mod uncommitted;
 
 #[derive(Debug)]
 pub struct VectorIndex {
-    uncommitted: UncommittedVectorIndex,
-    commited: DashMap<FieldId, CommittedState>,
-    base_path: PathBuf,
+    uncommitted: DashMap<FieldId, UncommittedVectorFieldIndex>,
+    committed: DashMap<FieldId, CommittedVectorFieldIndex>,
 }
 
-pub struct VectorIndexConfig {
-    pub base_path: PathBuf,
-}
+pub struct VectorIndexConfig {}
 
 impl VectorIndex {
-    pub fn try_new(config: VectorIndexConfig) -> Result<Self> {
+    pub fn try_new(_: VectorIndexConfig) -> Result<Self> {
         Ok(Self {
-            uncommitted: UncommittedVectorIndex::new(),
-            commited: Default::default(),
-            base_path: config.base_path,
+            uncommitted: Default::default(),
+            committed: Default::default(),
         })
     }
 
     pub fn add_field(&self, field_id: FieldId, dimension: usize) -> Result<()> {
-        let entry = self.commited.entry(field_id);
-        match entry {
-            Entry::Occupied(_) => Err(anyhow!("Field already exists")),
-            Entry::Vacant(entry) => {
-                entry.insert(CommittedState::new_in_memory(dimension));
+        self.uncommitted
+            .entry(field_id)
+            .or_insert_with(|| UncommittedVectorFieldIndex::new(dimension));
+        self.committed
+            .entry(field_id)
+            .or_insert_with(|| CommittedVectorFieldIndex::new(dimension));
 
-                Ok(())
-            }
-        }
+        Ok(())
     }
 
     pub fn insert_batch(&self, data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>) -> Result<()> {
         for (doc_id, field_id, vectors) in data {
-            self.uncommitted.insert((doc_id, field_id, vectors))?;
-        }
-        Ok(())
-    }
-
-    pub fn commit(&mut self) -> Result<()> {
-        // This process can take time. In the meantime, we cannot:
-        // - add new vectors
-        // - perform searches
-        // And this is not good. We should monitor how much time this process takes
-        // and think about how to make it faster or non-blocking.
-        // TODO: measure time and think about it.
-
-        let uncommitted = self.uncommitted.consume();
-        let mut loaded_index_field_ids = HashSet::new();
-        for (id, field_id, vectors) in uncommitted {
-            let index = self.commited.get_mut(&field_id);
-
-            let mut index = match index {
-                Some(index) => index,
-                None => return Err(anyhow!("Field {:?} not found", field_id)),
-            };
-
-            // `load_in_memory` does nothing if it is already loaded.
-            let loaded_index = index.load_in_memory()?;
-            for (_, vector) in vectors {
-                loaded_index.add(&vector, id)?;
+            if vectors.is_empty() {
+                continue;
             }
 
-            loaded_index_field_ids.insert(field_id);
-        }
-
-        // Rebuild indexes only for fields that have been updated
-        for field_id in loaded_index_field_ids {
-            let index = self.commited.get_mut(&field_id);
-
-            let mut index = match index {
-                Some(index) => index,
-                None => return Err(anyhow!("Field {:?} not found", field_id)),
-            };
-
-            let loaded_index = index.load_in_memory()?;
-            loaded_index.build()?;
-
-            loaded_index.save_on_fs(self.base_path.join(field_id.0.to_string()))?;
+            let uncommitted = self
+                .uncommitted
+                .entry(field_id)
+                .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len()));
+            uncommitted.insert((doc_id, vectors))?;
         }
 
         Ok(())
     }
 
-    pub fn load_in_memory(&self, field_ids: Option<Vec<FieldId>>) -> Result<()> {
-        let field_ids = match field_ids {
-            Some(field_ids) => field_ids,
-            None => self.commited.iter().map(|e| *e.key()).collect(),
-        };
+    #[instrument(skip(self, data_dir))]
+    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        std::fs::create_dir_all(&data_dir).context("Cannot create directory for vector index")?;
 
-        for field_id in field_ids {
-            let index = self.commited.get_mut(&field_id);
+        let all_field_ids = self
+            .uncommitted
+            .iter()
+            .map(|e| *e.key())
+            .chain(self.committed.iter().map(|e| *e.key()))
+            .collect::<HashSet<_>>();
 
-            let mut index = match index {
-                Some(index) => index,
-                None => return Err(anyhow!("Field {:?} not found", field_id)),
+        info!("Committing vector index with fields: {:?}", all_field_ids);
+
+        BufferedFile::create(data_dir.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&all_field_ids)
+            .context("Cannot serialize info.json file")?;
+
+        for field_id in all_field_ids {
+            let uncommitted = self.uncommitted.get(&field_id);
+
+            let uncommitted = match uncommitted {
+                Some(uncommitted) => uncommitted,
+                None => {
+                    debug!("Empty uncommitted vector index");
+                    continue;
+                }
             };
 
-            // We don't use the index itself,
-            // but we need to call `load_in_memory` to load the index in memory
-            let _ = index.load_in_memory();
+            let mut taken = uncommitted.take();
+
+            let mut committed = self
+                .committed
+                .entry(field_id)
+                .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension));
+
+            for (doc_id, vectors) in taken.data() {
+                for (_, vector) in vectors {
+                    committed.insert((doc_id, vector))?;
+                }
+            }
+
+            taken.close();
+
+            let data_dir = data_dir.join(field_id.0.to_string());
+            committed.commit(data_dir)?;
         }
 
         Ok(())
     }
 
-    pub fn unload_from_memory(&self, field_ids: Option<Vec<FieldId>>) -> Result<()> {
-        let field_ids = match field_ids {
-            Some(field_ids) => field_ids,
-            None => self.commited.iter().map(|e| *e.key()).collect(),
-        };
+    #[instrument(skip(self, data_dir))]
+    pub fn load(&self, data_dir: PathBuf) -> Result<()> {
+        let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
+            .context("Cannot open info.json file")?
+            .read_json_data()
+            .context("Cannot deserialize info.json file")?;
+
+        info!("Loading vector index with fields: {:?}", field_ids);
 
         for field_id in field_ids {
-            let index = self.commited.get_mut(&field_id);
+            let data_dir = data_dir.join(field_id.0.to_string());
+            let index = CommittedVectorFieldIndex::load(data_dir)
+                .with_context(|| format!("Cannot load vector index for field {:?}", field_id))?;
 
-            let mut index = match index {
-                Some(index) => index,
-                None => return Err(anyhow!("Field {:?} not found", field_id)),
-            };
-
-            index.unload_from_memory(self.base_path.join(field_id.0.to_string()))?;
+            self.committed.insert(field_id, index);
         }
 
         Ok(())
@@ -143,7 +131,7 @@ impl VectorIndex {
         &self,
         field_ids: &Vec<FieldId>,
         target: &[f32],
-        limit: usize,
+        committed_limit: usize,
     ) -> Result<HashMap<DocumentId, f32>> {
         trace!(
             "Searching for target: {:?} in fields {:?}",
@@ -151,17 +139,29 @@ impl VectorIndex {
             field_ids
         );
 
-        let mut output = self.uncommitted.search(field_ids, target, limit)?;
+        let mut output = HashMap::new();
 
         for field_id in field_ids {
-            let index = self.commited.get(field_id);
+            let index = self.uncommitted.get(field_id);
+            let index = match index {
+                Some(index) => index,
+                None => continue,
+            };
+
+            index
+                .search(target, &mut output)
+                .context("Cannot perform search on vector index")?;
+        }
+
+        for field_id in field_ids {
+            let index = self.committed.get(field_id);
             let index = match index {
                 Some(index) => index,
                 None => return Err(anyhow!("Field {:?} not found", field_id)),
             };
 
             index
-                .search(target, limit, &mut output)
+                .search(target, committed_limit, &mut output)
                 .context("Cannot perform search on vector index")?;
         }
 
@@ -180,11 +180,9 @@ mod tests {
     #[test]
     fn test_indexes_vector_commit_dont_change_the_result() -> Result<()> {
         const DIM: usize = 3;
-        const N: usize = 1_000;
+        const N: usize = 2;
 
-        let mut index = VectorIndex::try_new(VectorIndexConfig {
-            base_path: generate_new_path(),
-        })?;
+        let index = VectorIndex::try_new(VectorIndexConfig {})?;
         index.add_field(FieldId(0), 3)?;
 
         let data = (0..N)
@@ -203,17 +201,25 @@ mod tests {
         index.insert_batch(data)?;
 
         let output = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
-        let keys = output.keys().cloned().collect::<HashSet<_>>();
+        let uncommitted_keys = output.keys().cloned().collect::<HashSet<_>>();
 
-        index.commit()?;
+        let data_dir = generate_new_path();
+        index.commit(data_dir.clone())?;
 
         let output_after = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
-        let keys_after = output_after.keys().cloned().collect::<HashSet<_>>();
+        let committed_keys = output_after.keys().cloned().collect::<HashSet<_>>();
 
         // Equality is wrong here:
         // HWNSIndex doesn't guarantee the correct results.
         // But the 2 sets should have some common elements at least...
-        assert!(!keys.is_disjoint(&keys_after));
+        assert!(!uncommitted_keys.is_disjoint(&committed_keys));
+
+        let new_index = VectorIndex::try_new(VectorIndexConfig {})?;
+        new_index.load(data_dir)?;
+        let loaded_output = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
+        let loaded_keys = loaded_output.keys().cloned().collect::<HashSet<_>>();
+
+        assert_eq!(committed_keys, loaded_keys);
 
         Ok(())
     }

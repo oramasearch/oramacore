@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use anyhow::{anyhow, Context, Ok, Result};
 
@@ -46,6 +46,7 @@ impl CommittedDiskDocumentStorage {
                     ));
                 }
                 std::result::Result::Ok(false) => {
+                    warn!("Document {:?} not found", id);
                     result.push(None);
                     continue;
                 }
@@ -125,10 +126,12 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn get_documents_by_ids(
         &self,
         doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<Document>>> {
+        debug!("Get documents");
         let committed = self.committed.get_documents_by_ids(&doc_ids)?;
 
         let uncommitted = match self.uncommitted.read() {
@@ -147,6 +150,10 @@ impl DocumentStorage for DiskDocumentStorage {
                 if let Some(doc) = uncommitted {
                     Some(doc)
                 } else {
+                    if committed.is_none() {
+                        warn!("Document not found");
+                    }
+
                     committed
                 }
             })

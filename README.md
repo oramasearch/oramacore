@@ -59,6 +59,7 @@ cargo install hurl
 Run the tests:
 ```
 hurl --very-verbose --test --variables-file api-test.hurl.property api-test.hurl
+hurl --very-verbose --test --variables-file api-test.hurl.property embedding-api-test.hurl
 ```
 
 NB: you need to have the server running before running the tests.
