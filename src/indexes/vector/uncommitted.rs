@@ -27,11 +27,7 @@ impl InnerInnerUncommittedVectorFieldIndex {
         Ok(())
     }
 
-    pub fn search(
-        &self,
-        target: &[f32],
-        result: &mut HashMap<DocumentId, f32>,
-    ) -> Result<()>{
+    pub fn search(&self, target: &[f32], result: &mut HashMap<DocumentId, f32>) -> Result<()> {
         let magnetude = calculate_magnetude(target);
 
         for (id, vectors) in &self.data {
@@ -71,11 +67,7 @@ impl InnerUncommittedVectorFieldIndex {
         Ok(())
     }
 
-    fn search(
-        &self,
-        target: &[f32],
-        result: &mut HashMap<DocumentId, f32>,
-    ) -> Result<()> {
+    fn search(&self, target: &[f32], result: &mut HashMap<DocumentId, f32>) -> Result<()> {
         self.left.search(target, result)?;
         self.right.search(target, result)?;
 
@@ -138,11 +130,7 @@ impl UncommittedVectorFieldIndex {
         }
     }
 
-    pub fn search(
-        &self,
-        target: &[f32],
-        result: &mut HashMap<DocumentId, f32>,
-    ) -> Result<()> {
+    pub fn search(&self, target: &[f32], result: &mut HashMap<DocumentId, f32>) -> Result<()> {
         let inner = match self.inner.read() {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
@@ -183,7 +171,11 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
         target.len(),
         "Vector and target must have the same length"
     );
-    let distance: f32 = vector.iter().zip(target).map(|(a, b)| (a - b).powi(2)).sum();
+    let distance: f32 = vector
+        .iter()
+        .zip(target)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum();
     let distance = distance.sqrt();
 
     let score = 1.0 / distance.max(0.01);

@@ -22,17 +22,14 @@ impl IdxType for IdxID {}
 
 #[derive(Debug)]
 pub struct CommittedVectorFieldIndex {
-    index: HNSWIndex::<f32, IdxID>,
+    index: HNSWIndex<f32, IdxID>,
 }
 
 impl CommittedVectorFieldIndex {
     pub fn new(dimension: usize) -> Self {
-        let params = HNSWParams::<f32>::default()
-            .max_item(1_000_000_000);
+        let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
         let index = HNSWIndex::<f32, IdxID>::new(dimension, &params);
-        Self {
-            index,
-        }
+        Self { index }
     }
 
     pub fn search(
@@ -47,7 +44,6 @@ impl CommittedVectorFieldIndex {
         }
 
         for (node, distance) in search_output {
-
             // `hora` returns the score as Euclidean distance.
             // That means 0.0 is the best score and the larger the score, the worse.
             // NB: because it is a distance, it is always positive.
@@ -82,7 +78,8 @@ impl CommittedVectorFieldIndex {
 
     pub fn insert(&mut self, data: (DocumentId, Vec<f32>)) -> Result<()> {
         let (doc_id, vector) = data;
-        self.index.add(&vector, IdxID(Some(doc_id)))
+        self.index
+            .add(&vector, IdxID(Some(doc_id)))
             .map_err(|e| anyhow!("Cannot add vector to index: {}", e))?;
 
         Ok(())
@@ -98,13 +95,12 @@ impl CommittedVectorFieldIndex {
 
         let index = HNSWIndex::<f32, IdxID>::load(data_dir)
             .map_err(|e| anyhow!("Cannot load index: {}", e))?;
-        Ok(Self {
-            index,
-        })
+        Ok(Self { index })
     }
 
     pub fn commit(&mut self, data_dir: PathBuf) -> Result<()> {
-        self.index.build(Metric::Euclidean)
+        self.index
+            .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
         let data_dir = match data_dir.to_str() {
@@ -113,7 +109,8 @@ impl CommittedVectorFieldIndex {
                 return Err(anyhow!("Cannot convert path to string"));
             }
         };
-        self.index.dump(data_dir)
+        self.index
+            .dump(data_dir)
             .map_err(|e| anyhow!("Cannot dump index: {}", e))
     }
 }
@@ -175,7 +172,9 @@ mod tests {
         index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
         index.insert((DocumentId(2), vec![-1.0, 0.0, 0.0]))?;
 
-        index.index.build(Metric::Euclidean)
+        index
+            .index
+            .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
         let mut output = HashMap::new();
@@ -201,7 +200,9 @@ mod tests {
         let mut index = CommittedVectorFieldIndex::new(3);
         index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
 
-        index.index.build(Metric::Euclidean)
+        index
+            .index
+            .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
         let data_dir = generate_new_path();

@@ -30,9 +30,11 @@ impl VectorIndex {
     }
 
     pub fn add_field(&self, field_id: FieldId, dimension: usize) -> Result<()> {
-        self.uncommitted.entry(field_id)
+        self.uncommitted
+            .entry(field_id)
             .or_insert_with(|| UncommittedVectorFieldIndex::new(dimension));
-        self.committed.entry(field_id)
+        self.committed
+            .entry(field_id)
             .or_insert_with(|| CommittedVectorFieldIndex::new(dimension));
 
         Ok(())
@@ -44,7 +46,9 @@ impl VectorIndex {
                 continue;
             }
 
-            let uncommitted = self.uncommitted.entry(field_id)
+            let uncommitted = self
+                .uncommitted
+                .entry(field_id)
                 .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len()));
             uncommitted.insert((doc_id, vectors))?;
         }
@@ -53,10 +57,11 @@ impl VectorIndex {
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        std::fs::create_dir_all(&data_dir)
-            .context("Cannot create directory for vector index")?;
+        std::fs::create_dir_all(&data_dir).context("Cannot create directory for vector index")?;
 
-        let all_field_ids = self.uncommitted.iter()
+        let all_field_ids = self
+            .uncommitted
+            .iter()
             .map(|e| *e.key())
             .chain(self.committed.iter().map(|e| *e.key()))
             .collect::<HashSet<_>>();
@@ -74,12 +79,14 @@ impl VectorIndex {
                 None => {
                     debug!("Empty uncommitted vector index");
                     continue;
-                },
+                }
             };
 
             let mut taken = uncommitted.take();
 
-            let mut committed = self.committed.entry(field_id)
+            let mut committed = self
+                .committed
+                .entry(field_id)
                 .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension));
 
             for (doc_id, vectors) in taken.data() {
@@ -104,7 +111,6 @@ impl VectorIndex {
             .context("Cannot deserialize info.json file")?;
 
         for field_id in field_ids {
-
             let data_dir = data_dir.join(field_id.0.to_string());
             let index = CommittedVectorFieldIndex::load(data_dir)
                 .with_context(|| format!("Cannot load vector index for field {:?}", field_id))?;
