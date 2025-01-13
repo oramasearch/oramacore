@@ -23,7 +23,7 @@ mod tests {
                 TermStringField, WriteOperation,
             },
         },
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        embeddings::{EmbeddingConfig, EmbeddingService},
         test_utils::generate_new_path,
         types::{CollectionId, DocumentId},
     };
@@ -43,9 +43,11 @@ mod tests {
 
         let data_dir = generate_new_path();
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            preload: EmbeddingPreload::Bool(false),
-            cache_path: generate_new_path(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
+            fastembed: None,
+            models: HashMap::new(),
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);

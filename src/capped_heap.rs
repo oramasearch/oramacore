@@ -17,6 +17,13 @@ impl<K: std::cmp::Ord, V: std::cmp::Ord> CappedHeap<K, V> {
         if self.heap.len() < self.limit {
             self.heap.push(Reverse((key, value)));
         } else if let Some(Reverse((min_key, _))) = self.heap.peek() {
+            // We insert the new element only if the key is greater than the min key.
+            // Anyway, what happen if the key is the same?
+            // In this case the order of insertion is important.
+            // But we don't want to have a different behavior every time we run the query.
+            // So, we should order by V too when the K is the same.
+            // TODO: order by V too when the K is the same.
+
             if key > *min_key {
                 self.heap.pop();
                 self.heap.push(Reverse((key, value)));

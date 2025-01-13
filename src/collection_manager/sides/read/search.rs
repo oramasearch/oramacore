@@ -277,7 +277,7 @@ impl CollectionReader {
             let model = e.key();
             let fields = e.value();
 
-            let e = model.embed(vec![term.to_string()], None)?;
+            let e = model.embed(vec![term.to_string()]).await?;
 
             for k in e {
                 let r = self.vector_index.search(fields, &k, 1)?;

@@ -23,16 +23,16 @@ impl CollectionReader {
             .insert(field_name.clone(), (field_id, field.clone()));
 
         if let TypedField::Embedding(embedding) = field {
-            let orama_model = self
+            let loaded_model = self
                 .embedding_service
                 .get_model(embedding.model_name)
                 .await?;
 
             self.vector_index
-                .add_field(field_id, orama_model.dimensions())?;
+                .add_field(field_id, loaded_model.dimensions())?;
 
             self.fields_per_model
-                .entry(orama_model)
+                .entry(loaded_model)
                 .or_default()
                 .push(field_id);
         };

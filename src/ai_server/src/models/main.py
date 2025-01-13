@@ -31,7 +31,8 @@ class ModelsManager:
 
         # Preload unique models
         for model_id in unique_models:
-            self._preload_unique_model(model_id)
+            # self._preload_unique_model(model_id)
+            continue
 
         # Set up model references and sampling params
         self._setup_model_references()

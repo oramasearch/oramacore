@@ -129,3 +129,16 @@ impl From<Intent> for i32 {
         OramaIntent::from(intent) as i32
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_send_sync() {
+        fn test_send_sync<T: Send + Sync>() {}
+
+        test_send_sync::<Model>();
+        test_send_sync::<AIServiceBackend>();
+    }
+}

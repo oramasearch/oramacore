@@ -8,13 +8,14 @@ use hurl_core::typing::Count;
 use rustorama::collection_manager::sides::read::IndexesConfig;
 use rustorama::collection_manager::sides::CollectionsWriterConfig;
 use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use tempdir::TempDir;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
-use rustorama::embeddings::{EmbeddingConfig, EmbeddingPreload};
+use rustorama::embeddings::EmbeddingConfig;
 use rustorama::web_server::{HttpConfig, WebServer};
 
 const HOST: &str = "127.0.0.1";
@@ -58,9 +59,11 @@ async fn start_server() {
             with_prometheus: false,
         },
         embeddings: EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         },
         writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,

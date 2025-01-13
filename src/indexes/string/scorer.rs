@@ -107,6 +107,11 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
         let score = score * boost;
 
         let old_score = self.scores.entry(key).or_default();
+        // This "+" operation doesn't distinguish between the FieldId.
+        // This means that if a document matches on the same field
+        // or on different fields, it is the same.
+        // But this is not good for the ranking.
+        // TODO: we should distinguish between the FieldId.
         *old_score += score;
     }
 

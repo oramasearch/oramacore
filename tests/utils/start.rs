@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use rustorama::{
@@ -8,7 +8,7 @@ use rustorama::{
         write::CollectionsWriter,
         CollectionsWriterConfig,
     },
-    embeddings::{EmbeddingConfig, EmbeddingPreload},
+    embeddings::EmbeddingConfig,
     web_server::HttpConfig,
     ReadSideConfig, RustoramaConfig, WriteSideConfig,
 };
@@ -32,9 +32,11 @@ pub async fn start_all() -> Result<(
             with_prometheus: false,
         },
         embeddings: EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         },
         writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::dto::FieldId,
-    embeddings::{LoadedModel, OramaModel},
+    embeddings::LoadedModel,
     indexes::number::Number,
     metrics::{
         EmbeddingCalculationLabels, StringCalculationLabels, EMBEDDING_CALCULATION_METRIC,
@@ -31,7 +31,7 @@ pub enum SerializedFieldIndexer {
     Number,
     Bool,
     String(Locale),
-    Embedding(OramaModel, Vec<String>),
+    Embedding(String, Vec<String>),
 }
 
 pub trait FieldIndexer: Sync + Send + Debug {
@@ -291,8 +291,10 @@ impl FieldIndexer for EmbeddingField {
         // - "normal": it is ok
         // - "too long": we should chunk it in a smart way
         // TODO: implement that logic
-        let mut output = self.model.embed(vec![input], None)?;
-        let output = output.remove(0);
+
+        // let mut output = self.model.embed(vec![input])?;
+        // let output = output.remove(0);
+
         drop(metric);
 
         Ok(vec![WriteOperation::Collection(
@@ -300,12 +302,12 @@ impl FieldIndexer for EmbeddingField {
             CollectionWriteOperation::Index(
                 doc_id,
                 field_id,
-                DocumentFieldIndexOperation::IndexEmbedding { value: output },
+                DocumentFieldIndexOperation::IndexEmbedding { value: vec![] },
             ),
         )])
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
-        SerializedFieldIndexer::Embedding(self.model.model(), self.document_fields.clone())
+        SerializedFieldIndexer::Embedding(self.model.model_name(), self.document_fields.clone())
     }
 }

@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fmt::Debug,
+    fs::File,
     io::Write,
     path::{Path, PathBuf},
     time::Duration,
@@ -18,82 +19,188 @@ use reqwest::Client;
 use serde::Deserialize;
 use tracing::{info, trace, trace_span, Instrument};
 
-use super::LoadedModel;
+#[derive(Debug, Clone, Deserialize)]
+pub struct HuggingFaceModelRepoFilesConfig {
+    pub onnx_model: PathBuf,
+    pub special_tokens_map: PathBuf,
+    pub tokenizer: PathBuf,
+    pub tokenizer_config: PathBuf,
+    pub config: PathBuf,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HuggingFaceModelRepoConfig {
-    real_model_name: String,
-    config: String,
-    tokenizer: String,
-    tokenizer_config: String,
-    special_tokens_map: String,
-    onnx_model: String,
-    max_input_tokens: usize,
-    dimensions: usize,
+    pub real_model_name: String,
+    pub files: HuggingFaceModelRepoFilesConfig,
+    pub max_input_tokens: usize,
+    pub dimensions: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct HuggingFaceConfiguration {
-    pub(crate) base_url: String,
-
-    pub(crate) user_agent: String,
-    pub(crate) connect_timeout: String,
-    pub(crate) timeout: String,
-
-    pub model_configs: HashMap<String, HuggingFaceModelRepoConfig>,
+pub struct HuggingFaceRepoConfig {
+    pub base_url: String,
+    pub user_agent: String,
+    #[serde(deserialize_with = "deserialize_duration_string")]
+    pub connect_timeout: Duration,
+    #[serde(deserialize_with = "deserialize_duration_string")]
+    pub timeout: Duration,
+    pub cache_path: PathBuf,
 }
 
-struct MissingFile {
-    repo_path: String,
+fn deserialize_duration_string<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    DurationString::try_from(s)
+        .map_err(serde::de::Error::custom)
+        .map(Into::into)
+}
+
+pub struct HuggingFaceModel {
+    model_name: String,
+    model: TextEmbedding,
+    dimensions: usize,
+}
+impl HuggingFaceModel {
+    pub fn model_name(&self) -> String {
+        self.model_name.clone()
+    }
+    pub fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+    pub fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        self.model.embed(input, None)
+    }
+}
+impl Debug for HuggingFaceModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HuggingFaceModel({})", self.model_name)
+    }
+}
+
+#[derive(Debug)]
+pub struct HuggingFaceRepo {
+    hugging_face_config: HuggingFaceRepoConfig,
+    model_configs: HashMap<String, HuggingFaceModelRepoConfig>,
+}
+impl HuggingFaceRepo {
+    pub fn new(
+        hugging_face_config: HuggingFaceRepoConfig,
+        model_configs: HashMap<String, HuggingFaceModelRepoConfig>,
+    ) -> Self {
+        Self {
+            hugging_face_config,
+            model_configs,
+        }
+    }
+
+    pub async fn load_model(&self, model_name: String) -> Result<HuggingFaceModel> {
+        let model_repo_config = match self.model_configs.get(&model_name) {
+            Some(config) => config,
+            None => {
+                return Err(anyhow!("Model not found: {}", model_name));
+            }
+        };
+
+        let cache_path = &self.hugging_face_config.cache_path;
+
+        let model_cache_root_path = calculate_model_cache_path(model_name.clone(), cache_path);
+        // Make sure the directory exists
+        std::fs::create_dir_all(&model_cache_root_path)
+            .with_context(|| format!("Failed to create directory: {model_cache_root_path:?}"))?;
+
+        // Support partial downloads
+        let missing_files =
+            calculate_missing_files(&model_repo_config.files, &model_cache_root_path);
+
+        download_missing_files(
+            &self.hugging_face_config,
+            &model_repo_config.real_model_name,
+            missing_files,
+        )
+        .await?;
+
+        let full_path = |file: &PathBuf| model_cache_root_path.join(file);
+
+        info!("Loading model from '{:?}'", &model_cache_root_path);
+        let files = &model_repo_config.files;
+
+        let onnx_file = std::fs::read(full_path(&files.onnx_model))?;
+        let tokenizer_files = TokenizerFiles {
+            tokenizer_file: std::fs::read(full_path(&files.tokenizer))?,
+            config_file: std::fs::read(full_path(&files.config))?,
+            special_tokens_map_file: std::fs::read(full_path(&files.special_tokens_map))?,
+            tokenizer_config_file: std::fs::read(full_path(&files.tokenizer_config))?,
+        };
+
+        let init_model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files);
+
+        let model =
+            TextEmbedding::try_new_from_user_defined(init_model, InitOptionsUserDefined::default())
+                .with_context(|| format!("Failed to initialize the model: {model_name}"))?;
+
+        let model = HuggingFaceModel {
+            model_name: model_name.clone(),
+            model,
+            dimensions: model_repo_config.dimensions,
+        };
+
+        Ok(model)
+    }
+}
+
+struct MissingFile<'p> {
+    repo_path: &'p PathBuf,
     filesystem_path: PathBuf,
 }
 
-fn calculate_model_cache_path(model_name: String, custom_models_path: PathBuf) -> PathBuf {
+fn calculate_model_cache_path(model_name: String, custom_models_path: &Path) -> PathBuf {
     custom_models_path.join(model_name)
 }
 
-fn calculate_missing_files(
-    hugging_face_model_repo_config: &HuggingFaceModelRepoConfig,
-    model_cache_root_path: PathBuf,
-) -> Vec<MissingFile> {
+fn calculate_missing_files<'p>(
+    model_files: &'p HuggingFaceModelRepoFilesConfig,
+    model_cache_root_path: &Path,
+) -> Vec<MissingFile<'p>> {
     let mut missing_files = Vec::new();
 
-    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.onnx_model);
+    let fs_path = model_cache_root_path.join(&model_files.onnx_model);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
-            repo_path: hugging_face_model_repo_config.onnx_model.clone(),
+            repo_path: &model_files.onnx_model,
             filesystem_path: fs_path,
         });
     }
 
-    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.special_tokens_map);
+    let fs_path = model_cache_root_path.join(&model_files.special_tokens_map);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
-            repo_path: hugging_face_model_repo_config.special_tokens_map.clone(),
+            repo_path: &model_files.special_tokens_map,
             filesystem_path: fs_path,
         });
     }
 
-    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.tokenizer);
+    let fs_path = model_cache_root_path.join(&model_files.tokenizer);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
-            repo_path: hugging_face_model_repo_config.tokenizer.clone(),
+            repo_path: &model_files.tokenizer,
             filesystem_path: fs_path,
         });
     }
 
-    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.tokenizer_config);
+    let fs_path = model_cache_root_path.join(&model_files.tokenizer_config);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
-            repo_path: hugging_face_model_repo_config.tokenizer_config.clone(),
+            repo_path: &model_files.tokenizer_config,
             filesystem_path: fs_path,
         });
     }
 
-    let fs_path = model_cache_root_path.join(&hugging_face_model_repo_config.config);
+    let fs_path = model_cache_root_path.join(&model_files.config);
     if !std::path::Path::new(&fs_path).exists() {
         missing_files.push(MissingFile {
-            repo_path: hugging_face_model_repo_config.config.clone(),
+            repo_path: &model_files.config,
             filesystem_path: fs_path,
         });
     }
@@ -101,11 +208,15 @@ fn calculate_missing_files(
     missing_files
 }
 
-async fn download_missing_files(
-    hugging_face_config: &HuggingFaceConfiguration,
+async fn download_missing_files<'p>(
+    hugging_face_config: &HuggingFaceRepoConfig,
     model_name: &String,
-    files_to_download: Vec<MissingFile>,
+    files_to_download: Vec<MissingFile<'p>>,
 ) -> Result<()> {
+    if files_to_download.is_empty() {
+        return Ok(());
+    }
+
     let client = create_client(hugging_face_config)?;
 
     let mut v = Vec::new();
@@ -116,11 +227,14 @@ async fn download_missing_files(
     {
         let url = format!(
             "{}/{}/resolve/main/{}",
-            hugging_face_config.base_url, model_name, repo_path
+            hugging_face_config.base_url,
+            model_name,
+            repo_path.to_string_lossy()
         );
 
-        let f = download_file(&client, url, filesystem_path)
-            .instrument(trace_span!("Downloading", %model_name, %repo_path));
+        let f = download_file(&client, url, filesystem_path).instrument(
+            trace_span!("Downloading", %model_name, repo_path = %repo_path.to_string_lossy()),
+        );
 
         v.push(f);
     }
@@ -205,7 +319,7 @@ async fn download_file(client: &Client, url: String, destination: PathBuf) -> Re
     Ok(())
 }
 
-fn create_client(hugging_face_config: &HuggingFaceConfiguration) -> Result<Client> {
+fn create_client(hugging_face_config: &HuggingFaceRepoConfig) -> Result<Client> {
     let user_agent = HeaderValue::from_str(&hugging_face_config.user_agent).with_context(|| {
         format!(
             "Failed to create user agent header: \"{}\"",
@@ -216,146 +330,89 @@ fn create_client(hugging_face_config: &HuggingFaceConfiguration) -> Result<Clien
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, user_agent.clone());
 
-    let connect_timeout: Duration =
-        DurationString::try_from(hugging_face_config.connect_timeout.clone())?.into();
-    let timeout: Duration = DurationString::try_from(hugging_face_config.timeout.clone())?.into();
-
     Client::builder()
         .user_agent(user_agent)
         .default_headers(headers)
-        .connect_timeout(connect_timeout)
-        .timeout(timeout)
+        .connect_timeout(hugging_face_config.connect_timeout)
+        .timeout(hugging_face_config.timeout)
         .connection_verbose(true)
         .build()
         .context("Failed to create HTTP client")
 }
 
-impl LoadedModel {
-    pub async fn try_from_hugging_face(
-        hugging_face_config: &HuggingFaceConfiguration,
-        cache_path: PathBuf,
-        model_name: String,
-    ) -> Result<Self> {
-        let hugging_face_model_repo_config = hugging_face_config
-            .model_configs
-            .get(&model_name)
-            .with_context(|| format!("Model not found in configuration: {model_name}"))?;
-
-        let text_embedding = try_build_text_embedding_model(
-            hugging_face_config,
-            cache_path,
-            model_name.clone(),
-            hugging_face_model_repo_config,
-        )
-        .await?;
-
-        Ok(Self {
-            text_embedding,
-            model: super::OramaModel::HuggingFace(model_name.clone()),
-            model_name,
-            max_input_tokens: hugging_face_model_repo_config.max_input_tokens,
-            dimensions: hugging_face_model_repo_config.dimensions,
-        })
-    }
-}
-
-async fn try_build_text_embedding_model(
-    hugging_face_config: &HuggingFaceConfiguration,
-    cache_path: PathBuf,
-    model_name: String,
-    hugging_face_model_repo_config: &HuggingFaceModelRepoConfig,
-) -> Result<TextEmbedding> {
-    let model_cache_root_path = calculate_model_cache_path(model_name.clone(), cache_path);
-    // Make sure the directory exists
-    std::fs::create_dir_all(model_cache_root_path.clone())
-        .with_context(|| format!("Failed to create directory: {model_cache_root_path:?}"))?;
-
-    // Support partial downloads
-    let missing_files = calculate_missing_files(
-        hugging_face_model_repo_config,
-        model_cache_root_path.clone(),
-    );
-
-    download_missing_files(
-        hugging_face_config,
-        &hugging_face_model_repo_config.real_model_name,
-        missing_files,
-    )
-    .await?;
-
-    let full_path = |file: &str| model_cache_root_path.join(file);
-
-    info!("Loading model from '{:?}'", &model_cache_root_path);
-
-    let onnx_file = fs::read(full_path(&hugging_face_model_repo_config.onnx_model))?;
-    let tokenizer_files = TokenizerFiles {
-        tokenizer_file: fs::read(full_path(&hugging_face_model_repo_config.tokenizer))?,
-        config_file: fs::read(full_path(&hugging_face_model_repo_config.config))?,
-        special_tokens_map_file: fs::read(full_path(
-            &hugging_face_model_repo_config.special_tokens_map,
-        ))?,
-        tokenizer_config_file: fs::read(full_path(
-            &hugging_face_model_repo_config.tokenizer_config,
-        ))?,
-    };
-
-    let init_model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files);
-
-    let model =
-        TextEmbedding::try_new_from_user_defined(init_model, InitOptionsUserDefined::default())
-            .with_context(|| format!("Failed to initialize the model: {model_name}"))?;
-
-    info!("Model loaded");
-
-    Ok(model)
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::embeddings::LoadedModel;
+    use crate::test_utils::generate_new_path;
 
     use super::*;
 
     #[tokio::test]
-    async fn test_hf_download_onnx() -> Result<()> {
+    async fn test_embedding_run_hf() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let tmp = tempdir::TempDir::new("test_hf_download_onnx")?;
         let cache_path: PathBuf = tmp.path().into();
-        fs::remove_dir(cache_path.clone())?;
+        std::fs::remove_dir(cache_path.clone())?;
 
         let rebranded_name = "my-model".to_string();
         let model_name = "Xenova/gte-small".to_string();
 
-        let hugging_face_config = HuggingFaceConfiguration {
+        let hugging_face_config = HuggingFaceRepoConfig {
             base_url: "https://huggingface.co".to_string(),
             user_agent: "my-agent".to_string(),
-            connect_timeout: "60s".to_string(),
-            timeout: "60s".to_string(),
-            model_configs: HashMap::from_iter([(
-                rebranded_name.clone(),
-                HuggingFaceModelRepoConfig {
-                    real_model_name: model_name,
-                    onnx_model: "onnx/model_quantized.onnx".to_string(),
-                    special_tokens_map: "special_tokens_map.json".to_string(),
-                    tokenizer: "tokenizer.json".to_string(),
-                    tokenizer_config: "tokenizer_config.json".to_string(),
-                    config: "config.json".to_string(),
-                    max_input_tokens: 512,
-                    dimensions: 768,
-                },
-            )]),
+            cache_path: generate_new_path(),
+            connect_timeout: *DurationString::try_from("60s".to_string()).unwrap(),
+            timeout: *DurationString::try_from("60s".to_string()).unwrap(),
         };
 
-        LoadedModel::try_from_hugging_face(
-            &hugging_face_config,
-            cache_path.clone(),
-            rebranded_name.clone(),
-        )
-        .await?;
+        let model = HuggingFaceModelRepoConfig {
+            real_model_name: model_name,
+            files: HuggingFaceModelRepoFilesConfig {
+                onnx_model: "onnx/model_quantized.onnx".to_string().into(),
+                special_tokens_map: "special_tokens_map.json".to_string().into(),
+                tokenizer: "tokenizer.json".to_string().into(),
+                tokenizer_config: "tokenizer_config.json".to_string().into(),
+                config: "config.json".to_string().into(),
+            },
+            max_input_tokens: 512,
+            dimensions: 384,
+        };
 
-        LoadedModel::try_from_hugging_face(&hugging_face_config, cache_path, rebranded_name)
-            .await?;
+        let repo = HuggingFaceRepo::new(
+            hugging_face_config,
+            HashMap::from_iter([(rebranded_name.clone(), model)]),
+        );
+        let model = repo
+            .load_model(rebranded_name)
+            .await
+            .expect("Failed to cache model");
+
+        let output = model.embed(vec!["foo".to_string()])?;
+
+        assert_eq!(output[0].len(), 384);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_embedding_deserialize_hugging_face_repo_config() -> Result<()> {
+        let config = r#"
+            {
+                "base_url": "https://huggingface.co",
+                "user_agent": "my-agent",
+                "connect_timeout": "60s",
+                "timeout": "60s",
+                "cache_path": "/tmp/hf_cache"
+            }
+        "#;
+
+        let config: HuggingFaceRepoConfig = serde_json::from_str(config)?;
+
+        assert_eq!(config.base_url, "https://huggingface.co");
+        assert_eq!(config.user_agent, "my-agent");
+        assert_eq!(config.connect_timeout, Duration::from_secs(60));
+        assert_eq!(config.timeout, Duration::from_secs(60));
+        assert_eq!(config.cache_path, PathBuf::from("/tmp/hf_cache"));
 
         Ok(())
     }
