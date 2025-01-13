@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, Display, EnumIter};
-use tokio_stream::Stream;
 use tonic::{transport::Channel, Request, Response, Streaming};
 
 pub mod orama_ai_service {

@@ -129,6 +129,10 @@ path = "src/bin/embeddings/embeddings.rs"
 name = "deno"
 path = "src/bin/js/deno.rs"
 
+[[bin]]
+name = "ai"
+path = "src/bin/ai/ai.rs"
+
 [[bench]]
 name = "phrase_match"
 harness = false
