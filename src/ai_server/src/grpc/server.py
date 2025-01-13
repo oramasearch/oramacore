@@ -40,6 +40,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
         self.models_manager = models_manager
 
     def CallLLM(self, request, context):
+        """Generate text using a model."""
         try:
             model_key = LLMType.Name(request.model).lower()
             response_text = self.models_manager.generate_text(model_key=model_key, prompt=request.prompt)
@@ -50,30 +51,25 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             return LLMResponse()
 
     def CallLLMStream(self, request, context):
+        """Generate text using a model with streaming response."""
         try:
-            timeout = 60  # in seconds
-            context.set_timeout(timeout)
-            model_data = self.models_manager.get_model(LLMType.Name(request.model).lower())
-            if not model_data:
+            model_key = LLMType.Name(request.model).lower()
+
+            try:
+                for text_chunk in self.models_manager.generate_text_stream(model_key=model_key, prompt=request.prompt):
+                    yield LLMStreamResponse(text_chunk=text_chunk, is_final=False)
+
+                # Send final chunk
+                yield LLMStreamResponse(text_chunk="", is_final=True)
+
+            except Exception as e:
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details("Model not available")
+                context.set_details(f"Error during stream generation: {str(e)}")
                 return
-
-            model = model_data["model"]
-            sampling_params = model_data["config"]["sampling_params"]
-
-            outputs = model.generate([request.prompt], sampling_params, stream=True)
-
-            for output in outputs:
-                for token in output.outputs[0].token_texts:
-                    yield LLMStreamResponse(text_chunk=token, is_final=False)
-
-            # Send final chunk
-            yield LLMStreamResponse(text_chunk="", is_final=True)
 
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Error in stream: {str(e)}")
+            context.set_details(f"Error processing streaming LLM request: {str(e)}")
             return
 
 

@@ -132,6 +132,45 @@ class ModelsManager:
             logger.error(f"Currently loaded models: {list(self._models.keys())}")
             raise
 
+    def generate_text_stream(self, model_key: str, prompt: str):
+        """Generate text using a model with streaming output."""
+        try:
+            model_data = self.get_model(model_key)
+            if not model_data:
+                raise RuntimeError(f"Model {model_key} is not available")
+
+            model = model_data["model"]
+            sampling_params = model_data["config"]["sampling_params"]
+
+            conversation_history = [
+                {"role": "system", "content": PROMPT_TEMPLATES[f"{model_key}:system"]},
+                {"role": "user", "content": PROMPT_TEMPLATES[f"{model_key}:user"](prompt)},
+            ]
+
+            # Format chat messages into prompt using Assistant/User format
+            formatted_prompt = ""
+            for msg in conversation_history:
+                role_prefix = "Assistant: " if msg["role"] == "system" else "User: "
+                formatted_prompt += f"{role_prefix}{msg['content']}\nAssistant: "
+
+            # Use the generate method which supports streaming
+            outputs = model.generate(prompts=[formatted_prompt], sampling_params=sampling_params, use_tqdm=False)
+
+            # Stream the output tokens as they're generated
+            request_output = outputs[0]
+            generated_text = ""
+
+            for output in request_output.outputs:
+                new_text = output.text[len(generated_text) :].strip()
+                if new_text:
+                    generated_text = output.text
+                    yield repair_json(new_text)
+
+        except Exception as e:
+            logger.error(f"Error generating streaming text with {model_key}: {e}")
+            logger.error(f"Currently loaded models: {list(self._models.keys())}")
+            raise
+
     def process_batch(self, model_key: str, prompts: list[str]) -> list[str]:
         """Process a batch of prompts."""
         model_data = self.get_model(model_key)
