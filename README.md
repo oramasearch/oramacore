@@ -2,9 +2,29 @@
 
 🚧 Under active development 🚧
 
-**Orama Core** is the actual database you need for your AI projects, answer engines, copilots, and search.
+**Orama Core** is the database you need for your AI projects, answer engines, copilots, and search.
 
 It includes a fully-fledged full-text search engine, vector database, LLM interface, and many more utilities.
+
+## Roadmap
+
+- **v0.0.1**. ETA Jan 31st, 2025
+    - ✅ Full-text search (FST)
+    - ✅ Vector search (HNSW)
+    - ✅ Search filters
+    - ✅ Automatic embeddings generation
+    - ✅ Built-in multiple LLM inference setup
+    - ✅ Basic JavaScript integration (via Deno)
+    - 🚧 Disk persistence
+    - 🚧 Product quantization
+    - 🚧 Dockerfile for load testing in production environment
+
+- **v0.1.0**. ETA Feb 28th, 2025
+    - 🔜 Long-term user memory (via TKG)
+    - 🔜 Multi-node setup
+    - 🔜 Content expansion APIs
+    - 🔜 JavaScript API integration (via Deno)
+    - 🔜 Production-ready build
 
 ## Requirements
 
