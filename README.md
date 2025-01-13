@@ -1,5 +1,7 @@
 # Orama Core
 
+🚧 Under active development 🚧
+
 **Orama Core** is the actual database you need for your AI projects, answer engines, copilots, and search.
 
 It includes a fully-fledged full-text search engine, vector database, LLM interface, and many more utilities.
