@@ -133,6 +133,8 @@ impl UncommittedVectorFieldIndex {
         UncommittedVectorFieldIndexTaken {
             data: tree.data,
             dimension: self.dimension,
+            index: self,
+            state: current_state,
         }
     }
 
@@ -150,9 +152,29 @@ impl UncommittedVectorFieldIndex {
     }
 }
 
-pub struct UncommittedVectorFieldIndexTaken {
+pub struct UncommittedVectorFieldIndexTaken<'index> {
     pub data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
     pub dimension: usize,
+    index: &'index UncommittedVectorFieldIndex,
+    state: bool,
+}
+
+impl UncommittedVectorFieldIndexTaken<'_> {
+    pub fn data(&mut self) -> Vec<(DocumentId, Vec<VectorWithMagnetude>)> {
+        std::mem::take(&mut self.data)
+    }
+    pub fn close(self) {
+        let mut lock = match self.index.inner.write() {
+            Ok(lock) => lock,
+            Err(p) => p.into_inner(),
+        };
+        let inner = if self.state {
+            &mut lock.left
+        } else {
+            &mut lock.right
+        };
+        inner.data.clear();
+    }
 }
 
 fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
@@ -161,8 +183,10 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
         target.len(),
         "Vector and target must have the same length"
     );
+    let distance: f32 = vector.iter().zip(target).map(|(a, b)| (a - b).powi(2)).sum();
+    let distance = distance.sqrt();
 
-    let score: f32 = vector.iter().zip(target).map(|(a, b)| a * b).sum();
+    let score = 1.0 / distance.max(0.01);
 
     Ok(score)
 }
@@ -171,14 +195,13 @@ fn calculate_magnetude(vector: &[f32]) -> f32 {
     vector.iter().map(|x| x.powi(2)).sum::<f32>()
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_uncommitted_vector_index() -> Result<()> {
-        let index = UncommittedVectorFieldIndex::new();
+        let index = UncommittedVectorFieldIndex::new(2);
 
         //      |
         //      2b  a
@@ -192,12 +215,13 @@ mod tests {
         //      5
         //      |
 
-        index.insert((DocumentId(1), FieldId(1), vec![vec![1.0, 0.0]]))?;
-        index.insert((DocumentId(2), FieldId(1), vec![vec![0.0, 1.0]]))?;
-        index.insert((DocumentId(4), FieldId(1), vec![vec![-1.0, 0.0]]))?;
-        index.insert((DocumentId(5), FieldId(1), vec![vec![0.0, -1.0]]))?;
+        index.insert((DocumentId(1), vec![vec![1.0, 0.0]]))?;
+        index.insert((DocumentId(2), vec![vec![0.0, 1.0]]))?;
+        index.insert((DocumentId(4), vec![vec![-1.0, 0.0]]))?;
+        index.insert((DocumentId(5), vec![vec![0.0, -1.0]]))?;
 
-        let result_1 = index.search(&[FieldId(1)], &[1.0, 0.0], 4)?;
+        let mut result_1 = HashMap::new();
+        index.search(&[1.0, 0.0], &mut result_1)?;
 
         assert_eq!(result_1.get(&DocumentId(1)), Some(&1.0));
         // The point 4 has a negative score, so it should not be included.
@@ -205,14 +229,15 @@ mod tests {
         // TODO: think about this.
         assert_eq!(result_1.get(&DocumentId(4)), None);
 
-        let result_a = index.search(&[FieldId(1)], &[1.0, 1.0], 6)?;
+        let mut result_a = HashMap::new();
+        index.search(&[1.0, 1.0], &mut result_a)?;
         assert_eq!(result_a.get(&DocumentId(1)), Some(&0.5));
         assert_eq!(result_a.get(&DocumentId(2)), Some(&0.5));
 
-        let result_b = index.search(&[FieldId(1)], &[0.25, 1.0], 6)?;
+        let mut result_b = HashMap::new();
+        index.search(&[0.25, 1.0], &mut result_b)?;
         assert!(result_b.get(&DocumentId(2)).unwrap() > result_b.get(&DocumentId(1)).unwrap());
 
         Ok(())
     }
 }
-*/

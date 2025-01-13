@@ -211,7 +211,9 @@ impl CollectionsReader {
                 self.indexes_config.clone(),
             )?;
 
-            collection.load(base_dir_for_collections.join(&collection.id.0))?;
+            collection.load(base_dir_for_collections.join(&collection.id.0))
+                .await
+                .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
             let mut guard = self.collections.write().await;
             guard.insert(collection_id, collection);

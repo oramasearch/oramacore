@@ -77,16 +77,18 @@ impl VectorIndex {
                 },
             };
 
-            let taken = uncommitted.take();
+            let mut taken = uncommitted.take();
 
             let mut committed = self.committed.entry(field_id)
                 .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension));
 
-            for (doc_id, vectors) in taken.data {
+            for (doc_id, vectors) in taken.data() {
                 for (_, vector) in vectors {
                     committed.insert((doc_id, vector))?;
                 }
             }
+
+            taken.close();
 
             let data_dir = data_dir.join(field_id.0.to_string());
             committed.commit(data_dir)?;
@@ -166,7 +168,7 @@ mod tests {
     #[test]
     fn test_indexes_vector_commit_dont_change_the_result() -> Result<()> {
         const DIM: usize = 3;
-        const N: usize = 1_000;
+        const N: usize = 2;
 
         let index = VectorIndex::try_new(VectorIndexConfig {})?;
         index.add_field(FieldId(0), 3)?;

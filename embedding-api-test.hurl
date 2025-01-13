@@ -25,7 +25,7 @@ PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
 [
     {
         "id": "1",
-        "content": "The cat is sleeping on the table."
+        "content": "The cat is running outside."
     },
     {
         "id": "2",
@@ -46,4 +46,4 @@ POST {{base_url}}/v0/collections/{{collection_id}}/search
 }
 HTTP 200
 [Asserts]
-jsonpath "$.count" == 1
+jsonpath "$.hits[0].id" == "2"

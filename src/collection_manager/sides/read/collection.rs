@@ -9,7 +9,7 @@ use crate::{
         dto::{FieldId, TypedField},
         sides::document_storage::DocumentStorage,
     },
-    embeddings::{EmbeddingService, LoadedModel},
+    embeddings::{EmbeddingService, LoadedModel, OramaModel},
     file_utils::BufferedFile,
     indexes::{
         bool::BoolIndex,
@@ -48,14 +48,13 @@ impl CollectionReader {
         document_storage: Arc<dyn DocumentStorage>,
         _: IndexesConfig,
     ) -> Result<Self> {
-        // let collection_data_dir = indexes_config.data_dir.join(&id.0);
-
         let vector_index = VectorIndex::try_new(VectorIndexConfig {})
             .context("Cannot create vector index during collection creation")?;
 
         let string_index = StringIndex::new(StringIndexConfig {});
 
-        let number_index = NumberIndex::try_new(NumberIndexConfig {})?;
+        let number_index = NumberIndex::try_new(NumberIndexConfig {})
+            .context("Cannot create number index during collection creation")?;
 
         let bool_index = BoolIndex::new();
 
@@ -97,7 +96,7 @@ impl CollectionReader {
             .ok_or_else(|| anyhow!("Field not found"))
     }
 
-    pub fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
+    pub async fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
         self.string_index
             .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
@@ -117,6 +116,15 @@ impl CollectionReader {
             })?;
         for (field_name, (field_id, field_type)) in dump.fields {
             self.fields.insert(field_name, (field_id, field_type));
+        }
+
+        for (orama_model, fields) in dump.used_models {
+            let model = self
+                .embedding_service
+                .get_model(orama_model.clone())
+                .await
+                .context("Model not found")?;
+            self.fields_per_model.insert(model, fields);
         }
 
         Ok(())
@@ -148,7 +156,7 @@ impl CollectionReader {
                 .iter()
                 .map(|v| {
                     let (model, field_ids) = v.pair();
-                    (model.model_name().to_string(), field_ids.clone())
+                    (model.model(), field_ids.clone())
                 })
                 .collect(),
         };
@@ -177,5 +185,5 @@ pub struct Committed {
 pub struct CollectionDescriptorDump {
     pub id: CollectionId,
     pub fields: Vec<(String, (FieldId, TypedField))>,
-    pub used_models: Vec<(String, Vec<FieldId>)>,
+    pub used_models: Vec<(OramaModel, Vec<FieldId>)>,
 }
