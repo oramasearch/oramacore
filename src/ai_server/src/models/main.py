@@ -175,6 +175,13 @@ class ModelsManager:
                     {"role": "user", "content": PROMPT_TEMPLATES[f"{template_prefix}:user"](prompt)},
                 ]
 
+                formatted_prompt = ""
+                for msg in conversation_history:
+                    role_prefix = "Assistant: " if msg["role"] == "system" else "User: "
+                    formatted_prompt += f"{role_prefix}{msg['content']}\nAssistant: "
+
+                inputs = [formatted_prompt]
+
             outputs = model.generate(inputs, sampling_params=sampling_params)
             return repair_json(outputs[0].outputs[0].text.strip())
 
