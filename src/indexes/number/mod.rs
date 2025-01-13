@@ -70,6 +70,8 @@ impl NumberIndex {
             .chain(self.committed.iter().map(|entry| *entry.key()))
             .collect::<HashSet<_>>();
 
+        info!("Committing number index: {:?}", all_fields);
+
         BufferedFile::create(data_dir.join("info.json"))
             .context("Cannot create info.json")?
             .write_json_data(&all_fields)
@@ -112,11 +114,14 @@ impl NumberIndex {
         Ok(())
     }
 
+    #[instrument(skip(self, data_dir))]
     pub fn load(&mut self, data_dir: PathBuf) -> Result<()> {
         let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
+
+        info!("Loading number index: {:?}", field_ids);
 
         for field_id in field_ids {
             let field_dir = data_dir.join(format!("{}", field_id.0));

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use hora::{
     core::{
         ann_index::{ANNIndex, SerializableIndex},
@@ -20,52 +20,16 @@ use crate::types::DocumentId;
 pub struct IdxID(Option<DocumentId>);
 impl IdxType for IdxID {}
 
-// This enum represents the state of the index.
-// It can be in memory or on file.
-// If it is in memory, it is faster to search, but it takes more memory.
-// So, the size of this enum changes a lot depending on the state.
-// Due to the enum nature, the memory used to store "OnFile" variant or "InMemory" is always the same.
-// Because "InMemory" variant is larger (408 bytes vs 24 bytes), Rust uses 408 even for "OnFile" variant.
-// If there're a lot of indexes, it can be a problem.
-// TODO: think about how to optimize it.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-pub enum CommittedState {
-    InMemory(LoadedInMemoryCommittedIndex),
-    OnFile(PathBuf),
+pub struct CommittedVectorFieldIndex {
+    index: HNSWIndex<f32, IdxID>,
 }
 
-impl CommittedState {
-    pub fn new_in_memory(dimension: usize) -> Self {
-        let index = HNSWIndex::<f32, IdxID>::new(dimension, &HNSWParams::<f32>::default());
-        Self::InMemory(LoadedInMemoryCommittedIndex { index })
-    }
-
-    pub fn load_in_memory(&mut self) -> Result<&mut LoadedInMemoryCommittedIndex> {
-        let path = match self {
-            Self::InMemory(idx) => return Ok(idx),
-            Self::OnFile(path) => path,
-        };
-
-        let loaded = LoadedInMemoryCommittedIndex::from_path(path)?;
-        *self = Self::InMemory(loaded);
-        match self {
-            Self::InMemory(idx) => Ok(idx),
-            Self::OnFile(_) => unreachable!(),
-        }
-    }
-
-    pub fn unload_from_memory(&mut self, path: PathBuf) -> Result<()> {
-        let loaded = match self {
-            Self::InMemory(loaded) => loaded,
-            Self::OnFile(_) => return Ok(()),
-        };
-
-        loaded.save_on_fs(path.clone())?;
-
-        *self = Self::OnFile(path);
-
-        Ok(())
+impl CommittedVectorFieldIndex {
+    pub fn new(dimension: usize) -> Self {
+        let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
+        let index = HNSWIndex::<f32, IdxID>::new(dimension, &params);
+        Self { index }
     }
 
     pub fn search(
@@ -74,44 +38,29 @@ impl CommittedState {
         limit: usize,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
-        match self {
-            Self::InMemory(idx) => {
-                idx.search(target, limit, output);
-                Ok(())
-            }
-            Self::OnFile(path) => {
-                let loaded = LoadedInMemoryCommittedIndex::from_path(path)
-                    .with_context(|| format!("Cannot load index from '{:?}'", path))?;
-                loaded.search(target, limit, output);
-
-                Ok(())
-            }
+        let search_output = self.index.search_nodes(target, limit);
+        if search_output.is_empty() {
+            return Ok(());
         }
-    }
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LoadedInMemoryCommittedIndex {
-    pub index: HNSWIndex<f32, IdxID>,
-}
+        for (node, distance) in search_output {
+            // `hora` returns the score as Euclidean distance.
+            // That means 0.0 is the best score and the larger the score, the worse.
+            // NB: because it is a distance, it is always positive.
+            // NB2: the score is capped with a maximum value.
+            // So, inverting the score could be a good idea.
+            // NB3: we capped the score to "100".
+            // TODO: put `0.01` number in config.
+            let inc = 1.0 / distance.max(0.01);
 
-impl LoadedInMemoryCommittedIndex {
-    pub fn add(&mut self, vector: &[f32], id: DocumentId) -> Result<()> {
-        self.index
-            .add(vector, IdxID(Some(id)))
-            .map_err(|e| anyhow!("Error adding vector: {:?}", e))
-    }
-
-    pub fn build(&mut self) -> Result<()> {
-        self.index
-            .build(Metric::Manhattan)
-            .map_err(|e| anyhow!("Error building index: {:?}", e))
-    }
-
-    pub fn search(&self, target: &[f32], limit: usize, output: &mut HashMap<DocumentId, f32>) {
-        let search_output = self.index.search(target, limit).into_iter();
-        for id in search_output {
-            let doc_id = match id.0 {
+            let idx = match node.idx() {
+                Some(idx) => idx,
+                None => {
+                    warn!("This should not happen");
+                    continue;
+                }
+            };
+            let doc_id = match idx.0 {
                 Some(id) => id,
                 // ???
                 None => {
@@ -119,90 +68,70 @@ impl LoadedInMemoryCommittedIndex {
                     continue;
                 }
             };
+
             let v = output.entry(doc_id).or_insert(0.0);
-            *v += 1.0;
+            *v += inc;
         }
+
+        Ok(())
     }
 
-    pub fn save_on_fs(&mut self, path: PathBuf) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Cannot create directory '{:?}'", path))?;
-        }
-
-        let path: &str = path
-            .to_str()
-            .with_context(|| format!("'{:?}' cannot to converted to str", path))?;
+    pub fn insert(&mut self, data: (DocumentId, Vec<f32>)) -> Result<()> {
+        let (doc_id, vector) = data;
         self.index
-            .dump(path)
-            .map_err(|e| anyhow!("Error saving index: {:?}", e))
+            .add(&vector, IdxID(Some(doc_id)))
+            .map_err(|e| anyhow!("Cannot add vector to index: {}", e))?;
+
+        Ok(())
     }
 
-    pub fn from_path(path: &PathBuf) -> Result<Self> {
-        let path: &str = path
-            .to_str()
-            .with_context(|| format!("'{:?}' cannot to converted to str", path))?;
-        let index = HNSWIndex::<f32, IdxID>::load(path)
-            .map_err(|e| anyhow!("Error loading index: {:?}", e))?;
+    pub fn load(data_dir: PathBuf) -> Result<Self> {
+        let data_dir = match data_dir.to_str() {
+            Some(data_dir) => data_dir,
+            None => {
+                return Err(anyhow!("Cannot convert path to string"));
+            }
+        };
+
+        let index = HNSWIndex::<f32, IdxID>::load(data_dir)
+            .map_err(|e| anyhow!("Cannot load index: {}", e))?;
         Ok(Self { index })
+    }
+
+    pub fn commit(&mut self, data_dir: PathBuf) -> Result<()> {
+        self.index
+            .build(Metric::Euclidean)
+            .map_err(|e| anyhow!("Cannot build index: {}", e))?;
+
+        let data_dir = match data_dir.to_str() {
+            Some(data_dir) => data_dir,
+            None => {
+                return Err(anyhow!("Cannot convert path to string"));
+            }
+        };
+        self.index
+            .dump(data_dir)
+            .map_err(|e| anyhow!("Cannot dump index: {}", e))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hora::core::ann_index::SerializableIndex;
+    use assert_approx_eq::assert_approx_eq;
 
     use crate::test_utils::generate_new_path;
 
     use super::*;
 
     #[test]
-    fn test_serialize_deserialize_inner() -> Result<()> {
-        let mut index = HNSWIndex::<f32, IdxID>::new(3, &HNSWParams::<f32>::default());
-        {
-            const DIM: usize = 3;
-            const N: usize = 10;
-            let data = (0..N)
-                .map(|i| {
-                    let doc_id = DocumentId(i as u64);
-                    let vector: Vec<_> = (0..DIM)
-                        .map(|_| {
-                            let x = rand::random::<i8>();
-                            x as f32 / 10.0
-                        })
-                        .collect();
-                    (vector, doc_id)
-                })
-                .collect::<Vec<_>>();
-
-            for (vector, doc_id) in data {
-                index.add(&vector, IdxID(Some(doc_id))).unwrap();
-            }
-            index.build(Metric::Manhattan).unwrap();
-        }
-
-        let path = generate_new_path();
-        let path: &str = path.to_str().unwrap();
-
-        index.dump(path).unwrap();
-
-        let after = HNSWIndex::<f32, IdxID>::load(path).unwrap();
-
-        let before = index.search(&[0.0, 0.0, 0.0], 2);
-        let output_after = after.search(&[0.0, 0.0, 0.0], 2);
-
-        assert_eq!(before, output_after);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_serialize_deserialize_committed_state() -> Result<()> {
         const DIM: usize = 3;
         const N: usize = 10;
 
-        let mut index = CommittedState::new_in_memory(3);
-        {
+        let data_dir = generate_new_path();
+
+        let index = {
+            let mut index = CommittedVectorFieldIndex::new(3);
             let data = (0..N)
                 .map(|i| {
                     let doc_id = DocumentId(i as u64);
@@ -216,25 +145,75 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let loaded_index = index.load_in_memory()?;
             for (vector, doc_id) in data {
-                loaded_index.add(&vector, doc_id)?;
+                index.insert((doc_id, vector))?;
             }
-            loaded_index.build()?;
-        }
+            index.commit(data_dir.clone())?;
 
-        let path = generate_new_path();
-        index.unload_from_memory(path.clone())?;
-
-        let deserialized = CommittedState::OnFile(path);
+            index
+        };
 
         let mut output_before = HashMap::new();
         index.search(&[0.0, 0.0, 0.0], 2, &mut output_before)?;
+
+        let deserialized = CommittedVectorFieldIndex::load(data_dir.clone())?;
 
         let mut output_after = HashMap::new();
         deserialized.search(&[0.0, 0.0, 0.0], 2, &mut output_after)?;
 
         assert_eq!(output_before, output_after);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_score() -> Result<()> {
+        let mut index = CommittedVectorFieldIndex::new(3);
+        index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
+        index.insert((DocumentId(2), vec![-1.0, 0.0, 0.0]))?;
+
+        index
+            .index
+            .build(Metric::Euclidean)
+            .map_err(|e| anyhow!("Cannot build index: {}", e))?;
+
+        let mut output = HashMap::new();
+        index.search(&[0.999, 0.001, -0.001], 2, &mut output)?;
+
+        assert!(output[&DocumentId(1)] > output[&DocumentId(2)]);
+
+        let data_dir = generate_new_path();
+        index.commit(data_dir.clone())?;
+
+        let new_index = CommittedVectorFieldIndex::load(data_dir)?;
+
+        let mut output_after_load = HashMap::new();
+        new_index.search(&[0.999, 0.001, -0.001], 2, &mut output_after_load)?;
+
+        assert_eq!(output, output_after_load);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_one() -> Result<()> {
+        let mut index = CommittedVectorFieldIndex::new(3);
+        index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
+
+        index
+            .index
+            .build(Metric::Euclidean)
+            .map_err(|e| anyhow!("Cannot build index: {}", e))?;
+
+        let data_dir = generate_new_path();
+        index.commit(data_dir.clone())?;
+
+        let new_index = CommittedVectorFieldIndex::load(data_dir)?;
+
+        let mut output_after_load = HashMap::new();
+        new_index.search(&[0.999, 0.001, -1.0], 2, &mut output_after_load)?;
+
+        assert_approx_eq!(output_after_load[&DocumentId(1)], 1.0, 0.01);
 
         Ok(())
     }
