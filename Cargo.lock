@@ -4019,6 +4019,7 @@ dependencies = [
  "thiserror 2.0.4",
  "tiktoken-rs",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-build",
  "tower 0.5.1",
