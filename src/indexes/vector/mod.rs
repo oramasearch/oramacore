@@ -11,6 +11,7 @@ use tracing::{debug, info, instrument, trace};
 use uncommitted::UncommittedVectorFieldIndex;
 
 mod committed;
+pub mod hnsw;
 mod uncommitted;
 
 #[derive(Debug)]

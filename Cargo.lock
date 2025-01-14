@@ -4011,6 +4011,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_v8",
+ "simsimd",
  "smallvec",
  "strum 0.26.3",
  "strum_macros 0.26.4",
@@ -4270,6 +4271,15 @@ name = "similar"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1de1d4f81173b03af4c0cbed3c898f6bff5b870e4a7f5d6f4057d62a7a4b686e"
+
+[[package]]
+name = "simsimd"
+version = "6.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56838e1a0aceaef39fc1327227033efa84a294f54a39b356eefa5c60c885e9f0"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "sketches-ddsketch"
