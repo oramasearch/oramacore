@@ -17,7 +17,7 @@ struct GrpcConnection {
 }
 
 impl GrpcConnection {
-    fn check(&self) -> Result<()> {
+    async fn check(&self) -> Result<()> {
         // self.client.
         Ok(())
     }
@@ -59,7 +59,7 @@ impl Manager for GrpcManager {
     }
 
     async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
-        conn.check()?;
+        conn.check().await?;
 
         Ok(conn)
     }
@@ -182,11 +182,11 @@ impl GrpcRepo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(feature = "test-python")]
     #[tokio::test]
     async fn test_embedding_run_grpc() -> Result<()> {
+        use super::*;
+
         let _ = tracing_subscriber::fmt::try_init();
 
         let grpc_config = GrpcRepoConfig {
