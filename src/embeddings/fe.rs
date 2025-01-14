@@ -101,7 +101,7 @@ mod tests {
     async fn test_embedding_run_fastembed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let tmp = tempdir::TempDir::new("test_hf_download_onnx")?;
+        let tmp = tempdir::TempDir::new("test_fe_download_onnx")?;
         let cache_path: PathBuf = tmp.path().into();
         std::fs::remove_dir(cache_path.clone())?;
 

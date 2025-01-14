@@ -23,7 +23,9 @@
     },
 
     "embeddings": {
-        "preload": [],
+        "preload": [
+            "gte-small"
+        ],
 
         // Providers
         "grpc": {

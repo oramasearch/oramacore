@@ -46,7 +46,6 @@ impl CommittedDiskDocumentStorage {
                     ));
                 }
                 std::result::Result::Ok(false) => {
-                    warn!("Document {:?} not found", id);
                     result.push(None);
                     continue;
                 }

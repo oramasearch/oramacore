@@ -4,6 +4,7 @@ use dashmap::DashMap;
 use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
+use tracing::{debug, info};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
 
 pub mod fe;
@@ -214,9 +215,7 @@ impl EmbeddingService {
         match self.loaded_models.entry(model_name.clone()) {
             dashmap::mapref::entry::Entry::Occupied(entry) => Ok(entry.get().clone()),
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                println!("Loading model: {}", model_name);
                 let model = self.load_model(model_name).await?;
-                println!("Model loaded");
                 entry.insert(model.clone());
                 Ok(model)
             }
@@ -233,6 +232,7 @@ impl EmbeddingService {
 
         let loaded_model = match repo {
             Repo::FastEmbed => {
+                debug!("Loading FastEmbed model: {}", model_name);
                 let repo = self
                     .fastembed_repo
                     .as_ref()
@@ -242,6 +242,7 @@ impl EmbeddingService {
                 LoadedModel::Fastembed(model)
             }
             Repo::HuggingFace => {
+                debug!("Loading HuggingFace model: {}", model_name);
                 let repo = self
                     .hugging_face_repo
                     .as_ref()
@@ -251,6 +252,7 @@ impl EmbeddingService {
                 LoadedModel::HuggingFace(model)
             }
             Repo::Grpc => {
+                debug!("Loading Grpc model: {}", model_name);
                 let repo = self
                     .grpc_repo
                     .as_ref()

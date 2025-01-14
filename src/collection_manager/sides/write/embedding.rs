@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
     collection_manager::{
@@ -52,6 +52,8 @@ where
             .await
             .context("Failed to embed text")?;
 
+        info!("Embedding done");
+
         drop(metric);
 
         for (input, output) in inputs.into_iter().zip(output.into_iter()) {
@@ -74,7 +76,11 @@ where
                 ))
                 .unwrap();
         }
+
+        info!("Embedding sent to the read side");
     }
+
+    debug!("Embedding batch processed");
 
     Ok(())
 }
@@ -96,15 +102,9 @@ pub fn start_calculate_embedding_loop(
 
             let item = rx.try_next().await;
 
-            println!("Item: {:?}", item);
-
             match item {
-                Ok(None) => {
-                    println!("None");
-                }
+                Ok(None) => {}
                 Ok(Some(EmbeddingCalculationRequest { model_name, input })) => {
-                    println!("Some");
-
                     let inputs = cache.entry(model_name).or_default();
                     inputs.push(input);
 
@@ -116,10 +116,8 @@ pub fn start_calculate_embedding_loop(
                         .await
                         .unwrap();
                 }
-                Err(e) => {
-                    println!("Error: {:?}", e);
+                Err(_) => {
                     // timeout
-
                     process(embedding_server.clone(), cache.drain())
                         .await
                         .unwrap();
@@ -161,11 +159,9 @@ mod tests {
                 }),
             )]),
         };
-        println!("EmbeddingConfig: {:?}", embedding_config);
         let embedding_service = EmbeddingService::try_new(embedding_config)
             .await
             .expect("Failed to initialize the EmbeddingService");
-        println!("EmbeddingService: {:?}", embedding_service);
         let embedding_service = Arc::new(embedding_service);
 
         let (sender, mut receiver) = tokio::sync::broadcast::channel(100);
