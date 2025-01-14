@@ -50,7 +50,9 @@ mod tests {
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,
@@ -117,7 +119,8 @@ mod tests {
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,
@@ -194,7 +197,8 @@ mod tests {
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,

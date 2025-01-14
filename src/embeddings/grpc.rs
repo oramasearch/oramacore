@@ -79,13 +79,15 @@ impl GrpcModel {
     pub fn dimensions(&self) -> usize {
         self.dimensions
     }
-    pub async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        println!("Input {:?}", input);
-
+    pub async fn embed(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
         let mut conn = self.manager.get().await.context("Cannot get connection")?;
 
+        // We cloned the input because tonic requires it even if it shouldn't
+        // In fact, tonic will copy the strings into a TCP socket, so it shouldn't be own values
+        // Anyway we have to.
+
         let request = Request::new(EmbeddingRequest {
-            input,
+            input: input.into_iter().cloned().collect(),
             model: self.model_id,
             intent: OramaIntent::Query.into(),
         });
@@ -102,8 +104,6 @@ impl GrpcModel {
             .into_iter()
             .map(|embedding| embedding.embeddings)
             .collect();
-
-        println!("Embedding {:?}", v);
 
         Ok(v)
     }
@@ -209,7 +209,7 @@ mod tests {
             .await
             .expect("Failed to cache model");
 
-        let output = model.embed(vec!["foo".to_string()]).await?;
+        let output = model.embed(vec![&"foo".to_string()]).await?;
 
         assert_eq!(output[0].len(), 384);
 

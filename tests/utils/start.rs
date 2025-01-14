@@ -5,8 +5,7 @@ use rustorama::{
     build_orama,
     collection_manager::sides::{
         read::{CollectionsReader, IndexesConfig},
-        write::CollectionsWriter,
-        CollectionsWriterConfig,
+        CollectionsWriterConfig, WriteSide,
     },
     embeddings::EmbeddingConfig,
     web_server::HttpConfig,
@@ -20,7 +19,7 @@ fn generate_new_path() -> PathBuf {
 }
 
 pub async fn start_all() -> Result<(
-    Arc<CollectionsWriter>,
+    Arc<WriteSide>,
     Arc<CollectionsReader>,
     tokio::task::JoinHandle<()>,
 )> {

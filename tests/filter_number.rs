@@ -14,6 +14,7 @@ async fn init() -> (Arc<CollectionsReader>, CollectionId) {
     let (writer, reader, _) = start_all().await.unwrap();
 
     let collection_id = writer
+        .collections()
         .create_collection(
             json!({
                 "id": "test",
@@ -25,6 +26,7 @@ async fn init() -> (Arc<CollectionsReader>, CollectionId) {
         .unwrap();
 
     writer
+        .collections()
         .write(
             collection_id.clone(),
             json!([

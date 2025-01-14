@@ -5,7 +5,6 @@ use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
-use tokio_stream::StreamExt;
 
 pub mod fe;
 pub mod grpc;
@@ -59,7 +58,7 @@ impl LoadedModel {
         }
     }
 
-    pub async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>> {
+    pub async fn embed(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
         match self {
             LoadedModel::HuggingFace(model) => model.embed(input),
             LoadedModel::Fastembed(model) => model.embed(input),

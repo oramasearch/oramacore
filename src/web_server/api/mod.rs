@@ -11,11 +11,11 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use tower_http::trace::TraceLayer;
 use tracing::{info, info_span};
 
-use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
+use crate::collection_manager::sides::{read::CollectionsReader, WriteSide};
 mod collection;
 
 pub fn api_config(
-    writers: Option<Arc<CollectionsWriter>>,
+    write_side: Option<Arc<WriteSide>>,
     readers: Option<Arc<CollectionsReader>>,
     prometheus_handle: Option<PrometheusHandle>,
 ) -> Router {
@@ -34,7 +34,7 @@ pub fn api_config(
         router
     };
 
-    let router = router.nest("/", collection::apis(writers, readers));
+    let router = router.nest("/", collection::apis(write_side, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
 

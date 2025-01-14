@@ -3,8 +3,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     read::{CollectionsReader, IndexesConfig},
-    write::{CollectionsWriter, WriteOperation},
-    CollectionsWriterConfig,
+    write::WriteOperation,
+    CollectionsWriterConfig, WriteSide,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -97,7 +97,7 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
 pub async fn build_orama(
     config: RustoramaConfig,
 ) -> Result<(
-    Option<Arc<CollectionsWriter>>,
+    Option<Arc<WriteSide>>,
     Option<Arc<CollectionsReader>>,
     Receiver<WriteOperation>,
 )> {
@@ -126,9 +126,13 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
-    let mut collections_writer =
-        CollectionsWriter::new(sender, embedding_service.clone(), writer_side.config);
-    collections_writer
+    let mut write_side = WriteSide::new(
+        sender.clone(),
+        writer_side.config,
+        embedding_service.clone(),
+    );
+
+    write_side
         .load()
         .await
         .context("Cannot load collections writer")?;
@@ -141,8 +145,8 @@ pub async fn build_orama(
         .await
         .context("Cannot load collection reader")?;
 
-    let collections_writer = Some(Arc::new(collections_writer));
+    let write_side = Some(Arc::new(write_side));
     let collections_reader = Some(Arc::new(collections_reader));
 
-    Ok((collections_writer, collections_reader, receiver))
+    Ok((write_side, collections_reader, receiver))
 }

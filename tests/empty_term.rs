@@ -15,6 +15,7 @@ async fn test_empty_term() -> Result<()> {
     let (writer, reader, _) = start_all().await?;
 
     let collection_id = writer
+        .collections()
         .create_collection(
             json!({
                 "id": "test",
@@ -25,6 +26,7 @@ async fn test_empty_term() -> Result<()> {
         .await?;
 
     writer
+        .collections()
         .write(
             collection_id.clone(),
             json!([

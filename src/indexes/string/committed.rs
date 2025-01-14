@@ -252,8 +252,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_indexes_string_committed() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let index = create_committed_string_field_index(vec![
@@ -265,7 +265,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // Exact match
@@ -302,8 +303,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_boost() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_boost() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -313,7 +314,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // 1.0
@@ -358,8 +360,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_nonexistent_term() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_nonexistent_term() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -369,7 +371,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         let mut scorer = BM25Scorer::new();
@@ -390,8 +393,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_field_filter() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_field_filter() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -401,7 +404,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // Exclude a doc
@@ -436,12 +440,13 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_large_text() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_large_text() -> Result<()> {
         let index = create_committed_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
         })
-        .try_into()?])?
+        .try_into()?])
+        .await?
         .unwrap();
 
         let mut scorer = BM25Scorer::new();
