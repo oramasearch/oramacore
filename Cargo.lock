@@ -155,15 +155,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 
 [[package]]
-name = "approx"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f2a05fd1bd10b2527e20a2cd32d8873d115b8b39fe219ee25f42a8aca6ba278"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2661,7 +2652,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "indexmap 2.7.0",
  "metrics",
- "ordered-float 4.5.0",
+ "ordered-float",
  "quanta",
  "radix_trie",
  "sketches-ddsketch",
@@ -2759,13 +2750,11 @@ version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb12d4e967ec485a5f71c6311fe28158e9d6f4bc4a447b474184d0f91a8fa32"
 dependencies = [
- "approx",
  "matrixmultiply",
  "num-complex",
  "num-integer",
  "num-traits",
  "rawpointer",
- "rayon",
 ]
 
 [[package]]
@@ -3013,15 +3002,6 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
-name = "ordered-float"
-version = "2.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "ordered-float"
@@ -3530,15 +3510,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_xorshift"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
-dependencies = [
- "rand_core 0.6.4",
-]
-
-[[package]]
 name = "rav1e"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3666,24 +3637,6 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "reductive"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7178e6a493368141ea460b21e5db07d70207091b85344a46d7cb2b405d02b752"
-dependencies = [
- "log",
- "ndarray 0.15.6",
- "num-traits",
- "ordered-float 2.10.1",
- "rand 0.8.5",
- "rand_chacha",
- "rand_core 0.6.4",
- "rand_xorshift",
- "rayon",
  "thiserror 1.0.69",
 ]
 
@@ -3967,14 +3920,13 @@ dependencies = [
  "mime",
  "ndarray 0.15.6",
  "num-traits",
- "ordered-float 4.5.0",
+ "ordered-float",
  "pretty_assertions",
  "prost",
  "ptrie",
  "rand 0.8.5",
  "rand_chacha",
  "rayon",
- "reductive",
  "regex",
  "reqwest",
  "rust-stemmers",
