@@ -68,7 +68,6 @@ ndarray = "=0.15.6"
 reductive = "0.9.0"
 rand_chacha = "0.3.1"
 reqwest = { version = "0.12.9", features = ["blocking", "json"] }
-quick-js = "0.4.1"
 
 # Tracing
 tracing = "0.1"
@@ -113,9 +112,9 @@ path = "src/bin/insert_documents.rs"
 #[[bin]]
 #name = "vector_index_test"
 #path = "src/bin/vector_index_test.rs"
-[[bin]]
-name = "embeddings"
-path = "src/bin/embeddings/embeddings.rs"
+#[[bin]]
+#name = "embeddings"
+#path = "src/bin/embeddings/embeddings.rs"
 #[[bin]]
 #name = "pq_bench"
 #path = "src/bin/embeddings/pq_bench.rs"
@@ -125,17 +124,15 @@ path = "src/bin/embeddings/embeddings.rs"
 #[[bin]]
 #name = "selector"
 #path = "src/bin/embeddings/selector.rs"
-[[bin]]
-name = "deno"
-path = "src/bin/js/deno.rs"
-
-[[bin]]
-name = "ai"
-path = "src/bin/ai/ai.rs"
-
-[[bench]]
-name = "phrase_match"
-harness = false
+#[[bin]]
+#name = "deno"
+#path = "src/bin/js/deno.rs"
+#[[bin]]
+#name = "ai"
+#path = "src/bin/ai/ai.rs"
+#[[bench]]
+#name = "phrase_match"
+#harness = false
 
 [features]
 default = ["benchmarking"]

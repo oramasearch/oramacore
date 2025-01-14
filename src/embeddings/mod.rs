@@ -1,5 +1,4 @@
 // pub mod custom_models;
-pub mod pq;
 
 mod hf;
 
