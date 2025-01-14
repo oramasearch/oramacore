@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package orama_ai_service;
 
+service HealthCheckService {
+    rpc CheckHealth (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
 service CalculateEmbeddingsService {
     rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
 }
@@ -79,4 +83,14 @@ message VisionRequest {
 // Response message for vision model
 message VisionResponse {
     string text = 1;             // Generated text response
+}
+
+// Request message for health check
+message HealthCheckRequest {
+    string service = 1;          // Service name
+}
+
+// Response message for health check
+message HealthCheckResponse {
+    string status = 1;           // Service status
 }

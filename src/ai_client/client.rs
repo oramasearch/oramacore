@@ -9,7 +9,8 @@ pub mod orama_ai_service {
 
 use orama_ai_service::{
     calculate_embeddings_service_client::CalculateEmbeddingsServiceClient,
-    llm_service_client::LlmServiceClient, EmbeddingRequest, EmbeddingResponse, LlmRequest,
+    health_check_service_client::HealthCheckServiceClient, llm_service_client::LlmServiceClient,
+    EmbeddingRequest, EmbeddingResponse, HealthCheckRequest, HealthCheckResponse, LlmRequest,
     LlmResponse, LlmStreamResponse, OramaIntent, OramaModel,
 };
 
@@ -64,6 +65,7 @@ impl From<LlmType> for i32 {
 pub struct AIServiceBackend {
     embedding_client: CalculateEmbeddingsServiceClient<Channel>,
     llm_client: LlmServiceClient<Channel>,
+    health_check_client: HealthCheckServiceClient<Channel>,
 }
 
 impl AIServiceBackend {
@@ -77,13 +79,24 @@ impl AIServiceBackend {
             config.port.as_deref().unwrap_or(Self::DEFAULT_PORT),
         );
 
+        // @todo: add connection pool
         let embedding_client = CalculateEmbeddingsServiceClient::connect(addr.clone()).await?;
-        let llm_client = LlmServiceClient::connect(addr).await?; // Add this
+        let llm_client = LlmServiceClient::connect(addr.clone()).await?;
+        let health_check_client = HealthCheckServiceClient::connect(addr).await?;
 
         Ok(Self {
             embedding_client,
             llm_client,
+            health_check_client,
         })
+    }
+
+    pub async fn health_check(&mut self) -> Result<Response<HealthCheckResponse>> {
+        let request = Request::new(HealthCheckRequest {
+            service: "HealthCheck".to_string(),
+        });
+
+        Ok(self.health_check_client.check_health(request).await?)
     }
 
     pub async fn generate_embeddings(

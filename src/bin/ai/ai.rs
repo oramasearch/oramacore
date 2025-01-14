@@ -24,6 +24,10 @@ async fn main() -> Result<()> {
 
     let mut backend = AIServiceBackend::try_new(config).await?;
 
+    let health = backend.health_check().await?;
+
+    dbg!(health);
+
     let model = LlmType::GoogleQueryTranslator;
     let prompt = "I am installing my Ryzen 9 9900X and I fear I bent some pins. What should I do? True story here.".to_string();
     let response = backend.call_llm(model, prompt).await?;

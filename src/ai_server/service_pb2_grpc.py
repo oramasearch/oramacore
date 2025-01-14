@@ -26,6 +26,81 @@ if _version_not_supported:
     )
 
 
+class HealthCheckServiceStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.CheckHealth = channel.unary_unary(
+            "/orama_ai_service.HealthCheckService/CheckHealth",
+            request_serializer=service__pb2.HealthCheckRequest.SerializeToString,
+            response_deserializer=service__pb2.HealthCheckResponse.FromString,
+            _registered_method=True,
+        )
+
+
+class HealthCheckServiceServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def CheckHealth(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_HealthCheckServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        "CheckHealth": grpc.unary_unary_rpc_method_handler(
+            servicer.CheckHealth,
+            request_deserializer=service__pb2.HealthCheckRequest.FromString,
+            response_serializer=service__pb2.HealthCheckResponse.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.HealthCheckService", rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers("orama_ai_service.HealthCheckService", rpc_method_handlers)
+
+
+# This class is part of an EXPERIMENTAL API.
+class HealthCheckService(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def CheckHealth(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/orama_ai_service.HealthCheckService/CheckHealth",
+            service__pb2.HealthCheckRequest.SerializeToString,
+            service__pb2.HealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+
 class CalculateEmbeddingsServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 

@@ -17,9 +17,15 @@ from service_pb2 import (
     LLMResponse,
     LLMStreamResponse,
     VisionResponse,
+    HealthCheckResponse,
 )
 
 from src.embeddings.models import OramaModelInfo
+
+
+class HealthCheckService(service_pb2_grpc.HealthCheckServiceServicer):
+    def CheckHealth(self, request, context):
+        return HealthCheckResponse(status="OK")
 
 
 class CalculateEmbeddingService(service_pb2_grpc.CalculateEmbeddingsServiceServicer):
@@ -153,10 +159,12 @@ def serve(config, embeddings_service, models_manager):
     embedding_service = CalculateEmbeddingService(embeddings_service)
     llm_service = LLMService(models_manager)
     vision_service = VisionService(models_manager)
+    health_check_service = HealthCheckService()
 
     service_pb2_grpc.add_LLMServiceServicer_to_server(llm_service, server)
     service_pb2_grpc.add_VisionServiceServicer_to_server(vision_service, server)
     service_pb2_grpc.add_CalculateEmbeddingsServiceServicer_to_server(embedding_service, server)
+    service_pb2_grpc.add_HealthCheckServiceServicer_to_server(health_check_service, server)
 
     SERVICE_NAMES = (
         service_pb2.DESCRIPTOR.services_by_name["CalculateEmbeddingsService"].full_name,
