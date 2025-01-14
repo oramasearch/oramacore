@@ -15,8 +15,9 @@ It includes a fully-fledged full-text search engine, vector database, LLM interf
     - ✅ Automatic embeddings generation
     - ✅ Built-in multiple LLM inference setup
     - ✅ Basic JavaScript integration (via Deno)
-    - 🚧 Disk persistence
-    - 🚧 Product quantization
+    - ✅ Disk persistence
+    - 🚧 Vector compression
+    - 🚧 Unified configuration
     - 🚧 Dockerfile for load testing in production environment
 
 - **v0.1.0**. ETA Feb 28th, 2025
