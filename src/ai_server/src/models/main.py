@@ -92,6 +92,49 @@ class ModelsManager:
             )
             self._models[model_id]["configs"][model_key] = {"sampling_params": sampling_params}
 
+    def _preload_unique_model(self, model_id: str) -> None:
+        """Preload a unique model instance."""
+        try:
+            logger.info(f"Loading model {model_id}...")
+
+            # For now we only support the microsoft/Phi-3.5-vision-instruct model.
+            if model_id == "microsoft/Phi-3.5-vision-instruct":
+                model = LLM(
+                    model=model_id,
+                    trust_remote_code=True,
+                    max_model_len=4096,
+                    max_num_seqs=2,
+                    mm_processor_kwargs={
+                        "num_crops": 4,
+                        "min_pixels": 28 * 28,
+                        "max_pixels": 224 * 224,
+                    },
+                    enforce_eager=True,
+                )
+            else:
+                model = LLM(
+                    model=model_id,
+                    tensor_parallel_size=1,
+                    gpu_memory_utilization=0.85,
+                    max_model_len=2048,
+                    enforce_eager=True,
+                    max_num_batched_tokens=4096,
+                    max_num_seqs=256,
+                    trust_remote_code=True,
+                )
+
+            warmup_prompt = "hello"
+            _ = model.generate([warmup_prompt], SamplingParams(temperature=0.2, top_p=0.95, max_tokens=5))
+
+            self._models[model_id] = {"model": model, "configs": {}}
+            logger.info(f"Successfully loaded model {model_id}")
+
+        except Exception as e:
+            logger.error(f"Error preloading model {model_id}: {e}")
+            if model_id in self._models:
+                del self._models[model_id]
+            raise
+
     def get_model(self, model_key: str) -> Optional[Dict[str, Any]]:
         """Get a model and its configuration by model_key."""
         model_key = model_key.lower()
@@ -109,7 +152,7 @@ class ModelsManager:
 
             return {"model": model_data["model"], "config": model_data["configs"][model_key]}
 
-    def generate_text(self, model_key: str, prompt: str) -> str:
+    def generate_text(self, model_key: str, prompt: str | dict) -> str:
         """Generate text using a model."""
         try:
             model_data = self.get_model(model_key)
@@ -119,13 +162,28 @@ class ModelsManager:
             model = model_data["model"]
             sampling_params = model_data["config"]["sampling_params"]
 
-            conversation_history = [
-                {"role": "system", "content": PROMPT_TEMPLATES[f"{model_key}:system"]},
-                {"role": "user", "content": PROMPT_TEMPLATES[f"{model_key}:user"](prompt)},
-            ]
+            if isinstance(prompt, dict):
+                inputs = [prompt]
+            else:
+                template_prefix = {
+                    "vision": "vision_generic",
+                    "content_expansion": "content_expansion",
+                    "google_query_translator": "google_query_translator",
+                }.get(model_key, model_key)
 
-            outputs = model.chat(conversation_history, sampling_params=sampling_params)
+                conversation_history = [
+                    {"role": "system", "content": PROMPT_TEMPLATES[f"{template_prefix}:system"]},
+                    {"role": "user", "content": PROMPT_TEMPLATES[f"{template_prefix}:user"](prompt)},
+                ]
 
+                formatted_prompt = ""
+                for msg in conversation_history:
+                    role_prefix = "Assistant: " if msg["role"] == "system" else "User: "
+                    formatted_prompt += f"{role_prefix}{msg['content']}\nAssistant: "
+
+                inputs = [formatted_prompt]
+
+            outputs = model.generate(inputs, sampling_params=sampling_params)
             return repair_json(outputs[0].outputs[0].text.strip())
 
         except Exception as e:
@@ -143,12 +201,19 @@ class ModelsManager:
             model = model_data["model"]
             sampling_params = model_data["config"]["sampling_params"]
 
+            template_prefix = {
+                "vision": "vision_generic",
+                "content_expansion": "content_expansion",
+                "google_query_translator": "google_query_translator",
+            }.get(model_key, model_key)
+
             conversation_history = [
-                {"role": "system", "content": PROMPT_TEMPLATES[f"{model_key}:system"]},
-                {"role": "user", "content": PROMPT_TEMPLATES[f"{model_key}:user"](prompt)},
+                {"role": "system", "content": PROMPT_TEMPLATES[f"{template_prefix}:system"]},
+                {"role": "user", "content": PROMPT_TEMPLATES[f"{template_prefix}:user"](prompt)},
             ]
 
             # Format chat messages into prompt using Assistant/User format
+            # This is required since VLLM does not support streaming chat messages
             formatted_prompt = ""
             for msg in conversation_history:
                 role_prefix = "Assistant: " if msg["role"] == "system" else "User: "

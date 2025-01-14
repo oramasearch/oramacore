@@ -17,7 +17,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\rservice.proto\x12\x10orama_ai_service"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"F\n\nLLMRequest\x12(\n\x05model\x18\x01 \x01(\x0e\x32\x19.orama_ai_service.LLMType\x12\x0e\n\x06prompt\x18\x02 \x01(\t"\x1b\n\x0bLLMResponse\x12\x0c\n\x04text\x18\x01 \x01(\t"9\n\x11LLMStreamResponse\x12\x12\n\ntext_chunk\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08",\n\rVisionRequest\x12\r\n\x05image\x18\x01 \x01(\x0c\x12\x0c\n\x04text\x18\x02 \x01(\t"\x1e\n\x0eVisionResponse\x12\x0c\n\x04text\x18\x01 \x01(\t*\x7f\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01*I\n\x07LLMType\x12\x15\n\x11\x63ontent_expansion\x10\x00\x12\x1b\n\x17google_query_translator\x10\x01\x12\n\n\x06vision\x10\x02\x32u\n\x1a\x43\x61lculateEmbeddingsService\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponse2\xaa\x01\n\nLLMService\x12\x46\n\x07\x43\x61llLLM\x12\x1c.orama_ai_service.LLMRequest\x1a\x1d.orama_ai_service.LLMResponse\x12T\n\rCallLLMStream\x12\x1c.orama_ai_service.LLMRequest\x1a#.orama_ai_service.LLMStreamResponse0\x01\x32`\n\rVisionService\x12O\n\nCallVision\x12\x1f.orama_ai_service.VisionRequest\x1a .orama_ai_service.VisionResponseb\x06proto3'
+    b'\n\rservice.proto\x12\x10orama_ai_service"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"F\n\nLLMRequest\x12(\n\x05model\x18\x01 \x01(\x0e\x32\x19.orama_ai_service.LLMType\x12\x0e\n\x06prompt\x18\x02 \x01(\t"\x1b\n\x0bLLMResponse\x12\x0c\n\x04text\x18\x01 \x01(\t"9\n\x11LLMStreamResponse\x12\x12\n\ntext_chunk\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08",\n\rVisionRequest\x12\r\n\x05image\x18\x01 \x01(\x0c\x12\x0c\n\x04text\x18\x02 \x01(\t"\x1e\n\x0eVisionResponse\x12\x0c\n\x04text\x18\x01 \x01(\t"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t*\x7f\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01*I\n\x07LLMType\x12\x15\n\x11\x63ontent_expansion\x10\x00\x12\x1b\n\x17google_query_translator\x10\x01\x12\n\n\x06vision\x10\x02\x32p\n\x12HealthCheckService\x12Z\n\x0b\x43heckHealth\x12$.orama_ai_service.HealthCheckRequest\x1a%.orama_ai_service.HealthCheckResponse2u\n\x1a\x43\x61lculateEmbeddingsService\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponse2\xaa\x01\n\nLLMService\x12\x46\n\x07\x43\x61llLLM\x12\x1c.orama_ai_service.LLMRequest\x1a\x1d.orama_ai_service.LLMResponse\x12T\n\rCallLLMStream\x12\x1c.orama_ai_service.LLMRequest\x1a#.orama_ai_service.LLMStreamResponse0\x01\x32`\n\rVisionService\x12O\n\nCallVision\x12\x1f.orama_ai_service.VisionRequest\x1a .orama_ai_service.VisionResponseb\x06proto3'
 )
 
 _globals = globals()
@@ -25,12 +25,12 @@ _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "service_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals["_ORAMAMODEL"]._serialized_start = 530
-    _globals["_ORAMAMODEL"]._serialized_end = 657
-    _globals["_ORAMAINTENT"]._serialized_start = 659
-    _globals["_ORAMAINTENT"]._serialized_end = 696
-    _globals["_LLMTYPE"]._serialized_start = 698
-    _globals["_LLMTYPE"]._serialized_end = 771
+    _globals["_ORAMAMODEL"]._serialized_start = 608
+    _globals["_ORAMAMODEL"]._serialized_end = 735
+    _globals["_ORAMAINTENT"]._serialized_start = 737
+    _globals["_ORAMAINTENT"]._serialized_end = 774
+    _globals["_LLMTYPE"]._serialized_start = 776
+    _globals["_LLMTYPE"]._serialized_end = 849
     _globals["_EMBEDDINGREQUEST"]._serialized_start = 35
     _globals["_EMBEDDINGREQUEST"]._serialized_end = 160
     _globals["_EMBEDDINGRESPONSE"]._serialized_start = 162
@@ -47,10 +47,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_VISIONREQUEST"]._serialized_end = 496
     _globals["_VISIONRESPONSE"]._serialized_start = 498
     _globals["_VISIONRESPONSE"]._serialized_end = 528
-    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_start = 773
-    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_end = 890
-    _globals["_LLMSERVICE"]._serialized_start = 893
-    _globals["_LLMSERVICE"]._serialized_end = 1063
-    _globals["_VISIONSERVICE"]._serialized_start = 1065
-    _globals["_VISIONSERVICE"]._serialized_end = 1161
+    _globals["_HEALTHCHECKREQUEST"]._serialized_start = 530
+    _globals["_HEALTHCHECKREQUEST"]._serialized_end = 567
+    _globals["_HEALTHCHECKRESPONSE"]._serialized_start = 569
+    _globals["_HEALTHCHECKRESPONSE"]._serialized_end = 606
+    _globals["_HEALTHCHECKSERVICE"]._serialized_start = 851
+    _globals["_HEALTHCHECKSERVICE"]._serialized_end = 963
+    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_start = 965
+    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_end = 1082
+    _globals["_LLMSERVICE"]._serialized_start = 1085
+    _globals["_LLMSERVICE"]._serialized_end = 1255
+    _globals["_VISIONSERVICE"]._serialized_start = 1257
+    _globals["_VISIONSERVICE"]._serialized_end = 1353
 # @@protoc_insertion_point(module_scope)

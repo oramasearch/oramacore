@@ -18,3 +18,7 @@ pyyaml
 cachetools
 vllm
 json-repair
+pillow
+
+pytest
+pytest-mock
