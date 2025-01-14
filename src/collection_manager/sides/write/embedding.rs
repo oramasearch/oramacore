@@ -1,8 +1,7 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{debug, info};
 
 use crate::{
@@ -87,45 +86,37 @@ where
 
 pub fn start_calculate_embedding_loop(
     embedding_server: Arc<EmbeddingService>,
-    timeout: Duration,
     mut receiver: Receiver<EmbeddingCalculationRequest>,
 ) {
-    tokio::task::spawn(async move {
-        // let mut buffer = Vec::new();
-        // receiver.recv_many(&mut buffer, 10);
+    // TODO: put limit in config
+    let limit = 10;
 
-        let rx = ReceiverStream::new(receiver);
-        let rx = rx.timeout(timeout);
-        tokio::pin!(rx);
+    // `limit` is the number of items to process in a batch
+    assert!(limit > 0);
+
+    tokio::task::spawn(async move {
+        let mut buffer = Vec::with_capacity(limit);
 
         let mut cache: HashMap<String, Vec<EmbeddingCalculationRequestInput>> = Default::default();
 
         loop {
-            use std::result::Result::Ok;
-
-            let item = rx.try_next().await;
-
-            match item {
-                Ok(None) => {}
-                Ok(Some(EmbeddingCalculationRequest { model_name, input })) => {
-                    let inputs = cache.entry(model_name).or_default();
-                    inputs.push(input);
-
-                    if inputs.len() < 10 {
-                        continue;
-                    }
-
-                    process(embedding_server.clone(), cache.drain())
-                        .await
-                        .unwrap();
-                }
-                Err(_) => {
-                    // timeout
-                    process(embedding_server.clone(), cache.drain())
-                        .await
-                        .unwrap();
-                }
+            // `recv_many` waits for at least one item to be available
+            let item_count = receiver.recv_many(&mut buffer, limit).await;
+            // `recv_many` returns 0 if the channel is closed
+            if item_count == 0 {
+                break;
             }
+
+            for item in buffer.drain(..) {
+                let EmbeddingCalculationRequest { model_name, input } = item;
+
+                let inputs = cache.entry(model_name).or_default();
+                inputs.push(input);
+            }
+
+            process(embedding_server.clone(), cache.drain())
+                .await
+                .unwrap();
         }
     });
 }
@@ -134,7 +125,7 @@ pub fn start_calculate_embedding_loop(
 mod tests {
     #[cfg(feature = "test-python")]
     #[tokio::test]
-    async fn test_embedding_grpc_server() -> Result<()> {
+    async fn test_embedding_grpc_server() -> anyhow::Result<()> {
         use std::{collections::HashMap, sync::Arc};
 
         use crate::embeddings::{
@@ -170,7 +161,7 @@ mod tests {
 
         let (sender, mut receiver) = tokio::sync::broadcast::channel(100);
 
-        start_calculate_embedding_loop(embedding_service.clone(), Duration::from_secs(2), rx);
+        start_calculate_embedding_loop(embedding_service.clone(), rx);
 
         sx.send(EmbeddingCalculationRequest {
             model_name: "my-model".to_string(),

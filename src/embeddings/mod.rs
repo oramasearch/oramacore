@@ -5,7 +5,7 @@ use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
-use tracing::{debug, info};
+use tracing::debug;
 
 pub mod fe;
 pub mod grpc;

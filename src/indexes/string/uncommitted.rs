@@ -349,6 +349,7 @@ pub struct DataToCommit<'uncommitted> {
     total_field_length: u64,
     document_ids: HashSet<DocumentId>,
     field_length_per_doc: HashMap<DocumentId, u32>,
+    #[allow(clippy::type_complexity)]
     tree: Vec<(
         Vec<u8>,
         (

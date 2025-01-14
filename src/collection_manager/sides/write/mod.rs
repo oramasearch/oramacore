@@ -4,7 +4,7 @@ mod embedding;
 mod fields;
 mod operation;
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::Result;
 pub use collections::{CollectionsWriter, CollectionsWriterConfig};
@@ -29,7 +29,7 @@ impl WriteSide {
     ) -> WriteSide {
         let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(1);
 
-        start_calculate_embedding_loop(embedding_service.clone(), Duration::from_secs(1), rx);
+        start_calculate_embedding_loop(embedding_service.clone(), rx);
 
         WriteSide {
             collections: CollectionsWriter::new(sender, config, sx),
