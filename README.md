@@ -89,4 +89,4 @@ NB: you need to have the server running before running the tests.
 
 ## License
 
-AGPLv3
+[AGPLv3](/LICENSE.md)
