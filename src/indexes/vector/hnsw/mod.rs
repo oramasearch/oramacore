@@ -4,32 +4,19 @@ use rand::Rng;
 use simsimd::SpatialSimilarity;
 use std::cmp::{Ord, Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap};
+use std::fmt::Debug;
 use std::hash::Hash;
 
 type DistanceFn = fn(&[f32], &[f32]) -> Option<f64>;
 type Vector = Vec<f32>;
 
 #[derive(Clone, Debug)]
-struct SearchCandidate<K: Ord + Hash + Clone> {
+struct SearchCandidate<K: Ord + Hash + Clone + Debug> {
     node: Box<LayerNode<K>>,
     distance: f64,
 }
 
-impl<K: Ord + Hash + Clone> PartialEq for SearchCandidate<K> {
-    fn eq(&self, other: &Self) -> bool {
-        self.distance.eq(&other.distance)
-    }
-}
-
-impl<K: Ord + Hash + Clone> Eq for SearchCandidate<K> {}
-
-impl<K: Ord + Hash + Clone> PartialOrd for SearchCandidate<K> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.distance.partial_cmp(&other.distance)
-    }
-}
-
-impl<K: Ord + Hash + Clone> Ord for SearchCandidate<K> {
+impl<K: Ord + Hash + Clone + Debug> Ord for SearchCandidate<K> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.distance
             .partial_cmp(&other.distance)
@@ -37,12 +24,26 @@ impl<K: Ord + Hash + Clone> Ord for SearchCandidate<K> {
     }
 }
 
+impl<K: Ord + Hash + Clone + Debug> Eq for SearchCandidate<K> {}
+
+impl<K: Ord + Hash + Clone + Debug> PartialOrd for SearchCandidate<K> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.distance.partial_cmp(&other.distance)
+    }
+}
+
+impl<K: Ord + Hash + Clone + Debug> PartialEq for SearchCandidate<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.distance.eq(&other.distance)
+    }
+}
+
 #[derive(Clone, Debug)]
-struct Layer<K: Ord + Hash + Clone> {
+struct Layer<K: Ord + Hash + Clone + Debug> {
     nodes: HashMap<K, Box<LayerNode<K>>>,
 }
 
-impl<K: Ord + Hash + Clone> Layer<K> {
+impl<K: Ord + Hash + Clone + Debug> Layer<K> {
     fn new() -> Self {
         Self {
             nodes: HashMap::new(),
@@ -59,7 +60,7 @@ impl<K: Ord + Hash + Clone> Layer<K> {
 }
 
 #[derive(Debug)]
-struct Graph<K: Ord + Hash + Clone> {
+struct Graph<K: Ord + Hash + Clone + Debug> {
     distance: DistanceFn,
     rng: ThreadRng,
     m: usize,
@@ -69,7 +70,7 @@ struct Graph<K: Ord + Hash + Clone> {
     size: usize,
 }
 
-impl<K: Ord + Hash + Clone> Graph<K> {
+impl<K: Ord + Hash + Clone + Debug> Graph<K> {
     pub fn new() -> Self {
         Self {
             distance: f32::cosine,
@@ -90,7 +91,7 @@ impl<K: Ord + Hash + Clone> Graph<K> {
         self.size == 0
     }
 
-    pub fn add(&mut self, nodes: Vec<Node<K>>) -> Result<()> {
+    fn add(&mut self, nodes: Vec<Node<K>>) -> Result<()> {
         for node in nodes {
             let key = node.key.clone();
             let vec = node.value.clone();
@@ -140,8 +141,6 @@ impl<K: Ord + Hash + Clone> Graph<K> {
 
                 if insert_level >= i {
                     if layer.nodes.contains_key(&key) {
-                        // perdoname @tommaso for mi vida loca
-                        let _ = layer;
                         self.delete(&key);
                         layer = &mut self.layers[i];
                     }
@@ -173,15 +172,49 @@ impl<K: Ord + Hash + Clone> Graph<K> {
         let mut deleted = false;
 
         for layer in &mut self.layers {
-            if let Some(node) = layer.nodes.get(key) {
-                let mut node_clone = (**node).clone();
-                layer.nodes.remove(key);
-                node_clone.isolate(self.m);
-                deleted = true
+            if let Some(mut node) = layer.nodes.remove(key) {
+                node.isolate(self.m);
+                deleted = true;
             }
         }
 
+        if deleted {
+            self.size -= 1;
+        }
+
         deleted
+    }
+
+    pub fn search(&self, near: &[f32], k: usize) -> Vec<Node<K>> {
+        if self.layers.is_empty() {
+            return Vec::new();
+        }
+
+        let mut elevator: Option<Box<K>> = None;
+
+        for layer_idx in (0..self.layers.len()).rev() {
+            let layer = &self.layers[layer_idx];
+
+            let search_point = if let Some(elevator_key) = &elevator {
+                layer.nodes.get(&**elevator_key).unwrap()
+            } else {
+                layer.entry().unwrap()
+            };
+
+            if layer_idx > 0 {
+                let nodes = search_point.search(1, self.ef_search, near, self.distance);
+                elevator = Some(Box::new(nodes[0].node.node.key.clone()));
+                continue;
+            }
+
+            let nodes = search_point.search(k, self.ef_search, near, self.distance);
+            return nodes
+                .into_iter()
+                .map(|candidate| candidate.node.node.clone())
+                .collect();
+        }
+
+        unreachable!("Graph search should never reach this point")
     }
 
     fn random_level(&mut self) -> Result<usize> {
@@ -224,24 +257,24 @@ impl<K: Ord + Hash + Clone> Graph<K> {
 }
 
 #[derive(Clone, Debug)]
-struct Node<K: Ord> {
+struct Node<K: Ord + Debug> {
     key: K,
     value: Vector,
 }
 
-impl<K: Ord> Node<K> {
+impl<K: Ord + Debug> Node<K> {
     fn new(key: K, value: Vector) -> Self {
         Node { key, value }
     }
 }
 
 #[derive(Clone, Debug)]
-struct LayerNode<K: Ord + Hash + Clone> {
+struct LayerNode<K: Ord + Hash + Clone + Debug> {
     node: Node<K>,
     neighbors: Option<HashMap<K, Box<LayerNode<K>>>>,
 }
 
-impl<K: Ord + Hash + Clone> LayerNode<K> {
+impl<K: Ord + Hash + Clone + Debug> LayerNode<K> {
     pub fn new(key: K, value: Vector) -> Self {
         Self {
             node: Node::new(key, value),
@@ -266,6 +299,11 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
             distance: distance_fn(&self.node.value, target).unwrap_or(f64::INFINITY),
         };
 
+        println!(
+            "Initial candidate: {:?}, Distance: {}",
+            initial_candidate.node.node.key, initial_candidate.distance
+        );
+
         candidates.push(Reverse(initial_candidate.clone()));
         result.push(Reverse(initial_candidate.clone()));
         visited.insert(self.node.key.clone(), true);
@@ -286,6 +324,8 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
                     if let Some(neighbor) = neighbors.get(&neighbor_key) {
                         let distance =
                             distance_fn(&neighbor.node.value, target).unwrap_or(f64::INFINITY);
+
+                        println!("Neighbor: {:?}, Distance: {}", neighbor.node.key, distance);
 
                         if let Some(Reverse(current_best)) = result.peek() {
                             improved = improved || distance < current_best.distance;
@@ -309,11 +349,6 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
                         if candidates.len() >= ef_search {
                             candidates.pop();
                         }
-                    }
-
-                    candidates.push(Reverse(current_candidate.clone()));
-                    if candidates.len() >= ef_search {
-                        candidates.pop();
                     }
                 }
             }
@@ -350,14 +385,14 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
         let neighbors = self
             .neighbors
             .get_or_insert_with(|| HashMap::with_capacity(m));
-
         neighbors.insert(new_node.node.key.clone(), new_node);
+
         if neighbors.len() <= m {
             return;
         }
 
+        let mut worst_key: Option<K> = None;
         let mut worst_dist = f64::NEG_INFINITY;
-        let mut worst_key = None;
 
         for (key, neighbor) in neighbors.iter() {
             let dist =
@@ -387,14 +422,12 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
             return;
         }
 
-        let mut candidates = Vec::new();
+        let mut candidates: Vec<(K, Box<LayerNode<K>>)> = Vec::new();
+
         for neighbor in neighbors.values() {
             if let Some(neighbor_neighbors) = &neighbor.neighbors {
                 for (key, candidate) in neighbor_neighbors {
-                    if neighbors.contains_key(key) {
-                        continue;
-                    }
-                    if *key == self.node.key {
+                    if neighbors.contains_key(key) || *key == self.node.key {
                         continue;
                     }
                     candidates.push((key.clone(), candidate.clone()));
@@ -403,7 +436,7 @@ impl<K: Ord + Hash + Clone> LayerNode<K> {
         }
 
         for (key, candidate) in candidates {
-            neighbors.insert(key, Box::new((*candidate).clone()));
+            neighbors.insert(key, candidate);
             if neighbors.len() >= m {
                 break;
             }
@@ -424,4 +457,102 @@ pub fn max_level(ml: f64, num_nodes: usize) -> Result<usize> {
     let level = level / (1.0 / ml).ln();
 
     Ok((level.round() as usize) + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    fn create_test_graph() -> Graph<i32> {
+        let mut graph = Graph::new();
+        graph
+            .add(vec![
+                Node::new(1, vec![1.0, 0.0]),
+                Node::new(2, vec![0.0, 1.0]),
+                Node::new(3, vec![1.0, 1.0]),
+                Node::new(4, vec![0.0, 0.0]),
+            ])
+            .unwrap();
+        graph
+    }
+
+    #[test]
+    fn test_add_nodes() {
+        let mut graph = Graph::new();
+        assert_eq!(graph.len(), 0);
+
+        graph
+            .add(vec![
+                Node::new(1, vec![1.0, 0.0]),
+                Node::new(2, vec![0.0, 1.0]),
+            ])
+            .unwrap();
+        assert_eq!(graph.len(), 2);
+
+        graph.add(vec![Node::new(3, vec![1.0, 1.0])]).unwrap();
+        assert_eq!(graph.len(), 3);
+    }
+
+    #[test]
+    fn test_search() {
+        let graph = create_test_graph();
+
+        let results = graph.search(&[0.5, 0.5], 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, 3);
+
+        let results = graph.search(&[0.0, 0.0], 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].key, 4);
+        assert_eq!(results[1].key, 2);
+    }
+
+    #[test]
+    fn test_delete_node() {
+        let mut graph = create_test_graph();
+        assert_eq!(graph.len(), 4);
+
+        assert!(graph.delete(&3));
+        assert_eq!(graph.len(), 3);
+
+        let results = graph.search(&[1.0, 1.0], 1);
+        assert_eq!(results.len(), 1);
+        assert_ne!(results[0].key, 3);
+    }
+
+    #[test]
+    fn test_search_edge_cases() {
+        let mut graph = Graph::new();
+
+        let results = graph.search(&[0.5, 0.5], 1);
+        assert!(results.is_empty());
+
+        graph.add(vec![Node::new(1, vec![1.0, 0.0])]).unwrap();
+        let results = graph.search(&[0.5, 0.5], 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, 1);
+
+        let results = graph.search(&[0.5, 0.5], 10);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_random_level() {
+        let mut graph = Graph::new();
+        graph.ml = 0.5;
+
+        for _ in 0..100 {
+            let level = graph.random_level().unwrap();
+            assert!(level >= 0 && level <= 1);
+        }
+
+        graph.add(vec![Node::new(1, vec![1.0, 0.0])]).unwrap();
+        graph.add(vec![Node::new(2, vec![0.0, 1.0])]).unwrap();
+
+        for _ in 0..100 {
+            let level = graph.random_level().unwrap();
+            assert!(level >= 0 && level <= 2);
+        }
+    }
 }
