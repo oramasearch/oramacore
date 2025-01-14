@@ -67,6 +67,7 @@ strum_macros = "0.26.4"
 ndarray = "=0.15.6"
 rand_chacha = "0.3.1"
 reqwest = { version = "0.12.9", features = ["blocking", "json"] }
+vector_quantizer = "0.0.3"
 
 # Tracing
 tracing = "0.1"
