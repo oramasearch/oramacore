@@ -27,7 +27,8 @@ impl WriteSide {
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
     ) -> WriteSide {
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
+        let (sx, rx) =
+            tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
 
         start_calculate_embedding_loop(embedding_service.clone(), rx, config.embedding_queue_limit);
 
