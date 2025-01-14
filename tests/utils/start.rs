@@ -1,14 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use rustorama::{
     build_orama,
     collection_manager::sides::{
         read::{CollectionsReader, IndexesConfig},
-        write::CollectionsWriter,
-        CollectionsWriterConfig,
+        CollectionsWriterConfig, WriteSide,
     },
-    embeddings::{EmbeddingConfig, EmbeddingPreload},
+    embeddings::EmbeddingConfig,
     web_server::HttpConfig,
     ReadSideConfig, RustoramaConfig, WriteSideConfig,
 };
@@ -20,7 +19,7 @@ fn generate_new_path() -> PathBuf {
 }
 
 pub async fn start_all() -> Result<(
-    Arc<CollectionsWriter>,
+    Arc<WriteSide>,
     Arc<CollectionsReader>,
     tokio::task::JoinHandle<()>,
 )> {
@@ -32,14 +31,17 @@ pub async fn start_all() -> Result<(
             with_prometheus: false,
         },
         embeddings: EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         },
         writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
+                embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {

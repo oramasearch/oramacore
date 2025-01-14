@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicU16, AtomicU64},
@@ -14,7 +15,6 @@ use tracing::{info, instrument};
 
 use crate::{
     collection_manager::dto::{CollectionDTO, FieldId},
-    embeddings::EmbeddingService,
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
@@ -23,6 +23,7 @@ use crate::{
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
+    embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
     CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
 };
@@ -37,6 +38,8 @@ pub struct CollectionWriter {
 
     field_id_generator: AtomicU16,
     field_id_by_name: DashMap<String, FieldId>,
+
+    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 impl CollectionWriter {
@@ -44,6 +47,7 @@ impl CollectionWriter {
         id: CollectionId,
         description: Option<String>,
         default_language: LanguageDTO,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -53,6 +57,7 @@ impl CollectionWriter {
             fields: Default::default(),
             field_id_by_name: DashMap::new(),
             field_id_generator: AtomicU16::new(0),
+            embedding_sender,
         }
     }
 
@@ -75,8 +80,7 @@ impl CollectionWriter {
         &self,
         doc_id: DocumentId,
         doc: Document,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
+        sender: Sender<WriteOperation>,
     ) -> Result<()> {
         self.document_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -92,34 +96,31 @@ impl CollectionWriter {
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
 
         let fields_to_index = self
-            .get_fields_to_index(doc.clone(), embedding_service.clone(), sender)
+            .get_fields_to_index(doc.clone(), sender.clone())
             .await
             .context("Cannot get fields to index")?;
 
         let flatten = doc.clone().into_flatten();
-        for entry in fields_to_index.iter() {
-            let (field_name, (_, field)) = entry.pair();
 
-            let field_id = self.get_field_id_by_name(field_name);
+        for (field_name, (_, field)) in fields_to_index {
+            let field_id = self.get_field_id_by_name(&field_name);
 
-            let write_operations = field.get_write_operations(
-                self.id.clone(),
-                doc_id,
-                field_name,
-                field_id,
-                &flatten,
-            )?;
-            for write_operation in write_operations {
-                sender
-                    .send(write_operation)
-                    .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
-            }
+            field
+                .get_write_operations(
+                    self.id.clone(),
+                    doc_id,
+                    field_name,
+                    field_id,
+                    &flatten,
+                    sender.clone(),
+                )
+                .await?;
         }
 
         Ok(())
     }
 
-    pub(super) fn get_field_id_by_name(&self, name: &str) -> FieldId {
+    fn get_field_id_by_name(&self, name: &str) -> FieldId {
         use dashmap::Entry;
 
         let v = self.field_id_by_name.get(name);
@@ -147,7 +148,7 @@ impl CollectionWriter {
         }
     }
 
-    pub(super) fn value_to_typed_field(&self, value_type: ValueType) -> TypedField {
+    fn value_to_typed_field(&self, value_type: ValueType) -> TypedField {
         match value_type {
             ValueType::Scalar(ScalarType::String) => TypedField::Text(self.default_language),
             ValueType::Scalar(ScalarType::Number) => TypedField::Number,
@@ -162,27 +163,47 @@ impl CollectionWriter {
         Arc::new(parser)
     }
 
-    #[instrument(skip(self, sender, embedding_service))]
-    pub(super) async fn create_field(
+    pub(super) async fn register_fields(
+        &self,
+        typed_fields: HashMap<String, TypedField>,
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
+        for (field_name, field_type) in typed_fields {
+            let field_id = self.get_field_id_by_name(&field_name);
+
+            self.create_field(
+                field_id,
+                field_name,
+                field_type,
+                self.embedding_sender.clone(),
+                sender.clone(),
+            )
+            .await
+            .context("Cannot create field")?;
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self, sender))]
+    async fn create_field(
         &self,
         field_id: FieldId,
         field_name: String,
         typed_field: TypedField,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        sender: Sender<WriteOperation>,
     ) -> Result<()> {
         match &typed_field {
             TypedField::Embedding(embedding_field) => {
-                let model = embedding_service
-                    .get_model(embedding_field.model_name.clone())
-                    .await?;
                 self.fields.insert(
                     field_name.clone(),
                     (
                         ValueType::Complex(ComplexType::Embedding),
                         Arc::new(Box::new(EmbeddingField::new(
-                            model,
+                            embedding_field.model_name.clone(),
                             embedding_field.document_fields.clone(),
+                            embedding_sender,
                         ))),
                     ),
                 );
@@ -232,11 +253,10 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn get_fields_to_index(
+    async fn get_fields_to_index(
         &self,
         doc: Document,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
+        sender: Sender<WriteOperation>,
     ) -> Result<FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
@@ -254,8 +274,8 @@ impl CollectionWriter {
                 field_id,
                 field_name,
                 typed_field,
-                embedding_service.clone(),
-                sender,
+                self.embedding_sender.clone(),
+                sender.clone(),
             )
             .await
             .context("Cannot create field")?;
@@ -304,11 +324,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn load(
-        &mut self,
-        path: PathBuf,
-        embedding_service: Arc<EmbeddingService>,
-    ) -> Result<()> {
+    pub(super) async fn load(&mut self, path: PathBuf) -> Result<()> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -336,11 +352,9 @@ impl CollectionWriter {
                 SerializedFieldIndexer::Embedding(model, fields) => (
                     ValueType::Complex(ComplexType::Embedding),
                     Arc::new(Box::new(EmbeddingField::new(
-                        embedding_service
-                            .get_model(model)
-                            .await
-                            .context("Cannot load model")?,
+                        model,
                         fields,
+                        self.embedding_sender.clone(),
                     ))),
                 ),
             };

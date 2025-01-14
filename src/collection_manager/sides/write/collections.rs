@@ -14,7 +14,6 @@ use tracing::{info, instrument, warn};
 
 use crate::{
     collection_manager::dto::CollectionDTO,
-    embeddings::EmbeddingService,
     file_utils::{list_directory_in_path, BufferedFile},
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
@@ -22,33 +21,42 @@ use crate::{
 
 use crate::collection_manager::dto::{CreateCollectionOptionDTO, LanguageDTO};
 
-use super::{collection::CollectionWriter, GenericWriteOperation, WriteOperation};
+use super::{
+    collection::CollectionWriter, embedding::EmbeddingCalculationRequest, GenericWriteOperation,
+    WriteOperation,
+};
 
 pub struct CollectionsWriter {
     document_id_generator: Arc<AtomicU64>,
     sender: Sender<WriteOperation>,
-    embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
+    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
     pub data_dir: PathBuf,
+    #[serde(default = "embedding_queue_limit_default")]
+    pub embedding_queue_limit: usize,
+}
+
+fn embedding_queue_limit_default() -> usize {
+    50
 }
 
 impl CollectionsWriter {
     pub fn new(
         sender: Sender<WriteOperation>,
-        embedding_service: Arc<EmbeddingService>,
         config: CollectionsWriterConfig,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> CollectionsWriter {
         CollectionsWriter {
             document_id_generator: Default::default(),
             sender,
-            embedding_service,
             collections: Default::default(),
             config,
+            embedding_sender,
         }
     }
 
@@ -83,22 +91,13 @@ impl CollectionsWriter {
             id.clone(),
             description,
             language.unwrap_or(LanguageDTO::English),
+            self.embedding_sender.clone(),
         );
 
-        for (field_name, field_type) in typed_fields {
-            let field_id = collection.get_field_id_by_name(&field_name);
-
-            collection
-                .create_field(
-                    field_id,
-                    field_name,
-                    field_type,
-                    self.embedding_service.clone(),
-                    &self.sender,
-                )
-                .await
-                .context("Cannot create field")?;
-        }
+        collection
+            .register_fields(typed_fields, self.sender.clone())
+            .await
+            .context("Cannot register fields")?;
 
         let mut collections = self.collections.write().await;
         if collections.contains_key(&id) {
@@ -180,11 +179,13 @@ impl CollectionsWriter {
 
             let collection_id = CollectionId(file_name);
 
-            let mut collection =
-                CollectionWriter::new(collection_id.clone(), None, LanguageDTO::English);
-            collection
-                .load(collection_dir, self.embedding_service.clone())
-                .await?;
+            let mut collection = CollectionWriter::new(
+                collection_id.clone(),
+                None,
+                LanguageDTO::English,
+                self.embedding_sender.clone(),
+            );
+            collection.load(collection_dir).await?;
 
             self.collections
                 .write()
@@ -221,6 +222,8 @@ impl CollectionsWriter {
             .get(&collection_id)
             .ok_or_else(|| anyhow!("Collection not found"))?;
 
+        let sender = self.sender.clone();
+
         for mut doc in document_list {
             let doc_id = self.generate_document_id();
 
@@ -246,12 +249,7 @@ impl CollectionsWriter {
             }
 
             collection
-                .process_new_document(
-                    doc_id,
-                    doc,
-                    self.embedding_service.clone(),
-                    &self.sender.clone(),
-                )
+                .process_new_document(doc_id, doc, sender.clone())
                 .await
                 .context("Cannot process document")?;
         }

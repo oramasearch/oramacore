@@ -12,6 +12,11 @@
 
         "config": {
             "data_dir": "./.data/writer",
+
+            // The maximum number of embeddings that can be stored in the queue
+            // before the writer starts to be blocked
+            // NB: the elements are in memory, so be careful with this value
+            "embedding_queue_limit": 50,
         }
     },
     "reader_side": {
@@ -23,14 +28,16 @@
     },
 
     "embeddings": {
-        // Preload all embeddings on startup
-        "preload": ["small-model"],
+        "preload": [
+            "gte-small"
+        ],
 
-        // where to place the custom models
-        "cache_path": ".custom_models",
-
+        // Providers
+        "grpc": {
+            "host": "127.0.0.1",
+            "port": 50051,
+        },
         "hugging_face": {
-
             // The base url for the hugging face model hub
             "base_url": "https://huggingface.co",
 
@@ -39,18 +46,69 @@
             "connect_timeout": "10s",
             "timeout": "3600s",
 
-            "model_configs": {
-                "small-model": {
-                    "real_model_name": "Xenova/gte-small",
+            // where to place the custom models
+            "cache_path": ".custom_models",
+        },
+        "fastembed": {
+            "cache_dir": ".fastembed_cache",
+        },
+
+        "models": {
+            // Hugging Face models
+            "small-model": {
+                "type": "hugging_face",
+                "max_input_tokens": 512,
+                "dimensions": 384,
+                "real_model_name": "Xenova/gte-small",
+
+                "files": {
                     "onnx_model": "onnx/model_quantized.onnx",
                     "special_tokens_map": "special_tokens_map.json",
                     "tokenizer": "tokenizer.json",
                     "tokenizer_config": "tokenizer_config.json",
                     "config": "config.json",
-                    "max_input_tokens": 512,
-                    "dimensions": 384
-                }
-            }
+                },
+            },
+
+            // grpc models
+            "foo-model": {
+                "type": "grpc",
+                "real_model_name": "BGESmall",
+                "dimensions": 384,
+            },
+
+            // FastEmbed models
+            "gte-small": {
+                "type": "fastembed",
+                "real_model_name": "Xenova/bge-small-en-v1.5",
+                "dimensions": 384,
+            },
+            "gte-base": {
+                "type": "fastembed",
+                "real_model_name": "Xenova/bge-base-en-v1.5",
+                "dimensions": 384,
+            },
+            "gte-large": {
+                "type": "fastembed",
+                "real_model_name": "Xenova/bge-large-en-v1.5",
+                "dimensions": 384,
+            },
+            "multilingual-e5-small": {
+                "type": "fastembed",
+                "real_model_name": "intfloat/multilingual-e5-small",
+                "dimensions": 384,
+            },
+            "multilingual-e5-base": {
+                "type": "fastembed",
+                "real_model_name": "intfloat/multilingual-e5-base",
+                "dimensions": 384,
+            },
+            "multilingual-e5-large": {
+                "type": "fastembed",
+                "real_model_name": "Qdrant/multilingual-e5-large-onnx",
+                "dimensions": 384,
+            },
+
         }
     }
 }

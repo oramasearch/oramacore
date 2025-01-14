@@ -13,19 +13,19 @@ use tracing::error;
 use crate::{
     collection_manager::{
         dto::{CollectionDTO, CreateCollectionOptionDTO},
-        sides::write::CollectionsWriter,
+        sides::WriteSide,
     },
     types::{CollectionId, DocumentList},
 };
 
-pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
+pub fn apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
         .add(get_collections())
         .add(get_collection_by_id())
         .add(create_collection())
         .add(add_documents())
         .add(dump_all())
-        .with_state(writers)
+        .with_state(write_side)
 }
 
 #[endpoint(
@@ -33,8 +33,8 @@ pub fn apis(writers: Arc<CollectionsWriter>) -> Router {
     path = "/v0/writer/dump_all",
     description = "List all collections"
 )]
-async fn dump_all(writer: State<Arc<CollectionsWriter>>) -> impl IntoResponse {
-    match writer.commit().await {
+async fn dump_all(write_side: State<Arc<WriteSide>>) -> impl IntoResponse {
+    match write_side.commit().await {
         Ok(_) => {}
         Err(e) => {
             error!("Error dumping all collections: {}", e);
@@ -54,8 +54,8 @@ async fn dump_all(writer: State<Arc<CollectionsWriter>>) -> impl IntoResponse {
     path = "/v0/collections",
     description = "List all collections"
 )]
-async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<CollectionDTO>> {
-    let collections = writer.list().await;
+async fn get_collections(write_side: State<Arc<WriteSide>>) -> Json<Vec<CollectionDTO>> {
+    let collections = write_side.collections().list().await;
     Json(collections)
 }
 
@@ -66,10 +66,13 @@ async fn get_collections(writer: State<Arc<CollectionsWriter>>) -> Json<Vec<Coll
 )]
 async fn get_collection_by_id(
     Path(id): Path<String>,
-    writer: State<Arc<CollectionsWriter>>,
+    write_side: State<Arc<WriteSide>>,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collection_dto = writer.get_collection_dto(collection_id).await;
+    let collection_dto = write_side
+        .collections()
+        .get_collection_dto(collection_id)
+        .await;
 
     match collection_dto {
         Some(collection_dto) => Ok(Json(collection_dto)),
@@ -86,10 +89,10 @@ async fn get_collection_by_id(
     description = "Create a collection"
 )]
 async fn create_collection(
-    writer: State<Arc<CollectionsWriter>>,
+    write_side: State<Arc<WriteSide>>,
     Json(json): Json<CreateCollectionOptionDTO>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = match writer.create_collection(json).await {
+    let collection_id = match write_side.collections().create_collection(json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
             error!("Error creating collection: {}", e);
@@ -115,12 +118,13 @@ async fn create_collection(
 )]
 async fn add_documents(
     Path(id): Path<String>,
-    writer: State<Arc<CollectionsWriter>>,
+    write_side: State<Arc<WriteSide>>,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
+    let collections = write_side.collections();
 
-    match writer.write(collection_id, json).await {
+    match collections.write(collection_id, json).await {
         Ok(_) => {}
         Err(e) => {
             return Err((

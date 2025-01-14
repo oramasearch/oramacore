@@ -5,7 +5,6 @@ use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    embeddings::OramaModel,
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
     types::{CollectionId, Document, DocumentId, ValueType},
@@ -43,8 +42,7 @@ impl From<Locale> for LanguageDTO {
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct EmbeddingTypedField {
-    #[schema(inline)]
-    pub model_name: OramaModel,
+    pub model_name: String,
     pub document_fields: Vec<String>,
 }
 

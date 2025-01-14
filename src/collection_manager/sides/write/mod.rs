@@ -1,50 +1,80 @@
 mod collection;
 mod collections;
+mod embedding;
 mod fields;
 mod operation;
 
+use std::sync::Arc;
+
+use anyhow::Result;
 pub use collections::{CollectionsWriter, CollectionsWriterConfig};
+use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
+use tokio::sync::broadcast::Sender;
+
+use crate::embeddings::EmbeddingService;
+
+pub struct WriteSide {
+    collections: CollectionsWriter,
+}
+
+impl WriteSide {
+    pub fn new(
+        sender: Sender<WriteOperation>,
+        config: CollectionsWriterConfig,
+        embedding_service: Arc<EmbeddingService>,
+    ) -> WriteSide {
+        let (sx, rx) =
+            tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
+
+        start_calculate_embedding_loop(embedding_service.clone(), rx, config.embedding_queue_limit);
+
+        WriteSide {
+            collections: CollectionsWriter::new(sender, config, sx),
+        }
+    }
+
+    pub async fn load(&mut self) -> Result<()> {
+        self.collections.load().await
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        self.collections.commit().await
+    }
+
+    pub fn collections(&self) -> &CollectionsWriter {
+        &self.collections
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use anyhow::{Context, Result};
     use serde_json::json;
 
     use crate::{
-        collection_manager::dto::CreateCollectionOptionDTO,
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
-        test_utils::generate_new_path,
+        collection_manager::dto::CreateCollectionOptionDTO, test_utils::generate_new_path,
         types::CollectionId,
     };
 
     use super::*;
 
     #[tokio::test]
-    async fn test_side_writer_foo() -> Result<()> {
-        let embedding_config = EmbeddingConfig {
-            cache_path: generate_new_path(),
-            hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
-        };
-        let embedding_service = EmbeddingService::try_new(embedding_config)
-            .await
-            .with_context(|| "Failed to initialize the EmbeddingService")?;
-        let embedding_service = Arc::new(embedding_service);
-
+    async fn test_side_writer_serialize() -> Result<()> {
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
+
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
 
         let collection = {
             let (sender, receiver) = tokio::sync::broadcast::channel(1_0000);
 
-            let writer = CollectionsWriter::new(sender, embedding_service.clone(), config.clone());
+            let writer = CollectionsWriter::new(sender, config.clone(), sx);
 
             let collection_id = CollectionId("test-collection".to_string());
             writer
@@ -82,8 +112,8 @@ mod tests {
 
         let after = {
             let (sender, receiver) = tokio::sync::broadcast::channel(1_0000);
-
-            let mut writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+            let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+            let mut writer = CollectionsWriter::new(sender, config, sx);
 
             writer
                 .load()

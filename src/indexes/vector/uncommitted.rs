@@ -215,11 +215,10 @@ mod tests {
         let mut result_1 = HashMap::new();
         index.search(&[1.0, 0.0], &mut result_1)?;
 
-        assert_eq!(result_1.get(&DocumentId(1)), Some(&1.0));
-        // The point 4 has a negative score, so it should not be included.
-        // Is correct we exclude it?
-        // TODO: think about this.
-        assert_eq!(result_1.get(&DocumentId(4)), None);
+        assert_eq!(result_1.get(&DocumentId(1)), Some(&100.0));
+        assert!(*result_1.get(&DocumentId(2)).unwrap() < 1.0);
+        assert!(*result_1.get(&DocumentId(4)).unwrap() < 1.0);
+        assert!(*result_1.get(&DocumentId(5)).unwrap() < 1.0);
 
         let mut result_a = HashMap::new();
         index.search(&[1.0, 1.0], &mut result_a)?;

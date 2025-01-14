@@ -9,7 +9,7 @@ use crate::{
         dto::{FieldId, TypedField},
         sides::document_storage::DocumentStorage,
     },
-    embeddings::{EmbeddingService, LoadedModel, OramaModel},
+    embeddings::{EmbeddingService, LoadedModel},
     file_utils::BufferedFile,
     indexes::{
         bool::BoolIndex,
@@ -156,7 +156,7 @@ impl CollectionReader {
                 .iter()
                 .map(|v| {
                     let (model, field_ids) = v.pair();
-                    (model.model(), field_ids.clone())
+                    (model.model_name(), field_ids.clone())
                 })
                 .collect(),
         };
@@ -185,5 +185,5 @@ pub struct Committed {
 pub struct CollectionDescriptorDump {
     pub id: CollectionId,
     pub fields: Vec<(String, (FieldId, TypedField))>,
-    pub used_models: Vec<(OramaModel, Vec<FieldId>)>,
+    pub used_models: Vec<(String, Vec<FieldId>)>,
 }

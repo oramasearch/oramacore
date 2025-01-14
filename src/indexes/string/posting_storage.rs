@@ -29,6 +29,7 @@ impl PostingIdStorage {
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn get_posting(&self, posting_id: u64) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
         let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
             .context("Cannot open posting ids file")?

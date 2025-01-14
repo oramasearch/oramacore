@@ -25,7 +25,7 @@ pub fn generate_new_path() -> PathBuf {
     dir
 }
 
-pub fn create_string_index(
+pub async fn create_string_index(
     fields: Vec<(FieldId, String)>,
     documents: Vec<Document>,
 ) -> Result<StringIndex> {
@@ -43,55 +43,59 @@ pub fn create_string_index(
             )
         })
         .collect();
+
+    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(id as u64);
         let flatten = doc.into_flatten();
 
-        let operations: Vec<_> = string_fields
-            .iter()
-            .flat_map(|(field_id, field_name, string_field)| {
-                string_field
-                    .get_write_operations(
-                        CollectionId("collection".to_string()),
-                        document_id,
-                        field_name,
-                        *field_id,
-                        &flatten,
-                    )
-                    .unwrap()
-            })
-            .collect();
-
-        for operation in operations {
-            match operation {
-                WriteOperation::Collection(
-                    _,
-                    CollectionWriteOperation::Index(
-                        doc_id,
-                        field_id,
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length,
-                            terms,
-                        },
-                    ),
-                ) => {
-                    index.insert(doc_id, field_id, field_length, terms)?;
-                }
-                _ => unreachable!(),
-            };
+        for (field_id, field_name, string_field) in &string_fields {
+            string_field
+                .get_write_operations(
+                    CollectionId("collection".to_string()),
+                    document_id,
+                    field_name.clone(),
+                    *field_id,
+                    &flatten,
+                    sx.clone(),
+                )
+                .await
+                .unwrap()
         }
+    }
+
+    drop(sx);
+
+    while let Ok(operation) = rx.recv().await {
+        match operation {
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Index(
+                    doc_id,
+                    field_id,
+                    DocumentFieldIndexOperation::IndexString {
+                        field_length,
+                        terms,
+                    },
+                ),
+            ) => {
+                index.insert(doc_id, field_id, field_length, terms)?;
+            }
+            _ => unreachable!(),
+        };
     }
 
     Ok(index)
 }
 
-pub fn create_uncommitted_string_field_index(
+pub async fn create_uncommitted_string_field_index(
     documents: Vec<Document>,
 ) -> Result<UncommittedStringFieldIndex> {
-    create_uncommitted_string_field_index_from(documents, 0)
+    create_uncommitted_string_field_index_from(documents, 0).await
 }
 
-pub fn create_uncommitted_string_field_index_from(
+pub async fn create_uncommitted_string_field_index_from(
     documents: Vec<Document>,
     starting_doc_id: u64,
 ) -> Result<UncommittedStringFieldIndex> {
@@ -101,52 +105,58 @@ pub fn create_uncommitted_string_field_index_from(
         crate::nlp::locales::Locale::EN,
     )));
 
+    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u64);
         let flatten = doc.into_flatten();
-        let operations = string_field
+        string_field
             .get_write_operations(
                 CollectionId("collection".to_string()),
                 document_id,
-                "field",
+                "field".to_string(),
                 FieldId(1),
                 &flatten,
+                sx.clone(),
             )
+            .await
             .with_context(|| {
                 format!("Test get_write_operations {:?} {:?}", document_id, flatten)
             })?;
+    }
 
-        for operation in operations {
-            match operation {
-                WriteOperation::Collection(
+    drop(sx);
+
+    while let Ok(operation) = rx.recv().await {
+        match operation {
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Index(
+                    document_id,
                     _,
-                    CollectionWriteOperation::Index(
-                        _,
-                        _,
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length,
-                            terms,
-                        },
-                    ),
-                ) => {
-                    index
-                        .insert(document_id, field_length, terms)
-                        .with_context(|| {
-                            format!("test cannot insert index_string {:?}", document_id)
-                        })?;
-                }
-                _ => unreachable!(),
-            };
-        }
+                    DocumentFieldIndexOperation::IndexString {
+                        field_length,
+                        terms,
+                    },
+                ),
+            ) => {
+                index
+                    .insert(document_id, field_length, terms)
+                    .with_context(|| {
+                        format!("test cannot insert index_string {:?}", document_id)
+                    })?;
+            }
+            _ => unreachable!(),
+        };
     }
 
     Ok(index)
 }
 
-pub fn create_committed_string_field_index(
+pub async fn create_committed_string_field_index(
     documents: Vec<Document>,
 ) -> Result<Option<CommittedStringFieldIndex>> {
-    let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents)?;
+    let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents).await?;
 
     index.commit(generate_new_path())?;
 

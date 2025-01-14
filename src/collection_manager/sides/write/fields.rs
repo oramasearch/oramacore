@@ -5,22 +5,21 @@ use std::{
 };
 
 use anyhow::Result;
+use axum::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast::Sender;
 
 use crate::{
     collection_manager::dto::FieldId,
-    embeddings::{LoadedModel, OramaModel},
     indexes::number::Number,
-    metrics::{
-        EmbeddingCalculationLabels, StringCalculationLabels, EMBEDDING_CALCULATION_METRIC,
-        STRING_CALCULATION_METRIC,
-    },
+    metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
 
 use super::{
+    embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput},
     CollectionWriteOperation, DocumentFieldIndexOperation, Term, TermStringField, WriteOperation,
 };
 
@@ -31,18 +30,20 @@ pub enum SerializedFieldIndexer {
     Number,
     Bool,
     String(Locale),
-    Embedding(OramaModel, Vec<String>),
+    Embedding(String, Vec<String>),
 }
 
+#[async_trait]
 pub trait FieldIndexer: Sync + Send + Debug {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: &str,
+        field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-    ) -> Result<Vec<WriteOperation>>;
+        sender: Sender<WriteOperation>,
+    ) -> Result<()>;
 
     fn serialized(&self) -> SerializedFieldIndexer;
 }
@@ -62,19 +63,21 @@ impl NumberField {
     }
 }
 
+#[async_trait]
 impl FieldIndexer for NumberField {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: &str,
+        field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-    ) -> Result<Vec<WriteOperation>> {
-        let value = doc.get(field_name).and_then(|v| Number::try_from(v).ok());
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
+        let value = doc.get(&field_name).and_then(|v| Number::try_from(v).ok());
 
         let value = match value {
-            None => return Ok(vec![]),
+            None => return Ok(()),
             Some(value) => value,
         };
 
@@ -87,7 +90,9 @@ impl FieldIndexer for NumberField {
             ),
         );
 
-        Ok(vec![op])
+        sender.send(op)?;
+
+        Ok(())
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
@@ -110,21 +115,23 @@ impl BoolField {
     }
 }
 
+#[async_trait]
 impl FieldIndexer for BoolField {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: &str,
+        field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-    ) -> Result<Vec<WriteOperation>> {
-        let value = doc.get(field_name);
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
+        let value = doc.get(&field_name);
 
         let value = match value {
-            None => return Ok(vec![]),
+            None => return Ok(()),
             Some(value) => match value.as_bool() {
-                None => return Ok(vec![]),
+                None => return Ok(()),
                 Some(value) => value,
             },
         };
@@ -138,7 +145,9 @@ impl FieldIndexer for BoolField {
             ),
         );
 
-        Ok(vec![op])
+        sender.send(op)?;
+
+        Ok(())
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
@@ -156,26 +165,28 @@ impl StringField {
     }
 }
 
+#[async_trait]
 impl FieldIndexer for StringField {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: &str,
+        field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-    ) -> Result<Vec<WriteOperation>> {
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
         let metric = STRING_CALCULATION_METRIC.create(StringCalculationLabels {
             collection: coll_id.0.clone(),
             field: field_name.to_string(),
         });
 
-        let value = doc.get(field_name);
+        let value = doc.get(&field_name);
 
         let data = match value {
-            None => return Ok(vec![]),
+            None => return Ok(()),
             Some(value) => match value.as_str() {
-                None => return Ok(vec![]),
+                None => return Ok(()),
                 Some(value) => self.parser.tokenize_and_stem(value),
             },
         };
@@ -241,7 +252,9 @@ impl FieldIndexer for StringField {
             ),
         );
 
-        Ok(vec![op])
+        sender.send(op)?;
+
+        Ok(())
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
@@ -251,28 +264,36 @@ impl FieldIndexer for StringField {
 
 #[derive(Debug)]
 pub struct EmbeddingField {
-    model: Arc<LoadedModel>,
+    model_name: String,
     document_fields: Vec<String>,
+    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 impl EmbeddingField {
-    pub fn new(model: Arc<LoadedModel>, document_fields: Vec<String>) -> Self {
+    pub fn new(
+        model_name: String,
+        document_fields: Vec<String>,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+    ) -> Self {
         Self {
-            model,
+            model_name,
             document_fields,
+            embedding_sender,
         }
     }
 }
 
+#[async_trait]
 impl FieldIndexer for EmbeddingField {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         coll_id: CollectionId,
         doc_id: DocumentId,
-        _field_name: &str,
+        _field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-    ) -> Result<Vec<WriteOperation>> {
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
         let input: String = self
             .document_fields
             .iter()
@@ -282,30 +303,29 @@ impl FieldIndexer for EmbeddingField {
             })
             .collect();
 
-        let metric = EMBEDDING_CALCULATION_METRIC.create(EmbeddingCalculationLabels {
-            collection: coll_id.0.clone(),
-            model: self.model.model_name().to_string(),
-        });
         // The input could be:
         // - empty: we should skip this (???)
         // - "normal": it is ok
         // - "too long": we should chunk it in a smart way
         // TODO: implement that logic
-        let mut output = self.model.embed(vec![input], None)?;
-        let output = output.remove(0);
-        drop(metric);
 
-        Ok(vec![WriteOperation::Collection(
-            coll_id.clone(),
-            CollectionWriteOperation::Index(
-                doc_id,
-                field_id,
-                DocumentFieldIndexOperation::IndexEmbedding { value: output },
-            ),
-        )])
+        self.embedding_sender
+            .send(EmbeddingCalculationRequest {
+                model_name: self.model_name.clone(),
+                input: EmbeddingCalculationRequestInput {
+                    text: input,
+                    coll_id,
+                    doc_id,
+                    field_id,
+                    op_sender: sender,
+                },
+            })
+            .await?;
+
+        Ok(())
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
-        SerializedFieldIndexer::Embedding(self.model.model(), self.document_fields.clone())
+        SerializedFieldIndexer::Embedding(self.model_name.clone(), self.document_fields.clone())
     }
 }

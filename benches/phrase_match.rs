@@ -39,10 +39,20 @@ mod bench {
 
     pub fn one_word(c: &mut Criterion) {
         let data = generate_test_data();
-        let string_index = create_committed_string_field_index(data).unwrap().unwrap();
+
+        let mut inputs = None;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            inputs = create_committed_string_field_index(data).await.unwrap();
+        });
 
         c.bench_function("one word - phrase", |b| {
             b.iter(|| {
+                let string_index = inputs.as_ref().unwrap();
                 string_index
                     .search_with_phrase_match(
                         black_box(&["control".to_string()]),
@@ -56,6 +66,7 @@ mod bench {
         });
         c.bench_function("one word - no phrase", |b| {
             b.iter(|| {
+                let string_index = inputs.as_ref().unwrap();
                 string_index
                     .search_without_phrase_match(
                         black_box(&["control".to_string()]),
@@ -70,6 +81,7 @@ mod bench {
 
         c.bench_function("two word - phrase", |b| {
             b.iter(|| {
+                let string_index = inputs.as_ref().unwrap();
                 string_index
                     .search_with_phrase_match(
                         black_box(&["control".to_string(), "people".to_string()]),
@@ -83,6 +95,7 @@ mod bench {
         });
         c.bench_function("two word - no phrase", |b| {
             b.iter(|| {
+                let string_index = inputs.as_ref().unwrap();
                 string_index
                     .search_without_phrase_match(
                         black_box(&["control".to_string(), "people".to_string()]),

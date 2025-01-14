@@ -391,7 +391,8 @@ mod tests {
                 })
                 .try_into()?,
             ],
-        )?;
+        )
+        .await?;
 
         let mut scorer = BM25Scorer::new();
         string_index
@@ -493,7 +494,8 @@ mod tests {
                 })
                 .try_into()?,
             ],
-        )?;
+        )
+        .await?;
 
         let mut scorer = BM25Scorer::new();
         string_index

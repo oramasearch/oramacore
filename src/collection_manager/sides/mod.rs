@@ -23,7 +23,7 @@ mod tests {
         collection_manager::dto::{
             CreateCollectionOptionDTO, Filter, FulltextMode, Limit, SearchMode, SearchParams,
         },
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
+        embeddings::{EmbeddingConfig, EmbeddingService},
         indexes::number::{Number, NumberFilter},
         test_utils::generate_new_path,
         types::CollectionId,
@@ -38,17 +38,22 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         })
         .await?;
 
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,
@@ -104,16 +109,20 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,
@@ -179,16 +188,20 @@ mod tests {
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
         let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
+            grpc: None,
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         })
         .await?;
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
-        let writer = CollectionsWriter::new(sender, embedding_service.clone(), config);
+        let (sx, _) = tokio::sync::mpsc::channel(1_0000);
+        let writer = CollectionsWriter::new(sender, config, sx);
 
         let reader = CollectionsReader::try_new(
             embedding_service,
