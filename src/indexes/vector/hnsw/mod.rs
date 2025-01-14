@@ -18,8 +18,9 @@ struct SearchCandidate<K: Ord + Hash + Clone + Debug> {
 
 impl<K: Ord + Hash + Clone + Debug> Ord for SearchCandidate<K> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.distance
-            .partial_cmp(&other.distance)
+        other
+            .distance
+            .partial_cmp(&self.distance)
             .unwrap_or(Ordering::Equal)
     }
 }
@@ -28,7 +29,7 @@ impl<K: Ord + Hash + Clone + Debug> Eq for SearchCandidate<K> {}
 
 impl<K: Ord + Hash + Clone + Debug> PartialOrd for SearchCandidate<K> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.distance.partial_cmp(&self.distance)
+        Some(self.cmp(other))
     }
 }
 
@@ -314,8 +315,8 @@ impl<K: Ord + Hash + Clone + Debug> LayerNode<K> {
         visited.insert(self.node.key.clone(), true);
 
         while let Some(current_candidate) = candidates.pop() {
-            if let Some(best) = result.peek() {
-                if current_candidate.distance > best.distance && result.len() >= k {
+            if let Some(worst_in_result) = result.peek() {
+                if current_candidate.distance > worst_in_result.distance && result.len() >= k {
                     break;
                 }
             }
