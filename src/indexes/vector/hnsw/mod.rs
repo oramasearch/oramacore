@@ -28,7 +28,7 @@ impl<K: Ord + Hash + Clone + Debug> Eq for SearchCandidate<K> {}
 
 impl<K: Ord + Hash + Clone + Debug> PartialOrd for SearchCandidate<K> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.distance.partial_cmp(&other.distance)
+        other.distance.partial_cmp(&self.distance)
     }
 }
 
@@ -73,7 +73,7 @@ struct Graph<K: Ord + Hash + Clone + Debug> {
 impl<K: Ord + Hash + Clone + Debug> Graph<K> {
     pub fn new() -> Self {
         Self {
-            distance: f32::cosine,
+            distance: |a, b| f32::cosine(a, b).map(|sim| 1.0 - sim),
             rng: rand::thread_rng(),
             m: 16,
             ml: 0.25,
@@ -126,7 +126,11 @@ impl<K: Ord + Hash + Clone + Debug> Graph<K> {
                 }
 
                 let search_point = if let Some(elevator_key) = &elevator {
-                    layer.nodes.get(&**elevator_key).unwrap()
+                    if let Some(node) = layer.nodes.get(&**elevator_key) {
+                        node
+                    } else {
+                        layer.entry().unwrap()
+                    }
                 } else {
                     layer.entry().unwrap()
                 };
@@ -170,11 +174,18 @@ impl<K: Ord + Hash + Clone + Debug> Graph<K> {
         }
 
         let mut deleted = false;
+        let m = self.m;
 
         for layer in &mut self.layers {
             if let Some(mut node) = layer.nodes.remove(key) {
-                node.isolate(self.m);
+                node.isolate(m);
                 deleted = true;
+            }
+
+            for (_, other_node) in layer.nodes.iter_mut() {
+                if let Some(ref mut neighbors) = other_node.neighbors {
+                    neighbors.remove(key);
+                }
             }
         }
 
@@ -289,9 +300,8 @@ impl<K: Ord + Hash + Clone + Debug> LayerNode<K> {
         target: &[f32],
         distance_fn: DistanceFn,
     ) -> Vec<SearchCandidate<K>> {
-        let mut candidates: BinaryHeap<Reverse<SearchCandidate<K>>> =
-            BinaryHeap::with_capacity(ef_search);
-        let mut result: BinaryHeap<Reverse<SearchCandidate<K>>> = BinaryHeap::with_capacity(k);
+        let mut candidates: BinaryHeap<SearchCandidate<K>> = BinaryHeap::with_capacity(ef_search);
+        let mut result: BinaryHeap<SearchCandidate<K>> = BinaryHeap::with_capacity(k);
         let mut visited: HashMap<K, bool> = HashMap::new();
 
         let initial_candidate = SearchCandidate {
@@ -299,85 +309,63 @@ impl<K: Ord + Hash + Clone + Debug> LayerNode<K> {
             distance: distance_fn(&self.node.value, target).unwrap_or(f64::INFINITY),
         };
 
-        println!(
-            "Initial candidate: {:?}, Distance: {}",
-            initial_candidate.node.node.key, initial_candidate.distance
-        );
-
-        candidates.push(Reverse(initial_candidate.clone()));
-        result.push(Reverse(initial_candidate.clone()));
+        candidates.push(initial_candidate.clone());
+        result.push(initial_candidate);
         visited.insert(self.node.key.clone(), true);
 
-        while let Some(Reverse(current_candidate)) = candidates.pop() {
-            let mut improved = false;
+        while let Some(current_candidate) = candidates.pop() {
+            if let Some(best) = result.peek() {
+                if current_candidate.distance > best.distance && result.len() >= k {
+                    break;
+                }
+            }
 
             if let Some(ref neighbors) = current_candidate.node.neighbors {
-                let mut neighbor_keys: Vec<&K> = neighbors.keys().collect();
-                neighbor_keys.sort();
-
-                for neighbor_key in neighbor_keys {
-                    if visited.contains_key(&neighbor_key) {
+                for (neighbor_key, neighbor) in neighbors {
+                    if visited.contains_key(neighbor_key) {
                         continue;
                     }
                     visited.insert(neighbor_key.clone(), true);
 
-                    if let Some(neighbor) = neighbors.get(&neighbor_key) {
-                        let distance =
-                            distance_fn(&neighbor.node.value, target).unwrap_or(f64::INFINITY);
+                    let distance =
+                        distance_fn(&neighbor.node.value, target).unwrap_or(f64::INFINITY);
+                    let candidate = SearchCandidate {
+                        node: Box::new((**neighbor).clone()),
+                        distance,
+                    };
 
-                        println!("Neighbor: {:?}, Distance: {}", neighbor.node.key, distance);
-
-                        if let Some(Reverse(current_best)) = result.peek() {
-                            improved = improved || distance < current_best.distance;
-                        }
-
-                        let candidate = SearchCandidate {
-                            node: Box::new((**neighbor).clone()),
-                            distance,
-                        };
-
-                        if result.len() < k {
-                            result.push(Reverse(candidate.clone()));
-                        } else if let Some(Reverse(worst)) = result.peek() {
-                            if distance < worst.distance {
-                                result.pop();
-                                result.push(Reverse(candidate.clone()));
-                            }
-                        }
-
-                        candidates.push(Reverse(candidate));
-                        if candidates.len() >= ef_search {
-                            candidates.pop();
+                    if result.len() < k {
+                        result.push(candidate.clone());
+                    } else if let Some(worst) = result.peek() {
+                        if distance < worst.distance {
+                            result.pop();
+                            result.push(candidate.clone());
                         }
                     }
-                }
-            }
 
-            if !improved && result.len() >= k {
-                break;
+                    if candidates.len() < ef_search {
+                        candidates.push(candidate);
+                    }
+                }
             }
         }
 
-        result
-            .into_sorted_vec()
-            .into_iter()
-            .map(|Reverse(candidate)| candidate)
-            .collect()
+        result.into_sorted_vec()
     }
 
     fn isolate(&mut self, m: usize) {
-        if let Some(ref mut neighbors) = self.neighbors {
-            for (_, neighbor) in neighbors {
-                if let Some(ref mut neighbor_neighbors) = neighbor.neighbors {
-                    let nodes_to_update: Vec<_> = neighbor_neighbors.values_mut().collect();
-                    for node in nodes_to_update {
-                        if let Some(ref mut node_neighbors) = node.neighbors {
-                            node_neighbors.remove(&self.node.key);
-                            node.replenish(m);
-                        }
+        if let Some(ref mut self_neighbors) = self.neighbors {
+            let neighbor_keys: Vec<K> = self_neighbors.keys().cloned().collect();
+
+            for neighbor_key in neighbor_keys {
+                if let Some(neighbor) = self_neighbors.get_mut(&neighbor_key) {
+                    if let Some(ref mut neighbor_neighbors) = neighbor.neighbors {
+                        neighbor_neighbors.remove(&self.node.key);
+                        neighbor.replenish(m);
                     }
                 }
             }
+            self_neighbors.clear();
         }
     }
 
