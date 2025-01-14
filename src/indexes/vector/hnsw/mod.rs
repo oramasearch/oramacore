@@ -2,7 +2,7 @@ use anyhow::Result;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use simsimd::SpatialSimilarity;
-use std::cmp::{Ord, Ordering, Reverse};
+use std::cmp::{Ord, Ordering};
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -74,7 +74,7 @@ struct Graph<K: Ord + Hash + Clone + Debug> {
 impl<K: Ord + Hash + Clone + Debug> Graph<K> {
     pub fn new() -> Self {
         Self {
-            distance: |a, b| f32::cosine(a, b).map(|sim| 1.0 - sim),
+            distance: |a, b| Some(1.0 - dot(a, b)),
             rng: rand::thread_rng(),
             m: 16,
             ml: 0.25,
@@ -92,8 +92,10 @@ impl<K: Ord + Hash + Clone + Debug> Graph<K> {
         self.size == 0
     }
 
-    fn add(&mut self, nodes: Vec<Node<K>>) -> Result<()> {
-        for node in nodes {
+    pub fn add(&mut self, nodes: Vec<Node<K>>) -> Result<()> {
+        for mut node in nodes {
+            normalize_in_place(&mut node.value);
+
             let key = node.key.clone();
             let vec = node.value.clone();
             let insert_level = self.random_level()?;
@@ -227,6 +229,10 @@ impl<K: Ord + Hash + Clone + Debug> Graph<K> {
         }
 
         unreachable!("Graph search should never reach this point")
+    }
+
+    fn distance(&self, a: &[f32], b: &[f32]) -> Option<f64> {
+        (self.distance)(a, b)
     }
 
     fn random_level(&mut self) -> Result<usize> {
@@ -448,6 +454,28 @@ pub fn max_level(ml: f64, num_nodes: usize) -> Result<usize> {
     Ok((level.round() as usize) + 1)
 }
 
+#[inline]
+fn normalize_in_place(vec: &mut [f32]) {
+    let mut sum_sq = 0.0f32;
+    for x in vec.iter() {
+        sum_sq += x * x;
+    }
+    let norm = sum_sq.sqrt();
+    if norm > 0.0 {
+        for x in vec.iter_mut() {
+            *x /= norm;
+        }
+    }
+}
+
+#[inline]
+fn dot(a: &[f32], b: &[f32]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (*x as f64) * (*y as f64))
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +570,88 @@ mod tests {
         for _ in 0..100 {
             let level = graph.random_level().unwrap();
             assert!(level >= 0 && level <= 2);
+        }
+    }
+}
+
+#[cfg(test)]
+mod real_world_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
+
+    fn brute_force_search<K: Copy + Debug>(
+        data: &[(K, Vector)],
+        query: &[f32],
+        k: usize,
+        distance_fn: DistanceFn,
+    ) -> Vec<(K, f64)> {
+        let mut scored: Vec<(K, f64)> = data
+            .iter()
+            .map(|(key, vec)| {
+                let dist = distance_fn(vec, query).unwrap_or(f64::INFINITY);
+                (*key, dist)
+            })
+            .collect();
+
+        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        scored.truncate(k);
+        scored
+    }
+
+    #[test]
+    fn test_real_world_2d() {
+        let seed: u64 = 42;
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let num_points = 100_usize;
+        let data: Vec<(i32, Vector)> = (0..num_points as i32)
+            .map(|i| {
+                let x: f32 = rng.gen();
+                let y: f32 = rng.gen();
+                (i, vec![x, y])
+            })
+            .collect();
+
+        let mut graph = Graph::new();
+        let nodes: Vec<Node<i32>> = data
+            .iter()
+            .map(|(key, vec)| Node::new(*key, vec.clone()))
+            .collect();
+        graph.add(nodes).unwrap();
+        assert_eq!(graph.len(), num_points);
+
+        let num_queries = 5;
+        let k = 5;
+        for _ in 0..num_queries {
+            let qx: f32 = rng.gen();
+            let qy: f32 = rng.gen();
+            let query = vec![qx, qy];
+
+            let bf_results = brute_force_search(&data, &query, k, graph.distance);
+            let hnsw_results = graph.search(&query, k);
+
+            println!("Query = [{:.3}, {:.3}]", qx, qy);
+            println!("   BF nearest = {:?}", bf_results);
+            println!(
+                "   HNSW nearest = {:?}",
+                hnsw_results
+                    .iter()
+                    .map(|node| {
+                        let dist = (graph.distance)(&node.value, &query).unwrap();
+                        (node.key, dist)
+                    })
+                    .collect::<Vec<_>>()
+            );
+
+            let best_hnsw_key = hnsw_results[0].key;
+            let found_in_bf = bf_results.iter().any(|(kbf, _)| *kbf == best_hnsw_key);
+            assert!(
+                found_in_bf,
+                "HNSW best result (key={}) not found among BF top-{} results",
+                best_hnsw_key, k
+            );
         }
     }
 }
