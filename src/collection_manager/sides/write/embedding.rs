@@ -87,10 +87,8 @@ where
 pub fn start_calculate_embedding_loop(
     embedding_server: Arc<EmbeddingService>,
     mut receiver: Receiver<EmbeddingCalculationRequest>,
+    limit: usize,
 ) {
-    // TODO: put limit in config
-    let limit = 10;
-
     // `limit` is the number of items to process in a batch
     assert!(limit > 0);
 
@@ -100,7 +98,7 @@ pub fn start_calculate_embedding_loop(
         let mut cache: HashMap<String, Vec<EmbeddingCalculationRequestInput>> = Default::default();
 
         loop {
-            // `recv_many` waits for at least one item to be available
+            // `recv_many` waits for at least one available item
             let item_count = receiver.recv_many(&mut buffer, limit).await;
             // `recv_many` returns 0 if the channel is closed
             if item_count == 0 {

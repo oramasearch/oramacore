@@ -49,6 +49,7 @@ mod tests {
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
         let (sx, _) = tokio::sync::mpsc::channel(1_0000);
 
@@ -118,6 +119,7 @@ mod tests {
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
         let (sx, _) = tokio::sync::mpsc::channel(1_0000);
         let writer = CollectionsWriter::new(sender, config, sx);
@@ -196,6 +198,7 @@ mod tests {
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
         let (sx, _) = tokio::sync::mpsc::channel(1_0000);
         let writer = CollectionsWriter::new(sender, config, sx);

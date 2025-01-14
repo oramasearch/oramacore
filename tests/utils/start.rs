@@ -41,6 +41,7 @@ pub async fn start_all() -> Result<(
             output: rustorama::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
+                embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {

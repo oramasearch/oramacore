@@ -37,6 +37,12 @@ pub struct CollectionsWriter {
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
     pub data_dir: PathBuf,
+    #[serde(default = "embedding_queue_limit_default")]
+    pub embedding_queue_limit: usize,
+}
+
+fn embedding_queue_limit_default() -> usize {
+    50
 }
 
 impl CollectionsWriter {

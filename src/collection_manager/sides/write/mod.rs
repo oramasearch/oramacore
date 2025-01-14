@@ -27,9 +27,9 @@ impl WriteSide {
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
     ) -> WriteSide {
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(1);
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
 
-        start_calculate_embedding_loop(embedding_service.clone(), rx);
+        start_calculate_embedding_loop(embedding_service.clone(), rx, config.embedding_queue_limit);
 
         WriteSide {
             collections: CollectionsWriter::new(sender, config, sx),
@@ -65,6 +65,7 @@ mod tests {
     async fn test_side_writer_serialize() -> Result<()> {
         let config = CollectionsWriterConfig {
             data_dir: generate_new_path(),
+            embedding_queue_limit: 50,
         };
 
         let (sx, _) = tokio::sync::mpsc::channel(1_0000);

@@ -12,6 +12,11 @@
 
         "config": {
             "data_dir": "./.data/writer",
+
+            // The maximum number of embeddings that can be stored in the queue
+            // before the writer starts to be blocked
+            // NB: the elements are in memory, so be careful with this value
+            "embedding_queue_limit": 50,
         }
     },
     "reader_side": {
