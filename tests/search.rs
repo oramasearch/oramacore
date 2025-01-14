@@ -7,9 +7,10 @@ use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
 use rustorama::collection_manager::sides::read::IndexesConfig;
 use rustorama::collection_manager::sides::CollectionsWriterConfig;
-use rustorama::embeddings::fe::FastEmbedModelRepoConfig;
+use rustorama::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
 use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
 use std::collections::HashMap;
+use std::env::temp_dir;
 use std::path::PathBuf;
 use std::time::Duration;
 use tempdir::TempDir;
@@ -63,16 +64,16 @@ async fn start_server() {
             preload: vec![],
             grpc: None,
             hugging_face: None,
-            fastembed: None,
-            models: HashMap::from_iter([
-                (
-                    "gte-small".to_string(),
-                    ModelConfig::Fastembed(FastEmbedModelRepoConfig {
-                        real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
-                        dimensions: 384,
-                    }),
-                ),
-            ]),
+            fastembed: Some(FastEmbedRepoConfig {
+                cache_dir: temp_dir(),
+            }),
+            models: HashMap::from_iter([(
+                "gte-small".to_string(),
+                ModelConfig::Fastembed(FastEmbedModelRepoConfig {
+                    real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
+                    dimensions: 384,
+                }),
+            )]),
         },
         writer_side: WriteSideConfig {
             output: rustorama::SideChannelType::InMemory,
@@ -95,7 +96,7 @@ async fn start_server() {
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
-            let r= collections_reader.update(op).await;
+            let r = collections_reader.update(op).await;
             if let Err(e) = r {
                 println!("--------");
                 eprintln!("Error: {:?}", e);

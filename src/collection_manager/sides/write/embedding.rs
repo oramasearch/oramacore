@@ -88,9 +88,12 @@ where
 pub fn start_calculate_embedding_loop(
     embedding_server: Arc<EmbeddingService>,
     timeout: Duration,
-    receiver: Receiver<EmbeddingCalculationRequest>,
+    mut receiver: Receiver<EmbeddingCalculationRequest>,
 ) {
     tokio::task::spawn(async move {
+        // let mut buffer = Vec::new();
+        // receiver.recv_many(&mut buffer, 10);
+
         let rx = ReceiverStream::new(receiver);
         let rx = rx.timeout(timeout);
         tokio::pin!(rx);
@@ -129,17 +132,18 @@ pub fn start_calculate_embedding_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use crate::embeddings::{
-        grpc::{GrpcModelConfig, GrpcRepoConfig},
-        EmbeddingConfig, ModelConfig,
-    };
-
-    use super::*;
-
+    #[cfg(feature = "test-python")]
     #[tokio::test]
     async fn test_embedding_grpc_server() -> Result<()> {
+        use std::{collections::HashMap, sync::Arc};
+
+        use crate::embeddings::{
+            grpc::{GrpcModelConfig, GrpcRepoConfig},
+            EmbeddingConfig, ModelConfig,
+        };
+
+        use super::*;
+
         let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(1);
 
         let embedding_config = EmbeddingConfig {

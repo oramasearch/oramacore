@@ -219,7 +219,6 @@ mod tests {
         assert!(*result_1.get(&DocumentId(2)).unwrap() < 1.0);
         assert!(*result_1.get(&DocumentId(4)).unwrap() < 1.0);
         assert!(*result_1.get(&DocumentId(5)).unwrap() < 1.0);
-        
 
         let mut result_a = HashMap::new();
         index.search(&[1.0, 1.0], &mut result_a)?;

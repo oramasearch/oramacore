@@ -38,7 +38,7 @@ pub struct FastEmbedModelRepoConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FastEmbedRepoConfig {
-    cache_dir: PathBuf,
+    pub cache_dir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -93,7 +93,7 @@ impl FastEmbedRepo {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::generate_new_path;
+    use std::env::temp_dir;
 
     use super::*;
 
@@ -101,14 +101,11 @@ mod tests {
     async fn test_embedding_run_fastembed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let tmp = tempdir::TempDir::new("test_fe_download_onnx")?;
-        let cache_path: PathBuf = tmp.path().into();
-        std::fs::remove_dir(cache_path.clone())?;
-
+        let cache_path: PathBuf = temp_dir();
         let rebranded_name = "my-model".to_string();
 
         let fast_embed_config = FastEmbedRepoConfig {
-            cache_dir: generate_new_path(),
+            cache_dir: cache_path,
         };
 
         let repo = FastEmbedRepo::new(

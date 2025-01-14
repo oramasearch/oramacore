@@ -184,6 +184,7 @@ impl GrpcRepo {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "test-python")]
     #[tokio::test]
     async fn test_embedding_run_grpc() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();

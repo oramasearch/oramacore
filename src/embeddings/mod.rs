@@ -4,8 +4,8 @@ use dashmap::DashMap;
 use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
-use tracing::{debug, info};
 use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
+use tracing::{debug, info};
 
 pub mod fe;
 pub mod grpc;

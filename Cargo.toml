@@ -140,6 +140,7 @@ harness = false
 [features]
 default = ["benchmarking"]
 benchmarking = [ "tempdir" ]
+test-python = []
 
 [workspace]
 members = [
