@@ -115,19 +115,24 @@ async fn run_tests() {
         .await
         .unwrap();
 
+    writer.commit().await.unwrap();
+    reader.commit().await.unwrap();
+
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let param: SearchParams = json!({
         "term": "game love",
     })
     .try_into()
     .unwrap();
-    for _ in 0..1_000 {
+    for _ in 0..10_000 {
         collection.search(param.clone()).await.unwrap();
+        // println!("Result {:#?}", r)
     }
-    //  println!("Result {:#?}", r)
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_search_without_webserver() {
+    let _ = tracing_subscriber::fmt::try_init();
+
     run_tests().await;
 }

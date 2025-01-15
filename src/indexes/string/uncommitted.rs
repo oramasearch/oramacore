@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use ptrie::Trie;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     collection_manager::sides::write::{InsertStringTerms, TermStringField},
@@ -139,6 +139,7 @@ impl InnerInnerUncommittedStringFieldIndex {
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
+        let mut total_matches = 0_usize;
         for token in tokens {
             let (current, mut postfixes) = self.tree.find_postfixes_with_current(token.bytes());
 
@@ -187,9 +188,13 @@ impl InnerInnerUncommittedStringFieldIndex {
                         0.75,
                         boost,
                     );
+
+                    total_matches +=1;
                 }
             }
         }
+
+        info!(total_matches = total_matches, "Uncommitted total matches");
 
         Ok(())
     }
