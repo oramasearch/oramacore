@@ -76,7 +76,6 @@ impl InnerInnerUncommittedStringFieldIndex {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn insert(
         &mut self,
         document_id: DocumentId,
