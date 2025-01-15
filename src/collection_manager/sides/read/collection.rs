@@ -17,6 +17,7 @@ use crate::{
         string::{StringIndex, StringIndexConfig},
         vector::{VectorIndex, VectorIndexConfig},
     },
+    nlp::{locales::Locale, NLPService, TextParser},
     types::CollectionId,
 };
 
@@ -26,6 +27,7 @@ use super::IndexesConfig;
 pub struct CollectionReader {
     pub(super) id: CollectionId,
     pub(super) embedding_service: Arc<EmbeddingService>,
+    pub(super) nlp_service: Arc<NLPService>,
 
     pub(super) document_storage: Arc<dyn DocumentStorage>,
 
@@ -36,6 +38,8 @@ pub struct CollectionReader {
     pub(super) fields_per_model: DashMap<Arc<LoadedModel>, Vec<FieldId>>,
 
     pub(super) string_index: StringIndex,
+    pub(super) text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
+
     pub(super) number_index: NumberIndex,
     pub(super) bool_index: BoolIndex,
     // TODO: textparser -> vec<field_id>
@@ -45,6 +49,7 @@ impl CollectionReader {
     pub fn try_new(
         id: CollectionId,
         embedding_service: Arc<EmbeddingService>,
+        nlp_service: Arc<NLPService>,
         document_storage: Arc<dyn DocumentStorage>,
         _: IndexesConfig,
     ) -> Result<Self> {
@@ -61,12 +66,15 @@ impl CollectionReader {
         Ok(Self {
             id,
             embedding_service,
+            nlp_service,
+
             document_storage,
 
             vector_index,
             fields_per_model: Default::default(),
 
             string_index,
+            text_parser_per_field: Default::default(),
 
             number_index,
 
@@ -126,6 +134,26 @@ impl CollectionReader {
                 .context("Model not found")?;
             self.fields_per_model.insert(model, fields);
         }
+
+        self.text_parser_per_field = self.fields
+            .iter()
+            .filter_map(|e| {
+                if let TypedField::Text(l) = e.1 {
+                    let locale = l.into();
+                    Some(
+                        (
+                            e.0,
+                            (
+                                locale,
+                                self.nlp_service.get(locale)
+                            )
+                        )
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         Ok(())
     }

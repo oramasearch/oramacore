@@ -172,3 +172,7 @@ members = [
 #     "number_index",
 #     "bool_index",
 # ]
+
+
+[profile.bench]
+debug = true

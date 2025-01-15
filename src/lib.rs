@@ -8,6 +8,7 @@ use collection_manager::sides::{
 };
 use embeddings::{EmbeddingConfig, EmbeddingService};
 use metrics_exporter_prometheus::PrometheusBuilder;
+use nlp::NLPService;
 use serde::Deserialize;
 use tokio::sync::broadcast::Receiver;
 use tracing::info;
@@ -138,8 +139,10 @@ pub async fn build_orama(
         .await
         .context("Cannot load collections writer")?;
 
-    let mut collections_reader = CollectionsReader::try_new(embedding_service, reader_side.config)
-        .context("Cannot create collections reader")?;
+    let nlp_service = Arc::new(NLPService::new());
+    let mut collections_reader =
+        CollectionsReader::try_new(embedding_service, nlp_service, reader_side.config)
+            .context("Cannot create collections reader")?;
 
     collections_reader
         .load()

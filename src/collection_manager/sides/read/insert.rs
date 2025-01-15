@@ -22,20 +22,28 @@ impl CollectionReader {
         self.fields
             .insert(field_name.clone(), (field_id, field.clone()));
 
-        if let TypedField::Embedding(embedding) = field {
-            let loaded_model = self
-                .embedding_service
-                .get_model(embedding.model_name)
-                .await?;
+        match field {
+            TypedField::Embedding(embedding) => {
+                let loaded_model = self
+                    .embedding_service
+                    .get_model(embedding.model_name)
+                    .await?;
 
-            self.vector_index
-                .add_field(field_id, loaded_model.dimensions())?;
+                self.vector_index
+                    .add_field(field_id, loaded_model.dimensions())?;
 
-            self.fields_per_model
-                .entry(loaded_model)
-                .or_default()
-                .push(field_id);
-        };
+                self.fields_per_model
+                    .entry(loaded_model)
+                    .or_default()
+                    .push(field_id);
+            }
+            TypedField::Text(language) => {
+                let locale = language.into();
+                let text_parser = self.nlp_service.get(locale);
+                self.text_parser_per_field.insert(field_id, (locale, text_parser));
+            }
+            _ => {}
+        }
 
         Ok(())
     }

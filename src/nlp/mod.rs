@@ -3,9 +3,13 @@ pub mod locales;
 pub mod stop_words;
 pub mod tokenizer;
 
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    sync::Arc,
+};
 
 use anyhow::Result;
+use dashmap::DashMap;
 use locales::Locale;
 use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
@@ -28,22 +32,6 @@ impl Debug for TextParser {
             .finish()
     }
 }
-
-impl Clone for TextParser {
-    fn clone(&self) -> Self {
-        let stemmer = match self.locale {
-            Locale::EN => Stemmer::create(Algorithm::English),
-            // @todo: manage other locales
-            _ => Stemmer::create(Algorithm::English),
-        };
-        Self {
-            locale: self.locale,
-            tokenizer: self.tokenizer.clone(),
-            stemmer,
-        }
-    }
-}
-
 impl TextParser {
     pub fn from_locale(locale: Locale) -> Self {
         let (tokenizer, stemmer) = match locale {
@@ -84,6 +72,30 @@ impl TextParser {
 impl StringParser for TextParser {
     fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>> {
         Ok(self.tokenize_and_stem(input))
+    }
+}
+
+#[derive(Debug)]
+pub struct NLPService {
+    parser: DashMap<Locale, Arc<TextParser>>,
+}
+impl NLPService {
+    pub fn new() -> Self {
+        Self {
+            parser: Default::default(),
+        }
+    }
+
+    pub fn get(&self, locale: Locale) -> Arc<TextParser> {
+        match self.parser.entry(locale.clone()) {
+            dashmap::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
+            dashmap::Entry::Vacant(vacant_entry) => {
+                let parser = TextParser::from_locale(locale);
+                let parser = Arc::new(parser);
+                vacant_entry.insert(parser.clone());
+                parser
+            }
+        }
     }
 }
 
