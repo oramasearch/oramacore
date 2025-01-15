@@ -4,7 +4,6 @@ import logging
 
 from src.grpc.server import serve
 from src.utils import OramaAIConfig
-from src.models.main import ModelsManager
 from src.service.embedding import EmbeddingService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -27,12 +26,9 @@ if __name__ == "__main__":
     logger.info("Initializing embedding service...")
     embeddings_service = EmbeddingService(config)
 
-    logger.info("Initializing models manager...")
-    models_manager = ModelsManager(config)
-
     try:
         logger.info(f"Starting gRPC server on port {config.grpc_port}...")
-        serve(config, embeddings_service.embeddings_service, models_manager)
+        serve(config, embeddings_service.embeddings_service)
     except KeyboardInterrupt:
         logger.info("\nShutting down gracefully...")
         sys.exit(0)

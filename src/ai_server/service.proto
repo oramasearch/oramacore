@@ -13,6 +13,7 @@ service CalculateEmbeddingsService {
 service LLMService {
     rpc CallLLM (LLMRequest) returns (LLMResponse);
     rpc CallLLMStream (LLMRequest) returns (stream LLMStreamResponse);
+    rpc AnswerSessionStream (AnswerSessionRequest) returns (stream AnswerSessionResponse);
 }
 
 service VisionService {
@@ -39,6 +40,21 @@ enum LLMType {
     vision = 2;
 }
 
+enum Role {
+  USER = 0;
+  ASSISTANT = 1;
+  SYSTEM = 2;
+}
+
+message ConversationMessage {
+  Role role = 1;
+  string content = 2;
+}
+
+message Conversation {
+  repeated ConversationMessage messages = 1;
+}
+
 // Request message for embedding generation
 message EmbeddingRequest {
     OramaModel model = 1;         // The model to use for embedding
@@ -63,6 +79,12 @@ message LLMRequest {
     string prompt = 2;           // Input prompt
 }
 
+message AnswerSessionRequest {
+    Conversation conversation = 1; // All past messages
+    string prompt = 2;             // Input prompt
+    string context = 3;            // Input context
+}
+
 // Response message for LLM calls
 message LLMResponse {
     string text = 1;             // Generated text response
@@ -70,6 +92,11 @@ message LLMResponse {
 
 // Response message for streaming LLM calls
 message LLMStreamResponse {
+    string text_chunk = 1;       // Chunk of generated text
+    bool is_final = 2;           // Indicates if this is the final chunk
+}
+
+message AnswerSessionResponse {
     string text_chunk = 1;       // Chunk of generated text
     bool is_final = 2;           // Indicates if this is the final chunk
 }

@@ -22,3 +22,7 @@ pillow
 
 pytest
 pytest-mock
+
+transformers
+accelerate
+einops

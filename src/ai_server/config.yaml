@@ -33,3 +33,11 @@ LLMs:
       temperature: 0.2
       top_p: 0.95
       max_tokens: 20
+
+  answer:
+    id: "Qwen/Qwen2.5-3B-Instruct"
+    tensor_parallel_size: 1
+    sampling_params:
+      temperature: 0.0
+      top_p: 0.95
+      max_tokens: 2048

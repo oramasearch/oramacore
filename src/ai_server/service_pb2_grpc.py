@@ -199,6 +199,12 @@ class LLMServiceStub(object):
             response_deserializer=service__pb2.LLMStreamResponse.FromString,
             _registered_method=True,
         )
+        self.AnswerSessionStream = channel.unary_stream(
+            "/orama_ai_service.LLMService/AnswerSessionStream",
+            request_serializer=service__pb2.AnswerSessionRequest.SerializeToString,
+            response_deserializer=service__pb2.AnswerSessionResponse.FromString,
+            _registered_method=True,
+        )
 
 
 class LLMServiceServicer(object):
@@ -216,6 +222,12 @@ class LLMServiceServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def AnswerSessionStream(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_LLMServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -228,6 +240,11 @@ def add_LLMServiceServicer_to_server(servicer, server):
             servicer.CallLLMStream,
             request_deserializer=service__pb2.LLMRequest.FromString,
             response_serializer=service__pb2.LLMStreamResponse.SerializeToString,
+        ),
+        "AnswerSessionStream": grpc.unary_stream_rpc_method_handler(
+            servicer.AnswerSessionStream,
+            request_deserializer=service__pb2.AnswerSessionRequest.FromString,
+            response_serializer=service__pb2.AnswerSessionResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
@@ -288,6 +305,36 @@ class LLMService(object):
             "/orama_ai_service.LLMService/CallLLMStream",
             service__pb2.LLMRequest.SerializeToString,
             service__pb2.LLMStreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def AnswerSessionStream(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            "/orama_ai_service.LLMService/AnswerSessionStream",
+            service__pb2.AnswerSessionRequest.SerializeToString,
+            service__pb2.AnswerSessionResponse.FromString,
             options,
             channel_credentials,
             insecure,
