@@ -245,6 +245,7 @@ impl CollectionReader {
         let mut tokens_cache: HashMap<Locale, Vec<String>> = Default::default();
 
         for field_id in properties {
+
             let text_parser = self.text_parser_per_field.get(&field_id);
             let (locale, text_parser) = match text_parser.as_ref() {
                 None => return Err(anyhow!("No text parser for this field")),
@@ -324,7 +325,7 @@ impl CollectionReader {
             for (field_name, facet) in facets {
                 let field_id = self.get_field_id(field_name.clone())?;
 
-                // This calculation is inneficient
+                // This calculation is not efficient
                 // we have the doc_ids that matches:
                 // - filters
                 // - search

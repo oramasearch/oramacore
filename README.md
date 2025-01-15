@@ -66,6 +66,16 @@ RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin rustorama --release
 
 The configuration file is located at `config.jsonc` and contains an example of the configuration.
 
+## Disk persistence
+
+```bash
+curl 'http://localhost:8080/v0/reader/dump_all' -X POST
+```
+
+```bash
+curl 'http://localhost:8080/v0/writer/dump_all' -X POST
+```
+
 ## Tests
 
 To run the tests, use:
