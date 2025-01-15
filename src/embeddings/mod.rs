@@ -59,11 +59,19 @@ impl LoadedModel {
         }
     }
 
-    pub async fn embed(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+    pub async fn embed_query(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
         match self {
-            LoadedModel::HuggingFace(model) => model.embed(input),
-            LoadedModel::Fastembed(model) => model.embed(input),
-            LoadedModel::Grpc(model) => model.embed(input).await,
+            LoadedModel::HuggingFace(model) => model.embed_query(input),
+            LoadedModel::Fastembed(model) => model.embed_query(input),
+            LoadedModel::Grpc(model) => model.embed_query(input).await,
+        }
+    }
+
+    pub async fn embed_passage(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+        match self {
+            LoadedModel::HuggingFace(model) => model.embed_passage(input),
+            LoadedModel::Fastembed(model) => model.embed_passage(input),
+            LoadedModel::Grpc(model) => model.embed_passage(input).await,
         }
     }
 }

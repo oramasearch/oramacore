@@ -47,7 +47,7 @@ where
         let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
 
         let output = model
-            .embed(text_inputs)
+            .embed_passage(text_inputs)
             .await
             .context("Failed to embed text")?;
 
