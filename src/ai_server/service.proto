@@ -27,6 +27,7 @@ enum LLMType {
     content_expansion = 0;
     google_query_translator = 1;
     vision = 2;
+    answer = 3;
 }
 
 enum Role {
@@ -64,8 +65,9 @@ message Embedding {
 
 // Request message for LLM calls
 message ChatRequest {
-    LLMType model = 1;           // Which LLM to use
-    string prompt = 2;           // Input prompt
+    LLMType model = 1;             // Which LLM to use
+    string prompt = 2;             // Input prompt
+    Conversation conversation = 3; // All past messages
 }
 
 message AnswerSessionRequest {

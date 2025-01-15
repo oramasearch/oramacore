@@ -9,6 +9,7 @@ from service_pb2 import (
     OramaModel as ProtoOramaModel,
     OramaIntent as ProtoOramaIntent,
     Embedding as EmbeddingProto,
+    Role as ProtoRole,
     EmbeddingResponse as EmbeddingResponseProto,
     ChatResponse,
     ChatStreamResponse,
@@ -44,9 +45,21 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
     def Chat(self, request, context):
         try:
             model_name = LLMType.Name(request.model)
-            response = self.models_manager.chat(model_id=model_name.lower(), history=[], prompt=request.prompt)
+            logging.info(f"Received Chat request with model: {model_name}, prompt: {request.prompt}")
+
+            history = (
+                [
+                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    for message in request.conversation.messages
+                ]
+                if request.conversation.messages
+                else []
+            )
+
+            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt=request.prompt)
             return ChatResponse(text=response)
         except Exception as e:
+            logging.error(f"Error in Chat: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Error in chat: {str(e)}")
             return ChatResponse()
@@ -56,8 +69,17 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             logging.info(f"Received ChatStream request with model: {model_name}, prompt: {request.prompt}")
 
+            history = (
+                [
+                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    for message in request.conversation.messages
+                ]
+                if request.conversation.messages
+                else []
+            )
+
             for text_chunk in self.models_manager.chat_stream(
-                model_id=model_name.lower(), history=[], prompt=request.prompt
+                model_id=model_name.lower(), history=history, prompt=request.prompt
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
