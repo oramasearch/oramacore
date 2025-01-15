@@ -155,8 +155,6 @@ impl CommittedStringFieldIndex {
                 })
                 .count();
 
-            let boost_per_order = positions.len() as f32;
-
             // We have different kind of boosting:
             // 1. Boost for the exact match: not implemented
             // 2. Boost for the phrase match when the terms appear in sequence (without holes): implemented
@@ -165,7 +163,9 @@ impl CommittedStringFieldIndex {
             // 5. Boost defined by the user: implemented
             // We should allow the user to configure which boost to use and how much it impacts the score.
             // TODO: think about this
-            let total_boost = boost_per_order + (sequences_count as f32 * 2.0) + boost;
+            let boost_any_order = positions.len() as f32;
+            let boost_sequence = sequences_count as f32 * 2.0;
+            let total_boost = boost_any_order + boost_sequence + boost;
 
             for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
                 matches
