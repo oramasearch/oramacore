@@ -1,11 +1,11 @@
 import torch
 import logging
 import threading
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 from typing import Dict, Any, Set, List, Optional, Iterator
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.prompts.main import PROMPT_TEMPLATES
 from src.utils import OramaAIConfig
+from src.prompts.main import PROMPT_TEMPLATES
 
 logger = logging.getLogger(__name__)
 

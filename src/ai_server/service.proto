@@ -2,22 +2,11 @@ syntax = "proto3";
 
 package orama_ai_service;
 
-service HealthCheckService {
-    rpc CheckHealth (HealthCheckRequest) returns (HealthCheckResponse);
-}
-
-service CalculateEmbeddingsService {
-    rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
-}
-
 service LLMService {
-    rpc CallLLM (LLMRequest) returns (LLMResponse);
-    rpc CallLLMStream (LLMRequest) returns (stream LLMStreamResponse);
-    rpc AnswerSessionStream (AnswerSessionRequest) returns (stream AnswerSessionResponse);
-}
-
-service VisionService {
-    rpc CallVision (VisionRequest) returns (VisionResponse);
+    rpc CheckHealth (HealthCheckRequest) returns (HealthCheckResponse);
+    rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
+    rpc Chat (ChatRequest) returns (ChatResponse);
+    rpc ChatStream (ChatRequest) returns (stream ChatStreamResponse);
 }
 
 enum OramaModel {
@@ -74,7 +63,7 @@ message Embedding {
 }
 
 // Request message for LLM calls
-message LLMRequest {
+message ChatRequest {
     LLMType model = 1;           // Which LLM to use
     string prompt = 2;           // Input prompt
 }
@@ -86,30 +75,14 @@ message AnswerSessionRequest {
 }
 
 // Response message for LLM calls
-message LLMResponse {
+message ChatResponse {
     string text = 1;             // Generated text response
 }
 
 // Response message for streaming LLM calls
-message LLMStreamResponse {
+message ChatStreamResponse {
     string text_chunk = 1;       // Chunk of generated text
     bool is_final = 2;           // Indicates if this is the final chunk
-}
-
-message AnswerSessionResponse {
-    string text_chunk = 1;       // Chunk of generated text
-    bool is_final = 2;           // Indicates if this is the final chunk
-}
-
-// Request message for vision model
-message VisionRequest {
-    bytes image = 1;             // Image data
-    string text = 2;             // Accompanying text/prompt
-}
-
-// Response message for vision model
-message VisionResponse {
-    string text = 1;             // Generated text response
 }
 
 // Request message for health check

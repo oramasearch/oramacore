@@ -24,17 +24,18 @@ if __name__ == "__main__":
     logger.info("Initializing config...")
     config = OramaAIConfig()
 
-    manager = ModelsManager(config)
+    logger.info("Initializing models manager...")
+    models_service = ModelsManager(config)
 
-    # logger.info("Initializing embedding service...")
-    # embeddings_service = EmbeddingService(config)
+    logger.info("Initializing embedding service...")
+    embeddings_service = EmbeddingService(config)
 
-    # try:
-    #     logger.info(f"Starting gRPC server on port {config.grpc_port}...")
-    #     serve(config, embeddings_service.embeddings_service)
-    # except KeyboardInterrupt:
-    #     logger.info("\nShutting down gracefully...")
-    #     sys.exit(0)
-    # except Exception as e:
-    #     logger.error(f"Error starting server: {e}", exc_info=True)
-    #     sys.exit(1)
+    try:
+        logger.info(f"Starting gRPC server on port {config.grpc_port}...")
+        serve(config, embeddings_service.embeddings_service, models_service)
+    except KeyboardInterrupt:
+        logger.info("\nShutting down gracefully...")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error starting server: {e}", exc_info=True)
+        sys.exit(1)

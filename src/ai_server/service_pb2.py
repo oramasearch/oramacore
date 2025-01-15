@@ -17,7 +17,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\rservice.proto\x12\x10orama_ai_service"L\n\x13\x43onversationMessage\x12$\n\x04role\x18\x01 \x01(\x0e\x32\x16.orama_ai_service.Role\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t"G\n\x0c\x43onversation\x12\x37\n\x08messages\x18\x01 \x03(\x0b\x32%.orama_ai_service.ConversationMessage"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"F\n\nLLMRequest\x12(\n\x05model\x18\x01 \x01(\x0e\x32\x19.orama_ai_service.LLMType\x12\x0e\n\x06prompt\x18\x02 \x01(\t"m\n\x14\x41nswerSessionRequest\x12\x34\n\x0c\x63onversation\x18\x01 \x01(\x0b\x32\x1e.orama_ai_service.Conversation\x12\x0e\n\x06prompt\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontext\x18\x03 \x01(\t"\x1b\n\x0bLLMResponse\x12\x0c\n\x04text\x18\x01 \x01(\t"9\n\x11LLMStreamResponse\x12\x12\n\ntext_chunk\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08"=\n\x15\x41nswerSessionResponse\x12\x12\n\ntext_chunk\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08",\n\rVisionRequest\x12\r\n\x05image\x18\x01 \x01(\x0c\x12\x0c\n\x04text\x18\x02 \x01(\t"\x1e\n\x0eVisionResponse\x12\x0c\n\x04text\x18\x01 \x01(\t"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t*\x7f\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01*I\n\x07LLMType\x12\x15\n\x11\x63ontent_expansion\x10\x00\x12\x1b\n\x17google_query_translator\x10\x01\x12\n\n\x06vision\x10\x02*+\n\x04Role\x12\x08\n\x04USER\x10\x00\x12\r\n\tASSISTANT\x10\x01\x12\n\n\x06SYSTEM\x10\x02\x32p\n\x12HealthCheckService\x12Z\n\x0b\x43heckHealth\x12$.orama_ai_service.HealthCheckRequest\x1a%.orama_ai_service.HealthCheckResponse2u\n\x1a\x43\x61lculateEmbeddingsService\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponse2\x94\x02\n\nLLMService\x12\x46\n\x07\x43\x61llLLM\x12\x1c.orama_ai_service.LLMRequest\x1a\x1d.orama_ai_service.LLMResponse\x12T\n\rCallLLMStream\x12\x1c.orama_ai_service.LLMRequest\x1a#.orama_ai_service.LLMStreamResponse0\x01\x12h\n\x13\x41nswerSessionStream\x12&.orama_ai_service.AnswerSessionRequest\x1a\'.orama_ai_service.AnswerSessionResponse0\x01\x32`\n\rVisionService\x12O\n\nCallVision\x12\x1f.orama_ai_service.VisionRequest\x1a .orama_ai_service.VisionResponseb\x06proto3'
+    b'\n\rservice.proto\x12\x10orama_ai_service"L\n\x13\x43onversationMessage\x12$\n\x04role\x18\x01 \x01(\x0e\x32\x16.orama_ai_service.Role\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t"G\n\x0c\x43onversation\x12\x37\n\x08messages\x18\x01 \x03(\x0b\x32%.orama_ai_service.ConversationMessage"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"G\n\x0b\x43hatRequest\x12(\n\x05model\x18\x01 \x01(\x0e\x32\x19.orama_ai_service.LLMType\x12\x0e\n\x06prompt\x18\x02 \x01(\t"m\n\x14\x41nswerSessionRequest\x12\x34\n\x0c\x63onversation\x18\x01 \x01(\x0b\x32\x1e.orama_ai_service.Conversation\x12\x0e\n\x06prompt\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontext\x18\x03 \x01(\t"\x1c\n\x0c\x43hatResponse\x12\x0c\n\x04text\x18\x01 \x01(\t":\n\x12\x43hatStreamResponse\x12\x12\n\ntext_chunk\x18\x01 \x01(\t\x12\x10\n\x08is_final\x18\x02 \x01(\x08"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t*\x7f\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01*I\n\x07LLMType\x12\x15\n\x11\x63ontent_expansion\x10\x00\x12\x1b\n\x17google_query_translator\x10\x01\x12\n\n\x06vision\x10\x02*+\n\x04Role\x12\x08\n\x04USER\x10\x00\x12\r\n\tASSISTANT\x10\x01\x12\n\n\x06SYSTEM\x10\x02\x32\xdd\x02\n\nLLMService\x12Z\n\x0b\x43heckHealth\x12$.orama_ai_service.HealthCheckRequest\x1a%.orama_ai_service.HealthCheckResponse\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponse\x12\x45\n\x04\x43hat\x12\x1d.orama_ai_service.ChatRequest\x1a\x1e.orama_ai_service.ChatResponse\x12S\n\nChatStream\x12\x1d.orama_ai_service.ChatRequest\x1a$.orama_ai_service.ChatStreamResponse0\x01\x62\x06proto3'
 )
 
 _globals = globals()
@@ -25,14 +25,14 @@ _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "service_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals["_ORAMAMODEL"]._serialized_start = 933
-    _globals["_ORAMAMODEL"]._serialized_end = 1060
-    _globals["_ORAMAINTENT"]._serialized_start = 1062
-    _globals["_ORAMAINTENT"]._serialized_end = 1099
-    _globals["_LLMTYPE"]._serialized_start = 1101
-    _globals["_LLMTYPE"]._serialized_end = 1174
-    _globals["_ROLE"]._serialized_start = 1176
-    _globals["_ROLE"]._serialized_end = 1219
+    _globals["_ORAMAMODEL"]._serialized_start = 795
+    _globals["_ORAMAMODEL"]._serialized_end = 922
+    _globals["_ORAMAINTENT"]._serialized_start = 924
+    _globals["_ORAMAINTENT"]._serialized_end = 961
+    _globals["_LLMTYPE"]._serialized_start = 963
+    _globals["_LLMTYPE"]._serialized_end = 1036
+    _globals["_ROLE"]._serialized_start = 1038
+    _globals["_ROLE"]._serialized_end = 1081
     _globals["_CONVERSATIONMESSAGE"]._serialized_start = 35
     _globals["_CONVERSATIONMESSAGE"]._serialized_end = 111
     _globals["_CONVERSATION"]._serialized_start = 113
@@ -43,30 +43,18 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_EMBEDDINGRESPONSE"]._serialized_end = 408
     _globals["_EMBEDDING"]._serialized_start = 410
     _globals["_EMBEDDING"]._serialized_end = 441
-    _globals["_LLMREQUEST"]._serialized_start = 443
-    _globals["_LLMREQUEST"]._serialized_end = 513
-    _globals["_ANSWERSESSIONREQUEST"]._serialized_start = 515
-    _globals["_ANSWERSESSIONREQUEST"]._serialized_end = 624
-    _globals["_LLMRESPONSE"]._serialized_start = 626
-    _globals["_LLMRESPONSE"]._serialized_end = 653
-    _globals["_LLMSTREAMRESPONSE"]._serialized_start = 655
-    _globals["_LLMSTREAMRESPONSE"]._serialized_end = 712
-    _globals["_ANSWERSESSIONRESPONSE"]._serialized_start = 714
-    _globals["_ANSWERSESSIONRESPONSE"]._serialized_end = 775
-    _globals["_VISIONREQUEST"]._serialized_start = 777
-    _globals["_VISIONREQUEST"]._serialized_end = 821
-    _globals["_VISIONRESPONSE"]._serialized_start = 823
-    _globals["_VISIONRESPONSE"]._serialized_end = 853
-    _globals["_HEALTHCHECKREQUEST"]._serialized_start = 855
-    _globals["_HEALTHCHECKREQUEST"]._serialized_end = 892
-    _globals["_HEALTHCHECKRESPONSE"]._serialized_start = 894
-    _globals["_HEALTHCHECKRESPONSE"]._serialized_end = 931
-    _globals["_HEALTHCHECKSERVICE"]._serialized_start = 1221
-    _globals["_HEALTHCHECKSERVICE"]._serialized_end = 1333
-    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_start = 1335
-    _globals["_CALCULATEEMBEDDINGSSERVICE"]._serialized_end = 1452
-    _globals["_LLMSERVICE"]._serialized_start = 1455
-    _globals["_LLMSERVICE"]._serialized_end = 1731
-    _globals["_VISIONSERVICE"]._serialized_start = 1733
-    _globals["_VISIONSERVICE"]._serialized_end = 1829
+    _globals["_CHATREQUEST"]._serialized_start = 443
+    _globals["_CHATREQUEST"]._serialized_end = 514
+    _globals["_ANSWERSESSIONREQUEST"]._serialized_start = 516
+    _globals["_ANSWERSESSIONREQUEST"]._serialized_end = 625
+    _globals["_CHATRESPONSE"]._serialized_start = 627
+    _globals["_CHATRESPONSE"]._serialized_end = 655
+    _globals["_CHATSTREAMRESPONSE"]._serialized_start = 657
+    _globals["_CHATSTREAMRESPONSE"]._serialized_end = 715
+    _globals["_HEALTHCHECKREQUEST"]._serialized_start = 717
+    _globals["_HEALTHCHECKREQUEST"]._serialized_end = 754
+    _globals["_HEALTHCHECKRESPONSE"]._serialized_start = 756
+    _globals["_HEALTHCHECKRESPONSE"]._serialized_end = 793
+    _globals["_LLMSERVICE"]._serialized_start = 1084
+    _globals["_LLMSERVICE"]._serialized_end = 1433
 # @@protoc_insertion_point(module_scope)
