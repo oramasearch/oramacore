@@ -47,18 +47,6 @@ impl PostingIdStorage {
         Ok(LoadedPostingIdStorage { content })
     }
 
-    /*
-    #[allow(clippy::type_complexity)]
-    pub fn get_posting(&self, posting_id: u64) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
-        let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
-            .context("Cannot open posting ids file")?
-            .read_json_data()
-            .context("Cannot deserialize posting ids")?;
-
-        Ok(content.get(&posting_id).cloned())
-    }
-    */
-
     pub fn apply_delta(
         &self,
         delta: DashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
