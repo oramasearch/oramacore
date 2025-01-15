@@ -1,27 +1,28 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::RwLock};
 
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
 
 use crate::{file_utils::BufferedFile, types::DocumentId};
 
-pub struct LoadedDocumentLengths {
-    content: HashMap<DocumentId, u32>,
-}
-impl LoadedDocumentLengths {
-    pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
-        let length = self.content.get(doc_id).unwrap_or(&1);
-        Ok(*length)
-    }
-}
+type Content = HashMap<DocumentId, u32>;
 
 #[derive(Default, Debug)]
 pub struct DocumentLengthsPerDocument {
     pub(super) path: PathBuf,
+    pub(super) content: RwLock<Content>,
 }
 impl DocumentLengthsPerDocument {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn try_new(path: PathBuf) -> Result<Self> {
+        let content: Content = BufferedFile::open(&path)
+            .context("Cannot open document length file")?
+            .read_json_data()
+            .context("Cannot deserialize document length")?;
+
+        Ok(Self {
+            path,
+            content: RwLock::new(content),
+        })
     }
 
     pub fn create(lengths: &HashMap<DocumentId, u32>, new_path: PathBuf) -> Result<()> {
@@ -35,13 +36,12 @@ impl DocumentLengthsPerDocument {
         Ok(())
     }
 
-    pub fn load(&self) -> Result<LoadedDocumentLengths> {
-        let content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
-            .context("Cannot open document length file")?
-            .read_json_data()
-            .context("Cannot deserialize document length")?;
-
-        Ok(LoadedDocumentLengths { content })
+    pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
+        let lock = match self.content.read() {
+            Ok(lock) => lock,
+            Err(e) => e.into_inner(),
+        };
+        Ok(*lock.get(doc_id).unwrap_or(&1))
     }
 
     pub fn merge(&self, lengths: &HashMap<DocumentId, u32>, new_path: PathBuf) -> Result<()> {

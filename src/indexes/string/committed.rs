@@ -92,11 +92,6 @@ impl CommittedStringFieldIndex {
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        let loaded_document_lengths = self
-            .document_lengths_per_document
-            .load()
-            .context("Failed to load document lengths")?;
-
         let fst_map = &self.fst_map;
 
         for token in tokens {
@@ -132,7 +127,8 @@ impl CommittedStringFieldIndex {
                     let position_len = positions.len();
                     v.positions.extend(positions);
 
-                    let field_length = loaded_document_lengths
+                    let field_length = self
+                        .document_lengths_per_document
                         .get_length(&doc_id)
                         .context("Failed to get document length")?;
                     v.matches.push((
@@ -210,11 +206,6 @@ impl CommittedStringFieldIndex {
 
         let fst_map = &self.fst_map;
 
-        let loaded_document_lengths = self
-            .document_lengths_per_document
-            .load()
-            .context("Failed to load document lengths")?;
-
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
             let mut stream = fst_map.search(automaton).into_stream();
@@ -241,7 +232,8 @@ impl CommittedStringFieldIndex {
                         }
                     }
 
-                    let field_length = loaded_document_lengths
+                    let field_length = self
+                        .document_lengths_per_document
                         .get_length(&doc_id)
                         .context("Failed to get document length")?;
                     let term_occurrence_in_field = positions.len() as u32;

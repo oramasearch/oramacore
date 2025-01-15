@@ -209,7 +209,7 @@ impl StringIndex {
             let committed = CommittedStringFieldIndex::new(
                 map,
                 field_dump.fst_new_path.clone(),
-                DocumentLengthsPerDocument::new(field_dump.document_length_new_path.clone()),
+                DocumentLengthsPerDocument::try_new(field_dump.document_length_new_path.clone())?,
                 PostingIdStorage::try_new(field_dump.posting_new_path.clone())?,
                 field_dump.posting_id_new_path.clone(),
                 global_info,
@@ -268,7 +268,7 @@ impl StringIndex {
             let mut committed = CommittedStringFieldIndex::new(
                 map,
                 field_dump.fst_new_path,
-                DocumentLengthsPerDocument::new(field_dump.document_length_new_path),
+                DocumentLengthsPerDocument::try_new(field_dump.document_length_new_path)?,
                 PostingIdStorage::try_new(field_dump.posting_new_path)?,
                 field_dump.posting_id_new_path.clone(),
                 global_info,
