@@ -29,7 +29,7 @@ if __name__ == "__main__":
     a = manager.chat(
         model_id="google_query_translator",
         history=[],
-        prompt="I just installed a Ryzen 9 9900X but I fear I bent some pins. What should I do?",
+        prompt="I just installed a Ryzen 9 9900X but I fear I bent some pins. What should I do? I'm scared AF.",
         context=None,
         stream=True,
     )

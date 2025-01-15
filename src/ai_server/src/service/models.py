@@ -42,8 +42,8 @@ class ModelsManager:
 
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
-                torch_dtype="auto",
                 device_map="auto",
+                torch_dtype="auto",
                 trust_remote_code=True,  # @todo: make this configurable and False by default
             )
 
@@ -78,23 +78,17 @@ class ModelsManager:
         history.insert(0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]})
         history.append({"role": "user", "content": PROMPT_TEMPLATES[f"{model_id}:user"](prompt, context)})
 
-        text = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
+        formatted_chat = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
 
-        model_inputs = tokenizer([text], return_tensors="pt")
-        model_inputs = {k: v.to(self.device) for k, v in model_inputs.items()}
+        tokenizer.pad_token = tokenizer.eos_token
+
+        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
         streamer = TextStreamer(tokenizer, skip_prompt=True) if stream else None
 
-        generated_ids = model.generate(
-            **model_inputs,
-            max_new_tokens=20,
-            streamer=streamer,
-            do_sample=True,
-            temperature=0.3,
-            top_p=0.90,
-        )
+        outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
 
-        generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
-        response_text = generated_text[len(text) :].strip()
+        decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
 
-        return response_text
+        return decoded_output

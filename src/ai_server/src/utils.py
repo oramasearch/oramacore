@@ -57,13 +57,13 @@ class LLMs:
             sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
         )
     )
-    vision: Optional[ModelConfig] = field(
-        default_factory=lambda: ModelConfig(
-            id=DEFAULT_VISION_MODEL,
-            tensor_parallel_size=1,
-            sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
-        )
-    )
+    # vision: Optional[ModelConfig] = field(
+    #     default_factory=lambda: ModelConfig(
+    #         id=DEFAULT_VISION_MODEL,
+    #         tensor_parallel_size=1,
+    #         sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
+    #     )
+    # )
     google_query_translator: Optional[ModelConfig] = field(
         default_factory=lambda: ModelConfig(
             id=DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL,
