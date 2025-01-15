@@ -16,7 +16,6 @@ opentelemetry-api
 opentelemetry-sdk
 pyyaml
 cachetools
-vllm
 json-repair
 pillow
 
