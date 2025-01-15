@@ -69,7 +69,10 @@ impl HuggingFaceModel {
     pub fn dimensions(&self) -> usize {
         self.dimensions
     }
-    pub fn embed(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+    pub fn embed_query(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+        self.model.embed(input, None)
+    }
+    pub fn embed_passage(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
         self.model.embed(input, None)
     }
 }
@@ -387,7 +390,7 @@ mod tests {
             .await
             .expect("Failed to cache model");
 
-        let output = model.embed(vec![&"foo".to_string()])?;
+        let output = model.embed_query(vec![&"foo".to_string()])?;
 
         assert_eq!(output[0].len(), 384);
 

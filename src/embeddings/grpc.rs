@@ -79,7 +79,8 @@ impl GrpcModel {
     pub fn dimensions(&self) -> usize {
         self.dimensions
     }
-    pub async fn embed(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+
+    async fn embed(&self, input: Vec<&String>, intent: OramaIntent) -> Result<Vec<Vec<f32>>> {
         let mut conn = self.manager.get().await.context("Cannot get connection")?;
 
         // We cloned the input because tonic requires it even if it shouldn't
@@ -89,7 +90,7 @@ impl GrpcModel {
         let request = Request::new(EmbeddingRequest {
             input: input.into_iter().cloned().collect(),
             model: self.model_id,
-            intent: OramaIntent::Query.into(),
+            intent: intent.into(),
         });
 
         let v = conn
@@ -106,6 +107,14 @@ impl GrpcModel {
             .collect();
 
         Ok(v)
+    }
+
+    pub async fn embed_query(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+        self.embed(input, OramaIntent::Query).await
+    }
+
+    pub async fn embed_passage(&self, input: Vec<&String>) -> Result<Vec<Vec<f32>>> {
+        self.embed(input, OramaIntent::Passage).await
     }
 }
 
