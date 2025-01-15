@@ -25,6 +25,7 @@ mod tests {
         },
         embeddings::{EmbeddingConfig, EmbeddingService},
         indexes::number::{Number, NumberFilter},
+        nlp::NLPService,
         test_utils::generate_new_path,
         types::CollectionId,
     };
@@ -57,6 +58,7 @@ mod tests {
 
         let reader = CollectionsReader::try_new(
             embedding_service,
+            Arc::new(NLPService::new()),
             IndexesConfig {
                 data_dir: generate_new_path(),
             },
@@ -126,6 +128,7 @@ mod tests {
 
         let reader = CollectionsReader::try_new(
             embedding_service,
+            Arc::new(NLPService::new()),
             IndexesConfig {
                 data_dir: generate_new_path(),
             },
@@ -205,6 +208,7 @@ mod tests {
 
         let reader = CollectionsReader::try_new(
             embedding_service,
+            Arc::new(NLPService::new()),
             IndexesConfig {
                 data_dir: generate_new_path(),
             },

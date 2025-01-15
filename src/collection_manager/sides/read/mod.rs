@@ -24,6 +24,7 @@ mod tests {
             },
         },
         embeddings::{EmbeddingConfig, EmbeddingService},
+        nlp::NLPService,
         test_utils::generate_new_path,
         types::{CollectionId, DocumentId},
     };
@@ -56,6 +57,7 @@ mod tests {
         {
             let collections = CollectionsReader::try_new(
                 embedding_service.clone(),
+                Arc::new(NLPService::new()),
                 IndexesConfig {
                     data_dir: data_dir.join("indexes"),
                 },
@@ -122,6 +124,7 @@ mod tests {
 
         let mut collections = CollectionsReader::try_new(
             embedding_service.clone(),
+            Arc::new(NLPService::new()),
             IndexesConfig {
                 data_dir: data_dir.join("indexes"),
             },

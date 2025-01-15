@@ -287,9 +287,9 @@ impl StringIndex {
 
     pub async fn search(
         &self,
-        tokens: Vec<String>,
+        tokens: &[String],
         search_on: Option<&[FieldId]>,
-        boost: HashMap<FieldId, f32>,
+        boost: &HashMap<FieldId, f32>,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
@@ -326,17 +326,11 @@ impl StringIndex {
 
             if let Some(uncommitted) = uncommitted {
                 global_info += uncommitted.get_global_info();
-                uncommitted.search(
-                    &tokens,
-                    boost / 10.0,
-                    scorer,
-                    filtered_doc_ids,
-                    &global_info,
-                )?;
+                uncommitted.search(tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)?;
             }
 
             if let Some(committed) = committed {
-                committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;
+                committed.search(tokens, boost, scorer, filtered_doc_ids, &global_info)?;
             }
         }
 
@@ -397,9 +391,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )
@@ -411,9 +405,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )
@@ -442,9 +436,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )
@@ -461,9 +455,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )
@@ -500,9 +494,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )
@@ -522,9 +516,9 @@ mod tests {
         let mut scorer = BM25Scorer::new();
         new_string_index
             .search(
-                vec!["hello".to_string()],
+                &["hello".to_string()],
                 None,
-                Default::default(),
+                &Default::default(),
                 &mut scorer,
                 None,
             )

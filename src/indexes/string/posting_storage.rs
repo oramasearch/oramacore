@@ -9,6 +9,7 @@ pub struct LoadedPostingIdStorage {
     content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
 }
 impl LoadedPostingIdStorage {
+    #[allow(clippy::type_complexity)]
     pub fn get_posting(&self, posting_id: &u64) -> Result<Option<&Vec<(DocumentId, Vec<usize>)>>> {
         Ok(self.content.get(posting_id))
     }

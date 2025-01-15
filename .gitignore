@@ -9,3 +9,5 @@ posting_storage
 .foo
 .data
 .dataset
+
+flamegraph.svg
