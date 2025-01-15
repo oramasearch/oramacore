@@ -189,7 +189,7 @@ impl InnerInnerUncommittedStringFieldIndex {
                         boost,
                     );
 
-                    total_matches +=1;
+                    total_matches += 1;
                 }
             }
         }

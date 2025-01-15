@@ -108,10 +108,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-
-                let postings = match self
-                    .storage
-                    .get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -128,12 +125,10 @@ impl CommittedStringFieldIndex {
                         }
                     }
 
-                    let v = storage
-                        .entry(doc_id)
-                        .or_insert_with(|| PhraseMatchStorage {
-                            positions: Default::default(),
-                            matches: Default::default(),
-                        });
+                    let v = storage.entry(doc_id).or_insert_with(|| PhraseMatchStorage {
+                        positions: Default::default(),
+                        matches: Default::default(),
+                    });
                     let position_len = positions.len();
                     v.positions.extend(positions);
 
@@ -229,9 +224,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self
-                .storage
-                .get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");

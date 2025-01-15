@@ -56,9 +56,7 @@ impl PostingIdStorage {
             Ok(lock) => lock,
             Err(e) => e.into_inner(),
         };
-        Ok(lock.get(posting_id).map(|c| {
-            c.clone()
-        }))
+        Ok(lock.get(posting_id).cloned())
     }
 
     pub fn apply_delta(
