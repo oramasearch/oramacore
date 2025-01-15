@@ -7,6 +7,7 @@ use tracing::{debug, error, info, instrument};
 
 use super::CollectionReader;
 use crate::collection_manager::dto::Limit;
+use crate::nlp::locales::Locale;
 use crate::{
     capped_heap::CappedHeap,
     collection_manager::dto::{
@@ -18,7 +19,6 @@ use crate::{
         SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
         SEARCH_METRIC,
     },
-    nlp::TextParser,
     types::DocumentId,
 };
 
@@ -240,25 +240,37 @@ impl CollectionReader {
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let text_parser = TextParser::from_locale(crate::nlp::locales::Locale::EN);
-        let tokens = text_parser.tokenize(term);
-
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
-        self.string_index
-            .search(
-                tokens,
-                // This option is not required.
-                // It was introduced because for test purposes we
-                // could avoid to pass every properties
-                // Anyway the production code should always pass the properties
-                // So we could avoid this option
-                // TODO: remove this option
-                Some(&properties),
-                boost,
-                &mut scorer,
-                filtered_doc_ids.as_ref(),
-            )
-            .await?;
+
+        let mut tokens_cache: HashMap<Locale, Vec<String>> = Default::default();
+
+        for field_id in properties {
+            let text_parser = self.text_parser_per_field.get(&field_id);
+            let (locale, text_parser) = match text_parser.as_ref() {
+                None => return Err(anyhow!("No text parser for this field")),
+                Some(text_parser) => (text_parser.0, &text_parser.1),
+            };
+
+            let tokens = tokens_cache
+                .entry(locale)
+                .or_insert_with(|| text_parser.tokenize(term));
+
+            self.string_index
+                .search(
+                    tokens,
+                    // This option is not required.
+                    // It was introduced because for test purposes we
+                    // could avoid to pass every properties
+                    // Anyway the production code should always pass the properties
+                    // So we could avoid this option
+                    // TODO: remove this option
+                    Some(&[field_id]),
+                    &boost,
+                    &mut scorer,
+                    filtered_doc_ids.as_ref(),
+                )
+                .await?;
+        }
 
         Ok(scorer.get_scores())
     }

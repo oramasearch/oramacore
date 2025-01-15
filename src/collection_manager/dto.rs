@@ -100,7 +100,7 @@ pub enum Filter {
     Bool(bool),
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NumberFacetDefinitionRange {
     #[schema(inline)]
     pub from: Number,
@@ -108,13 +108,13 @@ pub struct NumberFacetDefinitionRange {
     pub to: Number,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NumberFacetDefinition {
     #[schema(inline)]
     pub ranges: Vec<NumberFacetDefinitionRange>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BoolFacetDefinition {
     #[serde(rename = "true")]
     pub r#true: bool,
@@ -122,7 +122,7 @@ pub struct BoolFacetDefinition {
     pub r#false: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 
 pub enum FacetDefinition {
     Number(#[schema(inline)] NumberFacetDefinition),
@@ -130,12 +130,12 @@ pub enum FacetDefinition {
     Bool(#[schema(inline)] BoolFacetDefinition),
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FulltextMode {
     pub term: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -145,12 +145,12 @@ pub struct VectorMode {
     pub term: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HybridMode {
     pub term: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum SearchMode {
     #[serde(rename = "fulltext")]
@@ -170,7 +170,7 @@ impl Default for SearchMode {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SearchParams {
     #[serde(flatten, rename = "type")]
     #[schema(inline)]

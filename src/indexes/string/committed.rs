@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::types::DocumentId;
 
@@ -103,7 +103,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -140,6 +140,7 @@ impl CommittedStringFieldIndex {
             }
         }
 
+        let mut total_matches = 0_usize;
         for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
@@ -181,8 +182,12 @@ impl CommittedStringFieldIndex {
                     0.75,
                     total_boost,
                 );
+
+                total_matches += 1;
             }
         }
+
+        info!(total_matches = total_matches, "Committed total matches");
 
         Ok(())
     }
@@ -210,7 +215,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");

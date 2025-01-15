@@ -13,6 +13,7 @@ use crate::{
         CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
         COLLECTION_OPERATION_COUNTER,
     },
+    nlp::NLPService,
     types::CollectionId,
 };
 
@@ -31,6 +32,7 @@ pub struct IndexesConfig {
 #[derive(Debug)]
 pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
+    nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     document_storage: Arc<dyn DocumentStorage>,
     indexes_config: IndexesConfig,
@@ -38,6 +40,7 @@ pub struct CollectionsReader {
 impl CollectionsReader {
     pub fn try_new(
         embedding_service: Arc<EmbeddingService>,
+        nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         let document_storage = DiskDocumentStorage::try_new(DocumentStorageConfig {
@@ -49,6 +52,8 @@ impl CollectionsReader {
 
         Ok(Self {
             embedding_service,
+            nlp_service,
+
             collections: Default::default(),
             document_storage,
             indexes_config,
@@ -68,6 +73,7 @@ impl CollectionsReader {
                 let collection_reader = CollectionReader::try_new(
                     id.clone(),
                     self.embedding_service.clone(),
+                    self.nlp_service.clone(),
                     Arc::clone(&self.document_storage),
                     self.indexes_config.clone(),
                 )?;
@@ -207,6 +213,7 @@ impl CollectionsReader {
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),
                 self.embedding_service.clone(),
+                self.nlp_service.clone(),
                 self.document_storage.clone(),
                 self.indexes_config.clone(),
             )?;
