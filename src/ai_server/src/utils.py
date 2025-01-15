@@ -8,6 +8,7 @@ DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_VISION_MODEL = "microsoft/Phi-3.5-vision-instruct"
 DEFAULT_CONTENT_EXPANSION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_ANSWER_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
 @dataclass
@@ -42,6 +43,13 @@ class ModelConfig:
 
 @dataclass
 class LLMs:
+    answer: Optional[ModelConfig] = field(
+        default_factory=lambda: ModelConfig(
+            id=DEFAULT_ANSWER_MODEL,
+            tensor_parallel_size=1,
+            sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=2048),
+        )
+    )
     content_expansion: Optional[ModelConfig] = field(
         default_factory=lambda: ModelConfig(
             id=DEFAULT_CONTENT_EXPANSION_MODEL,
@@ -49,13 +57,13 @@ class LLMs:
             sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
         )
     )
-    vision: Optional[ModelConfig] = field(
-        default_factory=lambda: ModelConfig(
-            id=DEFAULT_VISION_MODEL,
-            tensor_parallel_size=1,
-            sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
-        )
-    )
+    # vision: Optional[ModelConfig] = field(
+    #     default_factory=lambda: ModelConfig(
+    #         id=DEFAULT_VISION_MODEL,
+    #         tensor_parallel_size=1,
+    #         sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=512),
+    #     )
+    # )
     google_query_translator: Optional[ModelConfig] = field(
         default_factory=lambda: ModelConfig(
             id=DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL,
@@ -68,11 +76,10 @@ class LLMs:
 @dataclass
 class OramaAIConfig:
     models_cache_dir: Optional[str] = ".embeddings_models_cache"
-    api_key: Optional[str] = None
     grpc_port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
-    LLMs: Optional[LLMs] = field(default_factory=LLMs)
+    LLMs: Optional[LLMs] = field(default_factory=LLMs)  # type: ignore
     total_threads: Optional[int] = 12
 
     def __post_init__(self):

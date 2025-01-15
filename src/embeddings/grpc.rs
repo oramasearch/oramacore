@@ -1,19 +1,17 @@
 use std::{collections::HashMap, net::IpAddr};
 
-use crate::ai::{
-    calculate_embeddings_service_client::CalculateEmbeddingsServiceClient, EmbeddingRequest,
-    OramaIntent, OramaModel,
-};
 use http::uri::Scheme;
 use tonic::Request;
 
+use crate::ai::llm_service_client::LlmServiceClient;
+use crate::ai::{EmbeddingRequest, OramaIntent, OramaModel};
 use anyhow::{anyhow, Context, Result};
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
 use tracing::info;
 
 struct GrpcConnection {
-    client: CalculateEmbeddingsServiceClient<tonic::transport::Channel>,
+    client: LlmServiceClient<tonic::transport::Channel>,
 }
 
 impl GrpcConnection {
@@ -52,8 +50,7 @@ impl Manager for GrpcManager {
         let endpoint = tonic::transport::Endpoint::new(uri)?.connect().await?;
         info!("Connected to gRPC");
 
-        let client: CalculateEmbeddingsServiceClient<tonic::transport::Channel> =
-            CalculateEmbeddingsServiceClient::new(endpoint);
+        let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint);
 
         Ok(GrpcConnection { client })
     }
@@ -219,7 +216,9 @@ mod tests {
             .await
             .expect("Failed to cache model");
 
-        let output = model.embed_query(vec![&"foo".to_string()]).await?;
+        let output = model
+            .embed(vec![&"foo".to_string()], OramaIntent::Passage)
+            .await?;
 
         assert_eq!(output[0].len(), 384);
 

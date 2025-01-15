@@ -47,12 +47,14 @@ class EmbeddingsModels:
 
         return loaded_models
 
-    def calculate_embeddings(self, input, intent, model_name) -> List[float]:
+    def calculate_embeddings(self, input, intent, model_name) -> List[List[float]]:
         input_array = [input] if isinstance(input, str) else input
         if model_name not in self.selected_model_names:
             raise ValueError(
                 f"Model {model_name} is not supported:\n Supported models {', '.join(self.selected_model_names)}"
             )
+
+        print(f"Calculating embeddings for model {model_name} with intent {intent}")
 
         input_strings = (
             [f"{intent}: {s}" for s in input_array]
@@ -61,16 +63,16 @@ class EmbeddingsModels:
         )
 
         if model_name in self.loaded_models:
-            return embed_alternative(self.loaded_models[model_name], input_strings)
+            return list(embed_alternative(self.loaded_models[model_name], input_strings))
 
         if self.config.embeddings.dynamically_load_models:
             with self.model_loading_lock:
-                if not model_name in self.loaded_models:
+                if model_name not in self.loaded_models:
                     self.loaded_models[model_name] = TextEmbedding(
                         model_name=OramaModelInfo[model_name].value["model_name"],
                         providers=self.config.embeddings.execution_providers,
                     )
 
-                return embed_alternative(self.loaded_models[model_name], input_strings)
+                return list(embed_alternative(self.loaded_models[model_name], input_strings))
         else:
             raise ValueError(f"Model {model_name} is not loaded")

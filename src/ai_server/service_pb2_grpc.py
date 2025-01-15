@@ -26,7 +26,7 @@ if _version_not_supported:
     )
 
 
-class HealthCheckServiceStub(object):
+class LLMServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -36,14 +36,32 @@ class HealthCheckServiceStub(object):
             channel: A grpc.Channel.
         """
         self.CheckHealth = channel.unary_unary(
-            "/orama_ai_service.HealthCheckService/CheckHealth",
+            "/orama_ai_service.LLMService/CheckHealth",
             request_serializer=service__pb2.HealthCheckRequest.SerializeToString,
             response_deserializer=service__pb2.HealthCheckResponse.FromString,
             _registered_method=True,
         )
+        self.GetEmbedding = channel.unary_unary(
+            "/orama_ai_service.LLMService/GetEmbedding",
+            request_serializer=service__pb2.EmbeddingRequest.SerializeToString,
+            response_deserializer=service__pb2.EmbeddingResponse.FromString,
+            _registered_method=True,
+        )
+        self.Chat = channel.unary_unary(
+            "/orama_ai_service.LLMService/Chat",
+            request_serializer=service__pb2.ChatRequest.SerializeToString,
+            response_deserializer=service__pb2.ChatResponse.FromString,
+            _registered_method=True,
+        )
+        self.ChatStream = channel.unary_stream(
+            "/orama_ai_service.LLMService/ChatStream",
+            request_serializer=service__pb2.ChatRequest.SerializeToString,
+            response_deserializer=service__pb2.ChatStreamResponse.FromString,
+            _registered_method=True,
+        )
 
 
-class HealthCheckServiceServicer(object):
+class LLMServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def CheckHealth(self, request, context):
@@ -52,22 +70,55 @@ class HealthCheckServiceServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def GetEmbedding(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
-def add_HealthCheckServiceServicer_to_server(servicer, server):
+    def Chat(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def ChatStream(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_LLMServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
         "CheckHealth": grpc.unary_unary_rpc_method_handler(
             servicer.CheckHealth,
             request_deserializer=service__pb2.HealthCheckRequest.FromString,
             response_serializer=service__pb2.HealthCheckResponse.SerializeToString,
         ),
+        "GetEmbedding": grpc.unary_unary_rpc_method_handler(
+            servicer.GetEmbedding,
+            request_deserializer=service__pb2.EmbeddingRequest.FromString,
+            response_serializer=service__pb2.EmbeddingResponse.SerializeToString,
+        ),
+        "Chat": grpc.unary_unary_rpc_method_handler(
+            servicer.Chat,
+            request_deserializer=service__pb2.ChatRequest.FromString,
+            response_serializer=service__pb2.ChatResponse.SerializeToString,
+        ),
+        "ChatStream": grpc.unary_stream_rpc_method_handler(
+            servicer.ChatStream,
+            request_deserializer=service__pb2.ChatRequest.FromString,
+            response_serializer=service__pb2.ChatStreamResponse.SerializeToString,
+        ),
     }
-    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.HealthCheckService", rpc_method_handlers)
+    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("orama_ai_service.HealthCheckService", rpc_method_handlers)
+    server.add_registered_method_handlers("orama_ai_service.LLMService", rpc_method_handlers)
 
 
 # This class is part of an EXPERIMENTAL API.
-class HealthCheckService(object):
+class LLMService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -86,7 +137,7 @@ class HealthCheckService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/orama_ai_service.HealthCheckService/CheckHealth",
+            "/orama_ai_service.LLMService/CheckHealth",
             service__pb2.HealthCheckRequest.SerializeToString,
             service__pb2.HealthCheckResponse.FromString,
             options,
@@ -99,53 +150,6 @@ class HealthCheckService(object):
             metadata,
             _registered_method=True,
         )
-
-
-class CalculateEmbeddingsServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.GetEmbedding = channel.unary_unary(
-            "/orama_ai_service.CalculateEmbeddingsService/GetEmbedding",
-            request_serializer=service__pb2.EmbeddingRequest.SerializeToString,
-            response_deserializer=service__pb2.EmbeddingResponse.FromString,
-            _registered_method=True,
-        )
-
-
-class CalculateEmbeddingsServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def GetEmbedding(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Method not implemented!")
-        raise NotImplementedError("Method not implemented!")
-
-
-def add_CalculateEmbeddingsServiceServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-        "GetEmbedding": grpc.unary_unary_rpc_method_handler(
-            servicer.GetEmbedding,
-            request_deserializer=service__pb2.EmbeddingRequest.FromString,
-            response_serializer=service__pb2.EmbeddingResponse.SerializeToString,
-        ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler(
-        "orama_ai_service.CalculateEmbeddingsService", rpc_method_handlers
-    )
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("orama_ai_service.CalculateEmbeddingsService", rpc_method_handlers)
-
-
-# This class is part of an EXPERIMENTAL API.
-class CalculateEmbeddingsService(object):
-    """Missing associated documentation comment in .proto file."""
 
     @staticmethod
     def GetEmbedding(
@@ -163,7 +167,7 @@ class CalculateEmbeddingsService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/orama_ai_service.CalculateEmbeddingsService/GetEmbedding",
+            "/orama_ai_service.LLMService/GetEmbedding",
             service__pb2.EmbeddingRequest.SerializeToString,
             service__pb2.EmbeddingResponse.FromString,
             options,
@@ -177,70 +181,8 @@ class CalculateEmbeddingsService(object):
             _registered_method=True,
         )
 
-
-class LLMServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.CallLLM = channel.unary_unary(
-            "/orama_ai_service.LLMService/CallLLM",
-            request_serializer=service__pb2.LLMRequest.SerializeToString,
-            response_deserializer=service__pb2.LLMResponse.FromString,
-            _registered_method=True,
-        )
-        self.CallLLMStream = channel.unary_stream(
-            "/orama_ai_service.LLMService/CallLLMStream",
-            request_serializer=service__pb2.LLMRequest.SerializeToString,
-            response_deserializer=service__pb2.LLMStreamResponse.FromString,
-            _registered_method=True,
-        )
-
-
-class LLMServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def CallLLM(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Method not implemented!")
-        raise NotImplementedError("Method not implemented!")
-
-    def CallLLMStream(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Method not implemented!")
-        raise NotImplementedError("Method not implemented!")
-
-
-def add_LLMServiceServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-        "CallLLM": grpc.unary_unary_rpc_method_handler(
-            servicer.CallLLM,
-            request_deserializer=service__pb2.LLMRequest.FromString,
-            response_serializer=service__pb2.LLMResponse.SerializeToString,
-        ),
-        "CallLLMStream": grpc.unary_stream_rpc_method_handler(
-            servicer.CallLLMStream,
-            request_deserializer=service__pb2.LLMRequest.FromString,
-            response_serializer=service__pb2.LLMStreamResponse.SerializeToString,
-        ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("orama_ai_service.LLMService", rpc_method_handlers)
-
-
-# This class is part of an EXPERIMENTAL API.
-class LLMService(object):
-    """Missing associated documentation comment in .proto file."""
-
     @staticmethod
-    def CallLLM(
+    def Chat(
         request,
         target,
         options=(),
@@ -255,9 +197,9 @@ class LLMService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            "/orama_ai_service.LLMService/CallLLM",
-            service__pb2.LLMRequest.SerializeToString,
-            service__pb2.LLMResponse.FromString,
+            "/orama_ai_service.LLMService/Chat",
+            service__pb2.ChatRequest.SerializeToString,
+            service__pb2.ChatResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -270,7 +212,7 @@ class LLMService(object):
         )
 
     @staticmethod
-    def CallLLMStream(
+    def ChatStream(
         request,
         target,
         options=(),
@@ -285,84 +227,9 @@ class LLMService(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            "/orama_ai_service.LLMService/CallLLMStream",
-            service__pb2.LLMRequest.SerializeToString,
-            service__pb2.LLMStreamResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True,
-        )
-
-
-class VisionServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def __init__(self, channel):
-        """Constructor.
-
-        Args:
-            channel: A grpc.Channel.
-        """
-        self.CallVision = channel.unary_unary(
-            "/orama_ai_service.VisionService/CallVision",
-            request_serializer=service__pb2.VisionRequest.SerializeToString,
-            response_deserializer=service__pb2.VisionResponse.FromString,
-            _registered_method=True,
-        )
-
-
-class VisionServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def CallVision(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Method not implemented!")
-        raise NotImplementedError("Method not implemented!")
-
-
-def add_VisionServiceServicer_to_server(servicer, server):
-    rpc_method_handlers = {
-        "CallVision": grpc.unary_unary_rpc_method_handler(
-            servicer.CallVision,
-            request_deserializer=service__pb2.VisionRequest.FromString,
-            response_serializer=service__pb2.VisionResponse.SerializeToString,
-        ),
-    }
-    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.VisionService", rpc_method_handlers)
-    server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers("orama_ai_service.VisionService", rpc_method_handlers)
-
-
-# This class is part of an EXPERIMENTAL API.
-class VisionService(object):
-    """Missing associated documentation comment in .proto file."""
-
-    @staticmethod
-    def CallVision(
-        request,
-        target,
-        options=(),
-        channel_credentials=None,
-        call_credentials=None,
-        insecure=False,
-        compression=None,
-        wait_for_ready=None,
-        timeout=None,
-        metadata=None,
-    ):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            "/orama_ai_service.VisionService/CallVision",
-            service__pb2.VisionRequest.SerializeToString,
-            service__pb2.VisionResponse.FromString,
+            "/orama_ai_service.LLMService/ChatStream",
+            service__pb2.ChatRequest.SerializeToString,
+            service__pb2.ChatStreamResponse.FromString,
             options,
             channel_credentials,
             insecure,
