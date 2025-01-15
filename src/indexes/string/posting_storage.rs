@@ -5,6 +5,15 @@ use dashmap::DashMap;
 
 use crate::{file_utils::BufferedFile, types::DocumentId};
 
+pub struct LoadedPostingIdStorage {
+    content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
+}
+impl LoadedPostingIdStorage {
+    pub fn get_posting(&self, posting_id: &u64) -> Result<Option<&Vec<(DocumentId, Vec<usize>)>>> {
+        Ok(self.content.get(posting_id))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PostingListId(pub u32);
 
@@ -29,6 +38,16 @@ impl PostingIdStorage {
         Ok(())
     }
 
+    pub fn load(&self) -> Result<LoadedPostingIdStorage> {
+        let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
+            .context("Cannot open posting ids file")?
+            .read_json_data()
+            .context("Cannot deserialize posting ids")?;
+
+        Ok(LoadedPostingIdStorage { content })
+    }
+
+    /*
     #[allow(clippy::type_complexity)]
     pub fn get_posting(&self, posting_id: u64) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
         let content: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> = BufferedFile::open(&self.path)
@@ -38,6 +57,7 @@ impl PostingIdStorage {
 
         Ok(content.get(&posting_id).cloned())
     }
+    */
 
     pub fn apply_delta(
         &self,

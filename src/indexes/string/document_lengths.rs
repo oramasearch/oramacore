@@ -5,6 +5,16 @@ use tracing::{debug, warn};
 
 use crate::{file_utils::BufferedFile, types::DocumentId};
 
+pub struct LoadedDocumentLengths {
+    content: HashMap<DocumentId, u32>,
+}
+impl LoadedDocumentLengths {
+    pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
+        let length = self.content.get(doc_id).unwrap_or(&1);
+        Ok(*length)
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct DocumentLengthsPerDocument {
     pub(super) path: PathBuf,
@@ -25,6 +35,16 @@ impl DocumentLengthsPerDocument {
         Ok(())
     }
 
+    pub fn load(&self) -> Result<LoadedDocumentLengths> {
+        let content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
+            .context("Cannot open document length file")?
+            .read_json_data()
+            .context("Cannot deserialize document length")?;
+
+        Ok(LoadedDocumentLengths { content })
+    }
+
+    /*
     pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
         let content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
             .context("Cannot open document length file")?
@@ -34,6 +54,7 @@ impl DocumentLengthsPerDocument {
         let length = content.get(doc_id).unwrap_or(&1);
         Ok(*length)
     }
+    */
 
     pub fn merge(&self, lengths: &HashMap<DocumentId, u32>, new_path: PathBuf) -> Result<()> {
         let mut content: HashMap<DocumentId, u32> = BufferedFile::open(&self.path)
