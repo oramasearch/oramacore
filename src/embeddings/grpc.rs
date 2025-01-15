@@ -1,11 +1,10 @@
 use std::{collections::HashMap, net::IpAddr};
 
-use crate::ai_client::client::orama_ai_service::{
-    llm_service_client::LlmServiceClient, EmbeddingRequest, OramaIntent, OramaModel,
-};
 use http::uri::Scheme;
 use tonic::Request;
 
+use crate::ai::llm_service_client::LlmServiceClient;
+use crate::ai::{EmbeddingRequest, OramaIntent, OramaModel};
 use anyhow::{anyhow, Context, Result};
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
