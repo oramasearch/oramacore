@@ -13,6 +13,7 @@ from service_pb2 import (
     ChatResponse,
     ChatStreamResponse,
     HealthCheckResponse,
+    LLMType,
 )
 
 
@@ -42,7 +43,8 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
     def Chat(self, request, context):
         try:
-            response = self.models_manager.chat(model_id=request.model.name.lower(), history=[], prompt=request.prompt)
+            model_name = LLMType.Name(request.model)
+            response = self.models_manager.chat(model_id=model_name.lower(), history=[], prompt=request.prompt)
             return ChatResponse(text=response)
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -51,15 +53,18 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
     def ChatStream(self, request, context):
         try:
+            model_name = LLMType.Name(request.model)
+            logging.info(f"Received ChatStream request with model: {model_name}, prompt: {request.prompt}")
+
             for text_chunk in self.models_manager.chat_stream(
-                model_id=request.model.name.lower(), history=[], prompt=request.prompt
+                model_id=model_name.lower(), history=[], prompt=request.prompt
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
         except Exception as e:
+            logging.error(f"Error in ChatStream: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Error in chat stream: {str(e)}")
-            return
 
 
 def serve(config, embeddings_service, models_manager):
