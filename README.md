@@ -9,23 +9,24 @@ It includes a fully-fledged full-text search engine, vector database, LLM interf
 ## Roadmap
 
 - **v0.0.1**. ETA Jan 31st, 2025
-    - ✅ Full-text search (FST)
-    - ✅ Vector search (HNSW)
+    - ✅ Full-text search
+    - ✅ Vector search
     - ✅ Search filters
     - ✅ Automatic embeddings generation
     - ✅ Built-in multiple LLM inference setup
-    - ✅ Basic JavaScript integration (via Deno)
+    - ✅ Basic JavaScript integration
     - ✅ Disk persistence
     - 🚧 Vector compression
-    - 🚧 Unified configuration
+    - ✅ Unified configuration
     - 🚧 Dockerfile for load testing in production environment
 
 - **v0.1.0**. ETA Feb 28th, 2025
-    - 🔜 Long-term user memory (via TKG)
+    - 🔜 Long-term user memory
     - 🔜 Multi-node setup
     - 🔜 Content expansion APIs
-    - 🔜 JavaScript API integration (via Deno)
+    - 🔜 JavaScript API integration
     - 🔜 Production-ready build
+    - 🔜 Geosearch
 
 ## Requirements
 

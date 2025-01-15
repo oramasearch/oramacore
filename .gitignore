@@ -8,3 +8,4 @@ posting_storage
 ./src/bin/datasets/*.csv
 .foo
 .data
+.dataset
