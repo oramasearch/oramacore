@@ -1,17 +1,46 @@
 use anyhow::Result;
-use rustorama::ai_client::client::{AIServiceBackend, AIServiceBackendConfig, Intent, Model};
+use rustorama::ai::{
+    calculate_embeddings_service_client::CalculateEmbeddingsServiceClient,
+    health_check_service_client::HealthCheckServiceClient, EmbeddingRequest, HealthCheckRequest,
+    OramaIntent, OramaModel,
+};
 use std::time::Instant;
+use tonic::Request;
+
+const DEFAULT_HOST: &str = "localhost";
+const DEFAULT_PORT: &str = "50051";
+async fn create_embeddings_service_client(
+) -> Result<CalculateEmbeddingsServiceClient<tonic::transport::Channel>> {
+    let addr = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT,);
+
+    let embeddings_service_client = CalculateEmbeddingsServiceClient::connect(addr.clone()).await?;
+    let mut health_check_client = HealthCheckServiceClient::connect(addr).await?;
+
+    let health_check_request = Request::new(HealthCheckRequest {
+        service: "HealthCheck".to_string(),
+    });
+
+    // Test it is alive
+    dbg!(
+        health_check_client
+            .check_health(health_check_request)
+            .await?
+    );
+
+    Ok(embeddings_service_client)
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_init = Instant::now();
 
-    let mut service = AIServiceBackend::try_new(AIServiceBackendConfig::default())
-        .await
-        .unwrap();
+    let mut embeddings_service_client = create_embeddings_service_client().await?;
 
     let init_duration = start_init.elapsed();
-    println!("Service initialization took: {:?}", init_duration);
+    println!(
+        "Service initialization with health check took: {:?}",
+        init_duration
+    );
 
     let input_text = r"
         /**
@@ -34,11 +63,15 @@ async fn main() -> Result<()> {
           }
         }
     ".to_string();
-
+    let model = OramaModel::BgeSmall;
     let start_embedding = Instant::now();
-    let _embedding = service
-        .generate_embeddings(vec![input_text], Model::BgeSmall, Intent::Passage)
-        .await?;
+    let request = Request::new(EmbeddingRequest {
+        input: vec![input_text],
+        model: model.into(),
+        intent: OramaIntent::Passage.into(),
+    });
+    let _embedding = embeddings_service_client.get_embedding(request).await?;
+
     let embedding_duration = start_embedding.elapsed();
 
     println!("\nPerformance Metrics:");

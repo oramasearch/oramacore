@@ -1,6 +1,6 @@
 use std::{collections::HashMap, net::IpAddr};
 
-use crate::ai_client::client::orama_ai_service::{
+use crate::ai::{
     calculate_embeddings_service_client::CalculateEmbeddingsServiceClient, EmbeddingRequest,
     OramaIntent, OramaModel,
 };
@@ -193,7 +193,7 @@ impl GrpcRepo {
 mod tests {
     #[cfg(feature = "test-python")]
     #[tokio::test]
-    async fn test_embedding_run_grpc() -> Result<()> {
+    async fn test_embedding_run_grpc() -> anyhow::Result<()> {
         use super::*;
 
         let _ = tracing_subscriber::fmt::try_init();
@@ -219,7 +219,7 @@ mod tests {
             .await
             .expect("Failed to cache model");
 
-        let output = model.embed(vec![&"foo".to_string()]).await?;
+        let output = model.embed_query(vec![&"foo".to_string()]).await?;
 
         assert_eq!(output[0].len(), 384);
 

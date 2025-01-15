@@ -159,7 +159,7 @@ mod tests {
 
         let (sender, mut receiver) = tokio::sync::broadcast::channel(100);
 
-        start_calculate_embedding_loop(embedding_service.clone(), rx);
+        start_calculate_embedding_loop(embedding_service.clone(), rx, 10);
 
         sx.send(EmbeddingCalculationRequest {
             model_name: "my-model".to_string(),

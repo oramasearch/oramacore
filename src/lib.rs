@@ -30,10 +30,11 @@ pub mod js;
 
 mod metrics;
 
-pub mod ai_client;
 mod file_utils;
 
 mod merger;
+
+pub mod ai;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
