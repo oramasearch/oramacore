@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::types::DocumentId;
 
@@ -92,15 +92,6 @@ impl CommittedStringFieldIndex {
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        let loaded_storage = self
-            .storage
-            .load()
-            .context("Failed to load posting storage")?;
-        let loaded_document_lengths = self
-            .document_lengths_per_document
-            .load()
-            .context("Failed to load document lengths")?;
-
         let fst_map = &self.fst_map;
 
         for token in tokens {
@@ -112,7 +103,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match loaded_storage.get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -124,22 +115,21 @@ impl CommittedStringFieldIndex {
 
                 for (doc_id, positions) in postings {
                     if let Some(filtered_doc_ids) = filtered_doc_ids {
-                        if !filtered_doc_ids.contains(doc_id) {
+                        if !filtered_doc_ids.contains(&doc_id) {
                             continue;
                         }
                     }
 
-                    let v = storage
-                        .entry(*doc_id)
-                        .or_insert_with(|| PhraseMatchStorage {
-                            positions: Default::default(),
-                            matches: Default::default(),
-                        });
+                    let v = storage.entry(doc_id).or_insert_with(|| PhraseMatchStorage {
+                        positions: Default::default(),
+                        matches: Default::default(),
+                    });
                     let position_len = positions.len();
                     v.positions.extend(positions);
 
-                    let field_length = loaded_document_lengths
-                        .get_length(doc_id)
+                    let field_length = self
+                        .document_lengths_per_document
+                        .get_length(&doc_id)
                         .context("Failed to get document length")?;
                     v.matches.push((
                         field_length,
@@ -150,6 +140,7 @@ impl CommittedStringFieldIndex {
             }
         }
 
+        let mut total_matches = 0_usize;
         for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
@@ -191,8 +182,12 @@ impl CommittedStringFieldIndex {
                     0.75,
                     total_boost,
                 );
+
+                total_matches += 1;
             }
         }
+
+        info!(total_matches = total_matches, "Committed total matches");
 
         Ok(())
     }
@@ -211,15 +206,6 @@ impl CommittedStringFieldIndex {
 
         let fst_map = &self.fst_map;
 
-        let loaded_storage = self
-            .storage
-            .load()
-            .context("Failed to load posting storage")?;
-        let loaded_document_lengths = self
-            .document_lengths_per_document
-            .load()
-            .context("Failed to load document lengths")?;
-
         for token in tokens {
             let automaton = fst::automaton::Str::new(token).starts_with();
             let mut stream = fst_map.search(automaton).into_stream();
@@ -229,7 +215,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match loaded_storage.get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -241,18 +227,19 @@ impl CommittedStringFieldIndex {
 
                 for (doc_id, positions) in postings {
                     if let Some(filtered_doc_ids) = filtered_doc_ids {
-                        if !filtered_doc_ids.contains(doc_id) {
+                        if !filtered_doc_ids.contains(&doc_id) {
                             continue;
                         }
                     }
 
-                    let field_length = loaded_document_lengths
-                        .get_length(doc_id)
+                    let field_length = self
+                        .document_lengths_per_document
+                        .get_length(&doc_id)
                         .context("Failed to get document length")?;
                     let term_occurrence_in_field = positions.len() as u32;
 
                     scorer.add(
-                        *doc_id,
+                        doc_id,
                         term_occurrence_in_field,
                         field_length,
                         average_field_length,
