@@ -18,23 +18,13 @@ def handle_shutdown(signum, frame):
 
 
 if __name__ == "__main__":
-    # signal.signal(signal.SIGINT, handle_shutdown)
-    # signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
 
     logger.info("Initializing config...")
     config = OramaAIConfig()
 
     manager = ModelsManager(config)
-
-    a = manager.chat(
-        model_id="google_query_translator",
-        history=[],
-        prompt="I just installed a Ryzen 9 9900X but I fear I bent some pins. What should I do? I'm scared AF.",
-        context=None,
-        stream=True,
-    )
-
-    print(a)
 
     # logger.info("Initializing embedding service...")
     # embeddings_service = EmbeddingService(config)
