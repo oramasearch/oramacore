@@ -251,12 +251,13 @@ impl CollectionReader {
                 Some(text_parser) => (text_parser.0, &text_parser.1),
             };
 
-            let tokens = tokens_cache.entry(locale)
+            let tokens = tokens_cache
+                .entry(locale)
                 .or_insert_with(|| text_parser.tokenize(term));
 
             self.string_index
                 .search(
-                    &tokens,
+                    tokens,
                     // This option is not required.
                     // It was introduced because for test purposes we
                     // could avoid to pass every properties

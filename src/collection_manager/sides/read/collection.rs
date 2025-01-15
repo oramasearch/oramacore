@@ -135,20 +135,13 @@ impl CollectionReader {
             self.fields_per_model.insert(model, fields);
         }
 
-        self.text_parser_per_field = self.fields
+        self.text_parser_per_field = self
+            .fields
             .iter()
             .filter_map(|e| {
                 if let TypedField::Text(l) = e.1 {
                     let locale = l.into();
-                    Some(
-                        (
-                            e.0,
-                            (
-                                locale,
-                                self.nlp_service.get(locale)
-                            )
-                        )
-                    )
+                    Some((e.0, (locale, self.nlp_service.get(locale))))
                 } else {
                     None
                 }

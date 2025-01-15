@@ -79,6 +79,12 @@ impl StringParser for TextParser {
 pub struct NLPService {
     parser: DashMap<Locale, Arc<TextParser>>,
 }
+impl Default for NLPService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NLPService {
     pub fn new() -> Self {
         Self {
@@ -87,7 +93,7 @@ impl NLPService {
     }
 
     pub fn get(&self, locale: Locale) -> Arc<TextParser> {
-        match self.parser.entry(locale.clone()) {
+        match self.parser.entry(locale) {
             dashmap::Entry::Occupied(occupied_entry) => occupied_entry.get().clone(),
             dashmap::Entry::Vacant(vacant_entry) => {
                 let parser = TextParser::from_locale(locale);

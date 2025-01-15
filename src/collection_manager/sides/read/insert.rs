@@ -40,7 +40,8 @@ impl CollectionReader {
             TypedField::Text(language) => {
                 let locale = language.into();
                 let text_parser = self.nlp_service.get(locale);
-                self.text_parser_per_field.insert(field_id, (locale, text_parser));
+                self.text_parser_per_field
+                    .insert(field_id, (locale, text_parser));
             }
             _ => {}
         }
