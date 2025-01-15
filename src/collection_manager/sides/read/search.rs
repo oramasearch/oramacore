@@ -1,7 +1,4 @@
-use std::{
-    cmp::Reverse,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, Context, Result};
 use ordered_float::NotNan;
@@ -399,8 +396,7 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
 
     let result: Vec<TokenScore> = capped_heap
         .into_top()
-        .into_iter()
-        .map(|Reverse((value, key))| TokenScore {
+        .map(|(value, key)| TokenScore {
             document_id: key,
             score: value.into_inner(),
         })
