@@ -1,18 +1,18 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, Display, EnumIter};
-use tonic::{transport::Channel, Request, Response, Streaming};
+use tonic::{transport::Channel, Request, Response};
 
 pub mod orama_ai_service {
     tonic::include_proto!("orama_ai_service");
 }
 
 use orama_ai_service::{
-    calculate_embeddings_service_client::CalculateEmbeddingsServiceClient,
-    health_check_service_client::HealthCheckServiceClient, llm_service_client::LlmServiceClient,
-    EmbeddingRequest, EmbeddingResponse, HealthCheckRequest, HealthCheckResponse, LlmRequest,
-    LlmResponse, LlmStreamResponse, OramaIntent, OramaModel,
+    EmbeddingRequest, EmbeddingResponse, HealthCheckRequest, HealthCheckResponse, OramaIntent,
+    OramaModel,
 };
+
+use crate::ai_client::client::orama_ai_service::llm_service_client::LlmServiceClient;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Intent {
@@ -63,9 +63,7 @@ impl From<LlmType> for i32 {
 
 #[derive(Debug)]
 pub struct AIServiceBackend {
-    embedding_client: CalculateEmbeddingsServiceClient<Channel>,
     llm_client: LlmServiceClient<Channel>,
-    health_check_client: HealthCheckServiceClient<Channel>,
 }
 
 impl AIServiceBackend {
@@ -79,16 +77,9 @@ impl AIServiceBackend {
             config.port.as_deref().unwrap_or(Self::DEFAULT_PORT),
         );
 
-        // @todo: add connection pool
-        let embedding_client = CalculateEmbeddingsServiceClient::connect(addr.clone()).await?;
         let llm_client = LlmServiceClient::connect(addr.clone()).await?;
-        let health_check_client = HealthCheckServiceClient::connect(addr).await?;
 
-        Ok(Self {
-            embedding_client,
-            llm_client,
-            health_check_client,
-        })
+        Ok(Self { llm_client })
     }
 
     pub async fn health_check(&mut self) -> Result<Response<HealthCheckResponse>> {
@@ -96,7 +87,7 @@ impl AIServiceBackend {
             service: "HealthCheck".to_string(),
         });
 
-        Ok(self.health_check_client.check_health(request).await?)
+        Ok(self.llm_client.check_health(request).await?)
     }
 
     pub async fn generate_embeddings(
@@ -106,38 +97,12 @@ impl AIServiceBackend {
         intent: Intent,
     ) -> Result<Response<EmbeddingResponse>> {
         let request = Request::new(EmbeddingRequest {
-            input,
+            input: input.clone(),
             model: model.into(),
             intent: intent.into(),
         });
 
-        Ok(self.embedding_client.get_embedding(request).await?)
-    }
-
-    pub async fn call_llm(
-        &mut self,
-        model: LlmType,
-        prompt: String,
-    ) -> Result<Response<LlmResponse>> {
-        let request = Request::new(LlmRequest {
-            model: model.into(),
-            prompt,
-        });
-
-        Ok(self.llm_client.call_llm(request).await?)
-    }
-
-    pub async fn call_llm_stream(
-        &mut self,
-        model: LlmType,
-        prompt: String,
-    ) -> Result<Response<Streaming<LlmStreamResponse>>> {
-        let request = Request::new(LlmRequest {
-            model: model.into(),
-            prompt,
-        });
-
-        Ok(self.llm_client.call_llm_stream(request).await?)
+        Ok(self.llm_client.get_embedding(request).await?)
     }
 }
 
