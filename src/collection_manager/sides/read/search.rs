@@ -8,6 +8,8 @@ use ordered_float::NotNan;
 use tokio::join;
 use tracing::{debug, error, info, instrument};
 
+use super::CollectionReader;
+use crate::collection_manager::dto::Limit;
 use crate::{
     capped_heap::CappedHeap,
     collection_manager::dto::{
@@ -22,8 +24,6 @@ use crate::{
     nlp::TextParser,
     types::DocumentId,
 };
-
-use super::CollectionReader;
 
 impl CollectionReader {
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
@@ -50,12 +50,12 @@ impl CollectionReader {
                     .await?
             }
             SearchMode::Vector(search_params) => {
-                self.search_vector(&search_params.term, filtered_doc_ids)
+                self.search_vector(&search_params.term, filtered_doc_ids, &limit)
                     .await?
             }
             SearchMode::Hybrid(search_params) => {
                 let (vector, fulltext) = join!(
-                    self.search_vector(&search_params.term, filtered_doc_ids.clone()),
+                    self.search_vector(&search_params.term, filtered_doc_ids.clone(), &limit),
                     self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
                 );
                 let vector = vector?;
@@ -270,6 +270,7 @@ impl CollectionReader {
         &self,
         term: &str,
         filtered_doc_ids: Option<HashSet<DocumentId>>,
+        limit: &Limit,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut ret: HashMap<DocumentId, f32> = HashMap::new();
 
@@ -280,7 +281,7 @@ impl CollectionReader {
             let e = model.embed_query(vec![&term.to_string()]).await?;
 
             for k in e {
-                let r = self.vector_index.search(fields, &k, 1)?;
+                let r = self.vector_index.search(fields, &k, limit.0)?;
 
                 for (doc_id, score) in r {
                     if !filtered_doc_ids

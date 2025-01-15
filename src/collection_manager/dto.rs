@@ -85,7 +85,7 @@ pub struct CollectionDTO {
     pub fields: HashMap<String, ValueType>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone)]
 pub struct Limit(#[schema(inline)] pub usize);
 impl Default for Limit {
     fn default() -> Self {
