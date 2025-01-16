@@ -9,11 +9,13 @@ const DEFAULT_PORT: &str = "50051";
 async fn create_embeddings_service_client() -> Result<LlmServiceClient<tonic::transport::Channel>> {
     let addr = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT,);
 
-    let embeddings_service_client = LlmServiceClient::connect(addr.clone()).await?;
+    let mut embeddings_service_client = LlmServiceClient::connect(addr.clone()).await?;
 
     let health_check_request = Request::new(HealthCheckRequest {
         service: "HealthCheck".to_string(),
     });
+
+    embeddings_service_client.check_health(health_check_request).await?;
 
     Ok(embeddings_service_client)
 }
