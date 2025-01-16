@@ -22,6 +22,7 @@ pillow
 pytest
 pytest-mock
 
+onnxruntime-gpu
 transformers
 accelerate
 einops
