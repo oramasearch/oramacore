@@ -15,7 +15,9 @@ async fn create_embeddings_service_client() -> Result<LlmServiceClient<tonic::tr
         service: "HealthCheck".to_string(),
     });
 
-    embeddings_service_client.check_health(health_check_request).await?;
+    embeddings_service_client
+        .check_health(health_check_request)
+        .await?;
 
     Ok(embeddings_service_client)
 }
