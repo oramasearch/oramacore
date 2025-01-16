@@ -29,7 +29,7 @@ pub struct CollectionReader {
     pub(super) embedding_service: Arc<EmbeddingService>,
     pub(super) nlp_service: Arc<NLPService>,
 
-    pub(super) document_storage: Arc<dyn DocumentStorage>,
+    pub(super) document_storage: Arc<DocumentStorage>,
 
     pub(super) fields: DashMap<String, (FieldId, TypedField)>,
 
@@ -50,7 +50,7 @@ impl CollectionReader {
         id: CollectionId,
         embedding_service: Arc<EmbeddingService>,
         nlp_service: Arc<NLPService>,
-        document_storage: Arc<dyn DocumentStorage>,
+        document_storage: Arc<DocumentStorage>,
         _: IndexesConfig,
     ) -> Result<Self> {
         let vector_index = VectorIndex::try_new(VectorIndexConfig {})

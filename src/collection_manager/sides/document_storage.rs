@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use serde::{de::Unexpected, Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
 use tracing::{debug, trace, warn};
@@ -9,20 +8,6 @@ use crate::{
     file_utils::BufferedFile,
     types::{DocumentId, RawJSONDocument},
 };
-
-#[async_trait]
-pub trait DocumentStorage: Sync + Send + Debug {
-    async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()>;
-
-    async fn get_documents_by_ids(&self, doc_ids: Vec<DocumentId>)
-        -> Result<Vec<Option<RawJSONDocument>>>;
-
-    async fn get_total_documents(&self) -> Result<usize>;
-
-    fn commit(&self) -> Result<()>;
-
-    fn load(&mut self) -> Result<()>;
-}
 
 // The `CommittedDiskDocumentStorage` implementation is not optimal.
 // Defenitely, we cannot read every time from disk, it is too heavy.
@@ -99,12 +84,12 @@ pub struct DocumentStorageConfig {
 }
 
 #[derive(Debug)]
-pub struct DiskDocumentStorage {
+pub struct DocumentStorage {
     uncommitted: RwLock<HashMap<DocumentId, RawJSONDocument>>,
     committed: CommittedDiskDocumentStorage,
 }
 
-impl DiskDocumentStorage {
+impl DocumentStorage {
     pub fn try_new(config: DocumentStorageConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir).context("Cannot create document directory")?;
 
@@ -115,11 +100,8 @@ impl DiskDocumentStorage {
             },
         })
     }
-}
 
-#[async_trait]
-impl DocumentStorage for DiskDocumentStorage {
-    async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
+    pub async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
         let mut uncommitted = match self.uncommitted.write() {
             std::result::Result::Ok(uncommitted) => uncommitted,
             std::result::Result::Err(e) => e.into_inner(),
@@ -131,7 +113,7 @@ impl DocumentStorage for DiskDocumentStorage {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn get_documents_by_ids(
+    pub async fn get_documents_by_ids(
         &self,
         doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<RawJSONDocument>>> {
@@ -167,7 +149,7 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(result)
     }
 
-    async fn get_total_documents(&self) -> Result<usize> {
+    pub async fn get_total_documents(&self) -> Result<usize> {
         let mut total = self.committed.get_total_documents()?;
         let uncommitted = match self.uncommitted.read() {
             std::result::Result::Ok(uncommitted) => uncommitted,
@@ -177,11 +159,12 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(total)
     }
 
-    fn commit(&self) -> Result<()> {
+    pub fn commit(&self) -> Result<()> {
         // This implementation is wrong:
         // in the mean time we "dran" + "collection" + "write on FS"
         // The documents aren't reachable. So the search output will not contain them.
         // We should follow the same path of the indexes.
+        // TODO: fix me
 
         let mut uncommitted = match self.uncommitted.write() {
             std::result::Result::Ok(uncommitted) => uncommitted,
@@ -196,7 +179,7 @@ impl DocumentStorage for DiskDocumentStorage {
         Ok(())
     }
 
-    fn load(&mut self) -> Result<()> {
+    pub fn load(&mut self) -> Result<()> {
         Ok(())
     }
 }

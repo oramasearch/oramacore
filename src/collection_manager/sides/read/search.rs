@@ -85,7 +85,6 @@ impl CollectionReader {
         };
 
         info!("token_scores len: {:?}", token_scores.len());
-
         debug!("token_scores: {:?}", token_scores);
 
         let facets = self.calculate_facets(&token_scores, facets)?;
