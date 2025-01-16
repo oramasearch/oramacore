@@ -40,7 +40,7 @@ async fn dump_all(state: State<Arc<CollectionsReader>>) -> impl IntoResponse {
 
 #[endpoint(
     method = "POST",
-    path = "/v0/collections/:id/search",
+    path = "/v0/collections/{id}/search",
     description = "Search Endpoint"
 )]
 #[axum::debug_handler]
