@@ -5,10 +5,10 @@ use std::{
 };
 
 use anyhow::Result;
-use axum::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
+use async_trait::async_trait;
 
 use crate::{
     collection_manager::dto::FieldId,
