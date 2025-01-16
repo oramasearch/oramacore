@@ -38,6 +38,7 @@ class SamplingParams:
 class ModelConfig:
     id: str = DEFAULT_GENERAL_MODEL
     tensor_parallel_size: int = 1
+    use_cpu: bool = False
     sampling_params: SamplingParams = field(default_factory=SamplingParams)
 
 

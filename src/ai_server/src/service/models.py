@@ -40,14 +40,22 @@ class ModelsManager:
         try:
             logger.info(f"Loading model {model_id}...")
 
-            model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                device_map="auto",
-                torch_dtype="auto",
-                trust_remote_code=True,  # @todo: make this configurable and False by default
-            )
-
-            model = model.to(self.device)
+            # Configuration specific for CPU usage. Not as efficient as GPU.
+            if self.device == "cpu":
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    device_map="cpu",
+                    torch_dtype=torch.float32,
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True,
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    device_map="auto",
+                    torch_dtype="auto",
+                    trust_remote_code=True,
+                )
 
             self._models[model_id] = {
                 "model": model,
