@@ -20,7 +20,7 @@ use crate::types::StringParser;
 pub struct TextParser {
     locale: Locale,
     tokenizer: Tokenizer,
-    stemmer: Stemmer,
+    stemmer: Option<Stemmer>,
 }
 
 impl Debug for TextParser {
@@ -35,49 +35,82 @@ impl Debug for TextParser {
 impl TextParser {
     pub fn from_locale(locale: Locale) -> Self {
         let (tokenizer, stemmer) = match locale {
-            Locale::AR => (Tokenizer::arab(), Stemmer::create(Algorithm::Arabic)),
-            // Locale::BG => (Tokenizer::bulgarian(), Stemmer::create(Algorithm::Bulgarian)), @todo: support bulgarian stemming
-            Locale::DA => (Tokenizer::danish(), Stemmer::create(Algorithm::Danish)),
-            Locale::DE => (Tokenizer::german(), Stemmer::create(Algorithm::German)),
-            Locale::EN => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
-            Locale::EL => (Tokenizer::greek(), Stemmer::create(Algorithm::Greek)),
-            Locale::ES => (Tokenizer::spanish(), Stemmer::create(Algorithm::Spanish)),
-            // Locale::ET => (Tokenizer::estonian(), Stemmer::create(Algorithm::Estonian)), @todo: support estonian stemmer
-            Locale::FI => (Tokenizer::finnish(), Stemmer::create(Algorithm::Finnish)),
-            Locale::FR => (Tokenizer::french(), Stemmer::create(Algorithm::French)),
-            // Locale::GA => (Tokenizer::irish(), Stemmer::create(Algorithm::Irish)), @todo: support irish stemmer
-            // Locale::HI => (Tokenizer::hindi(), Stemmer::create(Algorithm::Hindi)), @todo: support hindi stemmer
+            Locale::AR => (Tokenizer::arab(), Some(Stemmer::create(Algorithm::Arabic))),
+            Locale::BG => (Tokenizer::bulgarian(), None),
+            Locale::DA => (
+                Tokenizer::danish(),
+                Some(Stemmer::create(Algorithm::Danish)),
+            ),
+            Locale::DE => (
+                Tokenizer::german(),
+                Some(Stemmer::create(Algorithm::German)),
+            ),
+            Locale::EN => (
+                Tokenizer::english(),
+                Some(Stemmer::create(Algorithm::English)),
+            ),
+            Locale::EL => (Tokenizer::greek(), Some(Stemmer::create(Algorithm::Greek))),
+            Locale::ES => (
+                Tokenizer::spanish(),
+                Some(Stemmer::create(Algorithm::Spanish)),
+            ),
+            Locale::ET => (Tokenizer::estonian(), None),
+            Locale::FI => (Tokenizer::finnish(), None),
+            Locale::FR => (
+                Tokenizer::french(),
+                Some(Stemmer::create(Algorithm::French)),
+            ),
+            Locale::GA => (Tokenizer::irish(), None),
+            Locale::HI => (Tokenizer::hindi(), None),
             Locale::HU => (
                 Tokenizer::hungarian(),
-                Stemmer::create(Algorithm::Hungarian),
+                Some(Stemmer::create(Algorithm::Hungarian)),
             ),
-            // Locale::HY => (Tokenizer::armenian(), Stemmer::create(Algorithm::Armenian)), @todo: support armenian stemmer
-            // Locale::ID => (Tokenizer::indonesian(), Stemmer::create(Algorithm::Indonesian)), @todo: support indonesian stemmer
-            Locale::IT => (Tokenizer::italian(), Stemmer::create(Algorithm::Italian)),
-            // Locale::JP => (Tokenizer::japanese(), Stemmer::create(Algorithm::Japanese)), @todo: support japanese stemmer
-            // Locale::KO => (Tokenizer::korean(), Stemmer::create(Algorithm::Korean)), @todo: support korean stemmer
-            // Locale::LT => (Tokenizer::lithuanian(), Stemmer::create(Algorithm::Lithuanian)) @todo: support lithuanian stemmer
-            // Locale::NE => (Tokenizer::nepali(), Stemmer::create(Algorithm::Nepali)) @todo: support nepali stemmer
-            Locale::NL => (Tokenizer::dutch(), Stemmer::create(Algorithm::Dutch)),
+            Locale::HY => (Tokenizer::armenian(), None),
+            Locale::ID => (Tokenizer::indonesian(), None),
+            Locale::IT => (
+                Tokenizer::italian(),
+                Some(Stemmer::create(Algorithm::Italian)),
+            ),
+            Locale::JP => (Tokenizer::japanese(), None),
+            Locale::KO => (Tokenizer::korean(), None),
+            Locale::LT => (Tokenizer::lithuanian(), None),
+            Locale::NE => (Tokenizer::nepali(), None),
+            Locale::NL => (Tokenizer::dutch(), Some(Stemmer::create(Algorithm::Dutch))),
             Locale::NO => (
                 Tokenizer::norwegian(),
-                Stemmer::create(Algorithm::Norwegian),
+                Some(Stemmer::create(Algorithm::Norwegian)),
             ),
             Locale::PT => (
                 Tokenizer::portuguese(),
-                Stemmer::create(Algorithm::Portuguese),
+                Some(Stemmer::create(Algorithm::Portuguese)),
             ),
-            Locale::RO => (Tokenizer::romanian(), Stemmer::create(Algorithm::Romanian)),
-            Locale::RU => (Tokenizer::russian(), Stemmer::create(Algorithm::Russian)),
-            // Locale::SA => (Tokenizer::sanskrit(), Stemmer::create(Algorithm::Sanskrit)) @todo: support sanskrit stemmer
-            // Locale::SL => (Tokenizer::slovenian(), Stemmer::create(Algorithm::Slovenian)) @todo: support slovenian stemmer
-            // Locale::SR => (Tokenizer::serbian(), Stemmer::create(Algorithm::Serbian)) @todo: support serbian stemmer
-            Locale::SV => (Tokenizer::swedish(), Stemmer::create(Algorithm::Swedish)),
-            Locale::TA => (Tokenizer::tamil(), Stemmer::create(Algorithm::Tamil)),
-            Locale::TR => (Tokenizer::turkish(), Stemmer::create(Algorithm::Turkish)),
-            // Locale::UK => (Tokenizer::ukrainian(), Stemmer::create(Algorithm::Ukrainian)) @todo: support ukrainian stemmer
-            // Locale::ZH => (Tokenizer::chinese(), Stemmer::create(Algorithm::Chinese)), @todo: support chinese stemmer
-            _ => (Tokenizer::english(), Stemmer::create(Algorithm::English)),
+            Locale::RO => (
+                Tokenizer::romanian(),
+                Some(Stemmer::create(Algorithm::Romanian)),
+            ),
+            Locale::RU => (
+                Tokenizer::russian(),
+                Some(Stemmer::create(Algorithm::Russian)),
+            ),
+            Locale::SA => (Tokenizer::sanskrit(), None),
+            Locale::SL => (Tokenizer::slovenian(), None),
+            Locale::SR => (Tokenizer::serbian(), None),
+            Locale::SV => (
+                Tokenizer::swedish(),
+                Some(Stemmer::create(Algorithm::Swedish)),
+            ),
+            Locale::TA => (Tokenizer::tamil(), Some(Stemmer::create(Algorithm::Tamil))),
+            Locale::TR => (
+                Tokenizer::turkish(),
+                Some(Stemmer::create(Algorithm::Turkish)),
+            ),
+            Locale::UK => (Tokenizer::ukrainian(), None),
+            Locale::ZH => (Tokenizer::chinese(), None),
+            _ => (
+                Tokenizer::english(),
+                Some(Stemmer::create(Algorithm::English)),
+            ),
         };
         Self {
             locale,
@@ -97,12 +130,15 @@ impl TextParser {
     pub fn tokenize_and_stem(&self, input: &str) -> Vec<(String, Vec<String>)> {
         self.tokenizer
             .tokenize(input)
-            .map(move |token| {
-                let stemmed = self.stemmer.stem(&token).to_string();
-                if stemmed == token {
-                    return (token, vec![]);
+            .map(move |token| match &self.stemmer {
+                Some(stemmer) => {
+                    let stemmed = stemmer.stem(&token).to_string();
+                    if stemmed == token {
+                        return (token, vec![]);
+                    }
+                    (token, vec![stemmed])
                 }
-                (token, vec![stemmed])
+                None => (token, vec![]),
             })
             .collect()
     }

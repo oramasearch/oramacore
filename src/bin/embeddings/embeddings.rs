@@ -1,16 +1,12 @@
 use anyhow::Result;
-use rustorama::ai::{
-     EmbeddingRequest, HealthCheckRequest,
-    OramaIntent, OramaModel,
-};
+use rustorama::ai::llm_service_client::LlmServiceClient;
+use rustorama::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use std::time::Instant;
 use tonic::Request;
-use rustorama::ai::llm_service_client::LlmServiceClient;
 
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: &str = "50051";
-async fn create_embeddings_service_client(
-) -> Result<LlmServiceClient<tonic::transport::Channel>> {
+async fn create_embeddings_service_client() -> Result<LlmServiceClient<tonic::transport::Channel>> {
     let addr = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT,);
 
     let embeddings_service_client = LlmServiceClient::connect(addr.clone()).await?;
