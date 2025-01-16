@@ -1,6 +1,6 @@
 use anyhow::Error;
 use rand::Rng;
-use rustorama::js::deno::{JavaScript, Operation};
+use oramacore::js::deno::{JavaScript, Operation};
 use serde::Serialize;
 use std::time::Instant;
 

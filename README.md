@@ -59,11 +59,11 @@ An NVIDIA GPU is highly recommended for running the application.
 
 How to run:
 ```bash
-RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin rustorama
+RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin oramacore
 ```
 or, for release mode:
 ```bash
-RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin rustorama --release
+RUST_LOG=trace PROTOC=/usr/bin/protoc cargo run --bin oramacore --release
 ```
 
 The configuration file is located at `config.jsonc` and contains an example of the configuration.

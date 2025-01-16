@@ -1,6 +1,6 @@
 use anyhow::Result;
-use rustorama::ai::llm_service_client::LlmServiceClient;
-use rustorama::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
+use oramacore::ai::llm_service_client::LlmServiceClient;
+use oramacore::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use std::time::Instant;
 use tonic::Request;
 

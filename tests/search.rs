@@ -5,10 +5,10 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use rustorama::collection_manager::sides::read::IndexesConfig;
-use rustorama::collection_manager::sides::CollectionsWriterConfig;
-use rustorama::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
-use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
+use oramacore::collection_manager::sides::read::IndexesConfig;
+use oramacore::collection_manager::sides::CollectionsWriterConfig;
+use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
+use oramacore::{build_orama, ReadSideConfig, OramacoreConfig, WriteSideConfig};
 use std::collections::HashMap;
 use std::env::temp_dir;
 use std::path::PathBuf;
@@ -17,8 +17,8 @@ use tempdir::TempDir;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
-use rustorama::embeddings::{EmbeddingConfig, ModelConfig};
-use rustorama::web_server::{HttpConfig, WebServer};
+use oramacore::embeddings::{EmbeddingConfig, ModelConfig};
+use oramacore::web_server::{HttpConfig, WebServer};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 8080;
@@ -53,7 +53,7 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -76,14 +76,14 @@ async fn start_server() {
             )]),
         },
         writer_side: WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
+            input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
             },

@@ -1,6 +1,6 @@
 use anyhow::Result;
-use rustorama::embeddings::pq;
-use rustorama::embeddings::OramaModel;
+use oramacore::embeddings::pq;
+use oramacore::embeddings::OramaModel;
 
 #[tokio::main]
 async fn main() -> Result<()> {

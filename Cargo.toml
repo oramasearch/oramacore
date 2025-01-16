@@ -1,5 +1,5 @@
 [package]
-name = "rustorama"
+name = "oramacore"
 version = "0.1.0"
 edition = "2021"
 
@@ -106,32 +106,11 @@ rand = "0.8.5"
 assert_approx_eq = "1.1.0"
 
 [[bin]]
-name = "rustorama"
-path = "src/bin/rustorama.rs"
-
-[[bin]]
-name = "insert_documents"
-path = "src/bin/insert_documents.rs"
-
-##### BIN FOR TEST #####
-#[[bin]]
-#name = "vector_index_test"
-#path = "src/bin/vector_index_test.rs"
+name = "oramacore"
+path = "src/bin/oramacore.rs"
 [[bin]]
 name = "embeddings"
 path = "src/bin/embeddings/embeddings.rs"
-#[[bin]]
-#name = "pq_bench"
-#path = "src/bin/embeddings/pq_bench.rs"
-#[[bin]]
-#name = "pq"
-#path = "src/bin/embeddings/pq.rs"
-#[[bin]]
-#name = "selector"
-#path = "src/bin/embeddings/selector.rs"
-[[bin]]
-name = "deno"
-path = "src/bin/js/deno.rs"
 
 [[bench]]
 name = "phrase_match"
@@ -146,25 +125,3 @@ test-python = []
 members = [
     
 ]
-
-# [workspace]
-# resolver = "2"
-# members = [
-#     "string_index",
-#     "nlp",
-#     "web_server",
-#     "collection_manager",
-#     "storage",
-#     "document_storage",
-#     "types",
-#     "rustorama",
-#     "embeddings",
-#     "tanstack_example",
-#     "code_parser",
-#     "vector_index",
-#     "code_index",
-#     "utils",
-#     "llm",
-#     "number_index",
-#     "bool_index",
-# ]

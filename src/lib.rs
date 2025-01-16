@@ -58,14 +58,14 @@ pub struct ReadSideConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct RustoramaConfig {
+pub struct OramacoreConfig {
     pub http: HttpConfig,
     pub embeddings: EmbeddingConfig,
     pub writer_side: WriteSideConfig,
     pub reader_side: ReadSideConfig,
 }
 
-pub async fn start(config: RustoramaConfig) -> Result<()> {
+pub async fn start(config: OramacoreConfig) -> Result<()> {
     let prometheus_hadler = if config.http.with_prometheus {
         Some(
             PrometheusBuilder::new()
@@ -97,13 +97,13 @@ pub async fn start(config: RustoramaConfig) -> Result<()> {
 }
 
 pub async fn build_orama(
-    config: RustoramaConfig,
+    config: OramacoreConfig,
 ) -> Result<(
     Option<Arc<WriteSide>>,
     Option<Arc<CollectionsReader>>,
     Receiver<WriteOperation>,
 )> {
-    let RustoramaConfig {
+    let OramacoreConfig {
         embeddings: embedding_config,
         writer_side,
         reader_side,

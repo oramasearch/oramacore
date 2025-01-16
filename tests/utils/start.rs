@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use rustorama::{
+use oramacore::{
     build_orama,
     collection_manager::sides::{
         read::{CollectionsReader, IndexesConfig},
@@ -9,7 +9,7 @@ use rustorama::{
     },
     embeddings::EmbeddingConfig,
     web_server::HttpConfig,
-    ReadSideConfig, RustoramaConfig, WriteSideConfig,
+    ReadSideConfig, OramacoreConfig, WriteSideConfig,
 };
 use tempdir::TempDir;
 
@@ -23,7 +23,7 @@ pub async fn start_all() -> Result<(
     Arc<CollectionsReader>,
     tokio::task::JoinHandle<()>,
 )> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -38,14 +38,14 @@ pub async fn start_all() -> Result<(
             models: HashMap::new(),
         },
         writer_side: WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
+            input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
             },

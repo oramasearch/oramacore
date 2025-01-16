@@ -4,9 +4,9 @@ use criterion::{criterion_group, criterion_main};
 mod bench {
 
     use criterion::{black_box, Criterion};
-    use rustorama::indexes::string::BM25Scorer;
-    use rustorama::test_utils::create_committed_string_field_index;
-    use rustorama::types::Document;
+    use oramacore::indexes::string::BM25Scorer;
+    use oramacore::test_utils::create_committed_string_field_index;
+    use oramacore::types::Document;
     use serde_json::json;
 
     #[derive(Debug)]

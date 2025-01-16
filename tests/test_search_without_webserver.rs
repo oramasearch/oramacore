@@ -1,10 +1,10 @@
 use anyhow::Result;
-use rustorama::collection_manager::dto::{CreateCollectionOptionDTO, SearchParams};
-use rustorama::collection_manager::sides::read::{CollectionsReader, IndexesConfig};
-use rustorama::collection_manager::sides::{CollectionsWriterConfig, WriteSide};
-use rustorama::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
-use rustorama::types::{CollectionId, DocumentList};
-use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
+use oramacore::collection_manager::dto::{CreateCollectionOptionDTO, SearchParams};
+use oramacore::collection_manager::sides::read::{CollectionsReader, IndexesConfig};
+use oramacore::collection_manager::sides::{CollectionsWriterConfig, WriteSide};
+use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
+use oramacore::types::{CollectionId, DocumentList};
+use oramacore::{build_orama, ReadSideConfig, OramacoreConfig, WriteSideConfig};
 use serde_json::json;
 use std::collections::HashMap;
 use std::env::temp_dir;
@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempdir::TempDir;
 
-use rustorama::embeddings::{EmbeddingConfig, ModelConfig};
-use rustorama::web_server::HttpConfig;
+use oramacore::embeddings::{EmbeddingConfig, ModelConfig};
+use oramacore::web_server::HttpConfig;
 
 pub fn generate_new_path() -> PathBuf {
     let tmp_dir = TempDir::new("test").unwrap();
@@ -21,7 +21,7 @@ pub fn generate_new_path() -> PathBuf {
 }
 
 async fn start_server() -> Result<(Arc<WriteSide>, Arc<CollectionsReader>)> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -44,14 +44,14 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<CollectionsReader>)> {
             )]),
         },
         writer_side: WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
+            input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
             },

@@ -41,7 +41,7 @@ jobs:
         cargo --version
     - name: Build
       run: |
-        cargo build --release --target x86_64-unknown-linux-gnu -p rustorama
+        cargo build --release --target x86_64-unknown-linux-gnu -p oramacore
         ls -lha target/
         ls -lha target/x86_64-unknown-linux-gnu
         ls -lha target/x86_64-unknown-linux-gnu/release
@@ -52,5 +52,5 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./target/x86_64-unknown-linux-gnu/release/rustorama
-        asset_name: rustorama-linux-x86_64-unknown-linux-gnu
+        asset_path: ./target/x86_64-unknown-linux-gnu/release/oramacore
+        asset_name: oramacore-linux-x86_64-unknown-linux-gnu

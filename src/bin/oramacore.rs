@@ -3,11 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
-use rustorama::{start, RustoramaConfig};
+use oramacore::{start, OramacoreConfig};
 use tracing::{info, instrument};
 
 #[instrument(level = "info")]
-fn load_config() -> Result<RustoramaConfig> {
+fn load_config() -> Result<OramacoreConfig> {
     let config_path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "./config.jsonc".to_string());
 
     let config_path = PathBuf::from(config_path);
@@ -18,14 +18,14 @@ fn load_config() -> Result<RustoramaConfig> {
 
     let settings = Config::builder()
         .add_source(config::File::with_name(&config_path).format(config::FileFormat::Json5))
-        .add_source(config::Environment::with_prefix("RUSTORAMA"))
+        .add_source(config::Environment::with_prefix("ORAMACORE"))
         .build()
         .context("Failed to load configuration")?;
 
     info!("Deserializing configuration");
 
     settings
-        .try_deserialize::<RustoramaConfig>()
+        .try_deserialize::<OramacoreConfig>()
         .context("Failed to deserialize configuration")
 }
 
