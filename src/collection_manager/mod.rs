@@ -711,7 +711,7 @@ mod tests {
                 "id": collection_id_str,
                 "typed_fields": {
                     "vector": {
-                        "type": "embedding",
+                        "mode": "embedding",
                         "model_name": "gte-small",
                         "document_fields": ["text"],
                     }
@@ -746,7 +746,7 @@ mod tests {
 
         let output = collection
             .search(json!({
-                "type": "vector",
+                "mode": "vector",
                 "term": "The feline is napping comfortably indoors.",
             }))
             .await

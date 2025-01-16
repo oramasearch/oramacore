@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 
 use crate::{
     indexes::number::{Number, NumberFilter},
@@ -151,7 +151,7 @@ pub struct HybridMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "type")]
+#[serde(tag = "mode")]
 pub enum SearchMode {
     #[serde(rename = "fulltext")]
     FullText(#[schema(inline)] FulltextMode),
@@ -170,9 +170,23 @@ impl Default for SearchMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, ToSchema)]
+#[derive(PartialEq)]
+pub enum Properties {
+    None,
+    Star,
+    Specified(Vec<String>),
+}
+
+impl Default for Properties {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct SearchParams {
-    #[serde(flatten, rename = "type")]
+    #[serde(flatten)]
     #[schema(inline)]
     pub mode: SearchMode,
     #[serde(default)]
@@ -180,14 +194,59 @@ pub struct SearchParams {
     pub limit: Limit,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
-    #[serde(default)]
-    pub properties: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_json_string")]
+    #[schema(inline)]
+    pub properties: Properties,
     #[serde(default, rename = "where")]
     #[schema(inline)]
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
     #[schema(inline)]
     pub facets: HashMap<String, FacetDefinition>,
+}
+
+fn deserialize_json_string<'de, D>(deserializer: D) -> Result<Properties, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    // define a visitor that deserializes
+    // `ActualData` encoded as json within a string
+    struct PropertiesVisitor;
+
+    impl<'de> de::Visitor<'de> for PropertiesVisitor {
+        type Value = Properties;
+    
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("Only '*' is supported or an array of strings")
+        }
+    
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            match v {
+                "*" => return Ok(Properties::Star),
+                _ => {
+                    return Err(E::custom("Invalid string. only '*' is supported or an array of strings"))
+                },
+            }
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut v: Vec<String> = Vec::new();
+            while let Some(p) = seq.next_element::<String>()? {
+                v.push(p);
+            }
+            Ok(Properties::Specified(v))
+        }
+
+    }
+    
+    // use our visitor to deserialize an `ActualValue`
+    deserializer.deserialize_any(PropertiesVisitor)
 }
 
 impl TryFrom<serde_json::Value> for SearchParams {
@@ -226,39 +285,67 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_search_deserialization() {
+    fn test_search_params_mode_deserialization() {
         let j = json!({
-            "type": "fulltext",
+            "mode": "fulltext",
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        matches!(p.mode, SearchMode::FullText(_));
+        assert!(matches!(p.mode, SearchMode::FullText(_)));
 
         let j = json!({
-            "type": "vector",
+            "mode": "vector",
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        matches!(p.mode, SearchMode::Vector(_));
+        assert!(matches!(p.mode, SearchMode::Vector(_)));
 
         let j = json!({
-            "type": "hybrid",
+            "mode": "hybrid",
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        matches!(p.mode, SearchMode::Hybrid(_));
+        assert!(matches!(p.mode, SearchMode::Hybrid(_)));
 
         let j = json!({
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        matches!(p.mode, SearchMode::Default(_));
+        assert!(matches!(p.mode, SearchMode::Default(_)));
 
         let j = json!({
-            "type": "unknown_value",
+            "mode": "unknown_value",
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        matches!(p.mode, SearchMode::Default(_));
+        assert!(matches!(p.mode, SearchMode::Default(_)));
+    }
+
+    #[test]
+    fn test_search_params_properties_deserialization() {
+        let j = json!({
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        assert_eq!(p.properties, Properties::None);
+
+        let j = json!({
+            "properties": ["p1", "p2"],
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        assert_eq!(p.properties, Properties::Specified(
+            vec![
+                "p1".to_string(),
+                "p2".to_string(),
+            ])
+        );
+
+        let j = json!({
+            "properties": "*",
+            "term": "hello",
+        });
+        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        assert_eq!(p.properties, Properties::Star);
     }
 }

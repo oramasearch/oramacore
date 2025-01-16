@@ -6,7 +6,7 @@ use tokio::join;
 use tracing::{debug, error, info, instrument};
 
 use super::CollectionReader;
-use crate::collection_manager::dto::Limit;
+use crate::collection_manager::dto::{Limit, Properties};
 use crate::nlp::locales::Locale;
 use crate::{
     capped_heap::CappedHeap,
@@ -220,9 +220,9 @@ impl CollectionReader {
         Ok(Some(doc_ids))
     }
 
-    fn calculate_string_properties(&self, properties: Option<Vec<String>>) -> Result<Vec<FieldId>> {
+    fn calculate_string_properties(&self, properties: Properties) -> Result<Vec<FieldId>> {
         let properties: Vec<_> = match properties {
-            Some(properties) => {
+            Properties::Specified(properties) => {
                 let mut r = Vec::with_capacity(properties.len());
                 for field_name in properties {
                     let field = self.fields.get(&field_name);
@@ -237,7 +237,7 @@ impl CollectionReader {
                 }
                 r
             }
-            None => {
+            Properties::None | Properties::Star => {
                 let mut r = Vec::with_capacity(self.fields.len());
                 for field in &self.fields {
                     if !matches!(field.1, TypedField::Text(_)) {
