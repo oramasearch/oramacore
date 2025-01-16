@@ -26,5 +26,4 @@ onnxruntime-gpu
 transformers
 accelerate
 einops
-flash-attn --no-build-isolation
 bitsandbytes
