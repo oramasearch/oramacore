@@ -105,10 +105,6 @@ impl TextParser {
             ),
             Locale::UK => (Tokenizer::ukrainian(), None),
             Locale::ZH => (Tokenizer::chinese(), None),
-            _ => (
-                Tokenizer::english(),
-                Some(Stemmer::create(Algorithm::English)),
-            ),
         };
         Self {
             locale,
