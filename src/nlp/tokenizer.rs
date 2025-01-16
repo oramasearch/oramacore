@@ -10,20 +10,144 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    pub fn english() -> Self {
-        let stop_words: HashSet<&str> = Locale::EN.stop_words().unwrap();
+    fn new(locale: Locale) -> Self {
+        let stop_words: HashSet<&'static str> = locale.stop_words().unwrap();
         Tokenizer {
-            split_regex: Locale::EN.split_regex().unwrap(),
+            split_regex: locale.split_regex().unwrap(),
             stop_words,
         }
     }
 
+    pub fn arab() -> Self {
+        Self::new(Locale::AR)
+    }
+
+    pub fn bulgarian() -> Self {
+        Self::new(Locale::BG)
+    }
+
+    pub fn danish() -> Self {
+        Self::new(Locale::DA)
+    }
+
+    pub fn german() -> Self {
+        Self::new(Locale::DE)
+    }
+
+    pub fn greek() -> Self {
+        Self::new(Locale::EL)
+    }
+
+    pub fn english() -> Self {
+        Self::new(Locale::EN)
+    }
+
+    pub fn spanish() -> Self {
+        Self::new(Locale::ES)
+    }
+
+    pub fn estonian() -> Self {
+        Self::new(Locale::ET)
+    }
+
+    pub fn finnish() -> Self {
+        Self::new(Locale::FI)
+    }
+
+    pub fn french() -> Self {
+        Self::new(Locale::FR)
+    }
+
+    pub fn irish() -> Self {
+        Self::new(Locale::GA)
+    }
+
+    pub fn hindi() -> Self {
+        Self::new(Locale::HI)
+    }
+
+    pub fn hungarian() -> Self {
+        Self::new(Locale::HU)
+    }
+
+    pub fn armenian() -> Self {
+        Self::new(Locale::HY)
+    }
+
+    pub fn indonesian() -> Self {
+        Self::new(Locale::ID)
+    }
+
     pub fn italian() -> Self {
-        let stop_words: HashSet<&str> = Locale::IT.stop_words().unwrap();
-        Tokenizer {
-            split_regex: Locale::IT.split_regex().unwrap(),
-            stop_words,
-        }
+        Self::new(Locale::IT)
+    }
+
+    pub fn japanese() -> Self {
+        Self::new(Locale::JP)
+    }
+
+    pub fn korean() -> Self {
+        Self::new(Locale::KO)
+    }
+
+    pub fn lithuanian() -> Self {
+        Self::new(Locale::LT)
+    }
+
+    pub fn nepali() -> Self {
+        Self::new(Locale::NE)
+    }
+
+    pub fn dutch() -> Self {
+        Self::new(Locale::NL)
+    }
+
+    pub fn norwegian() -> Self {
+        Self::new(Locale::NO)
+    }
+
+    pub fn portuguese() -> Self {
+        Self::new(Locale::PT)
+    }
+
+    pub fn romanian() -> Self {
+        Self::new(Locale::RO)
+    }
+
+    pub fn russian() -> Self {
+        Self::new(Locale::RU)
+    }
+
+    pub fn sanskrit() -> Self {
+        Self::new(Locale::SA)
+    }
+
+    pub fn slovenian() -> Self {
+        Self::new(Locale::SL)
+    }
+
+    pub fn serbian() -> Self {
+        Self::new(Locale::SR)
+    }
+
+    pub fn swedish() -> Self {
+        Self::new(Locale::SV)
+    }
+
+    pub fn tamil() -> Self {
+        Self::new(Locale::TA)
+    }
+
+    pub fn turkish() -> Self {
+        Self::new(Locale::TR)
+    }
+
+    pub fn ukrainian() -> Self {
+        Self::new(Locale::UK)
+    }
+
+    pub fn chinese() -> Self {
+        Self::new(Locale::ZH)
     }
 
     pub fn tokenize<'a, 'b>(&'a self, input: &'b str) -> impl Iterator<Item = String> + 'b

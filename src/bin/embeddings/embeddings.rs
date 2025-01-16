@@ -1,31 +1,23 @@
 use anyhow::Result;
 use rustorama::ai::{
-    calculate_embeddings_service_client::CalculateEmbeddingsServiceClient,
-    health_check_service_client::HealthCheckServiceClient, EmbeddingRequest, HealthCheckRequest,
+     EmbeddingRequest, HealthCheckRequest,
     OramaIntent, OramaModel,
 };
 use std::time::Instant;
 use tonic::Request;
+use rustorama::ai::llm_service_client::LlmServiceClient;
 
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: &str = "50051";
 async fn create_embeddings_service_client(
-) -> Result<CalculateEmbeddingsServiceClient<tonic::transport::Channel>> {
+) -> Result<LlmServiceClient<tonic::transport::Channel>> {
     let addr = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT,);
 
-    let embeddings_service_client = CalculateEmbeddingsServiceClient::connect(addr.clone()).await?;
-    let mut health_check_client = HealthCheckServiceClient::connect(addr).await?;
+    let embeddings_service_client = LlmServiceClient::connect(addr.clone()).await?;
 
     let health_check_request = Request::new(HealthCheckRequest {
         service: "HealthCheck".to_string(),
     });
-
-    // Test it is alive
-    dbg!(
-        health_check_client
-            .check_health(health_check_request)
-            .await?
-    );
 
     Ok(embeddings_service_client)
 }
