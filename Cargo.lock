@@ -628,6 +628,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
 
 [[package]]
+name = "capacity_builder"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58ec49028cb308564429cd8fac4ef21290067a0afe8f5955330a8d487d0d790c"
+dependencies = [
+ "itoa",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -890,6 +899,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_maths"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3b02505ccb8c50b0aa21ace0fc08c3e53adebd4e58caa18a36152803c7709a3"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1131,9 +1149,9 @@ dependencies = [
 
 [[package]]
 name = "deno_core"
-version = "0.325.0"
+version = "0.330.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c3e6762dac23152150f2713bfdd8ccd400623db90a297e9962c7a3ed552a122"
+checksum = "fd38bbbd68ed873165ccb630322704b44140d3a8c8d50f898beac4d1a8a3358c"
 dependencies = [
  "anyhow",
  "az",
@@ -1141,8 +1159,10 @@ dependencies = [
  "bit-set",
  "bit-vec",
  "bytes",
+ "capacity_builder",
  "cooked-waker",
  "deno_core_icudata",
+ "deno_error",
  "deno_ops",
  "deno_unsync",
  "futures",
@@ -1158,6 +1178,7 @@ dependencies = [
  "smallvec",
  "sourcemap",
  "static_assertions",
+ "thiserror 2.0.11",
  "tokio",
  "url",
  "v8",
@@ -1171,11 +1192,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe4dccb6147bb3f3ba0c7a48e993bfeb999d2c2e47a81badee80e2b370c8d695"
 
 [[package]]
-name = "deno_ops"
-version = "0.201.0"
+name = "deno_error"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cb98b66a3a6c23ca3035c940b88914411765ecb8518b954cb03d0020ece842f"
+checksum = "9c23dbc46d5804814b08b4675838f9884e3a52916987ec5105af36d42f9911b5"
 dependencies = [
+ "deno_error_macro",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "deno_error_macro"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "babccedee31ce7e57c3e6dff2cb3ab8d68c49d0df8222fe0d11d628e65192790"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "deno_ops"
+version = "0.206.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c25ffa9d088ea00748dbef870bba110ac22ebf8cf7b2e9eb288409c5d852af3"
+dependencies = [
+ "indexmap 2.7.0",
  "proc-macro-rules",
  "proc-macro2",
  "quote",
@@ -1183,7 +1230,7 @@ dependencies = [
  "strum 0.25.0",
  "strum_macros 0.25.3",
  "syn",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -1304,9 +1351,9 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "duration-string"
-version = "0.4.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2334658684d7c213e18602aa72ce37e94d1c9b535882ef6e30bc444b7514a1ee"
+checksum = "04782251e09dc67c90d694d89e9a3e5fc6cfe883df1b203202de672d812fb299"
 
 [[package]]
 name = "either"
@@ -2181,6 +2228,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "icu_segmenter"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a717725612346ffc2d7b42c94b820db6908048f39434504cb130e8b46256b0de"
+dependencies = [
+ "core_maths",
+ "displaydoc",
+ "icu_collections",
+ "icu_locid",
+ "icu_provider",
+ "icu_segmenter_data",
+ "utf8_iter",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_segmenter_data"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f739ee737260d955e330bc83fdeaaf1631f7fb7ed218761d3c04bb13bb7d79df"
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2491,6 +2560,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
+
+[[package]]
 name = "libquickjs-sys"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2687,7 +2762,7 @@ dependencies = [
  "indexmap 2.7.0",
  "ipnet",
  "metrics 0.24.1",
- "metrics-util 0.19.0",
+ "metrics-util",
  "quanta",
  "thiserror 1.0.69",
  "tokio",
@@ -2696,9 +2771,9 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b482df36c13dd1869d73d14d28cd4855fbd6cfc32294bee109908a9f4a4ed7"
+checksum = "dbd4884b1dd24f7d6628274a2f5ae22465c337c5ba065ec9b6edccddf8acc673"
 dependencies = [
  "aho-corasick",
  "crossbeam-epoch",
@@ -2709,20 +2784,6 @@ dependencies = [
  "ordered-float 4.6.0",
  "quanta",
  "radix_trie",
- "sketches-ddsketch",
-]
-
-[[package]]
-name = "metrics-util"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbd4884b1dd24f7d6628274a2f5ae22465c337c5ba065ec9b6edccddf8acc673"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
- "hashbrown 0.15.2",
- "metrics 0.24.1",
- "quanta",
  "rand 0.8.5",
  "rand_xoshiro",
  "sketches-ddsketch",
@@ -3125,7 +3186,7 @@ dependencies = [
  "memmap",
  "metrics 0.24.1",
  "metrics-exporter-prometheus",
- "metrics-util 0.18.0",
+ "metrics-util",
  "mime",
  "mobc",
  "ndarray 0.15.6",
@@ -4258,14 +4319,15 @@ dependencies = [
 
 [[package]]
 name = "serde_v8"
-version = "0.234.0"
+version = "0.239.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a617239cb9db67c77939f6ba9667547a6f4cf9136c18b95fee0092626d74bb9"
+checksum = "3caa6d882827148e5d9052d9d8d6d1c9d6ad426ed00cab46cafb8c07a0e7126a"
 dependencies = [
+ "deno_error",
  "num-bigint",
  "serde",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror 2.0.11",
  "v8",
 ]
 
@@ -4642,22 +4704,22 @@ dependencies = [
 
 [[package]]
 name = "text-splitter"
-version = "0.19.1"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efc811f697f2a77f8634f35eb110069f75ea0dbee530f969693ccb40bceac3c0"
+checksum = "645b1f5e2ae900c4415cd0618ba47b0be0ade6f512b27a9904fd8103b7581810"
 dependencies = [
  "ahash",
  "auto_enums",
  "either",
- "itertools 0.13.0",
- "once_cell",
+ "icu_provider",
+ "icu_segmenter",
+ "itertools 0.14.0",
  "pulldown-cmark",
  "regex",
  "strum 0.26.3",
  "thiserror 2.0.11",
  "tiktoken-rs",
  "tree-sitter",
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -5440,11 +5502,12 @@ dependencies = [
 
 [[package]]
 name = "wasm_dep_analyzer"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f270206a91783fd90625c8bb0d8fbd459d0b1d1bf209b656f713f01ae7c04b8"
+checksum = "2eeee3bdea6257cc36d756fa745a70f9d393571e47d69e0ed97581676a5369ca"
 dependencies = [
- "thiserror 1.0.69",
+ "deno_error",
+ "thiserror 2.0.11",
 ]
 
 [[package]]

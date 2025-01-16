@@ -35,7 +35,7 @@ invocation-counter = "0.1.0"
 
 
 rust-stemmers = "1.2.0"
-text-splitter = { version = "0.19", features = ["tiktoken-rs", "markdown", "code"] }
+text-splitter = { version = "0.21", features = ["tiktoken-rs", "markdown", "code"] }
 tiktoken-rs = "0.6.0"
 tree-sitter = "0.24.7"
 tree-sitter-html = "0.23.2"
@@ -75,14 +75,14 @@ quick-js = "0.4.1"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-duration-string = "0.4.0"
-deno_core = "0.325.0"
-serde_v8 = "0.234.0"
+duration-string = "0.5.2"
+deno_core = "0.330.0"
+serde_v8 = "0.239.0"
 
 # prometheus
 metrics-exporter-prometheus = "0.16.1"
 metrics = "0.24.1"
-metrics-util = "0.18.0"
+metrics-util = "0.19.0"
 
 tempdir = { version ="0.3.7", optional = true }
 memmap = "0.7.0"
