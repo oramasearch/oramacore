@@ -18,12 +18,34 @@ use crate::{
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
     path: PathBuf,
+    cache: RwLock<HashMap<DocumentId, RawJSONDocument>>,
 }
 impl CommittedDiskDocumentStorage {
+    fn try_new(path: PathBuf) -> Result<Self> {
+        let cache: RwLock<HashMap<DocumentId, RawJSONDocument>> = Default::default();
+
+        Ok(Self { path, cache })
+    }
+
     fn get_documents_by_ids(&self, doc_ids: &[DocumentId]) -> Result<Vec<Option<RawJSONDocument>>> {
+        let lock = match self.cache.read() {
+            std::result::Result::Ok(lock) => lock,
+            std::result::Result::Err(e) => e.into_inner(),
+        };
+        let mut from_cache: HashMap<DocumentId, RawJSONDocument> = doc_ids
+            .iter()
+            .filter_map(|id| lock.get(id).map(|d| (*id, d.clone())))
+            .collect();
+        drop(lock);
+
         trace!(doc_len=?doc_ids.len(), "Read document");
         let mut result = Vec::with_capacity(doc_ids.len());
         for id in doc_ids {
+            if let Some(d) = from_cache.remove(id) {
+                result.push(Some(d));
+                continue;
+            }
+
             let doc_path = self.path.join(format!("{}", id.0));
             match std::fs::exists(&doc_path) {
                 Err(e) => {
@@ -44,6 +66,13 @@ impl CommittedDiskDocumentStorage {
                 .context("Cannot open document file")?
                 .read_json_data()
                 .context("Cannot read document data")?;
+
+            let mut lock = match self.cache.write() {
+                std::result::Result::Ok(lock) => lock,
+                std::result::Result::Err(e) => e.into_inner(),
+            };
+            lock.insert(*id, doc.0.clone());
+            drop(lock);
 
             result.push(Some(doc.0));
         }
@@ -95,9 +124,8 @@ impl DocumentStorage {
 
         Ok(Self {
             uncommitted: Default::default(),
-            committed: CommittedDiskDocumentStorage {
-                path: config.data_dir,
-            },
+            committed: CommittedDiskDocumentStorage::try_new(config.data_dir)
+                .context("Cannot create CommittedDiskDocumentStorage")?,
         })
     }
 
@@ -134,7 +162,6 @@ impl DocumentStorage {
             .zip(uncommitted)
             .map(|(committed, uncommitted)| {
                 if let Some(doc) = uncommitted {
-
                     Some(doc)
                 } else {
                     if committed.is_none() {
@@ -184,7 +211,6 @@ impl DocumentStorage {
     }
 }
 
-
 struct RawJSONDocumentWrapper(RawJSONDocument);
 
 #[cfg(test)]
@@ -196,7 +222,9 @@ impl PartialEq for RawJSONDocumentWrapper {
 #[cfg(test)]
 impl Debug for RawJSONDocumentWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RawJSONDocumentWrapper").field(&self.0).finish()
+        f.debug_tuple("RawJSONDocumentWrapper")
+            .field(&self.0)
+            .finish()
     }
 }
 
@@ -218,9 +246,9 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{Error, Visitor};
         use core::result::Result;
         use core::result::Result::*;
+        use serde::de::{Error, Visitor};
 
         struct SerializableNumberVisitor;
 
@@ -242,24 +270,21 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
                 let inner: Option<String> = seq.next_element()?;
 
                 let inner = match inner {
-                    None => return Err(A::Error::missing_field(
-                        &"inner",
-                    )),
+                    None => return Err(A::Error::missing_field("inner")),
                     Some(inner) => inner,
                 };
 
                 let inner = match serde_json::value::RawValue::from_string(inner) {
-                    Err(_) => return Err(A::Error::invalid_value(Unexpected::Str("Invalid RawValue"), &"A valid RawValue")),
+                    Err(_) => {
+                        return Err(A::Error::invalid_value(
+                            Unexpected::Str("Invalid RawValue"),
+                            &"A valid RawValue",
+                        ))
+                    }
                     Ok(inner) => inner,
                 };
 
-                Result::Ok(RawJSONDocumentWrapper(
-                    RawJSONDocument {
-                        id,
-                        inner,
-                    }
-                ))
-
+                Result::Ok(RawJSONDocumentWrapper(RawJSONDocument { id, inner }))
             }
         }
 
@@ -269,8 +294,8 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_document_storage_raw_json_document_wrapper_serialize_deserialize() {

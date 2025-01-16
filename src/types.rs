@@ -8,7 +8,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct RawJSONDocument {
     pub id: Option<String>,
-    pub inner: Box<serde_json::value::RawValue>
+    pub inner: Box<serde_json::value::RawValue>,
 }
 
 impl TryFrom<serde_json::Value> for RawJSONDocument {
@@ -20,8 +20,7 @@ impl TryFrom<serde_json::Value> for RawJSONDocument {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let inner = serde_json::value::to_raw_value(&value)
-            .context("Cannot serialize document")?;
+        let inner = serde_json::value::to_raw_value(&value).context("Cannot serialize document")?;
         Ok(RawJSONDocument { inner, id })
     }
 }
@@ -34,7 +33,6 @@ impl Serialize for RawJSONDocument {
         self.inner.serialize(serializer)
     }
 }
-
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CollectionId(pub String);
@@ -69,9 +67,13 @@ impl Document {
     }
 
     pub fn into_raw(&self) -> Result<RawJSONDocument> {
-        let id = self.inner.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let inner = serde_json::value::to_raw_value(&self.inner)
-            .context("Cannot serialize document")?;
+        let id = self
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let inner =
+            serde_json::value::to_raw_value(&self.inner).context("Cannot serialize document")?;
         Ok(RawJSONDocument { inner, id })
     }
 

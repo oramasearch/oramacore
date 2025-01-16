@@ -231,7 +231,7 @@ impl CollectionReader {
                         Some(field) => field,
                     };
                     if !matches!(field.1, TypedField::Text(_)) {
-                        return Err(anyhow!("Cannot search on non-string field {}", field_name))
+                        return Err(anyhow!("Cannot search on non-string field {}", field_name));
                     }
                     r.push(field.0);
                 }
@@ -246,7 +246,7 @@ impl CollectionReader {
                     r.push(field.0);
                 }
                 r
-            },
+            }
         };
 
         Ok(properties)
