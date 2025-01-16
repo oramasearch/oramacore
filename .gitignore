@@ -10,4 +10,5 @@ posting_storage
 .data
 .dataset
 
+.vscode
 flamegraph.svg

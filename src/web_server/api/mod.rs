@@ -29,12 +29,12 @@ pub fn api_config(
             .add(prometheus_handler())
             .with_state(Arc::new(prometheus_handle));
         info!("Prometheus metrics enabled");
-        router.nest("/", metric)
+        router.merge(metric)
     } else {
         router
     };
 
-    let router = router.nest("/", collection::apis(write_side, readers));
+    let router = router.merge(collection::apis(write_side, readers));
 
     let counter = Arc::new(AtomicUsize::new(0));
 

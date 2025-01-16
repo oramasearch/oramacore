@@ -11,13 +11,13 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, readers: Option<Arc<CollectionsR
     let collection_router = Router::new();
 
     let collection_router = if let Some(write_side) = write_side {
-        collection_router.nest("/", admin::apis(write_side))
+        collection_router.merge(admin::apis(write_side))
     } else {
         collection_router
     };
 
     if let Some(readers) = readers {
-        collection_router.nest("/", search::apis(readers))
+        collection_router.merge(search::apis(readers))
     } else {
         collection_router
     }

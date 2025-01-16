@@ -61,7 +61,7 @@ async fn get_collections(write_side: State<Arc<WriteSide>>) -> Json<Vec<Collecti
 
 #[endpoint(
     method = "GET",
-    path = "/v0/collections/:id",
+    path = "/v0/collections/{id}",
     description = "Get a collection by id"
 )]
 async fn get_collection_by_id(
@@ -113,7 +113,7 @@ async fn create_collection(
 
 #[endpoint(
     method = "PATCH",
-    path = "/v0/collections/:id/documents",
+    path = "/v0/collections/{id}/documents",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
