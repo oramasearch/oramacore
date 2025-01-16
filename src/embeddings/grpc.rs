@@ -4,7 +4,7 @@ use http::uri::Scheme;
 use tonic::Request;
 
 use crate::ai::llm_service_client::LlmServiceClient;
-use crate::ai::{EmbeddingRequest, OramaIntent, OramaModel};
+use crate::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use anyhow::{anyhow, Context, Result};
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
@@ -15,8 +15,18 @@ struct GrpcConnection {
 }
 
 impl GrpcConnection {
-    async fn check(&self) -> Result<()> {
-        // self.client.
+    async fn check(&mut self) -> Result<()> {
+        let health_check_request = Request::new(HealthCheckRequest {
+            service: "HealthCheck".to_string(),
+        });
+
+        let response = self.client.check_health(health_check_request).await?;
+        let response = response.into_inner();
+
+        if response.status != "OK" {
+            return Err(anyhow!("Invalid status: {}", response.status));
+        }
+
         Ok(())
     }
 }
@@ -55,7 +65,7 @@ impl Manager for GrpcManager {
         Ok(GrpcConnection { client })
     }
 
-    async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
+    async fn check(&self, mut conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
         conn.check().await?;
 
         Ok(conn)
