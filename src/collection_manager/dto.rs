@@ -170,8 +170,7 @@ impl Default for SearchMode {
     }
 }
 
-#[derive(Debug, Clone, ToSchema)]
-#[derive(PartialEq)]
+#[derive(Debug, Clone, ToSchema, PartialEq)]
 pub enum Properties {
     None,
     Star,
@@ -215,20 +214,20 @@ where
 
     impl<'de> de::Visitor<'de> for PropertiesVisitor {
         type Value = Properties;
-    
+
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("Only '*' is supported or an array of strings")
         }
-    
+
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             match v {
-                "*" => return Ok(Properties::Star),
-                _ => {
-                    return Err(E::custom("Invalid string. only '*' is supported or an array of strings"))
-                },
+                "*" => Ok(Properties::Star),
+                _ => Err(E::custom(
+                    "Invalid string. only '*' is supported or an array of strings",
+                )),
             }
         }
 
@@ -242,9 +241,8 @@ where
             }
             Ok(Properties::Specified(v))
         }
-
     }
-    
+
     // use our visitor to deserialize an `ActualValue`
     deserializer.deserialize_any(PropertiesVisitor)
 }
@@ -334,11 +332,9 @@ mod test {
             "term": "hello",
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        assert_eq!(p.properties, Properties::Specified(
-            vec![
-                "p1".to_string(),
-                "p2".to_string(),
-            ])
+        assert_eq!(
+            p.properties,
+            Properties::Specified(vec!["p1".to_string(), "p2".to_string(),])
         );
 
         let j = json!({
