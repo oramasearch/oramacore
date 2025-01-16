@@ -5,7 +5,6 @@ grpcio-tools
 grpcio
 python-dotenv
 fastembed
-# fastembed-gpu
 grpcio-reflection
 argparse
 --extra-index-url https://download.pytorch.org/whl/cu124
@@ -17,3 +16,9 @@ opentelemetry-sdk
 pyyaml
 cachetools
 json-repair
+
+onnxruntime
+transformers
+accelerate
+einops
+bitsandbytes
