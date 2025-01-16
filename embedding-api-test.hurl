@@ -44,7 +44,7 @@ POST {{base_url}}/v0/collections/{{collection_id}}/search
 retry: 10
 retry-interval: 500ms
 {
-    "type": "vector",
+    "mode": "vector",
     "term": "The feline is napping comfortably indoors."
 }
 HTTP 200
