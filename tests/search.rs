@@ -8,7 +8,7 @@ use hurl_core::typing::Count;
 use oramacore::collection_manager::sides::read::IndexesConfig;
 use oramacore::collection_manager::sides::CollectionsWriterConfig;
 use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
-use oramacore::{build_orama, ReadSideConfig, OramacoreConfig, WriteSideConfig};
+use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
 use std::collections::HashMap;
 use std::env::temp_dir;
 use std::path::PathBuf;

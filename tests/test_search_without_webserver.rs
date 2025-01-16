@@ -4,7 +4,7 @@ use oramacore::collection_manager::sides::read::{CollectionsReader, IndexesConfi
 use oramacore::collection_manager::sides::{CollectionsWriterConfig, WriteSide};
 use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
 use oramacore::types::{CollectionId, DocumentList};
-use oramacore::{build_orama, ReadSideConfig, OramacoreConfig, WriteSideConfig};
+use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
 use serde_json::json;
 use std::collections::HashMap;
 use std::env::temp_dir;

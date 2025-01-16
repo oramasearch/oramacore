@@ -9,7 +9,7 @@ use oramacore::{
     },
     embeddings::EmbeddingConfig,
     web_server::HttpConfig,
-    ReadSideConfig, OramacoreConfig, WriteSideConfig,
+    OramacoreConfig, ReadSideConfig, WriteSideConfig,
 };
 use tempdir::TempDir;
 
