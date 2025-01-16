@@ -24,7 +24,7 @@ jobs:
       run: sudo apt-get update
     - name: apt-get install
       run: |
-        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev protobuf-compiler
+        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
