@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
-    types::{CollectionId, Document, DocumentId, ValueType},
+    types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
 };
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,11 +198,11 @@ impl TryFrom<serde_json::Value> for SearchParams {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResultHit {
     pub id: String,
     pub score: f32,
-    pub document: Option<Document>,
+    pub document: Option<RawJSONDocument>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,7 +211,7 @@ pub struct FacetResult {
     pub values: HashMap<String, usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub hits: Vec<SearchResultHit>,
     pub count: usize,

@@ -1,9 +1,38 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct RawJSONDocument {
+    pub id: Option<String>,
+    pub inner: Box<serde_json::value::RawValue>,
+}
+
+impl TryFrom<serde_json::Value> for RawJSONDocument {
+    type Error = anyhow::Error;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let inner = serde_json::value::to_raw_value(&value).context("Cannot serialize document")?;
+        Ok(RawJSONDocument { inner, id })
+    }
+}
+
+impl Serialize for RawJSONDocument {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CollectionId(pub String);
@@ -35,6 +64,17 @@ impl Document {
             })
             .collect();
         FlattenDocument(inner)
+    }
+
+    pub fn into_raw(&self) -> Result<RawJSONDocument> {
+        let id = self
+            .inner
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let inner =
+            serde_json::value::to_raw_value(&self.inner).context("Cannot serialize document")?;
+        Ok(RawJSONDocument { inner, id })
     }
 
     pub fn get(&self, key: &str) -> Option<&Value> {

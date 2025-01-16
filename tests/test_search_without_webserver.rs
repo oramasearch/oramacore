@@ -115,7 +115,6 @@ async fn run_tests() {
         .await
         .unwrap();
 
-    writer.commit().await.unwrap();
     reader.commit().await.unwrap();
 
     let collection = reader.get_collection(collection_id.clone()).await.unwrap();

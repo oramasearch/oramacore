@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
     collection_manager::sides::{
-        document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
+        document_storage::{DocumentStorage, DocumentStorageConfig},
         read::collection::CommitConfig,
         CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
         WriteOperation,
@@ -34,7 +34,7 @@ pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
-    document_storage: Arc<dyn DocumentStorage>,
+    document_storage: Arc<DocumentStorage>,
     indexes_config: IndexesConfig,
 }
 impl CollectionsReader {
@@ -43,7 +43,7 @@ impl CollectionsReader {
         nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
-        let document_storage = DiskDocumentStorage::try_new(DocumentStorageConfig {
+        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: indexes_config.data_dir.join("docs"),
         })
         .context("Cannot create document storage")?;

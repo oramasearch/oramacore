@@ -27,8 +27,6 @@ impl Debug for TextParser {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TextParser")
             .field("locale", &self.locale)
-            .field("tokenizer", &"...".to_string())
-            .field("stemmer", &"...".to_string())
             .finish()
     }
 }

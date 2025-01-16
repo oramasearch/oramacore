@@ -100,15 +100,7 @@ async fn test_bools_filter() -> Result<()> {
     let actual_doc_ids: HashSet<_> = output
         .hits
         .into_iter()
-        .map(|h| {
-            h.document
-                .unwrap()
-                .get("id")
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string()
-        })
+        .map(|h| h.document.unwrap().id.unwrap())
         .collect();
 
     assert_eq!(
