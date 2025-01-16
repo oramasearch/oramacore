@@ -90,7 +90,7 @@ impl CollectionWriter {
                 self.id.clone(),
                 CollectionWriteOperation::InsertDocument {
                     doc_id,
-                    doc: doc.clone(),
+                    doc: doc.into_raw()?,
                 },
             ))
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
@@ -185,7 +185,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    #[instrument(skip(self, sender))]
+    #[instrument(skip(self, sender, embedding_sender))]
     async fn create_field(
         &self,
         field_id: FieldId,

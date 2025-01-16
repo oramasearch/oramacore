@@ -103,11 +103,8 @@ async fn test_bools_filter() -> Result<()> {
         .map(|h| {
             h.document
                 .unwrap()
-                .get("id")
+                .id
                 .unwrap()
-                .as_str()
-                .unwrap()
-                .to_string()
         })
         .collect();
 

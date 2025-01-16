@@ -7,7 +7,7 @@ use crate::{
         sides::write::InsertStringTerms,
     },
     indexes::number::Number,
-    types::{Document, DocumentId},
+    types::{DocumentId, RawJSONDocument},
 };
 
 use super::CollectionReader;
@@ -17,12 +17,12 @@ impl CollectionReader {
         &self,
         field_id: FieldId,
         field_name: String,
-        field: TypedField,
+        typed_field: TypedField,
     ) -> Result<()> {
         self.fields
-            .insert(field_name.clone(), (field_id, field.clone()));
+            .insert(field_name.clone(), (field_id, typed_field.clone()));
 
-        match field {
+        match typed_field {
             TypedField::Embedding(embedding) => {
                 let loaded_model = self
                     .embedding_service
@@ -91,7 +91,7 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
-    pub async fn insert_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
+    pub async fn insert_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
         self.document_storage.add_document(doc_id, doc).await
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::types::{CollectionId, DocumentId};
-use crate::{collection_manager::dto::FieldId, indexes::number::Number, types::Document};
+use crate::types::{CollectionId, DocumentId, RawJSONDocument};
+use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
 use crate::collection_manager::dto::TypedField;
 
@@ -45,7 +45,7 @@ pub enum DocumentFieldIndexOperation {
 pub enum CollectionWriteOperation {
     InsertDocument {
         doc_id: DocumentId,
-        doc: Document,
+        doc: RawJSONDocument,
     },
     CreateField {
         field_id: FieldId,

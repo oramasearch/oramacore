@@ -39,10 +39,10 @@ impl CollectionReader {
 
         let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter)?;
         let boost = self.calculate_boost(boost);
-        let properties = self.calculate_properties(properties)?;
 
         let token_scores = match mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
+                let properties = self.calculate_string_properties(properties)?;
                 self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
                     .await?
             }
@@ -51,6 +51,8 @@ impl CollectionReader {
                     .await?
             }
             SearchMode::Hybrid(search_params) => {
+                let properties = self.calculate_string_properties(properties)?;
+
                 let (vector, fulltext) = join!(
                     self.search_vector(&search_params.term, filtered_doc_ids.clone(), &limit),
                     self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
@@ -103,9 +105,7 @@ impl CollectionReader {
             .map(|(token_score, document)| {
                 let id = document
                     .as_ref()
-                    .and_then(|d| d.get("id"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
+                    .and_then(|d| d.id.clone())
                     .unwrap_or_default();
                 SearchResultHit {
                     id,
@@ -221,16 +221,36 @@ impl CollectionReader {
         Ok(Some(doc_ids))
     }
 
-    fn calculate_properties(&self, properties: Option<Vec<String>>) -> Result<Vec<FieldId>> {
-        let properties: Result<Vec<_>> = match properties {
-            Some(properties) => properties
-                .into_iter()
-                .map(|p| self.get_field_id(p))
-                .collect(),
-            None => self.fields.iter().map(|e| Ok(e.value().0)).collect(),
+    fn calculate_string_properties(&self, properties: Option<Vec<String>>) -> Result<Vec<FieldId>> {
+        let properties: Vec<_> = match properties {
+            Some(properties) => {
+                let mut r = Vec::with_capacity(properties.len());
+                for field_name in properties {
+                    let field = self.fields.get(&field_name);
+                    let field = match field {
+                        None => return Err(anyhow!("Unknown field name {}", field_name)),
+                        Some(field) => field,
+                    };
+                    if !matches!(field.1, TypedField::Text(_)) {
+                        return Err(anyhow!("Cannot search on non-string field {}", field_name))
+                    }
+                    r.push(field.0);
+                }
+                r
+            }
+            None => {
+                let mut r = Vec::with_capacity(self.fields.len());
+                for field in &self.fields {
+                    if !matches!(field.1, TypedField::Text(_)) {
+                        continue;
+                    }
+                    r.push(field.0);
+                }
+                r
+            },
         };
 
-        properties
+        Ok(properties)
     }
 
     async fn search_full_text(
@@ -245,6 +265,7 @@ impl CollectionReader {
         let mut tokens_cache: HashMap<Locale, Vec<String>> = Default::default();
 
         for field_id in properties {
+            info!(?field_id, "Searching on field");
             let text_parser = self.text_parser_per_field.get(&field_id);
             let (locale, text_parser) = match text_parser.as_ref() {
                 None => return Err(anyhow!("No text parser for this field")),
