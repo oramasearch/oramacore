@@ -1,7 +1,8 @@
 use tokio::sync::RwLock;
 
 use anyhow::Result;
-use grpc::{GrpcEmbeddingModel, GrpcLLM};
+use grpc::{ChatStreamResult, GrpcEmbeddingModel, GrpcLLM};
+use tonic::Streaming;
 
 use crate::ai::grpc::GrpcRepo;
 
@@ -32,11 +33,12 @@ impl AiService {
         llm_type: LlmType,
         prompt: String,
         conversation: Conversation,
+        context: Option<String>,
     ) -> Result<ChatResponse> {
         let lock = self.llm_cache.read().await;
 
         if let Some(llm) = &*lock {
-            return llm.chat(llm_type, prompt, conversation).await;
+            return llm.chat(llm_type, prompt, conversation, context).await;
         }
 
         drop(lock);
@@ -50,6 +52,39 @@ impl AiService {
 
         let llm = lock.as_ref();
 
-        llm.unwrap().chat(llm_type, prompt, conversation).await
+        llm.unwrap()
+            .chat(llm_type, prompt, conversation, context)
+            .await
+    }
+
+    pub async fn chat_stream(
+        &self,
+        llm_type: LlmType,
+        prompt: String,
+        conversation: Conversation,
+        context: Option<String>,
+    ) -> Result<Streaming<ChatStreamResponse>> {
+        let lock = self.llm_cache.read().await;
+
+        if let Some(llm) = &*lock {
+            return llm
+                .chat_stream(llm_type, prompt, conversation, context)
+                .await;
+        }
+
+        drop(lock);
+
+        let mut cache_w = self.llm_cache.write().await;
+        *cache_w = Some(self.grpc.load_llm().await?);
+
+        drop(cache_w);
+
+        let lock = self.llm_cache.read().await;
+
+        let llm = lock.as_ref();
+
+        llm.unwrap()
+            .chat_stream(llm_type, prompt, conversation, context)
+            .await
     }
 }

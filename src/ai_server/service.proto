@@ -68,12 +68,7 @@ message ChatRequest {
     LLMType model = 1;             // Which LLM to use
     string prompt = 2;             // Input prompt
     Conversation conversation = 3; // All past messages
-}
-
-message AnswerSessionRequest {
-    Conversation conversation = 1; // All past messages
-    string prompt = 2;             // Input prompt
-    string context = 3;            // Input context
+    optional string context = 4;
 }
 
 // Response message for LLM calls

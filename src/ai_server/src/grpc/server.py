@@ -79,7 +79,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             )
 
             for text_chunk in self.models_manager.chat_stream(
-                model_id=model_name.lower(), history=history, prompt=request.prompt
+                model_id=model_name.lower(), history=history, prompt=request.prompt, context=request.context
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
