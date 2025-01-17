@@ -4,7 +4,10 @@ use http::uri::Scheme;
 use tonic::Request;
 
 use crate::ai::llm_service_client::LlmServiceClient;
-use crate::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
+use crate::ai::{
+    ChatRequest, ChatResponse, Conversation, EmbeddingRequest, HealthCheckRequest, LlmType,
+    OramaIntent, OramaModel,
+};
 use anyhow::{anyhow, Context, Result};
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
@@ -73,13 +76,44 @@ impl Manager for GrpcManager {
 }
 
 #[derive(Debug)]
-pub struct GrpcModel {
+pub struct GrpcLLM {
+    manager: Pool<GrpcManager>,
+}
+
+impl GrpcLLM {
+    pub async fn chat(
+        &self,
+        llm_type: LlmType,
+        prompt: String,
+        conversation: Conversation,
+    ) -> Result<ChatResponse> {
+        let mut conn = self.manager.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(ChatRequest {
+            conversation: Some(conversation),
+            prompt,
+            model: llm_type as i32,
+        });
+
+        let response = conn
+            .client
+            .chat(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform chat request")?;
+
+        Ok(response)
+    }
+}
+
+#[derive(Debug)]
+pub struct GrpcEmbeddingModel {
     model_name: String,
     model_id: i32,
     manager: Pool<GrpcManager>,
     dimensions: usize,
 }
-impl GrpcModel {
+impl GrpcEmbeddingModel {
     pub fn model_name(&self) -> String {
         self.model_name.clone()
     }
@@ -156,7 +190,23 @@ impl GrpcRepo {
     }
 
     #[tracing::instrument]
-    pub async fn load_model(&self, model_name: String) -> Result<GrpcModel> {
+    pub async fn load_llm(&self) -> Result<GrpcLLM> {
+        info!("Creating pool");
+        let pool = Pool::builder()
+            .max_open(15)
+            .build(GrpcManager::new(GrpcRepoConfig {
+                host: self.grpc_config.host,
+                port: self.grpc_config.port,
+                api_key: self.grpc_config.api_key.clone(),
+            }));
+
+        let model = GrpcLLM { manager: pool };
+
+        Ok(model)
+    }
+
+    #[tracing::instrument]
+    pub async fn load_model(&self, model_name: String) -> Result<GrpcEmbeddingModel> {
         info!("Loading model");
 
         let model_config = match self.model_configs.get(&model_name) {
@@ -185,7 +235,7 @@ impl GrpcRepo {
                 api_key: self.grpc_config.api_key.clone(),
             }));
 
-        let model = GrpcModel {
+        let model = GrpcEmbeddingModel {
             model_name: model_name.clone(),
             model_id: model.into(),
             manager: pool,

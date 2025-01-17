@@ -276,6 +276,42 @@ pub struct SearchResult {
     pub facets: Option<HashMap<String, FacetResult>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum RelatedQueriesFormat {
+    Question,
+    Query,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RelatedRequest {
+    enabled: Option<bool>,
+    size: Option<usize>,
+    format: Option<RelatedQueriesFormat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum Role {
+    System,
+    Assistant,
+    User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InteractionMessage {
+    role: Role,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Interaction {
+    pub interaction_id: String,
+    pub query: String,
+    pub visitor_id: String,
+    pub conversation_id: String,
+    pub related: Option<RelatedRequest>,
+    pub messages: Vec<InteractionMessage>,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

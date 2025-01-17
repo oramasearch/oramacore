@@ -1,5 +1,9 @@
-use std::sync::Arc;
+use std::{default, sync::Arc};
 
+use ai::{
+    grpc::{GrpcRepo, GrpcRepoConfig},
+    AiService,
+};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     read::{CollectionsReader, IndexesConfig},
@@ -110,7 +114,18 @@ pub async fn build_orama(
         ..
     } = config;
 
-    let embedding_service = EmbeddingService::try_new(embedding_config)
+    let grpc_repo = GrpcRepo::new(
+        GrpcRepoConfig {
+            host: "0.0.0.0".parse().unwrap(),
+            port: 50051,
+            api_key: None,
+        },
+        Default::default(),
+    );
+
+    let ai_service = AiService::new(grpc_repo);
+
+    let embedding_service = EmbeddingService::try_new(embedding_config, Some(Arc::new(ai_service)))
         .await
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);

@@ -38,13 +38,15 @@ mod tests {
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
-        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            preload: vec![],
-            grpc: None,
-            hugging_face: None,
-            fastembed: None,
-            models: HashMap::new(),
-        })
+        let embedding_service = EmbeddingService::try_new(
+            EmbeddingConfig {
+                preload: vec![],
+                hugging_face: None,
+                fastembed: None,
+                models: HashMap::new(),
+            },
+            None,
+        )
         .await?;
 
         let embedding_service = Arc::new(embedding_service);
@@ -110,13 +112,15 @@ mod tests {
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
-        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            preload: vec![],
-            grpc: None,
-            hugging_face: None,
-            fastembed: None,
-            models: HashMap::new(),
-        })
+        let embedding_service = EmbeddingService::try_new(
+            EmbeddingConfig {
+                preload: vec![],
+                hugging_face: None,
+                fastembed: None,
+                models: HashMap::new(),
+            },
+            None,
+        )
         .await?;
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {
@@ -190,13 +194,15 @@ mod tests {
 
         let (sender, mut rec) = tokio::sync::broadcast::channel(100);
 
-        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            preload: vec![],
-            grpc: None,
-            hugging_face: None,
-            fastembed: None,
-            models: HashMap::new(),
-        })
+        let embedding_service = EmbeddingService::try_new(
+            EmbeddingConfig {
+                preload: vec![],
+                hugging_face: None,
+                fastembed: None,
+                models: HashMap::new(),
+            },
+            None,
+        )
         .await?;
         let embedding_service = Arc::new(embedding_service);
         let config = CollectionsWriterConfig {

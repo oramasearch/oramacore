@@ -146,6 +146,10 @@ impl CollectionsReader {
         Ok(())
     }
 
+    pub fn get_embedding_service(&self) -> Arc<EmbeddingService> {
+        self.embedding_service.clone()
+    }
+
     pub async fn get_collection<'s, 'coll>(
         &'s self,
         id: CollectionId,

@@ -32,7 +32,6 @@ pub async fn start_all() -> Result<(
         },
         embeddings: EmbeddingConfig {
             preload: vec![],
-            grpc: None,
             hugging_face: None,
             fastembed: None,
             models: HashMap::new(),
