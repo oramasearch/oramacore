@@ -1,6 +1,8 @@
 use crate::ai::grpc::GrpcEmbeddingModel;
 use crate::ai::{Conversation, LlmType};
-use crate::collection_manager::dto::Interaction;
+use crate::collection_manager::dto::{
+    HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
+};
 use crate::collection_manager::sides::read::CollectionsReader;
 use crate::types::CollectionId;
 use axum::response::sse::Event;
@@ -13,11 +15,14 @@ use axum::{
 use axum_openapi3::*;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+
+use super::search;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -25,7 +30,7 @@ struct MessageChunk {
     is_final: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 enum SseMessage {
     #[serde(rename = "acknowledgement")]
@@ -37,7 +42,7 @@ enum SseMessage {
     #[serde(rename = "searching")]
     Searching { message: String },
     #[serde(rename = "sources")]
-    Sources { message: String },
+    Sources { message: SearchResult },
     #[serde(rename = "answer_chunk")]
     AnswerChunk { message: MessageChunk },
     #[serde(rename = "error")]
@@ -56,9 +61,7 @@ async fn answer_v0(
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId(id);
-    let collection = state.get_collection(collection_id).await;
-    // @todo: move this inside of state
-    let ai_service = state.get_embedding_service().get_ai_service().unwrap();
+    let state = state.clone();
 
     let query = interaction.query;
     let conversation = interaction.messages;
@@ -67,6 +70,9 @@ async fn answer_v0(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
+        let collection = state.get_collection(collection_id).await;
+        let ai_service = state.get_embedding_service().get_ai_service().unwrap();
+
         let acknowledgement_msg = SseMessage::Acknowledge {
             message: "Acknowledged".to_string(),
         };
@@ -101,6 +107,40 @@ async fn answer_v0(
                 Event::default().data(serde_json::to_string(&optimized_query_msg).unwrap())
             ))
             .await;
+
+        if let Some(collection) = collection {
+            let search_results = collection
+                .search(SearchParams {
+                    mode: SearchMode::Hybrid(HybridMode {
+                        term: optimized_query.text,
+                    }),
+                    limit: Limit(5),
+                    where_filter: HashMap::new(),
+                    boost: HashMap::new(),
+                    facets: HashMap::new(),
+                    properties: crate::collection_manager::dto::Properties::Star,
+                })
+                .await
+                .unwrap();
+
+            let sources_msg = SseMessage::Sources {
+                message: search_results,
+            };
+            let _ = tx
+                .send(Ok(
+                    Event::default().data(serde_json::to_string(&sources_msg).unwrap())
+                ))
+                .await;
+        } else {
+            let error_msg = SseMessage::Error {
+                message: "Collection not found".to_string(),
+            };
+            let _ = tx
+                .send(Ok(
+                    Event::default().data(serde_json::to_string(&error_msg).unwrap())
+                ))
+                .await;
+        }
     });
 
     Sse::new(rx_stream).keep_alive(
