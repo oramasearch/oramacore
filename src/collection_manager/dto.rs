@@ -298,8 +298,8 @@ pub enum Role {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InteractionMessage {
-    role: Role,
-    content: String,
+    pub role: Role,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

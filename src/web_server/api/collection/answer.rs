@@ -1,4 +1,4 @@
-use crate::ai::{Conversation, LlmType};
+use crate::ai::LlmType;
 use crate::collection_manager::dto::{
     HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
 };
@@ -19,7 +19,6 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::sleep;
 use tokio_stream::wrappers::ReceiverStream;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,6 +50,7 @@ pub fn apis(readers: Arc<CollectionsReader>) -> Router {
         .with_state(readers)
 }
 
+// @todo: this function needs some cleaning. It works but it's not well structured.
 async fn answer_v0(
     Path(id): Path<String>,
     state: State<Arc<CollectionsReader>>,
@@ -69,40 +69,36 @@ async fn answer_v0(
         let collection = state.get_collection(collection_id).await;
         let ai_service = state.get_embedding_service().get_ai_service().unwrap();
 
-        let acknowledgement_msg = SseMessage::Acknowledge {
-            message: "Acknowledged".to_string(),
-        };
         let _ = tx
-            .send(Ok(
-                Event::default().data(serde_json::to_string(&acknowledgement_msg).unwrap())
-            ))
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&SseMessage::Acknowledge {
+                    message: "Acknowledged".to_string(),
+                })
+                .unwrap(),
+            )))
             .await;
 
-        let optimizing_query_mgs = SseMessage::OptimizingQuery {
-            message: "Optimizing query".to_string(),
-        };
         let _ = tx
-            .send(Ok(
-                Event::default().data(serde_json::to_string(&optimizing_query_mgs).unwrap())
-            ))
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&SseMessage::OptimizingQuery {
+                    message: "Optimizing query".to_string(),
+                })
+                .unwrap(),
+            )))
             .await;
 
         let optimized_query = ai_service
-            .chat(
-                LlmType::GoogleQueryTranslator,
-                query.clone(),
-                Conversation { messages: vec![] },
-                None,
-            )
+            .chat(LlmType::GoogleQueryTranslator, query.clone(), None, None)
             .await
             .unwrap();
-        let optimized_query_msg = SseMessage::OptimizedQuery {
-            message: optimized_query.text.to_string(),
-        };
+
         let _ = tx
-            .send(Ok(
-                Event::default().data(serde_json::to_string(&optimized_query_msg).unwrap())
-            ))
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&SseMessage::OptimizedQuery {
+                    message: optimized_query.text.to_string(),
+                })
+                .unwrap(),
+            )))
             .await;
 
         if let Some(collection) = collection {
@@ -120,23 +116,22 @@ async fn answer_v0(
                 .await
                 .unwrap();
 
-            let sources_msg = SseMessage::Sources {
-                message: search_results.clone(),
-            };
             let _ = tx
-                .send(Ok(
-                    Event::default().data(serde_json::to_string(&sources_msg).unwrap())
-                ))
+                .send(Ok(Event::default().data(
+                    serde_json::to_string(&SseMessage::Sources {
+                        message: search_results.clone(),
+                    })
+                    .unwrap(),
+                )))
                 .await;
 
-            // ------------------------------------------------------------
             let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
 
             let stream = ai_service
                 .chat_stream(
                     LlmType::Answer,
                     query,
-                    Conversation { messages: vec![] },
+                    Some(conversation),
                     Some(search_result_str),
                 )
                 .await
@@ -151,11 +146,11 @@ async fn answer_v0(
                             is_final: response.is_final,
                         };
 
-                        let answer_chunk_msg = SseMessage::AnswerChunk { message: chunk };
-
                         if let Err(_) = tx
-                            .send(Ok(Event::default()
-                                .data(serde_json::to_string(&answer_chunk_msg).unwrap())))
+                            .send(Ok(Event::default().data(
+                                serde_json::to_string(&SseMessage::AnswerChunk { message: chunk })
+                                    .unwrap(),
+                            )))
                             .await
                         {
                             break; // Client disconnected
@@ -166,27 +161,26 @@ async fn answer_v0(
                         }
                     }
                     Err(e) => {
-                        let error_msg = SseMessage::Error {
-                            message: format!("Error during streaming: {}", e),
-                        };
                         let _ = tx
-                            .send(Ok(
-                                Event::default().data(serde_json::to_string(&error_msg).unwrap())
-                            ))
+                            .send(Ok(Event::default().data(
+                                serde_json::to_string(&SseMessage::Error {
+                                    message: format!("Error during streaming: {}", e),
+                                })
+                                .unwrap(),
+                            )))
                             .await;
                         break;
                     }
                 }
             }
-            // ------------------------------------------------------------
         } else {
-            let error_msg = SseMessage::Error {
-                message: "Collection not found".to_string(),
-            };
             let _ = tx
-                .send(Ok(
-                    Event::default().data(serde_json::to_string(&error_msg).unwrap())
-                ))
+                .send(Ok(Event::default().data(
+                    serde_json::to_string(&SseMessage::Error {
+                        message: "Collection not found".to_string(),
+                    })
+                    .unwrap(),
+                )))
                 .await;
         }
     });

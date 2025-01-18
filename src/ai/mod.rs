@@ -1,10 +1,10 @@
 use tokio::sync::RwLock;
 
 use anyhow::Result;
-use grpc::{ChatStreamResult, GrpcEmbeddingModel, GrpcLLM};
+use grpc::{GrpcEmbeddingModel, GrpcLLM};
 use tonic::Streaming;
 
-use crate::ai::grpc::GrpcRepo;
+use crate::{ai::grpc::GrpcRepo, collection_manager::dto::InteractionMessage};
 
 pub mod grpc;
 
@@ -32,13 +32,14 @@ impl AiService {
         &self,
         llm_type: LlmType,
         prompt: String,
-        conversation: Conversation,
+        conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
     ) -> Result<ChatResponse> {
         let lock = self.llm_cache.read().await;
+        let full_conversation = self.get_grpc_conversation(conversation);
 
         if let Some(llm) = &*lock {
-            return llm.chat(llm_type, prompt, conversation, context).await;
+            return llm.chat(llm_type, prompt, full_conversation, context).await;
         }
 
         drop(lock);
@@ -53,7 +54,7 @@ impl AiService {
         let llm = lock.as_ref();
 
         llm.unwrap()
-            .chat(llm_type, prompt, conversation, context)
+            .chat(llm_type, prompt, full_conversation, context)
             .await
     }
 
@@ -61,14 +62,15 @@ impl AiService {
         &self,
         llm_type: LlmType,
         prompt: String,
-        conversation: Conversation,
+        conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
     ) -> Result<Streaming<ChatStreamResponse>> {
         let lock = self.llm_cache.read().await;
+        let full_conversation = self.get_grpc_conversation(conversation);
 
         if let Some(llm) = &*lock {
             return llm
-                .chat_stream(llm_type, prompt, conversation, context)
+                .chat_stream(llm_type, prompt, full_conversation, context)
                 .await;
         }
 
@@ -84,7 +86,33 @@ impl AiService {
         let llm = lock.as_ref();
 
         llm.unwrap()
-            .chat_stream(llm_type, prompt, conversation, context)
+            .chat_stream(llm_type, prompt, full_conversation, context)
             .await
+    }
+
+    fn get_grpc_conversation(&self, interactions: Option<Vec<InteractionMessage>>) -> Conversation {
+        use crate::collection_manager::dto::Role as DtoRole;
+
+        if let Some(interactions) = interactions {
+            let messages = interactions
+                .iter()
+                .map(|message| {
+                    let role = match message.role {
+                        DtoRole::User => 0,
+                        DtoRole::Assistant => 1,
+                        DtoRole::System => 2,
+                    };
+
+                    ConversationMessage {
+                        role,
+                        content: message.content.clone(),
+                    }
+                })
+                .collect();
+
+            Conversation { messages }
+        } else {
+            Conversation { messages: vec![] }
+        }
     }
 }
