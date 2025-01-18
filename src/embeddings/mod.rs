@@ -189,9 +189,15 @@ impl EmbeddingService {
             service.hugging_face_repo = Some(hf::HuggingFaceRepo::new(hugging_face, model_configs));
         }
 
+        let _ = models.remove("grpc");
+
         if !models.is_empty() {
+            let models_without_provider: Vec<_> = models.into_keys()
+                .collect();
+
             return Err(anyhow!(
-                "Some models are linked to a provider without the provider configuration"
+                "Some models ({:?}) are linked to a provider without the provider configuration",
+                models_without_provider,
             ));
         }
 
