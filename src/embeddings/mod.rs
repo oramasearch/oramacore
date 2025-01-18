@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Ok, Result};
 use dashmap::DashMap;
 
+use crate::ai::{grpc, AiService};
 use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -8,14 +9,13 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
 use tracing::debug;
 
 pub mod fe;
-pub mod grpc;
 pub mod hf;
 
 #[derive(Debug)]
 pub enum LoadedModel {
     HuggingFace(hf::HuggingFaceModel),
     Fastembed(fe::FastEmbedModel),
-    Grpc(grpc::GrpcModel),
+    Grpc(grpc::GrpcEmbeddingModel),
 }
 
 impl PartialEq for LoadedModel {
@@ -90,7 +90,6 @@ pub enum ModelConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EmbeddingConfig {
     pub preload: Vec<String>,
-    pub grpc: Option<grpc::GrpcRepoConfig>,
     pub hugging_face: Option<HuggingFaceRepoConfig>,
     pub fastembed: Option<fe::FastEmbedRepoConfig>,
     pub models: HashMap<String, ModelConfig>,
@@ -107,25 +106,27 @@ enum Repo {
 pub struct EmbeddingService {
     fastembed_repo: Option<fe::FastEmbedRepo>,
     hugging_face_repo: Option<hf::HuggingFaceRepo>,
-    grpc_repo: Option<grpc::GrpcRepo>,
+    ai_service: Option<Arc<AiService>>,
 
     models_repo: HashMap<String, Repo>,
     loaded_models: DashMap<String, Arc<LoadedModel>>,
 }
 
 impl EmbeddingService {
-    pub async fn try_new(config: EmbeddingConfig) -> Result<Self> {
+    pub async fn try_new(
+        config: EmbeddingConfig,
+        ai_service: Option<Arc<AiService>>,
+    ) -> Result<Self> {
         let mut service = EmbeddingService {
             fastembed_repo: None,
             hugging_face_repo: None,
-            grpc_repo: None,
+            ai_service,
             models_repo: HashMap::new(),
             loaded_models: DashMap::new(),
         };
 
         let EmbeddingConfig {
             fastembed,
-            grpc,
             hugging_face,
             models,
             preload,
@@ -188,28 +189,6 @@ impl EmbeddingService {
             service.hugging_face_repo = Some(hf::HuggingFaceRepo::new(hugging_face, model_configs));
         }
 
-        if let Some(grpc) = grpc {
-            let model_configs = models.remove("grpc").unwrap_or_default();
-            let model_configs: HashMap<String, grpc::GrpcModelConfig> = model_configs
-                .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k,
-                        match v {
-                            ModelConfig::Grpc(v) => v,
-                            _ => unreachable!(),
-                        },
-                    )
-                })
-                .collect();
-
-            for model_name in model_configs.keys() {
-                service.models_repo.insert(model_name.clone(), Repo::Grpc);
-            }
-
-            service.grpc_repo = Some(grpc::GrpcRepo::new(grpc, model_configs));
-        }
-
         debug_assert!(models.is_empty(), "Models should be empty");
 
         for model_name in preload {
@@ -262,7 +241,7 @@ impl EmbeddingService {
             Repo::Grpc => {
                 debug!("Loading Grpc model: {}", model_name);
                 let repo = self
-                    .grpc_repo
+                    .ai_service
                     .as_ref()
                     .ok_or_else(|| anyhow!("GrpcRepo is missing"))?;
 
@@ -275,6 +254,10 @@ impl EmbeddingService {
         let loaded_model = Arc::new(loaded_model);
 
         Ok(loaded_model)
+    }
+
+    pub fn get_ai_service(&self) -> Option<Arc<AiService>> {
+        self.ai_service.clone()
     }
 }
 

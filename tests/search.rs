@@ -62,7 +62,6 @@ async fn start_server() {
         },
         embeddings: EmbeddingConfig {
             preload: vec![],
-            grpc: None,
             hugging_face: None,
             fastembed: Some(FastEmbedRepoConfig {
                 cache_dir: temp_dir(),

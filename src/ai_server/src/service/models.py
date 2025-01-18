@@ -2,7 +2,7 @@ import torch
 import logging
 import threading
 from typing import Dict, Any, Set, List, Optional, Iterator
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 from src.utils import OramaAIConfig
 from src.prompts.main import PROMPT_TEMPLATES
@@ -121,30 +121,21 @@ class ModelsManager:
         inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
-        streamer = StreamingCallback(tokenizer)
+        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
 
-        with self._lock:
-            generated_ids = model.generate(
-                **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
-            )
+        generation_kwargs = dict(
+            **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
+        )
+        thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
 
-            for token in generated_ids[0][inputs["input_ids"].shape[1] :]:
-                decoded = tokenizer.decode(token, skip_special_tokens=True)
-                if decoded:  # Only yield non-empty strings
-                    yield decoded
+        p = None
 
+        for new_text in streamer:
+            old_text = p
+            p = new_text
 
-class StreamingCallback:
-    def __init__(self, tokenizer):
-        self.tokenizer = tokenizer
+            if old_text:
+                yield old_text
 
-    def put(self, value):
-        if len(value.shape) > 1:
-            value = value[0]
-        decoded = self.tokenizer.decode(value, skip_special_tokens=True)
-        if decoded:  # Only yield non-empty strings
-            return decoded
-
-    def end(self):
-        """Called at the end of generation."""
-        pass
+        yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.

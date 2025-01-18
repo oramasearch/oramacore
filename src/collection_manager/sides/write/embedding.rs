@@ -121,15 +121,14 @@ pub fn start_calculate_embedding_loop(
 
 #[cfg(test)]
 mod tests {
+    use crate::ai::grpc::{GrpcModelConfig, GrpcRepoConfig};
+
     #[cfg(feature = "test-python")]
     #[tokio::test]
     async fn test_embedding_grpc_server() -> anyhow::Result<()> {
         use std::{collections::HashMap, sync::Arc};
 
-        use crate::embeddings::{
-            grpc::{GrpcModelConfig, GrpcRepoConfig},
-            EmbeddingConfig, ModelConfig,
-        };
+        use crate::embeddings::{EmbeddingConfig, ModelConfig};
 
         use super::*;
 

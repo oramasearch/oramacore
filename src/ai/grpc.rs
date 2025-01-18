@@ -1,14 +1,23 @@
+use std::pin::Pin;
 use std::{collections::HashMap, net::IpAddr};
 
 use http::uri::Scheme;
-use tonic::Request;
+use tonic::{Request, Response, Streaming};
 
 use crate::ai::llm_service_client::LlmServiceClient;
-use crate::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
+use crate::ai::{
+    ChatRequest, ChatResponse, Conversation, EmbeddingRequest, HealthCheckRequest, LlmType,
+    OramaIntent, OramaModel,
+};
 use anyhow::{anyhow, Context, Result};
+use futures::{Stream, StreamExt};
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
 use tracing::info;
+
+use super::ChatStreamResponse;
+
+pub type ChatStreamResult = Pin<Box<dyn Stream<Item = Result<ChatStreamResponse>> + Send>>;
 
 struct GrpcConnection {
     client: LlmServiceClient<tonic::transport::Channel>,
@@ -73,13 +82,71 @@ impl Manager for GrpcManager {
 }
 
 #[derive(Debug)]
-pub struct GrpcModel {
+pub struct GrpcLLM {
+    manager: Pool<GrpcManager>,
+}
+
+impl GrpcLLM {
+    pub async fn chat(
+        &self,
+        llm_type: LlmType,
+        prompt: String,
+        conversation: Conversation,
+        context: Option<String>,
+    ) -> Result<ChatResponse> {
+        let mut conn = self.manager.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(ChatRequest {
+            conversation: Some(conversation),
+            prompt,
+            model: llm_type as i32,
+            context,
+        });
+
+        let response = conn
+            .client
+            .chat(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform chat request")?;
+
+        Ok(response)
+    }
+
+    pub async fn chat_stream(
+        &self,
+        llm_type: LlmType,
+        prompt: String,
+        conversation: Conversation,
+        context: Option<String>,
+    ) -> Result<Streaming<ChatStreamResponse>> {
+        let mut conn = self.manager.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(ChatRequest {
+            conversation: Some(conversation),
+            prompt,
+            model: llm_type as i32,
+            context,
+        });
+
+        let response: Response<Streaming<ChatStreamResponse>> = conn
+            .client
+            .chat_stream(request)
+            .await
+            .context("Cannot initiate chat stream request")?;
+
+        Ok(response.into_inner())
+    }
+}
+
+#[derive(Debug)]
+pub struct GrpcEmbeddingModel {
     model_name: String,
     model_id: i32,
     manager: Pool<GrpcManager>,
     dimensions: usize,
 }
-impl GrpcModel {
+impl GrpcEmbeddingModel {
     pub fn model_name(&self) -> String {
         self.model_name.clone()
     }
@@ -156,7 +223,23 @@ impl GrpcRepo {
     }
 
     #[tracing::instrument]
-    pub async fn load_model(&self, model_name: String) -> Result<GrpcModel> {
+    pub async fn load_llm(&self) -> Result<GrpcLLM> {
+        info!("Creating pool");
+        let pool = Pool::builder()
+            .max_open(15)
+            .build(GrpcManager::new(GrpcRepoConfig {
+                host: self.grpc_config.host,
+                port: self.grpc_config.port,
+                api_key: self.grpc_config.api_key.clone(),
+            }));
+
+        let model = GrpcLLM { manager: pool };
+
+        Ok(model)
+    }
+
+    #[tracing::instrument]
+    pub async fn load_model(&self, model_name: String) -> Result<GrpcEmbeddingModel> {
         info!("Loading model");
 
         let model_config = match self.model_configs.get(&model_name) {
@@ -185,7 +268,7 @@ impl GrpcRepo {
                 api_key: self.grpc_config.api_key.clone(),
             }));
 
-        let model = GrpcModel {
+        let model = GrpcEmbeddingModel {
             model_name: model_name.clone(),
             model_id: model.into(),
             manager: pool,

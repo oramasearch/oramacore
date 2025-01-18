@@ -30,7 +30,6 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<CollectionsReader>)> {
         },
         embeddings: EmbeddingConfig {
             preload: vec![],
-            grpc: None,
             hugging_face: None,
             fastembed: Some(FastEmbedRepoConfig {
                 cache_dir: temp_dir(),
