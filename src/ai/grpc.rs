@@ -10,7 +10,7 @@ use crate::ai::{
     OramaIntent, OramaModel,
 };
 use anyhow::{anyhow, Context, Result};
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
 use tracing::info;
@@ -240,7 +240,7 @@ impl GrpcRepo {
 
     #[tracing::instrument]
     pub async fn load_model(&self, model_name: String) -> Result<GrpcEmbeddingModel> {
-        info!("Loading model");
+        info!("Loading GRPC model");
 
         let model_config = match self.model_configs.get(&model_name) {
             Some(config) => config,

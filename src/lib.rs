@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use collection_manager::sides::{
     CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation, WriteSide,
 };
-use embeddings::{EmbeddingConfig, EmbeddingService};
+use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
@@ -127,7 +127,15 @@ pub async fn build_orama(
             port: 50051,
             api_key: None,
         },
-        Default::default(),
+        embedding_config.models.iter()
+            .filter_map(|(name, model)| {
+                if let ModelConfig::Grpc(model) = model {
+                    Some((name.clone(), model.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
     );
 
     let ai_service = AiService::new(grpc_repo);

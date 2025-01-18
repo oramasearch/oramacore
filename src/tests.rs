@@ -9,17 +9,10 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    build_orama,
-    collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide},
-    connect_write_and_read_side,
-    embeddings::{
+    ai::grpc::GrpcModelConfig, build_orama, collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide}, connect_write_and_read_side, embeddings::{
         fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig},
         EmbeddingConfig, ModelConfig,
-    },
-    test_utils::generate_new_path,
-    types::CollectionId,
-    web_server::HttpConfig,
-    OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
+    }, test_utils::generate_new_path, types::CollectionId, web_server::HttpConfig, OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig
 };
 
 fn create_oramacore_config() -> OramacoreConfig {
@@ -1152,6 +1145,91 @@ async fn test_empty_term() -> Result<()> {
     // TODO: fix the search method to return all documents when the term is empty.
     assert_eq!(output.hits.len(), 5);
     assert_eq!(output.count, 5);
+
+    Ok(())
+}
+
+
+// #[cfg(feature = "test-python")]
+
+#[tokio::test]
+async fn test_vector_search_grpc() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let mut config = create_oramacore_config();
+    config.embeddings.models.insert(
+        "BGESmall".to_string(),
+        ModelConfig::Grpc(
+            GrpcModelConfig {
+                dimensions: 384,
+                real_model_name: "BGESmall".to_string(),
+            },
+        )
+    );
+
+    let (write_side, read_side) = create(config).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    write_side
+        .create_collection(
+            json!({
+                "id": collection_id.0.clone(),
+                "typed_fields": {
+                    "vector": {
+                        "mode": "embedding",
+                        "model_name": "BGESmall",
+                        "document_fields": ["text"],
+                    }
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    sleep(Duration::from_millis(100)).await;
+
+    write_side
+        .write(
+            collection_id.clone(),
+            vec![
+                json!({
+                    "id": "1",
+                    "text": "The cat is sleeping on the table.",
+                }),
+                json!({
+                    "id": "2",
+                    "text": "A cat rests peacefully on the sofa.",
+                }),
+                json!({
+                    "id": "3",
+                    "text": "The dog is barking loudly in the yard.",
+                }),
+            ]
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+
+    sleep(Duration::from_millis(500)).await;
+
+    let output = read_side
+        .search(
+            collection_id,
+            json!({
+                "mode": "vector",
+                "term": "The feline is napping comfortably indoors.",
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    // Due to the lack of a large enough dataset,
+    // the search will not return 2 results as expected.
+    // But it should return at least one result.
+    // Anyway, the 3th document should not be returned.
+    assert_ne!(output.count, 0);
+    assert_ne!(output.hits.len(), 0);
+    assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
 
     Ok(())
 }

@@ -147,12 +147,13 @@ async fn answer_v0(
                         is_final: response.is_final,
                     };
 
-                    if let Err(_) = tx
+                    if tx
                         .send(Ok(Event::default().data(
                             serde_json::to_string(&SseMessage::AnswerChunk { message: chunk })
                                 .unwrap(),
                         )))
                         .await
+                        .is_err()
                     {
                         break; // Client disconnected
                     }
