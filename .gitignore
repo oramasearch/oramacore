@@ -12,3 +12,5 @@ posting_storage
 
 .vscode
 flamegraph.svg
+.direnv/
+.envrc
