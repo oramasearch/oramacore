@@ -4,7 +4,7 @@ use anyhow::Result;
 use oramacore::{
     build_orama,
     collection_manager::sides::{
-        read::{CollectionsReader, IndexesConfig},
+        ReadSide, IndexesConfig,
         CollectionsWriterConfig, WriteSide,
     },
     embeddings::EmbeddingConfig,
@@ -20,7 +20,7 @@ fn generate_new_path() -> PathBuf {
 
 pub async fn start_all() -> Result<(
     Arc<WriteSide>,
-    Arc<CollectionsReader>,
+    Arc<ReadSide>,
     tokio::task::JoinHandle<()>,
 )> {
     let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {

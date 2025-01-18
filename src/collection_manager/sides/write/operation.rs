@@ -7,11 +7,7 @@ use crate::collection_manager::dto::TypedField;
 
 #[derive(Debug, Clone)]
 pub enum GenericWriteOperation {
-    CreateCollection {
-        id: CollectionId,
-        // Params here... but which ones?
-        // TODO: add params
-    },
+    CreateCollection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -57,6 +53,10 @@ pub enum CollectionWriteOperation {
 
 #[derive(Debug, Clone)]
 pub enum WriteOperation {
-    Generic(GenericWriteOperation),
+    CreateCollection {
+        id: CollectionId,
+        // Params here... but which ones?
+        // TODO: add params
+    },
     Collection(CollectionId, CollectionWriteOperation),
 }

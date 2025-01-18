@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::collection_manager::sides::{read::CollectionsReader, WriteSide};
+use crate::collection_manager::sides::{ReadSide, WriteSide};
 
 mod api;
 
@@ -24,19 +24,19 @@ pub struct HttpConfig {
 
 pub struct WebServer {
     write_side: Option<Arc<WriteSide>>,
-    collections_reader: Option<Arc<CollectionsReader>>,
+    read_side: Option<Arc<ReadSide>>,
     prometheus_handler: Option<PrometheusHandle>,
 }
 
 impl WebServer {
     pub fn new(
         write_side: Option<Arc<WriteSide>>,
-        collections_reader: Option<Arc<CollectionsReader>>,
+        read_side: Option<Arc<ReadSide>>,
         prometheus_handler: Option<PrometheusHandle>,
     ) -> Self {
         Self {
             write_side,
-            collections_reader,
+            read_side,
             prometheus_handler,
         }
     }
@@ -44,11 +44,7 @@ impl WebServer {
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        let router = api_config(
-            self.write_side,
-            self.collections_reader,
-            self.prometheus_handler,
-        );
+        let router = api_config(self.write_side, self.read_side, self.prometheus_handler);
 
         let router = if config.allow_cors {
             info!("Enabling CORS");

@@ -2,7 +2,7 @@ use crate::ai::LlmType;
 use crate::collection_manager::dto::{
     HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
 };
-use crate::collection_manager::sides::read::CollectionsReader;
+use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -12,7 +12,6 @@ use axum::{
     Json, Router,
 };
 use futures::Stream;
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -20,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -44,20 +44,20 @@ enum SseMessage {
     Error { message: String },
 }
 
-pub fn apis(readers: Arc<CollectionsReader>) -> Router {
+pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route("/v0/collections/{id}/answer", post(answer_v0))
-        .with_state(readers)
+        .with_state(read_side)
 }
 
 // @todo: this function needs some cleaning. It works but it's not well structured.
 async fn answer_v0(
     Path(id): Path<String>,
-    state: State<Arc<CollectionsReader>>,
+    read_side: State<Arc<ReadSide>>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId(id);
-    let state = state.clone();
+    let read_side = read_side.clone();
 
     let query = interaction.query;
     let conversation = interaction.messages;
@@ -66,8 +66,7 @@ async fn answer_v0(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let collection = state.get_collection(collection_id).await;
-        let ai_service = state.get_embedding_service().get_ai_service().unwrap();
+        let ai_service = read_side.get_embedding_service().get_ai_service().unwrap();
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -101,9 +100,10 @@ async fn answer_v0(
             )))
             .await;
 
-        if let Some(collection) = collection {
-            let search_results = collection
-                .search(SearchParams {
+        let search_results = read_side
+            .search(
+                collection_id,
+                SearchParams {
                     mode: SearchMode::Hybrid(HybridMode {
                         term: optimized_query.text,
                     }),
@@ -112,76 +112,67 @@ async fn answer_v0(
                     boost: HashMap::new(),
                     facets: HashMap::new(),
                     properties: crate::collection_manager::dto::Properties::Star,
+                },
+            )
+            .await
+            .unwrap();
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&SseMessage::Sources {
+                    message: search_results.clone(),
                 })
-                .await
-                .unwrap();
+                .unwrap(),
+            )))
+            .await;
 
-            let _ = tx
-                .send(Ok(Event::default().data(
-                    serde_json::to_string(&SseMessage::Sources {
-                        message: search_results.clone(),
-                    })
-                    .unwrap(),
-                )))
-                .await;
+        let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
 
-            let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
+        let stream = ai_service
+            .chat_stream(
+                LlmType::Answer,
+                query,
+                Some(conversation),
+                Some(search_result_str),
+            )
+            .await
+            .unwrap();
 
-            let stream = ai_service
-                .chat_stream(
-                    LlmType::Answer,
-                    query,
-                    Some(conversation),
-                    Some(search_result_str),
-                )
-                .await
-                .unwrap();
+        let mut stream = stream;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(response) => {
+                    let chunk = MessageChunk {
+                        text: response.text_chunk,
+                        is_final: response.is_final,
+                    };
 
-            let mut stream = stream;
-            while let Some(chunk) = stream.next().await {
-                match chunk {
-                    Ok(response) => {
-                        let chunk = MessageChunk {
-                            text: response.text_chunk,
-                            is_final: response.is_final,
-                        };
-
-                        if let Err(_) = tx
-                            .send(Ok(Event::default().data(
-                                serde_json::to_string(&SseMessage::AnswerChunk { message: chunk })
-                                    .unwrap(),
-                            )))
-                            .await
-                        {
-                            break; // Client disconnected
-                        }
-
-                        if response.is_final {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Ok(Event::default().data(
-                                serde_json::to_string(&SseMessage::Error {
-                                    message: format!("Error during streaming: {}", e),
-                                })
+                    if let Err(_) = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::AnswerChunk { message: chunk })
                                 .unwrap(),
-                            )))
-                            .await;
+                        )))
+                        .await
+                    {
+                        break; // Client disconnected
+                    }
+
+                    if response.is_final {
                         break;
                     }
                 }
+                Err(e) => {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Error {
+                                message: format!("Error during streaming: {}", e),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                    break;
+                }
             }
-        } else {
-            let _ = tx
-                .send(Ok(Event::default().data(
-                    serde_json::to_string(&SseMessage::Error {
-                        message: "Collection not found".to_string(),
-                    })
-                    .unwrap(),
-                )))
-                .await;
         }
     });
 

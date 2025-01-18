@@ -11,6 +11,13 @@ pub struct RawJSONDocument {
     pub inner: Box<serde_json::value::RawValue>,
 }
 
+#[cfg(test)]
+impl PartialEq for RawJSONDocument {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.inner.get() == other.inner.get()
+    }
+}
+
 impl TryFrom<serde_json::Value> for RawJSONDocument {
     type Error = anyhow::Error;
 

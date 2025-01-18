@@ -189,7 +189,11 @@ impl EmbeddingService {
             service.hugging_face_repo = Some(hf::HuggingFaceRepo::new(hugging_face, model_configs));
         }
 
-        debug_assert!(models.is_empty(), "Models should be empty");
+        if !models.is_empty() {
+            return Err(anyhow!(
+                "Some models are linked to a provider without the provider configuration"
+            ));
+        }
 
         for model_name in preload {
             service.load_model(model_name).await?;

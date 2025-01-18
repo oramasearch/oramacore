@@ -1,34 +1,21 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use serde::Deserialize;
-use tokio::sync::{broadcast::Sender, RwLock};
-use tracing::{info, instrument, warn};
+use tokio::sync::{broadcast::Sender, RwLock, RwLockReadGuard};
+use tracing::{info, instrument};
 
 use crate::{
-    collection_manager::dto::CollectionDTO,
-    file_utils::{list_directory_in_path, BufferedFile},
-    metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
-    types::{CollectionId, DocumentId, DocumentList},
+    collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
 };
 
 use crate::collection_manager::dto::{CreateCollectionOptionDTO, LanguageDTO};
 
-use super::{
-    collection::CollectionWriter, embedding::EmbeddingCalculationRequest, GenericWriteOperation,
-    WriteOperation,
-};
+use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
 
 pub struct CollectionsWriter {
-    document_id_generator: Arc<AtomicU64>,
-    sender: Sender<WriteOperation>,
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
@@ -47,30 +34,32 @@ fn embedding_queue_limit_default() -> usize {
 
 impl CollectionsWriter {
     pub fn new(
-        sender: Sender<WriteOperation>,
         config: CollectionsWriterConfig,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> CollectionsWriter {
         CollectionsWriter {
-            document_id_generator: Default::default(),
-            sender,
             collections: Default::default(),
             config,
             embedding_sender,
         }
     }
 
-    fn generate_document_id(&self) -> DocumentId {
-        let id = self
-            .document_id_generator
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        DocumentId(id)
+    pub async fn get_collection<'s, 'coll>(
+        &'s self,
+        id: CollectionId,
+    ) -> Option<CollectionWriteLock<'coll>>
+    where
+        's: 'coll,
+    {
+        let r = self.collections.read().await;
+        CollectionWriteLock::try_new(r, id)
     }
 
     pub async fn create_collection(
         &self,
         collection_option: CreateCollectionOptionDTO,
-    ) -> Result<CollectionId> {
+        sender: Sender<WriteOperation>,
+    ) -> Result<()> {
         let CreateCollectionOptionDTO {
             id,
             description,
@@ -78,14 +67,7 @@ impl CollectionsWriter {
             typed_fields,
         } = collection_option;
 
-        let id = CollectionId(id);
-
         info!("Creating collection {:?}", id);
-        self.sender
-            .send(WriteOperation::Generic(
-                GenericWriteOperation::CreateCollection { id: id.clone() },
-            ))
-            .context("Cannot send create collection")?;
 
         let collection = CollectionWriter::new(
             id.clone(),
@@ -94,31 +76,31 @@ impl CollectionsWriter {
             self.embedding_sender.clone(),
         );
 
+        sender
+            .send(WriteOperation::CreateCollection { id: id.clone() })
+            .context("Cannot send create collection")?;
+
         collection
-            .register_fields(typed_fields, self.sender.clone())
+            .register_fields(typed_fields, sender.clone())
             .await
             .context("Cannot register fields")?;
 
         let mut collections = self.collections.write().await;
         if collections.contains_key(&id) {
-            return Err(anyhow!("Collection already exists"));
+            // This error should be typed.
+            // todo: create a custom error type
+            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
         }
-        collections.insert(id.clone(), collection);
+        collections.insert(id, collection);
         drop(collections);
 
-        Ok(id)
+        Ok(())
     }
 
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
 
         collections.iter().map(|(_, coll)| coll.as_dto()).collect()
-    }
-
-    pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
-        let collections = self.collections.read().await;
-        let collection = collections.get(&collection_id);
-        collection.map(|c| c.as_dto())
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -130,12 +112,6 @@ impl CollectionsWriter {
         let mut collections = self.collections.write().await;
 
         std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-
-        let document_id = self.document_id_generator.load(Ordering::Relaxed);
-        BufferedFile::create(data_dir.join("document_id"))
-            .context("Cannot create document id file")?
-            .write_json_data(&document_id)
-            .context("Cannot serialize document id")?;
 
         for (collection_id, collection) in collections.iter_mut() {
             let collection_dir = data_dir.join(collection_id.0.clone());
@@ -193,67 +169,6 @@ impl CollectionsWriter {
                 .insert(collection_id, collection);
         }
 
-        let document_id = BufferedFile::open(data_dir.join("document_id"))
-            .context("Cannot open document id file")?
-            .read_json_data::<u64>()
-            .context("Cannot deserialize document id")?;
-
-        self.document_id_generator
-            .store(document_id, Ordering::Relaxed);
-
-        Ok(())
-    }
-
-    pub async fn write(
-        &self,
-        collection_id: CollectionId,
-        document_list: DocumentList,
-    ) -> Result<()> {
-        info!("Inserting batch of {} documents", document_list.len());
-        ADDED_DOCUMENTS_COUNTER
-            .create(AddedDocumentsLabels {
-                collection: collection_id.0.clone(),
-            })
-            .increment_by(document_list.len());
-
-        let collections = self.collections.read().await;
-
-        let collection = collections
-            .get(&collection_id)
-            .ok_or_else(|| anyhow!("Collection not found"))?;
-
-        let sender = self.sender.clone();
-
-        for mut doc in document_list {
-            let doc_id = self.generate_document_id();
-
-            let doc_id_value = doc.get("id");
-            // Forces the id to be set, if not set
-            if doc_id_value.is_none() {
-                doc.inner.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(cuid2::create_id()),
-                );
-            } else if let Some(doc_id_value) = doc_id_value {
-                if !doc_id_value.is_string() {
-                    // The search result contains the document id and it is defined as a string.
-                    // So, if the original document id is not a string, we should overwrite it with a new one
-                    // Anyway, this implies the loss of the original document id. For instance we could support number as well
-                    // TODO: think better
-                    warn!("Document id is not a string, overwriting it with new one");
-                    doc.inner.insert(
-                        "id".to_string(),
-                        serde_json::Value::String(cuid2::create_id()),
-                    );
-                }
-            }
-
-            collection
-                .process_new_document(doc_id, doc, sender.clone())
-                .await
-                .context("Cannot process document")?;
-        }
-
         Ok(())
     }
 }
@@ -266,5 +181,36 @@ mod tests {
     async fn test_writer_sync_send() {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsWriter>();
+    }
+}
+
+pub struct CollectionWriteLock<'guard> {
+    lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+    id: CollectionId,
+}
+
+impl<'guard> CollectionWriteLock<'guard> {
+    pub fn try_new(
+        lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+        id: CollectionId,
+    ) -> Option<Self> {
+        let guard = lock.get(&id);
+        match &guard {
+            Some(_) => {
+                let _ = guard;
+                Some(CollectionWriteLock { lock, id })
+            }
+            None => None,
+        }
+    }
+}
+
+impl Deref for CollectionWriteLock<'_> {
+    type Target = CollectionWriter;
+
+    fn deref(&self) -> &Self::Target {
+        // safety: the collection contains the id because we checked it before
+        // no one can remove the collection from the map because we hold a read lock
+        self.lock.get(&self.id).unwrap()
     }
 }

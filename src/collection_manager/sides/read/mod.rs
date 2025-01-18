@@ -1,156 +1,192 @@
 mod collection;
 mod collections;
+mod document_storage;
 
-mod insert;
-mod search;
+use std::{collections::HashMap, sync::Arc};
 
-pub use collection::{CollectionReader, CommitConfig};
-pub use collections::{CollectionsReader, IndexesConfig};
+use anyhow::{Context, Result};
+pub use collection::CommitConfig;
+use collections::CollectionsReader;
+pub use collections::IndexesConfig;
+use document_storage::{DocumentStorage, DocumentStorageConfig};
+use ordered_float::NotNan;
+
+use crate::{
+    capped_heap::CappedHeap,
+    collection_manager::dto::{SearchParams, SearchResult, SearchResultHit, TokenScore},
+    embeddings::EmbeddingService,
+    nlp::NLPService,
+    types::{CollectionId, DocumentId},
+};
+
+use super::{CollectionWriteOperation, WriteOperation};
+
+pub struct ReadSide {
+    collections: CollectionsReader,
+    document_storage: DocumentStorage,
+}
+
+impl ReadSide {
+    pub fn try_new(
+        embedding_service: Arc<EmbeddingService>,
+        nlp_service: Arc<NLPService>,
+        indexes_config: IndexesConfig,
+    ) -> Result<Self> {
+        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
+            data_dir: indexes_config.data_dir.join("docs"),
+        })
+        .context("Cannot create document storage")?;
+
+        Ok(Self {
+            collections: CollectionsReader::try_new(
+                embedding_service,
+                nlp_service,
+                indexes_config,
+            )?,
+            document_storage,
+        })
+    }
+
+    pub async fn load(&mut self) -> Result<()> {
+        self.collections.load().await?;
+
+        self.document_storage
+            .load()
+            .context("Cannot load document storage")?;
+
+        Ok(())
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        self.collections.commit().await?;
+
+        self.document_storage
+            .commit()
+            .context("Cannot commit document storage")?;
+
+        Ok(())
+    }
+
+    pub async fn search(
+        &self,
+        collection_id: CollectionId,
+        mut search_params: SearchParams,
+    ) -> Result<SearchResult> {
+        let facets = std::mem::take(&mut search_params.facets);
+        let limit = search_params.limit;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        let token_scores = collection.search(search_params).await?;
+
+        let facets = collection.calculate_facets(&token_scores, facets)?;
+
+        let count = token_scores.len();
+
+        let top_results: Vec<TokenScore> = top_n(token_scores, limit.0);
+
+        let docs = self
+            .document_storage
+            .get_documents_by_ids(top_results.iter().map(|m| m.document_id).collect())
+            .await?;
+
+        let hits: Vec<_> = top_results
+            .into_iter()
+            .zip(docs)
+            .map(|(token_score, document)| {
+                let id = document
+                    .as_ref()
+                    .and_then(|d| d.id.clone())
+                    .unwrap_or_default();
+                SearchResultHit {
+                    id,
+                    score: token_score.score,
+                    document,
+                }
+            })
+            .collect();
+
+        Ok(SearchResult {
+            count,
+            hits,
+            facets,
+        })
+    }
+
+    pub async fn update(&self, op: WriteOperation) -> Result<()> {
+        match op {
+            WriteOperation::CreateCollection { id } => {
+                self.collections.create_collection(id).await?;
+            }
+            WriteOperation::Collection(collection_id, collection_operation) => {
+                let collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+                if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
+                    collection_operation
+                {
+                    collection.increment_document_count();
+                    self.document_storage.add_document(doc_id, doc).await?;
+                } else {
+                    collection.update(collection_operation).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // This is wrong. We should not expose the embedding service to the read side.
+    // TODO: Remove this method.
+    pub fn get_embedding_service(&self) -> Arc<EmbeddingService> {
+        self.collections.get_embedding_service()
+    }
+
+    pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
+        let collection = self.collections.get_collection(collection_id).await?;
+        Some(collection.count_documents())
+    }
+}
+
+fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
+    let mut capped_heap = CappedHeap::new(n);
+
+    for (key, value) in map {
+        let k = match NotNan::new(value) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let v = key;
+        capped_heap.insert(k, v);
+    }
+
+    let result: Vec<TokenScore> = capped_heap
+        .into_top()
+        .map(|(value, key)| TokenScore {
+            document_id: key,
+            score: value.into_inner(),
+        })
+        .collect();
+
+    result
+}
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use anyhow::Result;
-
-    use serde_json::json;
-
-    use crate::{
-        collection_manager::{
-            dto::{FieldId, LanguageDTO, TypedField},
-            sides::write::{
-                CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation, Term,
-                TermStringField, WriteOperation,
-            },
-        },
-        embeddings::{EmbeddingConfig, EmbeddingService},
-        nlp::NLPService,
-        test_utils::generate_new_path,
-        types::{CollectionId, DocumentId},
+    use crate::collection_manager::sides::read::{
+        collection::CollectionReader, collections::CollectionsReader,
     };
 
-    use super::*;
-
-    #[tokio::test]
-    async fn test_side_read_sync_send() {
+    #[test]
+    fn test_side_read_sync_send() {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsReader>();
         assert_sync_send::<CollectionReader>();
-    }
-
-    #[tokio::test]
-    async fn test_side_read_commit_and_load() -> Result<()> {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let data_dir = generate_new_path();
-        let embedding_service = EmbeddingService::try_new(
-            EmbeddingConfig {
-                preload: vec![],
-                hugging_face: None,
-                fastembed: None,
-                models: HashMap::new(),
-            },
-            None,
-        )
-        .await?;
-        let embedding_service = Arc::new(embedding_service);
-        let collection_id = CollectionId("my-collection-name".to_string());
-
-        {
-            let collections = CollectionsReader::try_new(
-                embedding_service.clone(),
-                Arc::new(NLPService::new()),
-                IndexesConfig {
-                    data_dir: data_dir.join("indexes"),
-                },
-            )?;
-
-            collections
-                .update(WriteOperation::Generic(
-                    GenericWriteOperation::CreateCollection {
-                        id: collection_id.clone(),
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::CreateField {
-                        field_id: FieldId(0),
-                        field_name: "title".to_string(),
-                        field: TypedField::Text(LanguageDTO::English),
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::InsertDocument {
-                        doc_id: DocumentId(0),
-                        doc: json!({
-                            "id": "my-id",
-                            "title": "hello world",
-                        })
-                        .try_into()?,
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::Index(
-                        DocumentId(0),
-                        FieldId(0),
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length: 2,
-                            terms: HashMap::from_iter([
-                                (
-                                    Term("hello".to_string()),
-                                    TermStringField { positions: vec![0] },
-                                ),
-                                (
-                                    Term("world".to_string()),
-                                    TermStringField { positions: vec![1] },
-                                ),
-                            ]),
-                        },
-                    ),
-                ))
-                .await?;
-
-            collections.commit().await?;
-        }
-
-        let mut collections = CollectionsReader::try_new(
-            embedding_service.clone(),
-            Arc::new(NLPService::new()),
-            IndexesConfig {
-                data_dir: data_dir.join("indexes"),
-            },
-        )?;
-
-        collections.load().await?;
-
-        let reader = collections
-            .get_collection(collection_id.clone())
-            .await
-            .expect("collection not found");
-
-        let result = reader
-            .search(
-                json!({
-                    "term": "hello",
-                })
-                .try_into()?,
-            )
-            .await?;
-
-        assert_eq!(result.count, 1);
-        assert_eq!(result.hits[0].id, "my-id".to_string());
-
-        Ok(())
     }
 }

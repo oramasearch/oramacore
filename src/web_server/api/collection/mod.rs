@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use crate::collection_manager::sides::{read::CollectionsReader, WriteSide};
+use crate::collection_manager::sides::{ReadSide, WriteSide};
 
 mod admin;
 mod answer;
 mod search;
 
-pub fn apis(write_side: Option<Arc<WriteSide>>, readers: Option<Arc<CollectionsReader>>) -> Router {
+pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>) -> Router {
     let collection_router = Router::new();
 
     let collection_router = if let Some(write_side) = write_side {
@@ -17,10 +17,10 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, readers: Option<Arc<CollectionsR
         collection_router
     };
 
-    if let Some(readers) = readers {
+    if let Some(read_side) = read_side {
         collection_router
-            .merge(search::apis(readers.clone()))
-            .merge(answer::apis(readers))
+            .merge(search::apis(read_side.clone()))
+            .merge(answer::apis(read_side))
     } else {
         collection_router
     }

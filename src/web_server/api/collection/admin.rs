@@ -55,7 +55,7 @@ async fn dump_all(write_side: State<Arc<WriteSide>>) -> impl IntoResponse {
     description = "List all collections"
 )]
 async fn get_collections(write_side: State<Arc<WriteSide>>) -> Json<Vec<CollectionDTO>> {
-    let collections = write_side.collections().list().await;
+    let collections = write_side.list_collections().await;
     Json(collections)
 }
 
@@ -69,10 +69,7 @@ async fn get_collection_by_id(
     write_side: State<Arc<WriteSide>>,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collection_dto = write_side
-        .collections()
-        .get_collection_dto(collection_id)
-        .await;
+    let collection_dto = write_side.get_collection_dto(collection_id).await;
 
     match collection_dto {
         Some(collection_dto) => Ok(Json(collection_dto)),
@@ -92,7 +89,7 @@ async fn create_collection(
     write_side: State<Arc<WriteSide>>,
     Json(json): Json<CreateCollectionOptionDTO>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = match write_side.collections().create_collection(json).await {
+    match write_side.create_collection(json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
             error!("Error creating collection: {}", e);
@@ -105,10 +102,7 @@ async fn create_collection(
             ));
         }
     };
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "collection_id": collection_id })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "collection_id": () }))))
 }
 
 #[endpoint(
@@ -122,9 +116,8 @@ async fn add_documents(
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
-    let collections = write_side.collections();
 
-    match collections.write(collection_id, json).await {
+    match write_side.write(collection_id, json).await {
         Ok(_) => {}
         Err(e) => {
             return Err((

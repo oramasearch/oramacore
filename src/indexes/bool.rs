@@ -23,13 +23,15 @@ impl BoolIndex {
         }
     }
 
-    pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: bool) {
+    pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: bool) -> Result<()> {
         let mut btree = self.maps.entry(field_id).or_default();
         if value {
             btree.true_docs.insert(doc_id);
         } else {
             btree.false_docs.insert(doc_id);
         }
+
+        Ok(())
     }
 
     pub fn filter(&self, field_id: FieldId, val: bool) -> Result<HashSet<DocumentId>> {
@@ -52,20 +54,22 @@ impl BoolIndex {
 mod tests {
     use std::collections::HashSet;
 
+    use anyhow::Result;
+
     use crate::{collection_manager::dto::FieldId, types::DocumentId};
 
     use super::BoolIndex;
 
     #[test]
-    fn test_bool_index_filter() {
+    fn test_bool_index_filter() -> Result<()> {
         let index = BoolIndex::new();
 
-        index.add(DocumentId(0), FieldId(0), true);
-        index.add(DocumentId(1), FieldId(0), false);
-        index.add(DocumentId(2), FieldId(0), true);
-        index.add(DocumentId(3), FieldId(0), false);
-        index.add(DocumentId(4), FieldId(0), true);
-        index.add(DocumentId(5), FieldId(0), false);
+        index.add(DocumentId(0), FieldId(0), true)?;
+        index.add(DocumentId(1), FieldId(0), false)?;
+        index.add(DocumentId(2), FieldId(0), true)?;
+        index.add(DocumentId(3), FieldId(0), false)?;
+        index.add(DocumentId(4), FieldId(0), true)?;
+        index.add(DocumentId(5), FieldId(0), false)?;
 
         let true_docs = index.filter(FieldId(0), true).unwrap();
         assert_eq!(
@@ -78,23 +82,27 @@ mod tests {
             false_docs,
             HashSet::from([DocumentId(1), DocumentId(3), DocumentId(5)])
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_bool_index_filter_unknown_field() {
+    fn test_bool_index_filter_unknown_field() -> Result<()> {
         let index = BoolIndex::new();
 
-        index.add(DocumentId(0), FieldId(0), true);
-        index.add(DocumentId(1), FieldId(0), false);
-        index.add(DocumentId(2), FieldId(0), true);
-        index.add(DocumentId(3), FieldId(0), false);
-        index.add(DocumentId(4), FieldId(0), true);
-        index.add(DocumentId(5), FieldId(0), false);
+        index.add(DocumentId(0), FieldId(0), true)?;
+        index.add(DocumentId(1), FieldId(0), false)?;
+        index.add(DocumentId(2), FieldId(0), true)?;
+        index.add(DocumentId(3), FieldId(0), false)?;
+        index.add(DocumentId(4), FieldId(0), true)?;
+        index.add(DocumentId(5), FieldId(0), false)?;
 
         let true_docs = index.filter(FieldId(1), true).unwrap();
         assert_eq!(true_docs, HashSet::from([]));
 
         let false_docs = index.filter(FieldId(1), false).unwrap();
         assert_eq!(false_docs, HashSet::from([]));
+
+        Ok(())
     }
 }

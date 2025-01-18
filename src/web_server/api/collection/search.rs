@@ -11,21 +11,21 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    collection_manager::{dto::SearchParams, sides::read::CollectionsReader},
+    collection_manager::{dto::SearchParams, sides::ReadSide},
     types::CollectionId,
 };
 
-pub fn apis(readers: Arc<CollectionsReader>) -> Router {
+pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(search())
         .add(dump_all())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
-        .with_state(readers)
+        .with_state(read_side)
 }
 
 #[endpoint(method = "POST", path = "/v0/reader/dump_all", description = "Dump")]
-async fn dump_all(state: State<Arc<CollectionsReader>>) -> impl IntoResponse {
-    match state.commit().await {
+async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
+    match read_side.commit().await {
         Ok(_) => {}
         Err(e) => {
             error!("Error dumping all collections: {}", e);
@@ -46,24 +46,12 @@ async fn dump_all(state: State<Arc<CollectionsReader>>) -> impl IntoResponse {
 #[axum::debug_handler]
 async fn search(
     Path(id): Path<String>,
-    state: State<Arc<CollectionsReader>>,
+    read_side: State<Arc<ReadSide>>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
-    let collection = state.get_collection(collection_id).await;
-
-    let collection = match collection {
-        Some(collection) => collection,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "collection not found" })),
-            ));
-        }
-    };
-
-    let output = collection.search(json).await;
+    let output = read_side.search(collection_id, json).await;
 
     match output {
         Ok(data) => Ok((StatusCode::OK, Json(data))),
