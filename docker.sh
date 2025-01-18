@@ -1,4 +1,4 @@
-docker build -t orama-core .
+docker build -t oramacore .
 
 docker run -it \
   -p 8080:8080 \
