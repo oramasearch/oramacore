@@ -118,4 +118,3 @@ pub fn start_calculate_embedding_loop(
         }
     });
 }
-

@@ -127,7 +127,9 @@ pub async fn build_orama(
             port: 50051,
             api_key: None,
         },
-        embedding_config.models.iter()
+        embedding_config
+            .models
+            .iter()
             .filter_map(|(name, model)| {
                 if let ModelConfig::Grpc(model) = model {
                     Some((name.clone(), model.clone()))

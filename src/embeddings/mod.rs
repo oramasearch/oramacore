@@ -228,7 +228,7 @@ impl EmbeddingService {
                         .as_ref()
                         .ok_or_else(|| anyhow!("FastEmbedRepo is missing"))?;
                     let model = repo.load_model(model_name.clone()).await?;
-    
+
                     LoadedModel::Fastembed(model)
                 }
                 Repo::HuggingFace => {
@@ -238,7 +238,7 @@ impl EmbeddingService {
                         .as_ref()
                         .ok_or_else(|| anyhow!("HuggingFaceRepo is missing"))?;
                     let model = repo.load_model(model_name.clone()).await?;
-    
+
                     LoadedModel::HuggingFace(model)
                 }
                 Repo::Grpc => {
@@ -247,9 +247,9 @@ impl EmbeddingService {
                         .ai_service
                         .as_ref()
                         .ok_or_else(|| anyhow!("GrpcRepo is missing"))?;
-    
+
                     let model = repo.load_model(model_name.clone()).await?;
-    
+
                     LoadedModel::Grpc(model)
                 }
             }

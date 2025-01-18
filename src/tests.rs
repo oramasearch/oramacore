@@ -9,10 +9,18 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    ai::grpc::GrpcModelConfig, build_orama, collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide}, connect_write_and_read_side, embeddings::{
+    ai::grpc::GrpcModelConfig,
+    build_orama,
+    collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide},
+    connect_write_and_read_side,
+    embeddings::{
         fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig},
         EmbeddingConfig, ModelConfig,
-    }, test_utils::generate_new_path, types::CollectionId, web_server::HttpConfig, OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig
+    },
+    test_utils::generate_new_path,
+    types::CollectionId,
+    web_server::HttpConfig,
+    OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
 };
 
 fn create_oramacore_config() -> OramacoreConfig {
@@ -1149,7 +1157,6 @@ async fn test_empty_term() -> Result<()> {
     Ok(())
 }
 
-
 // #[cfg(feature = "test-python")]
 
 #[tokio::test]
@@ -1159,12 +1166,10 @@ async fn test_vector_search_grpc() -> Result<()> {
     let mut config = create_oramacore_config();
     config.embeddings.models.insert(
         "BGESmall".to_string(),
-        ModelConfig::Grpc(
-            GrpcModelConfig {
-                dimensions: 384,
-                real_model_name: "BGESmall".to_string(),
-            },
-        )
+        ModelConfig::Grpc(GrpcModelConfig {
+            dimensions: 384,
+            real_model_name: "BGESmall".to_string(),
+        }),
     );
 
     let (write_side, read_side) = create(config).await?;
