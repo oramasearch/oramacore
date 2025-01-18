@@ -1157,8 +1157,7 @@ async fn test_empty_term() -> Result<()> {
     Ok(())
 }
 
-// #[cfg(feature = "test-python")]
-
+#[cfg(feature = "test-python")]
 #[tokio::test]
 async fn test_vector_search_grpc() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
