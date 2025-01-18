@@ -15,6 +15,10 @@ use crate::{
     capped_heap::CappedHeap,
     collection_manager::dto::{SearchParams, SearchResult, SearchResultHit, TokenScore},
     embeddings::EmbeddingService,
+    metrics::{
+        CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
+        COLLECTION_OPERATION_COUNTER,
+    },
     nlp::NLPService,
     types::{CollectionId, DocumentId},
 };
@@ -119,9 +123,20 @@ impl ReadSide {
     pub async fn update(&self, op: WriteOperation) -> Result<()> {
         match op {
             WriteOperation::CreateCollection { id } => {
+                COLLECTION_ADDED_COUNTER
+                    .create(CollectionAddedLabels {
+                        collection: id.0.clone(),
+                    })
+                    .increment_by_one();
                 self.collections.create_collection(id).await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
+                COLLECTION_OPERATION_COUNTER
+                    .create(CollectionOperationLabels {
+                        collection: collection_id.0.clone(),
+                    })
+                    .increment_by_one();
+
                 let collection = self
                     .collections
                     .get_collection(collection_id)

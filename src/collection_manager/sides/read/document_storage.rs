@@ -80,17 +80,6 @@ impl CommittedDiskDocumentStorage {
         Ok(result)
     }
 
-    fn get_total_documents(&self) -> Result<usize> {
-        let mut total = 0;
-        for entry in std::fs::read_dir(&self.path)? {
-            let entry = entry?;
-            if entry.file_type()?.is_file() {
-                total += 1;
-            }
-        }
-        Ok(total)
-    }
-
     fn add(&self, docs: Vec<(DocumentId, RawJSONDocument)>) -> Result<()> {
         for (doc_id, doc) in docs {
             let doc_path = self.path.join(format!("{}", doc_id.0));
@@ -174,16 +163,6 @@ impl DocumentStorage {
             .collect();
 
         Ok(result)
-    }
-
-    pub async fn get_total_documents(&self) -> Result<usize> {
-        let mut total = self.committed.get_total_documents()?;
-        let uncommitted = match self.uncommitted.read() {
-            std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => e.into_inner(),
-        };
-        total += uncommitted.len();
-        Ok(total)
     }
 
     pub fn commit(&self) -> Result<()> {

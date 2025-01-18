@@ -173,17 +173,6 @@ impl CollectionsWriter {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_writer_sync_send() {
-        fn assert_sync_send<T: Sync + Send>() {}
-        assert_sync_send::<CollectionsWriter>();
-    }
-}
-
 pub struct CollectionWriteLock<'guard> {
     lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
     id: CollectionId,
@@ -212,5 +201,16 @@ impl Deref for CollectionWriteLock<'_> {
         // safety: the collection contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_writer_sync_send() {
+        fn assert_sync_send<T: Sync + Send>() {}
+        assert_sync_send::<CollectionsWriter>();
     }
 }
