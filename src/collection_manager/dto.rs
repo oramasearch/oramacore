@@ -57,7 +57,7 @@ pub enum TypedField {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateCollectionOptionDTO {
-    pub id: String,
+    pub id: CollectionId,
     pub description: Option<String>,
     #[schema(inline)]
     pub language: Option<LanguageDTO>,
@@ -125,6 +125,7 @@ pub struct BoolFacetDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 
 pub enum FacetDefinition {
+    #[serde(untagged)]
     Number(#[schema(inline)] NumberFacetDefinition),
     #[serde(untagged)]
     Bool(#[schema(inline)] BoolFacetDefinition),
@@ -256,6 +257,7 @@ impl TryFrom<serde_json::Value> for SearchParams {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResultHit {
     pub id: String,
     pub score: f32,
@@ -263,12 +265,14 @@ pub struct SearchResultHit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct FacetResult {
     pub count: usize,
     pub values: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResult {
     pub hits: Vec<SearchResultHit>,
     pub count: usize,

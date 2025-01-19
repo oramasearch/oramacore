@@ -34,7 +34,7 @@ pub struct CollectionWriter {
     default_language: LanguageDTO,
     fields: DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>,
 
-    document_count: AtomicU64,
+    collection_document_count: AtomicU64,
 
     field_id_generator: AtomicU16,
     field_id_by_name: DashMap<String, FieldId>,
@@ -53,7 +53,7 @@ impl CollectionWriter {
             id: id.clone(),
             description,
             default_language,
-            document_count: Default::default(),
+            collection_document_count: Default::default(),
             fields: Default::default(),
             field_id_by_name: DashMap::new(),
             field_id_generator: AtomicU16::new(0),
@@ -66,7 +66,7 @@ impl CollectionWriter {
             id: self.id.clone(),
             description: self.description.clone(),
             document_count: self
-                .document_count
+                .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             fields: self
                 .fields
@@ -76,13 +76,13 @@ impl CollectionWriter {
         }
     }
 
-    pub(super) async fn process_new_document(
+    pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
         doc: Document,
         sender: Sender<WriteOperation>,
     ) -> Result<()> {
-        self.document_count
+        self.collection_document_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         sender
@@ -304,7 +304,7 @@ impl CollectionWriter {
                 })
                 .collect(),
             document_count: self
-                .document_count
+                .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             field_id_generator: self
                 .field_id_generator
@@ -360,7 +360,7 @@ impl CollectionWriter {
             };
             self.fields.insert(name, (value_type, indexer));
         }
-        self.document_count
+        self.collection_document_count
             .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
         self.field_id_generator = AtomicU16::new(dump.field_id_generator);
         self.field_id_by_name = dump.field_id_by_name.into_iter().collect();

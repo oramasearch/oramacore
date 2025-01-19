@@ -189,7 +189,16 @@ impl EmbeddingService {
             service.hugging_face_repo = Some(hf::HuggingFaceRepo::new(hugging_face, model_configs));
         }
 
-        debug_assert!(models.is_empty(), "Models should be empty");
+        let _ = models.remove("grpc");
+
+        if !models.is_empty() {
+            let models_without_provider: Vec<_> = models.into_keys().collect();
+
+            return Err(anyhow!(
+                "Some models ({:?}) are linked to a provider without the provider configuration",
+                models_without_provider,
+            ));
+        }
 
         for model_name in preload {
             service.load_model(model_name).await?;
@@ -210,45 +219,50 @@ impl EmbeddingService {
     }
 
     async fn load_model(&self, model_name: String) -> Result<Arc<LoadedModel>> {
-        let repo = match self.models_repo.get(&model_name) {
-            None => {
-                return Err(anyhow!("Model not found: {}", model_name));
+        let loaded_model = if let Some(repo) = self.models_repo.get(&model_name) {
+            match repo {
+                Repo::FastEmbed => {
+                    debug!("Loading FastEmbed model: {}", model_name);
+                    let repo = self
+                        .fastembed_repo
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("FastEmbedRepo is missing"))?;
+                    let model = repo.load_model(model_name.clone()).await?;
+
+                    LoadedModel::Fastembed(model)
+                }
+                Repo::HuggingFace => {
+                    debug!("Loading HuggingFace model: {}", model_name);
+                    let repo = self
+                        .hugging_face_repo
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("HuggingFaceRepo is missing"))?;
+                    let model = repo.load_model(model_name.clone()).await?;
+
+                    LoadedModel::HuggingFace(model)
+                }
+                Repo::Grpc => {
+                    debug!("Loading Grpc model: {}", model_name);
+                    let repo = self
+                        .ai_service
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("GrpcRepo is missing"))?;
+
+                    let model = repo.load_model(model_name.clone()).await?;
+
+                    LoadedModel::Grpc(model)
+                }
             }
-            Some(repo) => repo,
-        };
+        } else {
+            debug!("Loading Grpc model: {}", model_name);
+            let repo = self
+                .ai_service
+                .as_ref()
+                .ok_or_else(|| anyhow!("GrpcRepo is missing"))?;
 
-        let loaded_model = match repo {
-            Repo::FastEmbed => {
-                debug!("Loading FastEmbed model: {}", model_name);
-                let repo = self
-                    .fastembed_repo
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("FastEmbedRepo is missing"))?;
-                let model = repo.load_model(model_name.clone()).await?;
+            let model = repo.load_model(model_name.clone()).await?;
 
-                LoadedModel::Fastembed(model)
-            }
-            Repo::HuggingFace => {
-                debug!("Loading HuggingFace model: {}", model_name);
-                let repo = self
-                    .hugging_face_repo
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("HuggingFaceRepo is missing"))?;
-                let model = repo.load_model(model_name.clone()).await?;
-
-                LoadedModel::HuggingFace(model)
-            }
-            Repo::Grpc => {
-                debug!("Loading Grpc model: {}", model_name);
-                let repo = self
-                    .ai_service
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("GrpcRepo is missing"))?;
-
-                let model = repo.load_model(model_name.clone()).await?;
-
-                LoadedModel::Grpc(model)
-            }
+            LoadedModel::Grpc(model)
         };
 
         let loaded_model = Arc::new(loaded_model);
@@ -302,39 +316,4 @@ mod tests {
 
         assert_eq!(models.len(), 3);
     }
-
-    /*
-    #[tokio::test]
-    async fn test_embeddings_calculate_embedding() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        // We don't want to download the model every time we run the test
-        // So we use a standard temp directory, without any cleanup logic
-        let temp_dir = std::env::temp_dir();
-
-        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            cache_path: temp_dir.clone(),
-            hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
-        })
-        .await
-        .expect("Failed to initialize the EmbeddingService");
-
-        let model = embedding_service.get_model(OramaModel::Fastembed(OramaFastembedModel::GTESmall))
-            .await
-            .expect("Failed to get model");
-
-        let output = model
-            .embed(
-                vec!["Hello, world!".to_string()],
-                Some(1),
-            )
-            .expect("Failed to embed text");
-
-        assert_eq!(output.len(), 1);
-        assert_eq!(output[0].len(), OramaFastembedModel::GTESmall.dimensions());
-
-        assert_eq!(embedding_service.loaded_models.len(), 1);
-    }
-    */
 }

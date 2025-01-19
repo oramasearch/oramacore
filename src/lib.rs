@@ -1,4 +1,4 @@
-use std::{default, sync::Arc};
+use std::sync::Arc;
 
 use ai::{
     grpc::{GrpcRepo, GrpcRepoConfig},
@@ -6,11 +6,9 @@ use ai::{
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    read::{CollectionsReader, IndexesConfig},
-    write::WriteOperation,
-    CollectionsWriterConfig, WriteSide,
+    CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation, WriteSide,
 };
-use embeddings::{EmbeddingConfig, EmbeddingService};
+use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
@@ -40,6 +38,9 @@ mod file_utils;
 mod merger;
 
 pub mod ai;
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
@@ -80,31 +81,37 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
         None
     };
 
-    let (writer, reader, mut receiver) = build_orama(config.clone()).await?;
+    let (write_side, read_side, receiver) = build_orama(config.clone()).await?;
 
-    let collections_reader = reader.clone().unwrap();
-    tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
-            collections_reader.update(op).await.expect("OUCH!");
-        }
-    });
+    connect_write_and_read_side(receiver, read_side.clone().unwrap());
 
     info!(
         "Starting web server on {}:{}",
         config.http.host, config.http.port
     );
 
-    let web_server = WebServer::new(writer, reader, prometheus_hadler);
+    let web_server = WebServer::new(write_side, read_side, prometheus_hadler);
     web_server.start(config.http).await?;
 
     Ok(())
+}
+
+pub fn connect_write_and_read_side(
+    mut receiver: Receiver<WriteOperation>,
+    read_side: Arc<ReadSide>,
+) {
+    tokio::spawn(async move {
+        while let Ok(op) = receiver.recv().await {
+            read_side.update(op).await.expect("OUCH!");
+        }
+    });
 }
 
 pub async fn build_orama(
     config: OramacoreConfig,
 ) -> Result<(
     Option<Arc<WriteSide>>,
-    Option<Arc<CollectionsReader>>,
+    Option<Arc<ReadSide>>,
     Receiver<WriteOperation>,
 )> {
     let OramacoreConfig {
@@ -120,7 +127,17 @@ pub async fn build_orama(
             port: 50051,
             api_key: None,
         },
-        Default::default(),
+        embedding_config
+            .models
+            .iter()
+            .filter_map(|(name, model)| {
+                if let ModelConfig::Grpc(model) = model {
+                    Some((name.clone(), model.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect(),
     );
 
     let ai_service = AiService::new(grpc_repo);
@@ -149,15 +166,12 @@ pub async fn build_orama(
         embedding_service.clone(),
     );
 
-    write_side
-        .load()
-        .await
-        .context("Cannot load collections writer")?;
+    write_side.load().await.context("Cannot load write side")?;
 
     let nlp_service = Arc::new(NLPService::new());
     let mut collections_reader =
-        CollectionsReader::try_new(embedding_service, nlp_service, reader_side.config)
-            .context("Cannot create collections reader")?;
+        ReadSide::try_new(embedding_service, nlp_service, reader_side.config)
+            .context("Cannot create read side")?;
 
     collections_reader
         .load()

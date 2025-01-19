@@ -1,26 +1,14 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
-    collection_manager::sides::{
-        document_storage::{DocumentStorage, DocumentStorageConfig},
-        read::collection::CommitConfig,
-        CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
-        WriteOperation,
-    },
-    embeddings::EmbeddingService,
-    file_utils::list_directory_in_path,
-    metrics::{
-        CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
-        COLLECTION_OPERATION_COUNTER,
-    },
-    nlp::NLPService,
-    types::CollectionId,
+    collection_manager::sides::read::collection::CommitConfig, embeddings::EmbeddingService,
+    file_utils::list_directory_in_path, nlp::NLPService, types::CollectionId,
 };
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, info, instrument};
 
 use super::collection::CollectionReader;
 
@@ -34,7 +22,6 @@ pub struct CollectionsReader {
     embedding_service: Arc<EmbeddingService>,
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
-    document_storage: Arc<DocumentStorage>,
     indexes_config: IndexesConfig,
 }
 impl CollectionsReader {
@@ -43,114 +30,20 @@ impl CollectionsReader {
         nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
-        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
-            data_dir: indexes_config.data_dir.join("docs"),
-        })
-        .context("Cannot create document storage")?;
-
-        let document_storage = Arc::new(document_storage);
-
         Ok(Self {
             embedding_service,
             nlp_service,
 
             collections: Default::default(),
-            document_storage,
             indexes_config,
         })
-    }
-
-    pub async fn update(&self, op: WriteOperation) -> Result<()> {
-        match op {
-            WriteOperation::Generic(GenericWriteOperation::CreateCollection { id }) => {
-                info!("CreateCollection {:?}", id);
-                COLLECTION_ADDED_COUNTER
-                    .create(CollectionAddedLabels {
-                        collection: id.0.to_string(),
-                    })
-                    .increment_by_one();
-
-                let collection_reader = CollectionReader::try_new(
-                    id.clone(),
-                    self.embedding_service.clone(),
-                    self.nlp_service.clone(),
-                    Arc::clone(&self.document_storage),
-                    self.indexes_config.clone(),
-                )?;
-
-                self.collections.write().await.insert(id, collection_reader);
-            }
-            WriteOperation::Collection(collection_id, coll_op) => {
-                let collections = self.collections.read().await;
-
-                COLLECTION_OPERATION_COUNTER
-                    .create(CollectionOperationLabels {
-                        collection: collection_id.0.to_string(),
-                    })
-                    .increment_by_one();
-
-                let collection_reader = match collections.get(&collection_id) {
-                    Some(collection_reader) => collection_reader,
-                    None => {
-                        error!(target: "Collection not found", ?collection_id);
-                        return Err(anyhow::anyhow!("Collection not found"));
-                    }
-                };
-
-                match coll_op {
-                    CollectionWriteOperation::CreateField {
-                        field_id,
-                        field_name,
-                        field,
-                    } => {
-                        collection_reader
-                            .create_field(field_id, field_name, field)
-                            .await
-                            .context("Cannot create field")?;
-                    }
-                    CollectionWriteOperation::InsertDocument { doc_id, doc } => {
-                        collection_reader
-                            .insert_document(doc_id, doc)
-                            .await
-                            .context("cannot insert document")?;
-                    }
-                    CollectionWriteOperation::Index(doc_id, field_id, field_op) => match field_op {
-                        DocumentFieldIndexOperation::IndexBoolean { value } => {
-                            collection_reader
-                                .index_boolean(doc_id, field_id, value)
-                                .context("cannot index boolean")?;
-                        }
-                        DocumentFieldIndexOperation::IndexNumber { value } => {
-                            collection_reader
-                                .index_number(doc_id, field_id, value)
-                                .context("cannot index number")?;
-                        }
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length,
-                            terms,
-                        } => {
-                            collection_reader
-                                .index_string(doc_id, field_id, field_length, terms)
-                                .context("cannot index string")?;
-                        }
-                        DocumentFieldIndexOperation::IndexEmbedding { value } => {
-                            collection_reader
-                                .index_embedding(doc_id, field_id, value)
-                                .context("cannot index embedding")?;
-                        }
-                    },
-                }
-            }
-        };
-
-        Ok(())
     }
 
     pub fn get_embedding_service(&self) -> Arc<EmbeddingService> {
         self.embedding_service.clone()
     }
 
-    pub async fn get_collection<'s, 'coll>(
+    pub(super) async fn get_collection<'s, 'coll>(
         &'s self,
         id: CollectionId,
     ) -> Option<CollectionReadLock<'coll>>
@@ -162,15 +55,9 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub async fn load(&mut self) -> Result<()> {
+    pub(super) async fn load(&mut self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
-
-        let document_storage = Arc::get_mut(&mut self.document_storage)
-            .expect("`load` should be called at the beginning of the program");
-        document_storage
-            .load()
-            .context("Cannot load document storage")?;
 
         match std::fs::exists(data_dir) {
             Err(e) => {
@@ -218,7 +105,6 @@ impl CollectionsReader {
                 collection_id.clone(),
                 self.embedding_service.clone(),
                 self.nlp_service.clone(),
-                self.document_storage.clone(),
                 self.indexes_config.clone(),
             )?;
 
@@ -237,7 +123,7 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub async fn commit(&self) -> Result<()> {
+    pub(super) async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
 
         match std::fs::exists(data_dir) {
@@ -272,9 +158,21 @@ impl CollectionsReader {
             })?;
         }
 
-        self.document_storage
-            .commit()
-            .context("Cannot commit document storage")?;
+        Ok(())
+    }
+
+    pub(super) async fn create_collection(&self, id: CollectionId) -> Result<()> {
+        info!("Creating collection {:?}", id);
+
+        let collection = CollectionReader::try_new(
+            id.clone(),
+            self.embedding_service.clone(),
+            self.nlp_service.clone(),
+            self.indexes_config.clone(),
+        )?;
+
+        let mut guard = self.collections.write().await;
+        guard.insert(id, collection);
 
         Ok(())
     }

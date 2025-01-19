@@ -1,7 +1,7 @@
 use anyhow::Result;
 use oramacore::collection_manager::dto::{CreateCollectionOptionDTO, SearchParams};
-use oramacore::collection_manager::sides::read::{CollectionsReader, IndexesConfig};
 use oramacore::collection_manager::sides::{CollectionsWriterConfig, WriteSide};
+use oramacore::collection_manager::sides::{IndexesConfig, ReadSide};
 use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
 use oramacore::types::{CollectionId, DocumentList};
 use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
@@ -20,7 +20,7 @@ pub fn generate_new_path() -> PathBuf {
     tmp_dir.path().to_path_buf()
 }
 
-async fn start_server() -> Result<(Arc<WriteSide>, Arc<CollectionsReader>)> {
+async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
     let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
@@ -98,9 +98,8 @@ async fn run_tests() {
     let collection_id = CollectionId("collection-test".to_string());
 
     writer
-        .collections()
         .create_collection(CreateCollectionOptionDTO {
-            id: collection_id.0.clone(),
+            id: collection_id.clone(),
             description: None,
             language: None,
             typed_fields: Default::default(),
@@ -109,22 +108,22 @@ async fn run_tests() {
         .unwrap();
 
     writer
-        .collections()
         .write(collection_id.clone(), generate_test_data())
         .await
         .unwrap();
 
     reader.commit().await.unwrap();
 
-    let collection = reader.get_collection(collection_id.clone()).await.unwrap();
     let param: SearchParams = json!({
         "term": "game love",
     })
     .try_into()
     .unwrap();
     for _ in 0..10_000 {
-        collection.search(param.clone()).await.unwrap();
-        // println!("Result {:#?}", r)
+        reader
+            .search(collection_id.clone(), param.clone())
+            .await
+            .unwrap();
     }
 }
 

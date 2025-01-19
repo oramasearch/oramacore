@@ -20,7 +20,7 @@ use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
+    collection_manager::{dto::FieldId, sides::InsertStringTerms},
     file_utils::BufferedFile,
     types::DocumentId,
 };
@@ -365,7 +365,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        collection_manager::sides::write::{Term, TermStringField},
+        collection_manager::sides::{Term, TermStringField},
         test_utils::{create_string_index, generate_new_path},
     };
 

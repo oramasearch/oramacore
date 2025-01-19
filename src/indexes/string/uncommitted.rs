@@ -8,7 +8,7 @@ use ptrie::Trie;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::write::{InsertStringTerms, TermStringField},
+    collection_manager::sides::{InsertStringTerms, TermStringField},
     types::DocumentId,
 };
 
@@ -409,7 +409,7 @@ impl Drop for DataToCommit<'_> {
 mod tests {
     use serde_json::json;
 
-    use crate::collection_manager::sides::write::Term;
+    use crate::collection_manager::sides::Term;
     use crate::indexes::string::scorer::BM25Scorer;
     use crate::test_utils::create_uncommitted_string_field_index;
 
