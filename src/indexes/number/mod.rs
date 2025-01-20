@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use axum_openapi3::utoipa;
@@ -11,8 +14,7 @@ use uncommitted::UncommittedNumberFieldIndex;
 
 use crate::{
     collection_manager::{dto::FieldId, sides::Offset},
-    file_utils::BufferedFile,
-    offset_storage::OffsetStorage,
+    file_utils::{create_if_not_exists, BufferedFile},
     types::DocumentId,
 };
 
@@ -28,7 +30,6 @@ pub struct NumberIndexConfig {}
 pub struct NumberIndex {
     uncommitted: DashMap<FieldId, UncommittedNumberFieldIndex>,
     committed: DashMap<FieldId, CommittedNumberFieldIndex>,
-    offset_storage: OffsetStorage,
 }
 
 impl NumberIndex {
@@ -36,7 +37,6 @@ impl NumberIndex {
         Ok(Self {
             uncommitted: Default::default(),
             committed: Default::default(),
-            offset_storage: Default::default(),
         })
     }
 
@@ -51,10 +51,9 @@ impl NumberIndex {
             "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
             doc_id, field_id, value
         );
-        self.offset_storage.set_offset(offset);
 
         let uncommitted = self.uncommitted.entry(field_id).or_default();
-        uncommitted.insert(value, doc_id)?;
+        uncommitted.insert(offset, value, doc_id)?;
 
         Ok(())
     }
@@ -75,8 +74,9 @@ impl NumberIndex {
 
     #[instrument(skip(self, data_dir))]
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        std::fs::create_dir_all(&data_dir)
-            .context("Cannot create data directory for number index")?;
+        create_if_not_exists(&data_dir).context("Cannot create data directory for number index")?;
+
+        let mut fields = HashMap::new();
 
         let all_fields = self
             .uncommitted
@@ -87,25 +87,34 @@ impl NumberIndex {
 
         info!("Committing number index: {:?}", all_fields);
 
-        BufferedFile::create(data_dir.join("info.json"))
-            .context("Cannot create info.json")?
-            .write_json_data(&all_fields)
-            .context("Cannot serialize into info.json")?;
-
         for field_id in all_fields {
             let uncommitted = self.uncommitted.get(&field_id);
-            let uncommitted = match uncommitted {
-                Some(uncommitted) => uncommitted,
-                None => {
-                    debug!(?field_id, "No uncommitted data for field");
-                    continue;
-                }
-            };
-
-            let data = uncommitted.take()?;
             let committed = self.committed.get(&field_id);
 
-            let base_dir = data_dir.join(format!("{}", field_id.0));
+            fields.insert(field_id, committed.as_ref().map(|c| c.current_offset()));
+
+            let uncommitted: dashmap::mapref::one::Ref<'_, FieldId, UncommittedNumberFieldIndex> =
+                match uncommitted {
+                    Some(uncommitted) => uncommitted,
+                    None => {
+                        info!(?field_id, "No uncommitted data for field");
+                        continue;
+                    }
+                };
+
+            let data = uncommitted.take()?;
+
+            if data.is_empty() {
+                info!(?field_id, "No uncommitted data for field");
+                continue;
+            }
+
+            let current_offset = data.current_offset();
+            fields.insert(field_id, Some(current_offset));
+
+            let base_dir = data_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", current_offset.0));
 
             info!(
                 ?field_id,
@@ -116,9 +125,9 @@ impl NumberIndex {
 
             let new_committed_number = if let Some(committed) = committed {
                 let merged = merge(data.into_iter(), committed.iter());
-                CommittedNumberFieldIndex::from_iter(merged, base_dir.clone())
+                CommittedNumberFieldIndex::from_iter(current_offset, merged, base_dir.clone())
             } else {
-                CommittedNumberFieldIndex::from_iter(data, base_dir.clone())
+                CommittedNumberFieldIndex::from_iter(current_offset, data, base_dir.clone())
             }?;
 
             new_committed_number.commit(base_dir)?;
@@ -126,24 +135,39 @@ impl NumberIndex {
             self.committed.insert(field_id, new_committed_number);
         }
 
+        let number_index_info = NumberIndexInfo {
+            field_infos: fields
+                .into_iter()
+                .filter_map(|(k, v)| v.map(|v| (k, v)))
+                .collect(),
+        };
+        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
+            .context("Cannot create info.json")?
+            .write_json_data(&number_index_info)
+            .context("Cannot serialize into info.json")?;
+
         Ok(())
     }
 
     #[instrument(skip(self, data_dir))]
     pub fn load(&mut self, data_dir: PathBuf) -> Result<()> {
-        let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
+        let number_index_info: NumberIndexInfo = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
 
-        info!("Loading number index: {:?}", field_ids);
+        info!("Loading number index: {:?}", number_index_info.field_infos);
 
-        for field_id in field_ids {
-            let field_dir = data_dir.join(format!("{}", field_id.0));
+        for (field_id, offset) in number_index_info.field_infos {
+            let field_dir = data_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
             let committed =
-                CommittedNumberFieldIndex::load(field_dir).context("Cannot load field")?;
+                CommittedNumberFieldIndex::load(offset, field_dir).context("Cannot load field")?;
 
             self.committed.insert(field_id, committed);
+            self.uncommitted
+                .insert(field_id, UncommittedNumberFieldIndex::new(offset));
         }
 
         Ok(())
@@ -164,6 +188,11 @@ pub enum NumberFilter {
     LessThanOrEqual(#[schema(inline)] Number),
     #[serde(rename = "between")]
     Between(#[schema(inline)] (Number, Number)),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NumberIndexInfo {
+    field_infos: HashMap<FieldId, Offset>,
 }
 
 #[cfg(test)]
@@ -277,6 +306,8 @@ mod tests {
 
     #[test]
     fn test_number_commit() {
+        let data_dir = generate_new_path();
+
         let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
 
         index
@@ -306,8 +337,9 @@ mod tests {
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
 
-        index.commit(generate_new_path()).unwrap();
+        index.commit(data_dir.clone()).unwrap();
 
+        // We can continue to search after commit
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
             .unwrap();
@@ -315,110 +347,69 @@ mod tests {
             output,
             HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
         );
-    }
 
-    #[test]
-    fn test_indexes_number_save_and_load_from_fs() -> Result<()> {
-        let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
-
-        let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u64), FieldId(0))));
-        for (offset, (number, (doc_id, field_id))) in iter.enumerate() {
-            index.add(Offset(offset as u64), doc_id, field_id, number)?;
-        }
-
+        // And insert
+        index
+            .add(Offset(7), DocumentId(6), FieldId(0), 2.into())
+            .unwrap();
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
             .unwrap();
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
-
-        index.commit(generate_new_path())?;
-
-        let output = index
-            .filter(FieldId(0), NumberFilter::Equal(2.into()))
-            .unwrap();
-        assert_eq!(output, HashSet::from_iter(vec![DocumentId(2)]));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_indexes_number_commit_load() -> Result<()> {
-        let data: Vec<(_, HashSet<_>)> = vec![
-            (Number::I32(0), HashSet::from_iter([DocumentId(0)])),
-            (Number::I32(1), HashSet::from_iter([DocumentId(1)])),
-            (Number::I32(2), HashSet::from_iter([DocumentId(2)])),
-            (Number::I32(3), HashSet::from_iter([DocumentId(3)])),
-            (Number::I32(4), HashSet::from_iter([DocumentId(4)])),
-            (Number::I32(5), HashSet::from_iter([DocumentId(5)])),
-            (Number::I32(6), HashSet::from_iter([DocumentId(6)])),
-            (Number::I32(7), HashSet::from_iter([DocumentId(7)])),
-            (Number::I32(8), HashSet::from_iter([DocumentId(8)])),
-            (Number::I32(9), HashSet::from_iter([DocumentId(9)])),
-        ];
-        let field_id = FieldId(0);
-
-        let index = NumberIndex::try_new(NumberIndexConfig {})?;
-        for (offset, d) in data.into_iter().enumerate() {
-            for doc_id in d.1 {
-                index.add(Offset(offset as u64), doc_id, field_id, d.0)?;
-            }
-        }
-
-        // Query on uncommitted data
-        let output = index.filter(
-            field_id,
-            NumberFilter::Between((Number::I32(-1), Number::I32(10))),
-        )?;
         assert_eq!(
             output,
-            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5), DocumentId(6)])
+        );
+
+        // Anyway, uncommitted data are lost.
+        let mut index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
+        index.load(data_dir.clone()).unwrap();
+
+        // So, after loading, we can still search on old data
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5)])
+        );
+
+        // We can insert data
+        index
+            .add(Offset(7), DocumentId(6), FieldId(0), 2.into())
+            .unwrap();
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
+        assert_eq!(
+            output,
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5), DocumentId(6)])
         );
 
         let data_dir = generate_new_path();
-        index.commit(data_dir.clone())?;
 
-        let mut after = NumberIndex::try_new(NumberIndexConfig {})?;
-        after.load(data_dir)?;
+        // Commit again
+        index.commit(data_dir.clone()).unwrap();
 
-        // Query on committed data
-        let output = after.filter(
-            field_id,
-            NumberFilter::Between((Number::I32(-1), Number::I32(10))),
-        )?;
+        // The document 6 is still there
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
         assert_eq!(
             output,
-            HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5), DocumentId(6)])
         );
 
-        after.add(Offset(10), DocumentId(10), field_id, Number::I32(10))?;
-        after.add(Offset(11), DocumentId(11), field_id, Number::I32(11))?;
+        // Reload again the index
+        let mut index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
+        index.load(data_dir.clone()).unwrap();
 
-        // Query on committed & uncommitted data
-        let output = after.filter(
-            field_id,
-            NumberFilter::Between((Number::I32(-1), Number::I32(12))),
-        )?;
+        // The document 6 is still there
+        let output = index
+            .filter(FieldId(0), NumberFilter::Equal(2.into()))
+            .unwrap();
         assert_eq!(
             output,
-            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
+            HashSet::from_iter(vec![DocumentId(2), DocumentId(5), DocumentId(6)])
         );
-
-        let new_data_dir = generate_new_path();
-        after.commit(new_data_dir.clone())?;
-
-        let mut after = NumberIndex::try_new(NumberIndexConfig {})?;
-        after.load(new_data_dir)?;
-
-        // Query on committed (and merged) data
-        let output = after.filter(
-            field_id,
-            NumberFilter::Between((Number::I32(-1), Number::I32(12))),
-        )?;
-        assert_eq!(
-            output,
-            HashSet::from_iter((0..12).map(|i| DocumentId(i as u64)))
-        );
-
-        Ok(())
     }
 }

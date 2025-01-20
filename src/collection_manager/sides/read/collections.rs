@@ -1,18 +1,23 @@
-use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use crate::{
-    collection_manager::sides::{read::collection::CommitConfig, Offset},
+    collection_manager::sides::Offset,
     embeddings::EmbeddingService,
-    file_utils::list_directory_in_path,
+    file_utils::{create_if_not_exists, BufferedFile},
     nlp::NLPService,
     offset_storage::OffsetStorage,
     types::CollectionId,
 };
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument, warn};
 
 use super::collection::CollectionReader;
 
@@ -67,47 +72,27 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
-        match std::fs::exists(data_dir) {
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
+
+        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot deserialize info.json file")
+        {
+            Ok(info) => info,
             Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Error while checking if the data directory exists: {:?}",
+                warn!(
+                    "Cannot read info.json file: {:?}. Skip loading collections",
                     e
-                ));
-            }
-            Ok(true) => {
-                debug!("Data directory exists.");
-            }
-            Ok(false) => {
-                info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-            }
-        }
-
-        let base_dir_for_collections = data_dir.join("collections");
-
-        let collection_dirs = list_directory_in_path(&base_dir_for_collections)
-            .context("Cannot read collection list from disk")?;
-
-        let collection_dirs = match collection_dirs {
-            Some(collection_dirs) => collection_dirs,
-            None => {
-                info!(
-                    "No collections found in data directory {:?}. Skipping load.",
-                    data_dir
                 );
                 return Ok(());
             }
         };
 
-        for collection_dir in collection_dirs {
+        let base_dir_for_collections = data_dir.join("collections");
+
+        for collection_id in collections_info.collection_ids {
+            let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
-
-            let file_name = collection_dir
-                .file_name()
-                .expect("File name is always given at this point");
-            let file_name: String = file_name.to_string_lossy().into();
-
-            let collection_id = CollectionId(file_name);
 
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),
@@ -134,37 +119,37 @@ impl CollectionsReader {
     pub(super) async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
 
-        match std::fs::exists(data_dir) {
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Error while checking if the data directory exists: {:?}",
-                    e
-                ));
-            }
-            Ok(true) => {
-                debug!("Data directory exists.");
-            }
-            Ok(false) => {
-                info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-            }
-        };
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
         let col = self.collections.read().await;
         let col = &*col;
 
         let collections_dir = data_dir.join("collections");
-        std::fs::create_dir_all(&collections_dir)
-            .context("Cannot create 'collections' directory")?;
+        create_if_not_exists(&collections_dir).context("Cannot create 'collections' directory")?;
+
+        let collection_ids: Vec<_> = col.keys().cloned().collect();
 
         for (id, reader) in col {
             info!("Committing collection {:?}", id);
 
-            reader.commit(CommitConfig {
-                folder_to_commit: collections_dir.join(&id.0),
-                epoch: 0,
-            })?;
+            let collection_dir = collections_dir.join(&id.0);
+
+            create_if_not_exists(&collection_dir)
+                .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
+
+            reader.commit(collection_dir)?;
+
+            info!("Collection {:?} committed", id);
         }
+
+        let collections_info = CollectionsInfo {
+            collection_ids: collection_ids.into_iter().collect(),
+        };
+
+        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&collections_info)
+            .context("Cannot serialize info.json file")?;
 
         Ok(())
     }
@@ -217,4 +202,9 @@ impl Deref for CollectionReadLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+#[derive(Deserialize, Serialize)]
+struct CollectionsInfo {
+    collection_ids: HashSet<CollectionId>,
 }

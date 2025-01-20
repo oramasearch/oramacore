@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::collection_manager::sides::Offset;
 
@@ -15,11 +15,13 @@ impl OffsetStorage {
     }
 
     pub fn set_offset(&self, offset: Offset) {
-        self.offset
-            .store(offset.0, std::sync::atomic::Ordering::SeqCst);
+        self.offset.store(offset.0, Ordering::SeqCst);
     }
 
     pub fn get_offset(&self) -> Offset {
-        Offset(self.offset.load(std::sync::atomic::Ordering::SeqCst))
+        // Don't change `SeqCst`: it's important to have a consistent view of the offset
+        // Commonly this `get_offset` is called having a lock,
+        // so it's important the CPU doens't reorder the instructions
+        Offset(self.offset.load(Ordering::SeqCst))
     }
 }

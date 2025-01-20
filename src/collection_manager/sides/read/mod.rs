@@ -5,7 +5,6 @@ mod document_storage;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
-pub use collection::CommitConfig;
 use collections::CollectionsReader;
 pub use collections::IndexesConfig;
 use document_storage::{DocumentStorage, DocumentStorageConfig};

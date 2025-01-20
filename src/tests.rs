@@ -17,7 +17,7 @@ use crate::{
         EmbeddingConfig, ModelConfig,
     },
     test_utils::generate_new_path,
-    types::CollectionId,
+    types::{CollectionId, DocumentList},
     web_server::HttpConfig,
     OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
 };
@@ -68,33 +68,23 @@ async fn test_simple_text_search() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "name": "John Doe",
-                }),
-                json!({
-                    "id": "2",
-                    "name": "Jane Doe",
-                }),
-            ]
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "1",
+                "name": "John Doe",
+            }),
+            json!({
+                "id": "2",
+                "name": "Jane Doe",
+            }),
+        ],
+    )
+    .await?;
 
     let result = read_side
         .search(
@@ -138,16 +128,7 @@ async fn test_filter_on_unknown_field() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
-            json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+    create_collection(write_side.clone(), collection_id.clone()).await?;
 
     let result = read_side
         .search(
@@ -177,33 +158,22 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "name": "John Doe",
-                }),
-                json!({
-                    "id": "2",
-                    "name": "Jane Doe",
-                }),
-            ]
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "1",
+                "name": "John Doe",
+            }),
+            json!({
+                "id": "2",
+                "name": "Jane Doe",
+            }),
+        ],
+    )
+    .await?;
 
     let result = read_side
         .search(
@@ -234,33 +204,22 @@ async fn test_commit_and_load() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "name": "John Doe",
-                }),
-                json!({
-                    "id": "2",
-                    "name": "Jane Doe",
-                }),
-            ]
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "1",
+                "name": "John Doe",
+            }),
+            json!({
+                "id": "2",
+                "name": "Jane Doe",
+            }),
+        ],
+    )
+    .await?;
 
     let before_commit_result = read_side
         .search(
@@ -330,14 +289,7 @@ async fn test_collection_id_already_exists() -> Result<()> {
     let (write_side, _) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
-            json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
+    create_collection(write_side.clone(), collection_id.clone()).await?;
 
     let output = write_side
         .create_collection(
@@ -364,14 +316,7 @@ async fn test_get_collections() -> Result<()> {
         .map(|i| format!("my-test-collection-{}", i))
         .collect();
     for id in &collection_ids {
-        write_side
-            .create_collection(
-                json!({
-                    "id": id.clone(),
-                })
-                .try_into()?,
-            )
-            .await?;
+        create_collection(write_side.clone(), CollectionId(id.clone())).await?;
     }
 
     let collections = write_side.list_collections().await;
@@ -389,33 +334,22 @@ async fn test_search_documents_order() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "text": "This is a long text with a lot of words",
-                }),
-                json!({
-                    "id": "2",
-                    "text": "This is a smaller text",
-                }),
-            ]
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "1",
+                "text": "This is a long text with a lot of words",
+            }),
+            json!({
+                "id": "2",
+                "text": "This is a smaller text",
+            }),
+        ],
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -442,32 +376,18 @@ async fn test_search_documents_limit() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..100).map(|i| {
             json!({
-                "id": collection_id.0.clone(),
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
             })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                    })
-                    .try_into()
-                })
-                .collect::<Result<Vec<_>>>()?
-                .into(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+        }),
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -502,33 +422,19 @@ async fn test_filter_number() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..100).map(|i| {
             json!({
-                "id": collection_id.0.clone(),
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i,
             })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                        "number": i,
-                    })
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+        }),
+    )
+    .await?;
 
     // EQ
 
@@ -659,33 +565,19 @@ async fn test_facets_number() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..100).map(|i| {
             json!({
-                "id": collection_id.0.clone(),
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i,
             })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                        "number": i,
-                    })
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+        }),
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -760,33 +652,19 @@ async fn test_filter_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..100).map(|i| {
             json!({
-                "id": collection_id.0.clone(),
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "bool": i % 2 == 0,
             })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                        "bool": i % 2 == 0,
-                    })
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+        }),
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -836,33 +714,19 @@ async fn test_facets_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..100).map(|i| {
             json!({
-                "id": collection_id.0.clone(),
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "bool": i % 2 == 0,
             })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            (0..100)
-                .map(|i| {
-                    json!({
-                        "id": i.to_string(),
-                        "text": "text ".repeat(i + 1),
-                        "bool": i % 2 == 0,
-                    })
-                })
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+        }),
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -901,46 +765,34 @@ async fn test_facets_should_based_on_term() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "text": "text",
-                    "bool": true,
-                    "number": 1,
-                }),
-                json!({
-                    "id": "2",
-                    "text": "text text",
-                    "bool": false,
-                    "number": 2,
-                }),
-                // This document doens't match the term
-                // so it should not be counted in the facets
-                json!({
-                    "id": "3",
-                    "text": "another",
-                    "bool": true,
-                    "number": 1,
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "1",
+                "text": "text",
+                "bool": true,
+                "number": 1,
+            }),
+            json!({
+                "id": "2",
+                "text": "text text",
+                "bool": false,
+                "number": 2,
+            }),
+            // This document doens't match the term
+            // so it should not be counted in the facets
+            json!({
+                "id": "3",
+                "text": "another",
+                "bool": true,
+                "number": 1,
+            }),
+        ],
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -1031,29 +883,25 @@ async fn test_vector_search() -> Result<()> {
 
     sleep(Duration::from_millis(100)).await;
 
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "text": "The cat is sleeping on the table.",
-                }),
-                json!({
-                    "id": "2",
-                    "text": "A cat rests peacefully on the sofa.",
-                }),
-                json!({
-                    "id": "3",
-                    "text": "The dog is barking loudly in the yard.",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(500)).await;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
+            json!({
+                "id": "1",
+                "text": "The cat is sleeping on the table.",
+            }),
+            json!({
+                "id": "2",
+                "text": "A cat rests peacefully on the sofa.",
+            }),
+            json!({
+                "id": "3",
+                "text": "The dog is barking loudly in the yard.",
+            }),
+        ],
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -1083,41 +931,29 @@ async fn test_empty_term() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
             json!({
-                "id": collection_id.0.clone(),
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    write_side
-        .write(
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "doc1",
-                }),
-                json!({
-                    "id": "doc2",
-                }),
-                json!({
-                    "id": "doc3",
-                }),
-                json!({
-                    "id": "doc4",
-                }),
-                json!({
-                    "id": "doc5",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
+                "id": "doc1",
+            }),
+            json!({
+                "id": "doc2",
+            }),
+            json!({
+                "id": "doc3",
+            }),
+            json!({
+                "id": "doc4",
+            }),
+            json!({
+                "id": "doc5",
+            }),
+        ],
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -1235,6 +1071,198 @@ async fn test_vector_search_grpc() -> Result<()> {
     assert_ne!(output.count, 0);
     assert_ne!(output.hits.len(), 0);
     assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_commit_and_load_number() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
+            json!({
+                "id": "1",
+                "name": "John Doe",
+                "age": 20,
+            }),
+            json!({
+                "id": "2",
+                "name": "Jane Doe",
+                "age": 21,
+            }),
+        ],
+    )
+    .await?;
+
+    let before_commit_result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(before_commit_result.count, 1);
+
+    write_side.commit().await?;
+    read_side.commit().await?;
+
+    // After the commit, the result should be the same
+    let after_commit_result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    assert_eq!(before_commit_result.count, after_commit_result.count);
+
+    // After the commit, we can insert and search for new documents
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![json!({
+            "id": "3",
+            "name": "Foo Doe",
+            "age": 20,
+        })],
+    )
+    .await?;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 2);
+
+    // We reload the read side
+    let (write_side, read_side) = create(config.clone()).await?;
+    let after_load_result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    assert_eq!(before_commit_result.count, after_load_result.count);
+
+    // After the load we can insert and search for new documents
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![json!({
+            "id": "3",
+            "name": "Foo Doe",
+            "age": 20,
+        })],
+    )
+    .await?;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 2);
+
+    // write_side.commit().await?;
+    read_side.commit().await?;
+
+    let (_, read_side) = create(config.clone()).await?;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 2);
+
+    Ok(())
+}
+
+async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
+    write_side
+        .create_collection(
+            json!({
+                "id": collection_id.0.clone(),
+            })
+            .try_into()?,
+        )
+        .await?;
+    sleep(Duration::from_millis(100)).await;
+
+    Ok(())
+}
+
+async fn insert_docs<I>(
+    write_side: Arc<WriteSide>,
+    collection_id: CollectionId,
+    docs: I,
+) -> Result<()>
+where
+    I: IntoIterator<Item = serde_json::Value>,
+{
+    let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
+    let document_list: DocumentList = document_list.try_into()?;
+
+    write_side.write(collection_id, document_list).await?;
+
+    sleep(Duration::from_millis(100)).await;
 
     Ok(())
 }

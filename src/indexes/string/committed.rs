@@ -1,54 +1,67 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    fs::File,
     sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
+use memmap::Mmap;
 use tracing::{info, warn};
 
-use crate::types::DocumentId;
+use crate::{file_utils::BufferedFile, types::DocumentId};
 
 use super::{
     document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,
-    scorer::BM25Scorer, GlobalInfo,
+    scorer::BM25Scorer, GlobalInfo, StringIndexFieldInfo,
 };
 
 #[derive(Debug)]
 pub struct CommittedStringFieldIndex {
     fst_map: Map<memmap::Mmap>,
-    pub(super) fst_map_path: PathBuf,
     pub(super) document_lengths_per_document: DocumentLengthsPerDocument,
 
     pub(super) storage: PostingIdStorage,
     pub(super) posting_id_generator: Arc<AtomicU64>,
-    pub(super) max_posting_id_path: PathBuf,
 
     global_info: GlobalInfo,
-    pub(super) global_info_path: PathBuf,
+
+    info: StringIndexFieldInfo,
 }
 
 impl CommittedStringFieldIndex {
-    pub fn new(
-        fst_map: Map<memmap::Mmap>,
-        fst_map_path: PathBuf,
-        document_lengths_per_document: DocumentLengthsPerDocument,
-        storage: PostingIdStorage,
-        max_posting_id_path: PathBuf,
-        global_info: GlobalInfo,
-        global_info_path: PathBuf,
-    ) -> Self {
-        Self {
+    pub fn try_new(string_index_field_info: StringIndexFieldInfo) -> Result<Self> {
+        // Reload field
+        let global_info: GlobalInfo =
+            BufferedFile::open(string_index_field_info.global_info_path.clone())
+                .context("Cannot open global info file")?
+                .read_json_data()
+                .context("Cannot deserialize global info")?;
+
+        let posting_id = std::fs::read(string_index_field_info.posting_id_path.clone()).unwrap();
+        let posting_id: u64 = serde_json::from_slice(&posting_id).unwrap();
+
+        let file = File::open(string_index_field_info.fst_path.clone())?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let fst_map = Map::new(mmap)?;
+
+        let document_lengths_per_document = DocumentLengthsPerDocument::try_new(
+            string_index_field_info.document_length_path.clone(),
+        )?;
+        let storage = PostingIdStorage::try_new(string_index_field_info.posting_path.clone())?;
+
+        Ok(CommittedStringFieldIndex {
             fst_map,
-            fst_map_path,
             document_lengths_per_document,
             storage,
-            max_posting_id_path,
-            posting_id_generator: Arc::new(AtomicU64::new(0)),
+            posting_id_generator: Arc::new(AtomicU64::new(posting_id)),
             global_info,
-            global_info_path,
-        }
+            info: string_index_field_info,
+        })
+    }
+
+    pub fn get_info(&self) -> StringIndexFieldInfo {
+        self.info.clone()
     }
 
     pub fn get_global_info(&self) -> GlobalInfo {

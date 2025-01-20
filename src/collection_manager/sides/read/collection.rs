@@ -126,17 +126,15 @@ impl CollectionReader {
         self.number_index
             .load(collection_data_dir.join("numbers"))
             .context("Cannot load number index")?;
-        self.vector_index
-            .load(collection_data_dir.join("vectors"))
-            .context("Cannot load vectors index")?;
+        // self.vector_index
+        //     .load(collection_data_dir.join("vectors"))
+        //     .context("Cannot load vectors index")?;
 
-        let coll_desc_file_path = collection_data_dir.join("desc.json");
-        let dump: CollectionDescriptorDump = BufferedFile::open(coll_desc_file_path)
+        let coll_desc_file_path = collection_data_dir.join("info.json");
+        let dump: CollectionInfo = BufferedFile::open(coll_desc_file_path)
             .context("Cannot open collection file")?
             .read_json_data()
-            .with_context(|| {
-                format!("Cannot deserialize collection descriptor for {:?}", self.id)
-            })?;
+            .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
         for (field_name, (field_id, field_type)) in dump.fields {
             self.fields.insert(field_name, (field_id, field_type));
         }
@@ -166,18 +164,18 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub fn commit(&self, commit_config: CommitConfig) -> Result<()> {
+    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
         self.string_index
-            .commit(commit_config.folder_to_commit.join("strings"))
+            .commit(data_dir.join("strings"))
             .context("Cannot commit string index")?;
         self.number_index
-            .commit(commit_config.folder_to_commit.join("numbers"))
+            .commit(data_dir.join("numbers"))
             .context("Cannot commit number index")?;
-        self.vector_index
-            .commit(commit_config.folder_to_commit.join("vectors"))
-            .context("Cannot commit vectors index")?;
+        // self.vector_index
+        //     .commit(data_dir.join("vectors"))
+        //     .context("Cannot commit vectors index")?;
 
-        let dump = CollectionDescriptorDump {
+        let dump = CollectionInfo {
             id: self.id.clone(),
             fields: self
                 .fields
@@ -197,11 +195,11 @@ impl CollectionReader {
                 .collect(),
         };
 
-        let coll_desc_file_path = commit_config.folder_to_commit.join("desc.json");
-        BufferedFile::create(coll_desc_file_path)
-            .context("Cannot create desc.json file")?
+        let coll_desc_file_path = data_dir.join("info.json");
+        BufferedFile::create_or_overwrite(coll_desc_file_path)
+            .context("Cannot create info.json file")?
             .write_json_data(&dump)
-            .with_context(|| format!("Cannot serialize collection descriptor for {:?}", self.id))?;
+            .with_context(|| format!("Cannot serialize collection info for {:?}", self.id))?;
 
         Ok(())
     }
@@ -249,6 +247,7 @@ impl CollectionReader {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
                             .insert(field_id, (locale, text_parser));
+                        self.string_index.add_field(offset, field_id);
                     }
                     _ => {}
                 }
@@ -653,18 +652,13 @@ impl CollectionReader {
     }
 }
 
-pub struct CommitConfig {
-    pub folder_to_commit: PathBuf,
-    pub epoch: u64,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Committed {
     pub epoch: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CollectionDescriptorDump {
+pub struct CollectionInfo {
     pub id: CollectionId,
     pub fields: Vec<(String, (FieldId, TypedField))>,
     pub used_models: Vec<(String, Vec<FieldId>)>,

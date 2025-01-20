@@ -5,8 +5,9 @@ use std::{
 };
 
 use anyhow::Result;
+use tracing::warn;
 
-use crate::types::DocumentId;
+use crate::{collection_manager::sides::Offset, offset_storage::OffsetStorage, types::DocumentId};
 
 use super::{Number, NumberFilter};
 
@@ -38,16 +39,30 @@ impl InnerUncommittedNumberFieldIndex {
 
 #[derive(Debug, Default)]
 pub struct UncommittedNumberFieldIndex {
-    inner: RwLock<InnerUncommittedNumberFieldIndex>,
+    inner: RwLock<(OffsetStorage, InnerUncommittedNumberFieldIndex)>,
 }
 
 impl UncommittedNumberFieldIndex {
-    pub fn insert(&self, value: Number, document_id: DocumentId) -> Result<()> {
+    pub fn new(offset: Offset) -> Self {
+        let offset_storage = OffsetStorage::new();
+        offset_storage.set_offset(offset);
+        Self {
+            inner: RwLock::new((offset_storage, InnerUncommittedNumberFieldIndex::default())),
+        }
+    }
+
+    pub fn insert(&self, offset: Offset, value: Number, document_id: DocumentId) -> Result<()> {
         let mut inner = match self.inner.write() {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.insert(value, document_id)?;
+        // Ignore inserts with lower offset
+        if offset <= inner.0.get_offset() {
+            warn!("Skip insert number with lower offset");
+            return Ok(());
+        }
+        inner.1.insert(value, document_id)?;
+        inner.0.set_offset(offset);
         Ok(())
     }
 
@@ -56,7 +71,7 @@ impl UncommittedNumberFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.filter(filter, doc_ids)?;
+        inner.1.filter(filter, doc_ids)?;
         Ok(())
     }
 
@@ -73,15 +88,18 @@ impl UncommittedNumberFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        let tree: BTreeMap<Number, HashSet<DocumentId>> = if inner.state {
-            inner.left.clone()
+        let tree: BTreeMap<Number, HashSet<DocumentId>> = if inner.1.state {
+            inner.1.left.clone()
         } else {
-            inner.right.clone()
+            inner.1.right.clone()
         };
-        let current_state = inner.state;
+        let current_state = inner.1.state;
+
+        // It is safe to put here because we are holding the lock
+        let current_offset = inner.0.get_offset();
 
         // Route the writes to the other side
-        inner.state = !current_state;
+        inner.1.state = !current_state;
         drop(inner);
 
         let tree_len = tree.len();
@@ -91,6 +109,7 @@ impl UncommittedNumberFieldIndex {
             tree_len,
             index: self,
             state: current_state,
+            current_offset,
         })
     }
 }
@@ -100,6 +119,7 @@ pub struct UncommittedNumberFieldIndexTaken<'index> {
     tree_len: usize,
     state: bool,
     index: &'index UncommittedNumberFieldIndex,
+    current_offset: Offset,
 }
 impl Iterator for UncommittedNumberFieldIndexTaken<'_> {
     type Item = (Number, HashSet<DocumentId>);
@@ -112,9 +132,9 @@ impl Drop for UncommittedNumberFieldIndexTaken<'_> {
     fn drop(&mut self) {
         let mut lock = self.index.inner.write().unwrap();
         let tree = if self.state {
-            &mut lock.left
+            &mut lock.1.left
         } else {
-            &mut lock.right
+            &mut lock.1.right
         };
         tree.clear();
     }
@@ -122,6 +142,14 @@ impl Drop for UncommittedNumberFieldIndexTaken<'_> {
 impl UncommittedNumberFieldIndexTaken<'_> {
     pub fn len(&self) -> usize {
         self.tree_len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn current_offset(&self) -> Offset {
+        self.current_offset
     }
 }
 
@@ -167,9 +195,9 @@ mod tests {
     fn test_indexes_number_uncommitted() -> Result<()> {
         let index = UncommittedNumberFieldIndex::default();
 
-        index.insert(Number::I32(1), DocumentId(1))?;
-        index.insert(Number::I32(2), DocumentId(2))?;
-        index.insert(Number::I32(3), DocumentId(3))?;
+        index.insert(Offset(1), Number::I32(1), DocumentId(1))?;
+        index.insert(Offset(2), Number::I32(2), DocumentId(2))?;
+        index.insert(Offset(3), Number::I32(3), DocumentId(3))?;
 
         let taken = index.take()?;
 

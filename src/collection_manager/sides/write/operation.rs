@@ -2,6 +2,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::Debug};
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
 use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
@@ -63,7 +65,7 @@ pub enum WriteOperation {
     Collection(CollectionId, CollectionWriteOperation),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Offset(pub u64);
 
 #[derive(Clone)]
@@ -73,6 +75,17 @@ pub struct OperationSender {
 }
 
 impl OperationSender {
+    pub fn offset(&self) -> Offset {
+        Offset(
+            self.offset_counter
+                .load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+    pub fn set_offset(&self, offset: Offset) {
+        self.offset_counter
+            .store(offset.0, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn send(
         &self,
         operation: WriteOperation,

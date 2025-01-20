@@ -4,12 +4,16 @@ mod embedding;
 mod fields;
 mod operation;
 
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use collections::CollectionsWriter;
@@ -23,6 +27,7 @@ pub use fields::*;
 use crate::{
     collection_manager::dto::{CollectionDTO, CreateCollectionOptionDTO},
     embeddings::EmbeddingService,
+    file_utils::BufferedFile,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -31,6 +36,7 @@ pub struct WriteSide {
     sender: OperationSender,
     collections: CollectionsWriter,
     document_count: AtomicU64,
+    data_dir: PathBuf,
 }
 
 impl WriteSide {
@@ -39,6 +45,8 @@ impl WriteSide {
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
     ) -> WriteSide {
+        let data_dir = config.data_dir.clone();
+
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
 
@@ -48,15 +56,51 @@ impl WriteSide {
             sender,
             collections: CollectionsWriter::new(config, sx),
             document_count: AtomicU64::new(0),
+            data_dir,
         }
     }
 
     pub async fn load(&mut self) -> Result<()> {
-        self.collections.load().await
+        self.collections.load().await?;
+
+        let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot read info file")
+        {
+            Ok(info) => info,
+            Err(err) => {
+                warn!("Cannot read info file: {}. Skip loading", err);
+                return Ok(());
+            }
+        };
+
+        self.document_count
+            .store(info.document_count, Ordering::Relaxed);
+        self.sender.set_offset(info.offset);
+
+        Ok(())
     }
 
     pub async fn commit(&self) -> Result<()> {
-        self.collections.commit().await
+        let offset = self.sender.offset();
+
+        self.collections.commit().await?;
+
+        // This load is not atomic with the commit.
+        // This means, we save a document count possible higher.
+        // Anyway it is not a problem, because the document count is only used for the document id generation
+        // So, if something goes wrong, we save an higher number, and this is ok.
+        let document_count = self.document_count.load(Ordering::Relaxed);
+        let info = WriteSideInfo {
+            document_count,
+            offset,
+        };
+        BufferedFile::create(self.data_dir.join("info.json"))
+            .context("Cannot create info file")?
+            .write_json_data(&info)
+            .context("Cannot write info file")?;
+
+        Ok(())
     }
 
     pub async fn create_collection(&self, option: CreateCollectionOptionDTO) -> Result<()> {
@@ -130,4 +174,10 @@ impl WriteSide {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.as_dto())
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct WriteSideInfo {
+    document_count: u64,
+    offset: Offset,
 }
