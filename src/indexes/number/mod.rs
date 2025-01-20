@@ -9,7 +9,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 use uncommitted::UncommittedNumberFieldIndex;
 
-use crate::{collection_manager::dto::FieldId, file_utils::BufferedFile, types::DocumentId};
+use crate::{
+    collection_manager::{dto::FieldId, sides::Offset},
+    file_utils::BufferedFile,
+    offset_storage::OffsetStorage,
+    types::DocumentId,
+};
 
 mod committed;
 mod n;
@@ -23,6 +28,7 @@ pub struct NumberIndexConfig {}
 pub struct NumberIndex {
     uncommitted: DashMap<FieldId, UncommittedNumberFieldIndex>,
     committed: DashMap<FieldId, CommittedNumberFieldIndex>,
+    offset_storage: OffsetStorage,
 }
 
 impl NumberIndex {
@@ -30,14 +36,23 @@ impl NumberIndex {
         Ok(Self {
             uncommitted: Default::default(),
             committed: Default::default(),
+            offset_storage: Default::default(),
         })
     }
 
-    pub fn add(&self, doc_id: DocumentId, field_id: FieldId, value: Number) -> Result<()> {
+    pub fn add(
+        &self,
+        offset: Offset,
+        doc_id: DocumentId,
+        field_id: FieldId,
+        value: Number,
+    ) -> Result<()> {
         debug!(
             "Adding number index: doc_id: {:?}, field_id: {:?}, value: {:?}",
             doc_id, field_id, value
         );
+        self.offset_storage.set_offset(offset);
+
         let uncommitted = self.uncommitted.entry(field_id).or_default();
         uncommitted.insert(value, doc_id)?;
 
@@ -165,12 +180,24 @@ mod tests {
             fn $fn_name() {
                 let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
 
-                index.add(DocumentId(0), FieldId(0), 0.into()).unwrap();
-                index.add(DocumentId(1), FieldId(0), 1.into()).unwrap();
-                index.add(DocumentId(2), FieldId(0), 2.into()).unwrap();
-                index.add(DocumentId(3), FieldId(0), 3.into()).unwrap();
-                index.add(DocumentId(4), FieldId(0), 4.into()).unwrap();
-                index.add(DocumentId(5), FieldId(0), 2.into()).unwrap();
+                index
+                    .add(Offset(1), DocumentId(0), FieldId(0), 0.into())
+                    .unwrap();
+                index
+                    .add(Offset(2), DocumentId(1), FieldId(0), 1.into())
+                    .unwrap();
+                index
+                    .add(Offset(3), DocumentId(2), FieldId(0), 2.into())
+                    .unwrap();
+                index
+                    .add(Offset(4), DocumentId(3), FieldId(0), 3.into())
+                    .unwrap();
+                index
+                    .add(Offset(5), DocumentId(4), FieldId(0), 4.into())
+                    .unwrap();
+                index
+                    .add(Offset(6), DocumentId(5), FieldId(0), 2.into())
+                    .unwrap();
 
                 let a = $b;
 
@@ -252,12 +279,24 @@ mod tests {
     fn test_number_commit() {
         let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
 
-        index.add(DocumentId(0), FieldId(0), 0.into()).unwrap();
-        index.add(DocumentId(1), FieldId(0), 1.into()).unwrap();
-        index.add(DocumentId(2), FieldId(0), 2.into()).unwrap();
-        index.add(DocumentId(3), FieldId(0), 3.into()).unwrap();
-        index.add(DocumentId(4), FieldId(0), 4.into()).unwrap();
-        index.add(DocumentId(5), FieldId(0), 2.into()).unwrap();
+        index
+            .add(Offset(1), DocumentId(0), FieldId(0), 0.into())
+            .unwrap();
+        index
+            .add(Offset(2), DocumentId(1), FieldId(0), 1.into())
+            .unwrap();
+        index
+            .add(Offset(3), DocumentId(2), FieldId(0), 2.into())
+            .unwrap();
+        index
+            .add(Offset(4), DocumentId(3), FieldId(0), 3.into())
+            .unwrap();
+        index
+            .add(Offset(5), DocumentId(4), FieldId(0), 4.into())
+            .unwrap();
+        index
+            .add(Offset(6), DocumentId(5), FieldId(0), 2.into())
+            .unwrap();
 
         let output = index
             .filter(FieldId(0), NumberFilter::Equal(2.into()))
@@ -283,8 +322,8 @@ mod tests {
         let index = NumberIndex::try_new(NumberIndexConfig {}).unwrap();
 
         let iter = (0..1_000).map(|i| (Number::from(i), (DocumentId(i as u64), FieldId(0))));
-        for (number, (doc_id, field_id)) in iter {
-            index.add(doc_id, field_id, number)?;
+        for (offset, (number, (doc_id, field_id))) in iter.enumerate() {
+            index.add(Offset(offset as u64), doc_id, field_id, number)?;
         }
 
         let output = index
@@ -319,9 +358,9 @@ mod tests {
         let field_id = FieldId(0);
 
         let index = NumberIndex::try_new(NumberIndexConfig {})?;
-        for d in data {
+        for (offset, d) in data.into_iter().enumerate() {
             for doc_id in d.1 {
-                index.add(doc_id, field_id, d.0)?;
+                index.add(Offset(offset as u64), doc_id, field_id, d.0)?;
             }
         }
 
@@ -351,8 +390,8 @@ mod tests {
             HashSet::from_iter((0..10).map(|i| DocumentId(i as u64)))
         );
 
-        after.add(DocumentId(10), field_id, Number::I32(10))?;
-        after.add(DocumentId(11), field_id, Number::I32(11))?;
+        after.add(Offset(10), DocumentId(10), field_id, Number::I32(10))?;
+        after.add(Offset(11), DocumentId(11), field_id, Number::I32(11))?;
 
         // Query on committed & uncommitted data
         let output = after.filter(

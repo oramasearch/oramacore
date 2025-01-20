@@ -3,7 +3,11 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{collection_manager::dto::FieldId, file_utils::BufferedFile, types::DocumentId};
+use crate::{
+    collection_manager::{dto::FieldId, sides::Offset},
+    file_utils::BufferedFile,
+    types::DocumentId,
+};
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedVectorFieldIndex;
 use dashmap::DashMap;
@@ -40,7 +44,11 @@ impl VectorIndex {
         Ok(())
     }
 
-    pub fn insert_batch(&self, data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>) -> Result<()> {
+    pub fn insert_batch(
+        &self,
+        _offset: Offset,
+        data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>,
+    ) -> Result<()> {
         for (doc_id, field_id, vectors) in data {
             if vectors.is_empty() {
                 continue;
@@ -198,7 +206,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        index.insert_batch(data)?;
+        index.insert_batch(Offset(1), data)?;
 
         let output = index.search(&vec![FieldId(0)], &[1.0, 2.0, 3.0], 5)?;
         let uncommitted_keys = output.keys().cloned().collect::<HashSet<_>>();

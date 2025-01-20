@@ -20,7 +20,10 @@ use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::InsertStringTerms},
+    collection_manager::{
+        dto::FieldId,
+        sides::{InsertStringTerms, Offset},
+    },
     file_utils::BufferedFile,
     types::DocumentId,
 };
@@ -92,6 +95,7 @@ impl StringIndex {
     #[allow(clippy::type_complexity)]
     pub fn insert(
         &self,
+        _offset: Offset,
         doc_id: DocumentId,
         field_id: FieldId,
         field_length: u16,
@@ -424,6 +428,7 @@ mod tests {
         );
 
         string_index.insert(
+            Offset(1),
             DocumentId(2),
             FieldId(0),
             1,

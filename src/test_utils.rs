@@ -67,7 +67,7 @@ pub async fn create_string_index(
 
     drop(sx);
 
-    while let Ok(operation) = rx.recv().await {
+    while let Ok((offset, operation)) = rx.recv().await {
         match operation {
             WriteOperation::Collection(
                 _,
@@ -80,7 +80,7 @@ pub async fn create_string_index(
                     },
                 ),
             ) => {
-                index.insert(doc_id, field_id, field_length, terms)?;
+                index.insert(offset, doc_id, field_id, field_length, terms)?;
             }
             _ => unreachable!(),
         };
@@ -127,7 +127,7 @@ pub async fn create_uncommitted_string_field_index_from(
 
     drop(sx);
 
-    while let Ok(operation) = rx.recv().await {
+    while let Ok((_, operation)) = rx.recv().await {
         match operation {
             WriteOperation::Collection(
                 _,

@@ -19,7 +19,7 @@ use crate::{
             FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode,
             SearchParams, TypedField,
         },
-        sides::{CollectionWriteOperation, DocumentFieldIndexOperation},
+        sides::{CollectionWriteOperation, DocumentFieldIndexOperation, Offset},
     },
     embeddings::{EmbeddingService, LoadedModel},
     file_utils::BufferedFile,
@@ -34,6 +34,7 @@ use crate::{
         SEARCH_METRIC,
     },
     nlp::{locales::Locale, NLPService, TextParser},
+    offset_storage::OffsetStorage,
     types::{CollectionId, DocumentId},
 };
 
@@ -59,6 +60,7 @@ pub struct CollectionReader {
     pub(super) number_index: NumberIndex,
     pub(super) bool_index: BoolIndex,
     // TODO: textparser -> vec<field_id>
+    offset_storage: OffsetStorage,
 }
 
 impl CollectionReader {
@@ -96,6 +98,8 @@ impl CollectionReader {
             bool_index,
 
             fields: Default::default(),
+
+            offset_storage: Default::default(),
         })
     }
 
@@ -208,6 +212,7 @@ impl CollectionReader {
 
     pub(super) async fn update(
         &self,
+        offset: Offset,
         collection_operation: CollectionWriteOperation,
     ) -> Result<()> {
         match collection_operation {
@@ -221,6 +226,8 @@ impl CollectionReader {
             } => {
                 self.fields
                     .insert(field_name.clone(), (field_id, typed_field.clone()));
+
+                self.offset_storage.set_offset(offset);
 
                 match typed_field {
                     TypedField::Embedding(embedding) => {
@@ -246,30 +253,33 @@ impl CollectionReader {
                     _ => {}
                 }
             }
-            CollectionWriteOperation::Index(doc_id, field_id, field_op) => match field_op {
-                DocumentFieldIndexOperation::IndexBoolean { value } => {
-                    self.bool_index.add(doc_id, field_id, value)?;
+            CollectionWriteOperation::Index(doc_id, field_id, field_op) => {
+                self.offset_storage.set_offset(offset);
+                match field_op {
+                    DocumentFieldIndexOperation::IndexBoolean { value } => {
+                        self.bool_index.add(offset, doc_id, field_id, value)?;
+                    }
+                    DocumentFieldIndexOperation::IndexNumber { value } => {
+                        self.number_index.add(offset, doc_id, field_id, value)?;
+                    }
+                    DocumentFieldIndexOperation::IndexString {
+                        field_length,
+                        terms,
+                    } => {
+                        self.string_index
+                            .insert(offset, doc_id, field_id, field_length, terms)?;
+                    }
+                    DocumentFieldIndexOperation::IndexEmbedding { value } => {
+                        // `insert_batch` is designed to process multiple values at once
+                        // We are inserting only one value, and this is not good for performance
+                        // We should add an API to accept a single value and avoid the rebuild step
+                        // Instead, we could move the "rebuild" logic to the `VectorIndex`
+                        // TODO: do it.
+                        self.vector_index
+                            .insert_batch(offset, vec![(doc_id, field_id, vec![value])])?;
+                    }
                 }
-                DocumentFieldIndexOperation::IndexNumber { value } => {
-                    self.number_index.add(doc_id, field_id, value)?;
-                }
-                DocumentFieldIndexOperation::IndexString {
-                    field_length,
-                    terms,
-                } => {
-                    self.string_index
-                        .insert(doc_id, field_id, field_length, terms)?;
-                }
-                DocumentFieldIndexOperation::IndexEmbedding { value } => {
-                    // `insert_batch` is designed to process multiple values at once
-                    // We are inserting only one value, and this is not good for performance
-                    // We should add an API to accept a single value and avoid the rebuild step
-                    // Instead, we could move the "rebuild" logic to the `VectorIndex`
-                    // TODO: do it.
-                    self.vector_index
-                        .insert_batch(vec![(doc_id, field_id, vec![value])])?;
-                }
-            },
+            }
         };
 
         Ok(())

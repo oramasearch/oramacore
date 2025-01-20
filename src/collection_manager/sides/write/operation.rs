@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::{collections::HashMap, fmt::Debug};
 
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
@@ -61,29 +63,36 @@ pub enum WriteOperation {
     Collection(CollectionId, CollectionWriteOperation),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Offset(pub u64);
+
 #[derive(Clone)]
 pub struct OperationSender {
-    sender: tokio::sync::broadcast::Sender<WriteOperation>,
+    offset_counter: Arc<AtomicU64>,
+    sender: tokio::sync::broadcast::Sender<(Offset, WriteOperation)>,
 }
 
 impl OperationSender {
     pub fn send(
         &self,
         operation: WriteOperation,
-    ) -> Result<(), tokio::sync::broadcast::error::SendError<WriteOperation>> {
-        self.sender.send(operation)?;
+    ) -> Result<(), tokio::sync::broadcast::error::SendError<(Offset, WriteOperation)>> {
+        let offset = self
+            .offset_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.sender.send((Offset(offset), operation))?;
         Ok(())
     }
 }
 
 pub struct OperationReceiver {
-    receiver: tokio::sync::broadcast::Receiver<WriteOperation>,
+    receiver: tokio::sync::broadcast::Receiver<(Offset, WriteOperation)>,
 }
 
 impl OperationReceiver {
     pub async fn recv(
         &mut self,
-    ) -> Result<WriteOperation, tokio::sync::broadcast::error::RecvError> {
+    ) -> Result<(Offset, WriteOperation), tokio::sync::broadcast::error::RecvError> {
         self.receiver.recv().await
     }
 }
@@ -91,5 +100,11 @@ impl OperationReceiver {
 pub fn channel(capacity: usize) -> (OperationSender, OperationReceiver) {
     let (sender, receiver) = tokio::sync::broadcast::channel(capacity);
 
-    (OperationSender { sender }, OperationReceiver { receiver })
+    (
+        OperationSender {
+            offset_counter: Arc::new(AtomicU64::new(0)),
+            sender,
+        },
+        OperationReceiver { receiver },
+    )
 }

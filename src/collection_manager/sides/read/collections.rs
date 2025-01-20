@@ -1,8 +1,12 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use crate::{
-    collection_manager::sides::read::collection::CommitConfig, embeddings::EmbeddingService,
-    file_utils::list_directory_in_path, nlp::NLPService, types::CollectionId,
+    collection_manager::sides::{read::collection::CommitConfig, Offset},
+    embeddings::EmbeddingService,
+    file_utils::list_directory_in_path,
+    nlp::NLPService,
+    offset_storage::OffsetStorage,
+    types::CollectionId,
 };
 
 use anyhow::{Context, Result};
@@ -23,6 +27,8 @@ pub struct CollectionsReader {
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
+
+    offset_storage: OffsetStorage,
 }
 impl CollectionsReader {
     pub fn try_new(
@@ -36,6 +42,8 @@ impl CollectionsReader {
 
             collections: Default::default(),
             indexes_config,
+
+            offset_storage: OffsetStorage::new(),
         })
     }
 
@@ -161,7 +169,7 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub(super) async fn create_collection(&self, id: CollectionId) -> Result<()> {
+    pub(super) async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
         info!("Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(
@@ -173,6 +181,8 @@ impl CollectionsReader {
 
         let mut guard = self.collections.write().await;
         guard.insert(id, collection);
+
+        self.offset_storage.set_offset(offset);
 
         Ok(())
     }

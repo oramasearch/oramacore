@@ -35,6 +35,7 @@ mod metrics;
 mod file_utils;
 
 mod merger;
+mod offset_storage;
 
 pub mod ai;
 
