@@ -11,6 +11,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedVectorFieldIndex;
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, trace};
 use uncommitted::UncommittedVectorFieldIndex;
 
@@ -33,20 +34,20 @@ impl VectorIndex {
         })
     }
 
-    pub fn add_field(&self, field_id: FieldId, dimension: usize) -> Result<()> {
+    pub fn add_field(&self, offset: Offset, field_id: FieldId, dimension: usize) -> Result<()> {
         self.uncommitted
             .entry(field_id)
-            .or_insert_with(|| UncommittedVectorFieldIndex::new(dimension));
+            .or_insert_with(|| UncommittedVectorFieldIndex::new(dimension, offset));
         self.committed
             .entry(field_id)
-            .or_insert_with(|| CommittedVectorFieldIndex::new(dimension));
+            .or_insert_with(|| CommittedVectorFieldIndex::new(dimension, offset));
 
         Ok(())
     }
 
     pub fn insert_batch(
         &self,
-        _offset: Offset,
+        offset: Offset,
         data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>,
     ) -> Result<()> {
         for (doc_id, field_id, vectors) in data {
@@ -57,8 +58,8 @@ impl VectorIndex {
             let uncommitted = self
                 .uncommitted
                 .entry(field_id)
-                .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len()));
-            uncommitted.insert((doc_id, vectors))?;
+                .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len(), offset));
+            uncommitted.insert(offset, (doc_id, vectors))?;
         }
 
         Ok(())
@@ -75,12 +76,19 @@ impl VectorIndex {
             .chain(self.committed.iter().map(|e| *e.key()))
             .collect::<HashSet<_>>();
 
-        info!("Committing vector index with fields: {:?}", all_field_ids);
+        let mut info = VectorIndexInfo {
+            fields: self
+                .committed
+                .iter()
+                .map(|e| {
+                    let key = *e.key();
+                    let offset = e.value().offset();
+                    (key, offset)
+                })
+                .collect(),
+        };
 
-        BufferedFile::create(data_dir.join("info.json"))
-            .context("Cannot create info.json file")?
-            .write_json_data(&all_field_ids)
-            .context("Cannot serialize info.json file")?;
+        info!("Committing vector index with fields: {:?}", all_field_ids);
 
         for field_id in all_field_ids {
             let uncommitted = self.uncommitted.get(&field_id);
@@ -95,10 +103,12 @@ impl VectorIndex {
 
             let mut taken = uncommitted.take();
 
+            let offset = taken.current_offset();
+
             let mut committed = self
                 .committed
                 .entry(field_id)
-                .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension));
+                .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension, offset));
 
             for (doc_id, vectors) in taken.data() {
                 for (_, vector) in vectors {
@@ -108,25 +118,39 @@ impl VectorIndex {
 
             taken.close();
 
-            let data_dir = data_dir.join(field_id.0.to_string());
+            let data_dir = data_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
             committed.commit(data_dir)?;
+
+            info.fields.insert(field_id, offset);
         }
+
+        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&info)
+            .context("Cannot serialize info.json file")?;
 
         Ok(())
     }
 
     #[instrument(skip(self, data_dir))]
     pub fn load(&self, data_dir: PathBuf) -> Result<()> {
-        let field_ids: HashSet<FieldId> = BufferedFile::open(data_dir.join("info.json"))
+        let info: VectorIndexInfo = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json file")?;
 
-        info!("Loading vector index with fields: {:?}", field_ids);
+        info!(
+            "Loading vector index with fields: {:?}",
+            info.fields.keys().collect::<Vec<_>>()
+        );
 
-        for field_id in field_ids {
-            let data_dir = data_dir.join(field_id.0.to_string());
-            let index = CommittedVectorFieldIndex::load(data_dir)
+        for (field_id, offset) in info.fields {
+            let data_dir = data_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let index = CommittedVectorFieldIndex::load(data_dir, offset)
                 .with_context(|| format!("Cannot load vector index for field {:?}", field_id))?;
 
             self.committed.insert(field_id, index);
@@ -179,6 +203,11 @@ impl VectorIndex {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct VectorIndexInfo {
+    fields: HashMap<FieldId, Offset>,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::test_utils::generate_new_path;
@@ -191,7 +220,7 @@ mod tests {
         const N: usize = 2;
 
         let index = VectorIndex::try_new(VectorIndexConfig {})?;
-        index.add_field(FieldId(0), 3)?;
+        index.add_field(Offset(0), FieldId(0), 3)?;
 
         let data = (0..N)
             .map(|i| {

@@ -126,9 +126,9 @@ impl CollectionReader {
         self.number_index
             .load(collection_data_dir.join("numbers"))
             .context("Cannot load number index")?;
-        // self.vector_index
-        //     .load(collection_data_dir.join("vectors"))
-        //     .context("Cannot load vectors index")?;
+        self.vector_index
+            .load(collection_data_dir.join("vectors"))
+            .context("Cannot load vectors index")?;
 
         let coll_desc_file_path = collection_data_dir.join("info.json");
         let dump: CollectionInfo = BufferedFile::open(coll_desc_file_path)
@@ -171,9 +171,9 @@ impl CollectionReader {
         self.number_index
             .commit(data_dir.join("numbers"))
             .context("Cannot commit number index")?;
-        // self.vector_index
-        //     .commit(data_dir.join("vectors"))
-        //     .context("Cannot commit vectors index")?;
+        self.vector_index
+            .commit(data_dir.join("vectors"))
+            .context("Cannot commit vectors index")?;
 
         let dump = CollectionInfo {
             id: self.id.clone(),
@@ -235,7 +235,7 @@ impl CollectionReader {
                             .await?;
 
                         self.vector_index
-                            .add_field(field_id, loaded_model.dimensions())?;
+                            .add_field(offset, field_id, loaded_model.dimensions())?;
 
                         self.fields_per_model
                             .entry(loaded_model)

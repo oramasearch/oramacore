@@ -1076,14 +1076,44 @@ async fn test_vector_search_grpc() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_commit_and_load_number() -> Result<()> {
+async fn test_commit_and_load2() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let config = create_oramacore_config();
+    let _ = std::fs::remove_dir_all("/Users/allevo/repos/rustorama/.data");
+
+    let mut config = create_oramacore_config();
+    config.embeddings.preload = vec!["gte-small".to_string()];
+    config.embeddings.fastembed = Some(FastEmbedRepoConfig {
+        cache_dir: std::env::temp_dir(),
+    });
+    config.embeddings.models.insert(
+        "gte-small".to_string(),
+        ModelConfig::Fastembed(FastEmbedModelRepoConfig {
+            real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
+            dimensions: 384,
+        }),
+    );
+    config.reader_side.config.data_dir = "/Users/allevo/repos/rustorama/.data/read".into();
+    config.writer_side.config.data_dir = "/Users/allevo/repos/rustorama/.data/write".into();
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    write_side
+        .create_collection(
+            json!({
+                "id": collection_id.0.clone(),
+                "typed_fields": {
+                    "vector": {
+                        "mode": "embedding",
+                        "model_name": "gte-small",
+                        "document_fields": ["name"],
+                    }
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+
     insert_docs(
         write_side.clone(),
         collection_id.clone(),
@@ -1231,6 +1261,23 @@ async fn test_commit_and_load_number() -> Result<()> {
         )
         .await?;
     assert_eq!(result.count, 2);
+
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "Doe",
+                "mode": "vector",
+                "where": {
+                    "age": {
+                        "eq": 20,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 1);
 
     Ok(())
 }

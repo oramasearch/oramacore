@@ -288,11 +288,6 @@ impl UncommittedStringFieldIndex {
         };
         // Ignore inserts with lower offset
         if offset <= inner.0.get_offset() {
-            println!(
-                "Offset: {:?}, Current offset: {:?}",
-                offset,
-                inner.0.get_offset()
-            );
             warn!("Skip insert string with lower offset");
             return Ok(());
         }
