@@ -3,7 +3,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use chrono::Utc;
 use dashmap::DashMap;
-use oxc_allocator::Allocator;
+use oxc_allocator::{Allocator, HashMap};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde::Serialize;
@@ -89,6 +89,17 @@ impl WriteHooks {
     pub fn get_hook(&self, name: Hook) -> Option<HookValue> {
         let key = name.to_key_name();
         self.hooks_map.get(&key).map(|ref_| ref_.clone())
+    }
+
+    pub fn list_hooks(&self) -> Vec<(String, HookValue)> {
+        self.hooks_map
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect()
+    }
+
+    pub fn delete_hook(&self, name: Hook) -> Option<(String, HookValue)> {
+        self.hooks_map.remove(&name.to_key_name())
     }
 
     pub fn insert_hook(&self, name: Hook, code: String) -> Result<()> {

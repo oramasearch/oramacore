@@ -296,6 +296,14 @@ impl CollectionWriter {
         self.javascript_hooks.get_hook(name)
     }
 
+    pub fn list_javascript_hooks(&self) -> Vec<(String, HookValue)> {
+        self.javascript_hooks.list_hooks()
+    }
+
+    pub fn delete_javascript_hook(&self, name: Hook) -> Option<(String, HookValue)> {
+        self.javascript_hooks.delete_hook(name)
+    }
+
     pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
         // `&mut self` is not used, but it needed to ensure no other thread is using the collection
         info!("Committing collection {}", self.id.0);

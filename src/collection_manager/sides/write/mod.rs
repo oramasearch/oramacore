@@ -161,4 +161,31 @@ impl WriteSide {
 
         collection.get_javascript_hook(name)
     }
+
+    pub async fn delete_javascript_hook(
+        &self,
+        collection_id: CollectionId,
+        name: Hook,
+    ) -> Option<(String, HookValue)> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .unwrap();
+
+        collection.delete_javascript_hook(name)
+    }
+
+    pub async fn list_javascript_hooks(
+        &self,
+        collection_id: CollectionId,
+    ) -> Vec<(String, HookValue)> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .unwrap();
+
+        collection.list_javascript_hooks()
+    }
 }

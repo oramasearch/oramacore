@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
+use axum_openapi3::utoipa::{self, IntoParams};
 use serde::{de, Deserialize, Serialize};
 
 use crate::{
@@ -317,9 +317,19 @@ pub struct Interaction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct NewHook {
+pub struct NewHookPostParams {
     pub name: String,
     pub code: String,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+pub struct GetHookQueryParams {
+    pub name: String,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+pub struct DeleteHookParams {
+    pub name: String,
 }
 
 #[cfg(test)]
