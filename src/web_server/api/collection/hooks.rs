@@ -19,7 +19,12 @@ use crate::{
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
-    Router::new().add(add_hook_v0()).with_state(write_side)
+    Router::new()
+        .add(add_hook_v0())
+        .add(get_hook_v0())
+        .add(delete_hook_v0())
+        .add(list_hooks_v0())
+        .with_state(write_side)
 }
 
 #[endpoint(
