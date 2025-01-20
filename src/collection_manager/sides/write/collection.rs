@@ -25,6 +25,7 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use super::{
     embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
+    hooks::{Hook, WriteHooks},
     CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
 };
 
@@ -40,6 +41,8 @@ pub struct CollectionWriter {
     field_id_by_name: DashMap<String, FieldId>,
 
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+
+    javascript_hooks: WriteHooks,
 }
 
 impl CollectionWriter {
@@ -58,6 +61,7 @@ impl CollectionWriter {
             field_id_by_name: DashMap::new(),
             field_id_generator: AtomicU16::new(0),
             embedding_sender,
+            javascript_hooks: WriteHooks::new(),
         }
     }
 
@@ -282,6 +286,10 @@ impl CollectionWriter {
         }
 
         Ok(self.fields.clone())
+    }
+
+    pub fn insert_new_hook(&self, name: Hook, code: String) -> Result<()> {
+        self.javascript_hooks.insert_hook(name, code)
     }
 
     pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {

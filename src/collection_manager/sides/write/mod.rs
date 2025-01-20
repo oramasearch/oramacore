@@ -2,7 +2,7 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
-mod hooks;
+pub mod hooks;
 mod operation;
 
 use std::sync::{
@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
+use hooks::{Hook, WriteHooks};
 pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
@@ -130,5 +131,20 @@ impl WriteSide {
     pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.as_dto())
+    }
+
+    pub async fn insert_javascript_hook(
+        &self,
+        collection_id: CollectionId,
+        name: Hook,
+        code: String,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .unwrap();
+
+        collection.insert_new_hook(name, code)
     }
 }

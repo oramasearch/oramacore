@@ -316,6 +316,12 @@ pub struct Interaction {
     pub messages: Vec<InteractionMessage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct NewHook {
+    pub name: String,
+    pub code: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

@@ -6,6 +6,7 @@ use crate::collection_manager::sides::{ReadSide, WriteSide};
 
 mod admin;
 mod answer;
+mod hooks;
 mod search;
 
 pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>) -> Router {

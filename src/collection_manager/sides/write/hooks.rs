@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::Result;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -5,6 +7,9 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde::Serialize;
+use thiserror::Error;
+
+const HOOK_PREFIX: &str = "hook:";
 
 #[derive(Serialize, Clone)]
 struct HookValue {
@@ -12,7 +17,13 @@ struct HookValue {
     pub created_at: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Error, Debug)]
+pub enum HookError {
+    #[error("Invalid hook name: {0}")]
+    InvalidHook(String),
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
 pub enum Hook {
     SelectEmbeddingsProperties,
 }
@@ -21,9 +32,35 @@ impl Hook {
     // @todo: this may not be necessary, but we may want to prefix "official" hooks with "hook:" to distingish them from
     // user defined hooks that are not part of the specs.
     pub fn to_key_name(&self) -> String {
+        format!("{}{}", HOOK_PREFIX, self.to_string().to_lowercase())
+    }
+}
+
+impl ToString for Hook {
+    fn to_string(&self) -> String {
         match self {
-            Self::SelectEmbeddingsProperties => "hook:selectEmbeddingProperties".to_string(),
+            Self::SelectEmbeddingsProperties => "selectEmbeddingProperties".to_string(),
         }
+    }
+}
+
+impl FromStr for Hook {
+    type Err = HookError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let name = s.strip_prefix(HOOK_PREFIX).unwrap_or(s);
+
+        match name {
+            "selectEmbeddingProperties" => Ok(Hook::SelectEmbeddingsProperties),
+            _ => Err(HookError::InvalidHook(s.to_string())),
+        }
+    }
+}
+
+impl TryFrom<String> for Hook {
+    type Error = HookError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Hook::from_str(&value)
     }
 }
 
@@ -36,6 +73,11 @@ impl WriteHooks {
         Self {
             hooks_map: DashMap::new(),
         }
+    }
+
+    pub fn has_hook(&self, name: Hook) -> bool {
+        let key = name.to_key_name();
+        self.hooks_map.contains_key(&key)
     }
 
     pub fn get_hook(&self, name: Hook) -> Option<HookValue> {
