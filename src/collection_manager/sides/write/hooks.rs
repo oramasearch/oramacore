@@ -3,7 +3,7 @@ use std::str::FromStr;
 use anyhow::Result;
 use chrono::Utc;
 use dashmap::DashMap;
-use oxc_allocator::{Allocator, HashMap};
+use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde::Serialize;

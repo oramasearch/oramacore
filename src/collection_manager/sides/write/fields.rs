@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::Sender;
 
 use crate::{
-    collection_manager::dto::FieldId,
+    collection_manager::dto::{DocumentFields, FieldId},
     indexes::number::Number,
     metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
     nlp::{locales::Locale, TextParser},
@@ -30,7 +30,7 @@ pub enum SerializedFieldIndexer {
     Number,
     Bool,
     String(Locale),
-    Embedding(String, Vec<String>),
+    Embedding(String, DocumentFields),
 }
 
 #[async_trait]
@@ -265,14 +265,14 @@ impl FieldIndexer for StringField {
 #[derive(Debug)]
 pub struct EmbeddingField {
     model_name: String,
-    document_fields: Vec<String>,
+    document_fields: DocumentFields,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 impl EmbeddingField {
     pub fn new(
         model_name: String,
-        document_fields: Vec<String>,
+        document_fields: DocumentFields,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> Self {
         Self {
@@ -294,14 +294,16 @@ impl FieldIndexer for EmbeddingField {
         doc: &FlattenDocument,
         sender: Sender<WriteOperation>,
     ) -> Result<()> {
-        let input: String = self
-            .document_fields
-            .iter()
-            .filter_map(|field_name| {
-                let value = doc.get(field_name).and_then(|v| v.as_str());
-                value
-            })
-            .collect();
+        let input: String = match &self.document_fields {
+            DocumentFields::Properties(v) => v
+                .iter()
+                .filter_map(|field_name| {
+                    let value = doc.get(field_name).and_then(|v| v.as_str());
+                    value
+                })
+                .collect(),
+            _ => unreachable!(),
+        };
 
         // The input could be:
         // - empty: we should skip this (???)

@@ -25,6 +25,8 @@ use tracing::{info, warn};
 use crate::{
     collection_manager::dto::{CollectionDTO, CreateCollectionOptionDTO},
     embeddings::EmbeddingService,
+    js::deno::JavaScript,
+    js::deno::Operation,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -33,6 +35,7 @@ pub struct WriteSide {
     sender: Sender<WriteOperation>,
     collections: CollectionsWriter,
     document_count: AtomicU64,
+    javascript_runtime: Arc<JavaScript>,
 }
 
 impl WriteSide {
@@ -40,6 +43,7 @@ impl WriteSide {
         sender: Sender<WriteOperation>,
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
+        javascript_runtime: Arc<JavaScript>,
     ) -> WriteSide {
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
@@ -50,6 +54,7 @@ impl WriteSide {
             sender,
             collections: CollectionsWriter::new(config, sx),
             document_count: AtomicU64::new(0),
+            javascript_runtime,
         }
     }
 
@@ -84,11 +89,15 @@ impl WriteSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id)
+            .get_collection(collection_id.clone())
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
         let sender = self.sender.clone();
+
+        let before_index_hook = self
+            .get_javascript_hook(collection_id, Hook::SelectEmbeddingsProperties)
+            .await;
 
         for mut doc in document_list {
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
@@ -112,6 +121,18 @@ impl WriteSide {
                         serde_json::Value::String(cuid2::create_id()),
                     );
                 }
+            }
+
+            if let Some(before_index_hook) = &before_index_hook {
+                let code = before_index_hook.code.clone();
+                let properties: Vec<String> = self
+                    .javascript_runtime
+                    .eval(
+                        Operation::SelectEmbeddingsProperties,
+                        code,
+                        doc.inner.clone(),
+                    )
+                    .await?;
             }
 
             let doc_id = DocumentId(doc_id);

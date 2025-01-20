@@ -41,9 +41,16 @@ impl From<Locale> for LanguageDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub enum DocumentFields {
+    Properties(Vec<String>),
+    Hook(String),
+    AllStringProperties,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct EmbeddingTypedField {
     pub model_name: String,
-    pub document_fields: Vec<String>,
+    pub document_fields: DocumentFields,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]

@@ -4,7 +4,7 @@ use rand::Rng;
 use serde::Serialize;
 use std::time::Instant;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Document {
     title: String,
     description: String,
@@ -39,7 +39,9 @@ async fn main() -> Result<(), Error> {
         .to_string();
 
         let start = Instant::now();
-        let result = js.eval(Operation::Anonymous, code, input).await?;
+        let result = js
+            .eval(Operation::Anonymous, code.clone(), input.clone())
+            .await?;
         let duration = start.elapsed();
         println!(
             "Call {}: JavaScript result: {} (Duration: {:?})",
