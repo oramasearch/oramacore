@@ -25,7 +25,7 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use super::{
     embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    hooks::{Hook, WriteHooks},
+    hooks::{Hook, HookValue, WriteHooks},
     CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
 };
 
@@ -288,8 +288,12 @@ impl CollectionWriter {
         Ok(self.fields.clone())
     }
 
-    pub fn insert_new_hook(&self, name: Hook, code: String) -> Result<()> {
+    pub fn insert_new_javascript_hook(&self, name: Hook, code: String) -> Result<()> {
         self.javascript_hooks.insert_hook(name, code)
+    }
+
+    pub fn get_javascript_hook(&self, name: Hook) -> Option<HookValue> {
+        self.javascript_hooks.get_hook(name)
     }
 
     pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {

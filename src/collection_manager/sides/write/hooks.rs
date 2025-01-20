@@ -12,9 +12,15 @@ use thiserror::Error;
 const HOOK_PREFIX: &str = "hook:";
 
 #[derive(Serialize, Clone)]
-struct HookValue {
+pub struct HookValue {
     pub code: String,
     pub created_at: i64,
+}
+
+impl HookValue {
+    pub fn to_string(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
 }
 
 #[derive(Error, Debug)]

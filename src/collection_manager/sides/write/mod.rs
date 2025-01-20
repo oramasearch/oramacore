@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-use hooks::{Hook, WriteHooks};
+use hooks::{Hook, HookValue};
 pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
@@ -145,6 +145,20 @@ impl WriteSide {
             .await
             .unwrap();
 
-        collection.insert_new_hook(name, code)
+        collection.insert_new_javascript_hook(name, code)
+    }
+
+    pub async fn get_javascript_hook(
+        &self,
+        collection_id: CollectionId,
+        name: Hook,
+    ) -> Option<HookValue> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .unwrap();
+
+        collection.get_javascript_hook(name)
     }
 }
