@@ -60,3 +60,36 @@ pub enum WriteOperation {
     },
     Collection(CollectionId, CollectionWriteOperation),
 }
+
+#[derive(Clone)]
+pub struct OperationSender {
+    sender: tokio::sync::broadcast::Sender<WriteOperation>,
+}
+
+impl OperationSender {
+    pub fn send(
+        &self,
+        operation: WriteOperation,
+    ) -> Result<(), tokio::sync::broadcast::error::SendError<WriteOperation>> {
+        self.sender.send(operation)?;
+        Ok(())
+    }
+}
+
+pub struct OperationReceiver {
+    receiver: tokio::sync::broadcast::Receiver<WriteOperation>,
+}
+
+impl OperationReceiver {
+    pub async fn recv(
+        &mut self,
+    ) -> Result<WriteOperation, tokio::sync::broadcast::error::RecvError> {
+        self.receiver.recv().await
+    }
+}
+
+pub fn channel(capacity: usize) -> (OperationSender, OperationReceiver) {
+    let (sender, receiver) = tokio::sync::broadcast::channel(capacity);
+
+    (OperationSender { sender }, OperationReceiver { receiver })
+}

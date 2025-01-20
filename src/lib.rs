@@ -6,13 +6,12 @@ use ai::{
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation, WriteSide,
+    channel, CollectionsWriterConfig, IndexesConfig, OperationReceiver, ReadSide, WriteSide,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
-use tokio::sync::broadcast::Receiver;
 use tracing::info;
 use web_server::{HttpConfig, WebServer};
 
@@ -96,10 +95,7 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn connect_write_and_read_side(
-    mut receiver: Receiver<WriteOperation>,
-    read_side: Arc<ReadSide>,
-) {
+pub fn connect_write_and_read_side(mut receiver: OperationReceiver, read_side: Arc<ReadSide>) {
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
             read_side.update(op).await.expect("OUCH!");
@@ -112,7 +108,7 @@ pub async fn build_orama(
 ) -> Result<(
     Option<Arc<WriteSide>>,
     Option<Arc<ReadSide>>,
-    Receiver<WriteOperation>,
+    OperationReceiver,
 )> {
     let OramacoreConfig {
         embeddings: embedding_config,
@@ -147,7 +143,7 @@ pub async fn build_orama(
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
 
-    let (sender, receiver) = tokio::sync::broadcast::channel(10_000);
+    let (sender, receiver) = channel(10_000);
 
     assert_eq!(
         writer_side.output,

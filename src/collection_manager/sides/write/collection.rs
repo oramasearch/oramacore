@@ -10,7 +10,6 @@ use std::{
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::Sender;
 use tracing::{info, instrument};
 
 use crate::{
@@ -25,7 +24,7 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use super::{
     embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
+    CollectionWriteOperation, OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
 pub struct CollectionWriter {
@@ -80,7 +79,7 @@ impl CollectionWriter {
         &self,
         doc_id: DocumentId,
         doc: Document,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         self.collection_document_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -166,7 +165,7 @@ impl CollectionWriter {
     pub(super) async fn register_fields(
         &self,
         typed_fields: HashMap<String, TypedField>,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
             let field_id = self.get_field_id_by_name(&field_name);
@@ -192,7 +191,7 @@ impl CollectionWriter {
         field_name: String,
         typed_field: TypedField,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         match &typed_field {
             TypedField::Embedding(embedding_field) => {
@@ -256,7 +255,7 @@ impl CollectionWriter {
     async fn get_fields_to_index(
         &self,
         doc: Document,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();

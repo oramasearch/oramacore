@@ -7,8 +7,8 @@ use crate::{
     collection_manager::{
         dto::FieldId,
         sides::{
-            CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer, StringField,
-            WriteOperation,
+            channel, CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer,
+            StringField, WriteOperation,
         },
     },
     indexes::string::{
@@ -44,7 +44,7 @@ pub async fn create_string_index(
         })
         .collect();
 
-    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+    let (sx, mut rx) = channel(1_0000);
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(id as u64);
@@ -105,7 +105,7 @@ pub async fn create_uncommitted_string_field_index_from(
         crate::nlp::locales::Locale::EN,
     )));
 
-    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+    let (sx, mut rx) = channel(1_0000);
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u64);

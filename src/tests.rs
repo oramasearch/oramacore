@@ -9,7 +9,6 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    ai::grpc::GrpcModelConfig,
     build_orama,
     collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide},
     connect_write_and_read_side,
@@ -1160,6 +1159,8 @@ async fn test_empty_term() -> Result<()> {
 #[cfg(feature = "test-python")]
 #[tokio::test]
 async fn test_vector_search_grpc() -> Result<()> {
+    use crate::ai::grpc::GrpcModelConfig;
+
     let _ = tracing_subscriber::fmt::try_init();
 
     let mut config = create_oramacore_config();

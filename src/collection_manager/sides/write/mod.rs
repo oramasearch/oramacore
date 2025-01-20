@@ -10,6 +10,8 @@ use std::sync::{
 };
 
 use anyhow::{Context, Result};
+use tracing::{info, warn};
+
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -17,8 +19,6 @@ pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
-use tokio::sync::broadcast::Sender;
-use tracing::{info, warn};
 
 use crate::{
     collection_manager::dto::{CollectionDTO, CreateCollectionOptionDTO},
@@ -28,14 +28,14 @@ use crate::{
 };
 
 pub struct WriteSide {
-    sender: Sender<WriteOperation>,
+    sender: OperationSender,
     collections: CollectionsWriter,
     document_count: AtomicU64,
 }
 
 impl WriteSide {
     pub fn new(
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
     ) -> WriteSide {
