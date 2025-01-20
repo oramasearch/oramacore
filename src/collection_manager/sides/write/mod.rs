@@ -2,6 +2,7 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
+mod hooks;
 mod operation;
 
 use std::sync::{
