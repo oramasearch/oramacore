@@ -1079,8 +1079,6 @@ async fn test_vector_search_grpc() -> Result<()> {
 async fn test_commit_and_load2() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let _ = std::fs::remove_dir_all("/Users/allevo/repos/rustorama/.data");
-
     let mut config = create_oramacore_config();
     config.embeddings.preload = vec!["gte-small".to_string()];
     config.embeddings.fastembed = Some(FastEmbedRepoConfig {
@@ -1093,8 +1091,6 @@ async fn test_commit_and_load2() -> Result<()> {
             dimensions: 384,
         }),
     );
-    config.reader_side.config.data_dir = "/Users/allevo/repos/rustorama/.data/read".into();
-    config.writer_side.config.data_dir = "/Users/allevo/repos/rustorama/.data/write".into();
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
