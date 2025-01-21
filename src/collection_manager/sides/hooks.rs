@@ -125,6 +125,12 @@ impl Debug for HooksRuntime {
     }
 }
 
+impl Default for HooksRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HooksRuntime {
     pub fn new() -> Self {
         Self {

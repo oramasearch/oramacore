@@ -157,7 +157,10 @@ impl StringIndex {
             let data_to_commit = uncommitted.take().context("Cannot take data to commit")?;
 
             if data_to_commit.is_empty() {
-                info!("Everything is already committed for string field {:?}. Skip dumping", field_id);
+                info!(
+                    "Everything is already committed for string field {:?}. Skip dumping",
+                    field_id
+                );
                 continue;
             }
 
