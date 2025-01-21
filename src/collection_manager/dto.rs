@@ -45,7 +45,7 @@ impl From<Locale> for LanguageDTO {
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub enum DocumentFields {
     Properties(Vec<String>),
-    Hook(String),
+    Hook(HookName),
     AllStringProperties,
 }
 

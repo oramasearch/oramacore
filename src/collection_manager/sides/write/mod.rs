@@ -6,13 +6,14 @@ mod operation;
 
 use std::{
     collections::HashMap,
+    hash::Hash,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
 };
 
-use super::hooks::{HookName, HookValue};
+use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
@@ -25,9 +26,10 @@ use tokio::sync::broadcast::Sender;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::dto::{CollectionDTO, CreateCollectionOptionDTO},
+    collection_manager::dto::{
+        CollectionDTO, CreateCollectionOptionDTO, DocumentFields, EmbeddingTypedField, TypedField,
+    },
     embeddings::EmbeddingService,
-    js::deno::JavaScript,
     js::deno::Operation,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
@@ -37,8 +39,7 @@ pub struct WriteSide {
     sender: Sender<WriteOperation>,
     collections: CollectionsWriter,
     document_count: AtomicU64,
-    javascript_runtime: Arc<JavaScript>,
-    hook_storage: super::hooks::HookStorage,
+    hook_runtime: Arc<HooksRuntime>,
 }
 
 impl WriteSide {
@@ -46,7 +47,7 @@ impl WriteSide {
         sender: Sender<WriteOperation>,
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
-        javascript_runtime: Arc<JavaScript>,
+        hook_runtime: Arc<HooksRuntime>,
     ) -> WriteSide {
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
@@ -57,8 +58,7 @@ impl WriteSide {
             sender,
             collections: CollectionsWriter::new(config, sx),
             document_count: AtomicU64::new(0),
-            javascript_runtime,
-            hook_storage: super::hooks::HookStorage::new(),
+            hook_runtime,
         }
     }
 
@@ -99,9 +99,6 @@ impl WriteSide {
 
         let sender = self.sender.clone();
 
-        let select_embedding_properties_hook =
-            self.get_javascript_hook(collection_id, HookName::SelectEmbeddingsProperties);
-
         for mut doc in document_list {
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
@@ -126,24 +123,43 @@ impl WriteSide {
                 }
             }
 
-            if let Some(before_index_hook) = &select_embedding_properties_hook {
-                let code = before_index_hook.code.clone();
-                let properties: Vec<String> = self
-                    .javascript_runtime
-                    .eval(
-                        Operation::SelectEmbeddingsProperties,
-                        code,
-                        doc.inner.clone(),
-                    )
-                    .await?;
-            }
-
             let doc_id = DocumentId(doc_id);
             collection
                 .process_new_document(doc_id, doc, sender.clone())
                 .await
                 .context("Cannot process document")?;
         }
+
+        Ok(())
+    }
+
+    pub async fn insert_javascript_hook(
+        &self,
+        collection_id: CollectionId,
+        name: HookName,
+        code: String,
+    ) -> Result<()> {
+        self.hook_runtime
+            .insert_hook(collection_id.clone(), name.clone(), code)
+            .context("Cannot insert hook")?;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        let typed_fields = HashMap::from_iter([(
+            "___orama_auto_embedding".to_string(),
+            TypedField::Embedding(EmbeddingTypedField {
+                model_name: "BGESmall".to_string(), // @todo: remove hardcoded value
+                document_fields: DocumentFields::Hook(name),
+            }),
+        )]);
+
+        collection
+            .register_fields(typed_fields, self.sender.clone())
+            .await?;
 
         Ok(())
     }
@@ -155,37 +171,5 @@ impl WriteSide {
     pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.as_dto())
-    }
-
-    pub fn insert_javascript_hook(
-        &self,
-        collection_id: CollectionId,
-        name: HookName,
-        code: String,
-    ) -> Result<()> {
-        self.hook_storage.insert_hook(collection_id, name, code)
-    }
-
-    pub fn get_javascript_hook(
-        &self,
-        collection_id: CollectionId,
-        name: HookName,
-    ) -> Option<HookValue> {
-        self.hook_storage.get_hook(collection_id, name)
-    }
-
-    pub fn delete_javascript_hook(
-        &self,
-        collection_id: CollectionId,
-        name: HookName,
-    ) -> Option<(String, HookValue)> {
-        self.hook_storage.delete_hook(collection_id, name)
-    }
-
-    pub fn list_javascript_hooks(
-        &self,
-        collection_id: CollectionId,
-    ) -> HashMap<HookName, HookValue> {
-        self.hook_storage.list_hooks(collection_id)
     }
 }
