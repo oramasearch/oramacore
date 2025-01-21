@@ -10,6 +10,8 @@ use crate::{
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
 };
 
+use super::sides::hooks::HookName;
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
 
@@ -325,18 +327,21 @@ pub struct Interaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NewHookPostParams {
-    pub name: String,
+    #[schema(inline)]
+    pub name: HookName,
     pub code: String,
 }
 
 #[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
 pub struct GetHookQueryParams {
-    pub name: String,
+    #[schema(inline)]
+    pub name: HookName,
 }
 
 #[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
 pub struct DeleteHookParams {
-    pub name: String,
+    #[schema(inline)]
+    pub name: HookName,
 }
 
 #[cfg(test)]

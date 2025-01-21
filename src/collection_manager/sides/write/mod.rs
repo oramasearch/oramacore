@@ -2,19 +2,21 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
-pub mod hooks;
 mod operation;
 
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
+use super::hooks::{HookName, HookValue};
 use anyhow::{Context, Result};
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-use hooks::{Hook, HookValue};
 pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
@@ -36,6 +38,7 @@ pub struct WriteSide {
     collections: CollectionsWriter,
     document_count: AtomicU64,
     javascript_runtime: Arc<JavaScript>,
+    hook_storage: super::hooks::HookStorage,
 }
 
 impl WriteSide {
@@ -55,6 +58,7 @@ impl WriteSide {
             collections: CollectionsWriter::new(config, sx),
             document_count: AtomicU64::new(0),
             javascript_runtime,
+            hook_storage: super::hooks::HookStorage::new(),
         }
     }
 
@@ -95,9 +99,8 @@ impl WriteSide {
 
         let sender = self.sender.clone();
 
-        let before_index_hook = self
-            .get_javascript_hook(collection_id, Hook::SelectEmbeddingsProperties)
-            .await;
+        let select_embedding_properties_hook =
+            self.get_javascript_hook(collection_id, HookName::SelectEmbeddingsProperties);
 
         for mut doc in document_list {
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
@@ -123,7 +126,7 @@ impl WriteSide {
                 }
             }
 
-            if let Some(before_index_hook) = &before_index_hook {
+            if let Some(before_index_hook) = &select_embedding_properties_hook {
                 let code = before_index_hook.code.clone();
                 let properties: Vec<String> = self
                     .javascript_runtime
@@ -154,59 +157,35 @@ impl WriteSide {
         Some(collection.as_dto())
     }
 
-    pub async fn insert_javascript_hook(
+    pub fn insert_javascript_hook(
         &self,
         collection_id: CollectionId,
-        name: Hook,
+        name: HookName,
         code: String,
     ) -> Result<()> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .unwrap();
-
-        collection.insert_new_javascript_hook(name, code)
+        self.hook_storage.insert_hook(collection_id, name, code)
     }
 
-    pub async fn get_javascript_hook(
+    pub fn get_javascript_hook(
         &self,
         collection_id: CollectionId,
-        name: Hook,
+        name: HookName,
     ) -> Option<HookValue> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .unwrap();
-
-        collection.get_javascript_hook(name)
+        self.hook_storage.get_hook(collection_id, name)
     }
 
-    pub async fn delete_javascript_hook(
+    pub fn delete_javascript_hook(
         &self,
         collection_id: CollectionId,
-        name: Hook,
+        name: HookName,
     ) -> Option<(String, HookValue)> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .unwrap();
-
-        collection.delete_javascript_hook(name)
+        self.hook_storage.delete_hook(collection_id, name)
     }
 
-    pub async fn list_javascript_hooks(
+    pub fn list_javascript_hooks(
         &self,
         collection_id: CollectionId,
-    ) -> Vec<(String, HookValue)> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .unwrap();
-
-        collection.list_javascript_hooks()
+    ) -> HashMap<HookName, HookValue> {
+        self.hook_storage.list_hooks(collection_id)
     }
 }

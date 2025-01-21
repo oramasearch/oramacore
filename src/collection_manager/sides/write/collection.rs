@@ -25,7 +25,6 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use super::{
     embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    hooks::{Hook, HookValue, WriteHooks},
     CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
 };
 
@@ -41,8 +40,6 @@ pub struct CollectionWriter {
     field_id_by_name: DashMap<String, FieldId>,
 
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-
-    javascript_hooks: WriteHooks,
 }
 
 impl CollectionWriter {
@@ -61,7 +58,6 @@ impl CollectionWriter {
             field_id_by_name: DashMap::new(),
             field_id_generator: AtomicU16::new(0),
             embedding_sender,
-            javascript_hooks: WriteHooks::new(),
         }
     }
 
@@ -286,22 +282,6 @@ impl CollectionWriter {
         }
 
         Ok(self.fields.clone())
-    }
-
-    pub fn insert_new_javascript_hook(&self, name: Hook, code: String) -> Result<()> {
-        self.javascript_hooks.insert_hook(name, code)
-    }
-
-    pub fn get_javascript_hook(&self, name: Hook) -> Option<HookValue> {
-        self.javascript_hooks.get_hook(name)
-    }
-
-    pub fn list_javascript_hooks(&self) -> Vec<(String, HookValue)> {
-        self.javascript_hooks.list_hooks()
-    }
-
-    pub fn delete_javascript_hook(&self, name: Hook) -> Option<(String, HookValue)> {
-        self.javascript_hooks.delete_hook(name)
     }
 
     pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
