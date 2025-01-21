@@ -14,7 +14,10 @@ use tokio::sync::broadcast::Sender;
 use tracing::{info, instrument};
 
 use crate::{
-    collection_manager::dto::{CollectionDTO, FieldId},
+    collection_manager::{
+        dto::{CollectionDTO, FieldId},
+        sides::hooks::HooksRuntime,
+    },
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
@@ -81,6 +84,7 @@ impl CollectionWriter {
         doc_id: DocumentId,
         doc: Document,
         sender: Sender<WriteOperation>,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         self.collection_document_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -96,7 +100,7 @@ impl CollectionWriter {
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
 
         let fields_to_index = self
-            .get_fields_to_index(doc.clone(), sender.clone())
+            .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
             .await
             .context("Cannot get fields to index")?;
 
@@ -167,6 +171,7 @@ impl CollectionWriter {
         &self,
         typed_fields: HashMap<String, TypedField>,
         sender: Sender<WriteOperation>,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
             let field_id = self.get_field_id_by_name(&field_name);
@@ -177,6 +182,7 @@ impl CollectionWriter {
                 field_type,
                 self.embedding_sender.clone(),
                 sender.clone(),
+                hooks_runtime.clone(),
             )
             .await
             .context("Cannot create field")?;
@@ -193,6 +199,7 @@ impl CollectionWriter {
         typed_field: TypedField,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
         sender: Sender<WriteOperation>,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         match &typed_field {
             TypedField::Embedding(embedding_field) => {
@@ -204,6 +211,7 @@ impl CollectionWriter {
                             embedding_field.model_name.clone(),
                             embedding_field.document_fields.clone(),
                             embedding_sender,
+                            hooks_runtime,
                         ))),
                     ),
                 );
@@ -257,6 +265,7 @@ impl CollectionWriter {
         &self,
         doc: Document,
         sender: Sender<WriteOperation>,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
@@ -276,6 +285,7 @@ impl CollectionWriter {
                 typed_field,
                 self.embedding_sender.clone(),
                 sender.clone(),
+                hooks_runtime.clone(),
             )
             .await
             .context("Cannot create field")?;
@@ -324,7 +334,11 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn load(&mut self, path: PathBuf) -> Result<()> {
+    pub(super) async fn load(
+        &mut self,
+        path: PathBuf,
+        hooks_runtime: Arc<HooksRuntime>,
+    ) -> Result<()> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -355,6 +369,7 @@ impl CollectionWriter {
                         model,
                         fields,
                         self.embedding_sender.clone(),
+                        hooks_runtime.clone(),
                     ))),
                 ),
             };

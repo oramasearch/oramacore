@@ -37,7 +37,10 @@ async fn add_hook_v0(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let NewHookPostParams { name, code } = params;
-    match write_side.insert_javascript_hook(collection_id, name, code) {
+    match write_side
+        .insert_javascript_hook(collection_id, name, code)
+        .await
+    {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -59,7 +62,7 @@ async fn get_hook_v0(
     let collection_id = CollectionId(id);
     let GetHookQueryParams { name } = params.0;
     match write_side.get_javascript_hook(collection_id, name) {
-        Some(full_hook) => Json(json!({ "hook": full_hook.to_string().unwrap() })),
+        Some(full_hook) => Json(json!({ "hook": full_hook.to_string() })),
         None => Json(json!({ "hook": null })),
     }
 }

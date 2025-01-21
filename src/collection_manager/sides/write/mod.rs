@@ -6,7 +6,6 @@ mod operation;
 
 use std::{
     collections::HashMap,
-    hash::Hash,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -30,7 +29,6 @@ use crate::{
         CollectionDTO, CreateCollectionOptionDTO, DocumentFields, EmbeddingTypedField, TypedField,
     },
     embeddings::EmbeddingService,
-    js::deno::Operation,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -63,7 +61,7 @@ impl WriteSide {
     }
 
     pub async fn load(&mut self) -> Result<()> {
-        self.collections.load().await
+        self.collections.load(self.hook_runtime.clone()).await
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -72,7 +70,7 @@ impl WriteSide {
 
     pub async fn create_collection(&self, option: CreateCollectionOptionDTO) -> Result<()> {
         self.collections
-            .create_collection(option, self.sender.clone())
+            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
 
         Ok(())
@@ -125,7 +123,7 @@ impl WriteSide {
 
             let doc_id = DocumentId(doc_id);
             collection
-                .process_new_document(doc_id, doc, sender.clone())
+                .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
                 .context("Cannot process document")?;
         }
@@ -158,7 +156,7 @@ impl WriteSide {
         )]);
 
         collection
-            .register_fields(typed_fields, self.sender.clone())
+            .register_fields(typed_fields, self.sender.clone(), self.hook_runtime.clone())
             .await?;
 
         Ok(())
@@ -171,5 +169,31 @@ impl WriteSide {
     pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.as_dto())
+    }
+
+    pub fn get_javascript_hook(
+        &self,
+        collection_id: CollectionId,
+        name: HookName,
+    ) -> Option<String> {
+        self.hook_runtime
+            .get_hook(collection_id, name)
+            .map(|hook| hook.code)
+    }
+
+    pub fn delete_javascript_hook(
+        &self,
+        _collection_id: CollectionId,
+        _name: HookName,
+    ) -> Option<String> {
+        None // @todo: implement delete hook in HooksRuntime and CollectionsWriter
+    }
+
+    pub fn list_javascript_hooks(&self, collection_id: CollectionId) -> HashMap<HookName, String> {
+        self.hook_runtime
+            .list_hooks(collection_id)
+            .into_iter()
+            .map(|(name, hook)| (name, hook.code))
+            .collect()
     }
 }
