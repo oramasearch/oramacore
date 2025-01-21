@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum_openapi3::utoipa::ToSchema;
-use axum_openapi3::utoipa::{self, IntoParams};
+use axum_openapi3::utoipa::{self};
 use chrono::Utc;
 use dashmap::DashMap;
 use oxc_allocator::Allocator;
