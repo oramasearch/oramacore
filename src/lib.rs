@@ -6,9 +6,11 @@ use ai::{
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation, WriteSide,
+    hooks::HooksRuntime, CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation,
+    WriteSide,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
+use js::deno::JavaScript;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
@@ -147,6 +149,8 @@ pub async fn build_orama(
         .with_context(|| "Failed to initialize the EmbeddingService")?;
     let embedding_service = Arc::new(embedding_service);
 
+    let hooks_runtime = Arc::new(HooksRuntime::new());
+
     let (sender, receiver) = tokio::sync::broadcast::channel(10_000);
 
     assert_eq!(
@@ -164,6 +168,7 @@ pub async fn build_orama(
         sender.clone(),
         writer_side.config,
         embedding_service.clone(),
+        hooks_runtime,
     );
 
     write_side.load().await.context("Cannot load write side")?;
