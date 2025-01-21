@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
+use axum_openapi3::utoipa::{self, IntoParams};
 use serde::{de, Deserialize, Serialize};
 
 use crate::{
@@ -9,6 +9,8 @@ use crate::{
     nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
 };
+
+use super::sides::hooks::HookName;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
@@ -41,9 +43,17 @@ impl From<Locale> for LanguageDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[serde(untagged)]
+pub enum DocumentFields {
+    Properties(Vec<String>),
+    Hook(HookName),
+    AllStringProperties,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct EmbeddingTypedField {
     pub model_name: String,
-    pub document_fields: Vec<String>,
+    pub document_fields: DocumentFields,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -316,6 +326,25 @@ pub struct Interaction {
     pub messages: Vec<InteractionMessage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct NewHookPostParams {
+    #[schema(inline)]
+    pub name: HookName,
+    pub code: String,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+pub struct GetHookQueryParams {
+    #[schema(inline)]
+    pub name: HookName,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+pub struct DeleteHookParams {
+    #[schema(inline)]
+    pub name: HookName,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
@@ -357,6 +386,22 @@ mod test {
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
         assert!(matches!(p.mode, SearchMode::Default(_)));
+    }
+
+    #[test]
+    fn test_create_collection_option_dto_serialization() {
+        let _: CreateCollectionOptionDTO = json!({
+            "id": "foo",
+            "typed_fields": {
+                "vector": {
+                    "mode": "embedding",
+                    "model_name": "gte-small",
+                    "document_fields": ["text"],
+                }
+            }
+        })
+        .try_into()
+        .unwrap();
     }
 
     #[test]

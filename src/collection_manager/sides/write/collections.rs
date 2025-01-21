@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
+use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
 };
@@ -60,6 +62,7 @@ impl CollectionsWriter {
         &self,
         collection_option: CreateCollectionOptionDTO,
         sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         let CreateCollectionOptionDTO {
             id,
@@ -82,7 +85,7 @@ impl CollectionsWriter {
             .context("Cannot send create collection")?;
 
         collection
-            .register_fields(typed_fields, sender.clone())
+            .register_fields(typed_fields, sender.clone(), hooks_runtime)
             .await
             .context("Cannot register fields")?;
 
@@ -127,7 +130,7 @@ impl CollectionsWriter {
     }
 
     #[instrument(skip(self))]
-    pub async fn load(&mut self) -> Result<()> {
+    pub async fn load(&mut self, hooks_runtime: Arc<HooksRuntime>) -> Result<()> {
         // `&mut self` isn't needed here
         // but we need to ensure that the method is not called concurrently
         let data_dir = &self.config.data_dir;
@@ -162,7 +165,9 @@ impl CollectionsWriter {
                 LanguageDTO::English,
                 self.embedding_sender.clone(),
             );
-            collection.load(collection_dir).await?;
+            collection
+                .load(collection_dir, hooks_runtime.clone())
+                .await?;
 
             self.collections
                 .write()

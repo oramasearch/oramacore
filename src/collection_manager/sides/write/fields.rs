@@ -10,7 +10,10 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::dto::FieldId,
+    collection_manager::{
+        dto::{DocumentFields, FieldId},
+        sides::hooks::HooksRuntime,
+    },
     indexes::number::Number,
     metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
     nlp::{locales::Locale, TextParser},
@@ -30,7 +33,7 @@ pub enum SerializedFieldIndexer {
     Number,
     Bool,
     String(Locale),
-    Embedding(String, Vec<String>),
+    Embedding(String, DocumentFields),
 }
 
 #[async_trait]
@@ -265,22 +268,32 @@ impl FieldIndexer for StringField {
 #[derive(Debug)]
 pub struct EmbeddingField {
     model_name: String,
-    document_fields: Vec<String>,
+    document_fields: DocumentFields,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+    hook_runtime: Arc<HooksRuntime>,
 }
 
 impl EmbeddingField {
     pub fn new(
         model_name: String,
-        document_fields: Vec<String>,
+        document_fields: DocumentFields,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        hook_runtime: Arc<HooksRuntime>,
     ) -> Self {
         Self {
             model_name,
             document_fields,
             embedding_sender,
+            hook_runtime,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SelectEmbeddingPropertiesReturnType {
+    Properties(Vec<String>),
+    Text(String),
 }
 
 #[async_trait]
@@ -294,14 +307,38 @@ impl FieldIndexer for EmbeddingField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let input: String = self
-            .document_fields
-            .iter()
-            .filter_map(|field_name| {
-                let value = doc.get(field_name).and_then(|v| v.as_str());
-                value
-            })
-            .collect();
+        let input: String = match &self.document_fields {
+            DocumentFields::Properties(v) => v
+                .iter()
+                .filter_map(|field_name| {
+                    let value = doc.get(field_name).and_then(|v| v.as_str());
+                    value
+                })
+                .collect(),
+            DocumentFields::Hook(hook_name) => {
+                let hook_exec_result = self
+                    .hook_runtime
+                    .eval(coll_id.clone(), hook_name.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
+                    .await;
+
+                let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
+                    Some(Ok(input)) => input,
+                    _ => return Ok(()),
+                };
+
+                match input {
+                    SelectEmbeddingPropertiesReturnType::Properties(v) => v
+                        .iter()
+                        .filter_map(|field_name| {
+                            let value = doc.get(field_name).and_then(|v| v.as_str());
+                            value
+                        })
+                        .collect(),
+                    SelectEmbeddingPropertiesReturnType::Text(v) => v,
+                }
+            }
+            _ => unreachable!(),
+        };
 
         // The input could be:
         // - empty: we should skip this (???)

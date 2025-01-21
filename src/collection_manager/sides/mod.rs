@@ -1,3 +1,4 @@
+pub mod hooks;
 mod read;
 mod write;
 
