@@ -28,9 +28,7 @@
     },
 
     "embeddings": {
-        "preload": [
-            "gte-small"
-        ],
+        "preload": [],
 
         // Providers
         "grpc": {
@@ -71,7 +69,7 @@
             },
 
             // grpc models
-            "foo-model": {
+            "BGESmall": {
                 "type": "grpc",
                 "real_model_name": "BGESmall",
                 "dimensions": 384,

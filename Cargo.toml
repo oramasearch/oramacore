@@ -119,9 +119,6 @@ path = "src/bin/oramacore.rs"
 [[bin]]
 name = "embeddings"
 path = "src/bin/embeddings/embeddings.rs"
-[[bin]]
-name = "deno"
-path = "src/bin/js/deno.rs"
 
 [[bench]]
 name = "phrase_match"
