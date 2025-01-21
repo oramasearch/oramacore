@@ -29,9 +29,9 @@ async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
         Ok(_) => {}
         Err(e) => {
             error!("Error dumping all collections: {}", e);
-            // e.chain()
-            //     .skip(1)
-            //     .for_each(|cause| error!("because: {}", cause));
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
         }
     }
 

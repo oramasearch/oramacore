@@ -102,7 +102,7 @@ impl WriteSide {
             document_count,
             offset,
         };
-        BufferedFile::create(self.data_dir.join("info.json"))
+        BufferedFile::create_or_overwrite(self.data_dir.join("info.json"))
             .context("Cannot create info file")?
             .write_json_data(&info)
             .context("Cannot write info file")?;

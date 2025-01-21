@@ -398,6 +398,10 @@ impl DataToCommit<'_> {
         self.current_offset
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty()
+    }
+
     pub fn iter(
         &self,
     ) -> impl Iterator<

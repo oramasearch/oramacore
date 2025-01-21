@@ -38,9 +38,9 @@ async fn dump_all(write_side: State<Arc<WriteSide>>) -> impl IntoResponse {
         Ok(_) => {}
         Err(e) => {
             error!("Error dumping all collections: {}", e);
-            // e.chain()
-            //     .skip(1)
-            //     .for_each(|cause| error!("because: {}", cause));
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
         }
     }
     // writer.commit(data_dir)

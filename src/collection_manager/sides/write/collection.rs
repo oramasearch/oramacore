@@ -325,7 +325,7 @@ impl CollectionWriter {
                 .collect(),
         };
 
-        BufferedFile::create(path.join("info.json"))
+        BufferedFile::create_or_overwrite(path.join("info.json"))
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;

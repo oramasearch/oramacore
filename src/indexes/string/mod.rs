@@ -154,9 +154,12 @@ impl StringIndex {
             };
             let committed = self.committed.get(&field_id);
 
-            println!("Committed Field {:?}", committed.is_some());
-
             let data_to_commit = uncommitted.take().context("Cannot take data to commit")?;
+
+            if data_to_commit.is_empty() {
+                info!("Everything is already committed for string field {:?}. Skip dumping", field_id);
+                continue;
+            }
 
             let offset = data_to_commit.get_offset();
             let field_new_path = new_path
