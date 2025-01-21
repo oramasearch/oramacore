@@ -43,6 +43,7 @@ impl From<Locale> for LanguageDTO {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
     Hook(HookName),
@@ -385,6 +386,22 @@ mod test {
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
         assert!(matches!(p.mode, SearchMode::Default(_)));
+    }
+
+    #[test]
+    fn test_create_collection_option_dto_serialization() {
+        let _: CreateCollectionOptionDTO = json!({
+            "id": "foo",
+            "typed_fields": {
+                "vector": {
+                    "mode": "embedding",
+                    "model_name": "gte-small",
+                    "document_fields": ["text"],
+                }
+            }
+        })
+        .try_into()
+        .unwrap();
     }
 
     #[test]

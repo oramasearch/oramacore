@@ -5,13 +5,17 @@ use std::{
 };
 
 use anyhow::Result;
+use rayon::vec;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
     ai::grpc::GrpcModelConfig,
     build_orama,
-    collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide},
+    collection_manager::{
+        dto::{CreateCollectionOptionDTO, DocumentFields, EmbeddingTypedField, TypedField},
+        sides::{CollectionsWriterConfig, EmbeddingField, IndexesConfig, ReadSide, WriteSide},
+    },
     connect_write_and_read_side,
     embeddings::{
         fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig},
