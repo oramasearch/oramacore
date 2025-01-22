@@ -3,7 +3,8 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     pin::Pin,
-    sync::Arc, time::Duration,
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -287,7 +288,7 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", add))
             .await;
         if c.is_ok() {
-            break ;
+            break;
         }
         sleep(Duration::from_millis(100)).await;
     }

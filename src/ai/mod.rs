@@ -56,8 +56,7 @@ impl AIService {
         input: Vec<&String>,
         intent: OramaIntent,
     ) -> Result<Vec<Vec<f32>>> {
-        let mut conn = self.pool.get().await
-            .context("Cannot get connection")?;
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let request = Request::new(EmbeddingRequest {
             input: input.into_iter().cloned().collect(),

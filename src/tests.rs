@@ -1174,7 +1174,6 @@ async fn test_commit_and_load2() -> Result<()> {
             .try_into()?,
         )
         .await?;
-    println!("{:?}", result);
     assert_eq!(result.count, 1);
 
     Ok(())
