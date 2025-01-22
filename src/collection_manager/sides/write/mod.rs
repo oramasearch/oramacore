@@ -6,6 +6,7 @@ mod operation;
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -14,6 +15,9 @@ use std::{
 
 use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
+
 use collections::CollectionsWriter;
 pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -21,32 +25,34 @@ pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
-use tokio::sync::broadcast::Sender;
-use tracing::{info, warn};
 
 use crate::{
     collection_manager::dto::{
         CollectionDTO, CreateCollectionOptionDTO, DocumentFields, EmbeddingTypedField, TypedField,
     },
     embeddings::EmbeddingService,
+    file_utils::BufferedFile,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
     types::{CollectionId, DocumentId, DocumentList},
 };
 
 pub struct WriteSide {
-    sender: Sender<WriteOperation>,
+    sender: OperationSender,
     collections: CollectionsWriter,
     document_count: AtomicU64,
+    data_dir: PathBuf,
     hook_runtime: Arc<HooksRuntime>,
 }
 
 impl WriteSide {
     pub fn new(
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         config: CollectionsWriterConfig,
         embedding_service: Arc<EmbeddingService>,
         hook_runtime: Arc<HooksRuntime>,
     ) -> WriteSide {
+        let data_dir = config.data_dir.clone();
+
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
 
@@ -56,16 +62,55 @@ impl WriteSide {
             sender,
             collections: CollectionsWriter::new(config, sx),
             document_count: AtomicU64::new(0),
+            data_dir,
             hook_runtime,
         }
     }
 
     pub async fn load(&mut self) -> Result<()> {
-        self.collections.load(self.hook_runtime.clone()).await
+        self.collections.load(self.hook_runtime.clone()).await?;
+
+        let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot read info file")
+        {
+            Ok(info) => info,
+            Err(err) => {
+                warn!("Cannot read info file: {}. Skip loading", err);
+                return Ok(());
+            }
+        };
+        let info = match info {
+            WriteSideInfo::V1(info) => info,
+        };
+
+        self.document_count
+            .store(info.document_count, Ordering::Relaxed);
+        self.sender.set_offset(info.offset);
+
+        Ok(())
     }
 
     pub async fn commit(&self) -> Result<()> {
-        self.collections.commit().await
+        let offset = self.sender.offset();
+
+        self.collections.commit().await?;
+
+        // This load is not atomic with the commit.
+        // This means, we save a document count possible higher.
+        // Anyway it is not a problem, because the document count is only used for the document id generation
+        // So, if something goes wrong, we save an higher number, and this is ok.
+        let document_count = self.document_count.load(Ordering::Relaxed);
+        let info = WriteSideInfo::V1(WriteSideInfoV1 {
+            document_count,
+            offset,
+        });
+        BufferedFile::create_or_overwrite(self.data_dir.join("info.json"))
+            .context("Cannot create info file")?
+            .write_json_data(&info)
+            .context("Cannot write info file")?;
+
+        Ok(())
     }
 
     pub async fn create_collection(&self, option: CreateCollectionOptionDTO) -> Result<()> {
@@ -196,4 +241,17 @@ impl WriteSide {
             .map(|(name, hook)| (name, hook.code))
             .collect()
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "version")]
+enum WriteSideInfo {
+    #[serde(rename = "1")]
+    V1(WriteSideInfoV1),
+}
+
+#[derive(Serialize, Deserialize)]
+struct WriteSideInfoV1 {
+    document_count: u64,
+    offset: Offset,
 }

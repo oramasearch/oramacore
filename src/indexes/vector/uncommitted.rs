@@ -1,8 +1,9 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use anyhow::Result;
+use tracing::warn;
 
-use crate::types::DocumentId;
+use crate::{collection_manager::sides::Offset, offset_storage::OffsetStorage, types::DocumentId};
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
@@ -77,24 +78,32 @@ impl InnerUncommittedVectorFieldIndex {
 
 #[derive(Debug)]
 pub struct UncommittedVectorFieldIndex {
-    inner: RwLock<InnerUncommittedVectorFieldIndex>,
+    inner: RwLock<(OffsetStorage, InnerUncommittedVectorFieldIndex)>,
     dimension: usize,
 }
 
 impl UncommittedVectorFieldIndex {
-    pub fn new(dimension: usize) -> Self {
+    pub fn new(dimension: usize, offset: Offset) -> Self {
+        let offset_storage = OffsetStorage::new();
+        offset_storage.set_offset(offset);
         Self {
-            inner: Default::default(),
+            inner: RwLock::new((offset_storage, InnerUncommittedVectorFieldIndex::default())),
             dimension,
         }
     }
 
-    pub fn insert(&self, data: (DocumentId, Vec<Vec<f32>>)) -> Result<()> {
+    pub fn insert(&self, offset: Offset, data: (DocumentId, Vec<Vec<f32>>)) -> Result<()> {
         let mut inner = match self.inner.write() {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.insert(data)?;
+        if offset <= inner.0.get_offset() {
+            warn!("Skip insert vector with lower offset");
+            return Ok(());
+        }
+        inner.1.insert(data)?;
+        inner.0.set_offset(offset);
+
         Ok(())
     }
 
@@ -111,15 +120,17 @@ impl UncommittedVectorFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        let tree = if inner.state {
-            inner.left.clone()
+        let tree = if inner.1.state {
+            inner.1.left.clone()
         } else {
-            inner.right.clone()
+            inner.1.right.clone()
         };
-        let current_state = inner.state;
+        let current_state = inner.1.state;
+
+        let current_offset = inner.0.get_offset();
 
         // Route the writes to the other side
-        inner.state = !current_state;
+        inner.1.state = !current_state;
         drop(inner);
 
         UncommittedVectorFieldIndexTaken {
@@ -127,6 +138,7 @@ impl UncommittedVectorFieldIndex {
             dimension: self.dimension,
             index: self,
             state: current_state,
+            current_offset,
         }
     }
 
@@ -136,7 +148,7 @@ impl UncommittedVectorFieldIndex {
             Err(p) => p.into_inner(),
         };
 
-        inner.search(target, result)
+        inner.1.search(target, result)
     }
 }
 
@@ -145,11 +157,15 @@ pub struct UncommittedVectorFieldIndexTaken<'index> {
     pub dimension: usize,
     index: &'index UncommittedVectorFieldIndex,
     state: bool,
+    current_offset: Offset,
 }
 
 impl UncommittedVectorFieldIndexTaken<'_> {
     pub fn data(&mut self) -> Vec<(DocumentId, Vec<VectorWithMagnetude>)> {
         std::mem::take(&mut self.data)
+    }
+    pub fn current_offset(&self) -> Offset {
+        self.current_offset
     }
     pub fn close(self) {
         let mut lock = match self.index.inner.write() {
@@ -157,9 +173,9 @@ impl UncommittedVectorFieldIndexTaken<'_> {
             Err(p) => p.into_inner(),
         };
         let inner = if self.state {
-            &mut lock.left
+            &mut lock.1.left
         } else {
-            &mut lock.right
+            &mut lock.1.right
         };
         inner.data.clear();
     }
@@ -193,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_uncommitted_vector_index() -> Result<()> {
-        let index = UncommittedVectorFieldIndex::new(2);
+        let index = UncommittedVectorFieldIndex::new(2, Offset(0));
 
         //      |
         //      2b  a
@@ -207,10 +223,10 @@ mod tests {
         //      5
         //      |
 
-        index.insert((DocumentId(1), vec![vec![1.0, 0.0]]))?;
-        index.insert((DocumentId(2), vec![vec![0.0, 1.0]]))?;
-        index.insert((DocumentId(4), vec![vec![-1.0, 0.0]]))?;
-        index.insert((DocumentId(5), vec![vec![0.0, -1.0]]))?;
+        index.insert(Offset(1), (DocumentId(1), vec![vec![1.0, 0.0]]))?;
+        index.insert(Offset(2), (DocumentId(2), vec![vec![0.0, 1.0]]))?;
+        index.insert(Offset(3), (DocumentId(4), vec![vec![-1.0, 0.0]]))?;
+        index.insert(Offset(4), (DocumentId(5), vec![vec![0.0, -1.0]]))?;
 
         let mut result_1 = HashMap::new();
         index.search(&[1.0, 0.0], &mut result_1)?;

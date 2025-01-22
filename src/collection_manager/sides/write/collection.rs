@@ -10,7 +10,6 @@ use std::{
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::Sender;
 use tracing::{info, instrument};
 
 use crate::{
@@ -28,7 +27,7 @@ use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use super::{
     embedding::EmbeddingCalculationRequest,
     fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
+    CollectionWriteOperation, OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
 pub struct CollectionWriter {
@@ -83,7 +82,7 @@ impl CollectionWriter {
         &self,
         doc_id: DocumentId,
         doc: Document,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         self.collection_document_count
@@ -170,7 +169,7 @@ impl CollectionWriter {
     pub(super) async fn register_fields(
         &self,
         typed_fields: HashMap<String, TypedField>,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
@@ -198,7 +197,7 @@ impl CollectionWriter {
         field_name: String,
         typed_field: TypedField,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         match &typed_field {
@@ -264,7 +263,7 @@ impl CollectionWriter {
     async fn get_fields_to_index(
         &self,
         doc: Document,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
@@ -301,7 +300,7 @@ impl CollectionWriter {
 
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
-        let dump = CollectionDump {
+        let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
             default_language: self.default_language,
@@ -325,9 +324,9 @@ impl CollectionWriter {
                 .iter()
                 .map(|e| (e.key().clone(), *e.value()))
                 .collect(),
-        };
+        });
 
-        BufferedFile::create(path.join("info.json"))
+        BufferedFile::create_or_overwrite(path.join("info.json"))
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
@@ -344,6 +343,10 @@ impl CollectionWriter {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize collection info")?;
+
+        let dump = match dump {
+            CollectionDump::V1(dump) => dump,
+        };
 
         self.id = dump.id;
         self.description = dump.description;
@@ -386,7 +389,14 @@ impl CollectionWriter {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CollectionDump {
+#[serde(tag = "version")]
+enum CollectionDump {
+    #[serde(rename = "1")]
+    V1(CollectionDumpV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionDumpV1 {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,

@@ -5,7 +5,6 @@ mod document_storage;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
-pub use collection::CommitConfig;
 use collections::CollectionsReader;
 pub use collections::IndexesConfig;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
@@ -23,7 +22,7 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::{CollectionWriteOperation, WriteOperation};
+use super::{CollectionWriteOperation, Offset, WriteOperation};
 
 pub struct ReadSide {
     collections: CollectionsReader,
@@ -120,7 +119,8 @@ impl ReadSide {
         })
     }
 
-    pub async fn update(&self, op: WriteOperation) -> Result<()> {
+    pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
+        let (offset, op) = op;
         match op {
             WriteOperation::CreateCollection { id } => {
                 COLLECTION_ADDED_COUNTER
@@ -128,7 +128,7 @@ impl ReadSide {
                         collection: id.0.clone(),
                     })
                     .increment_by_one();
-                self.collections.create_collection(id).await?;
+                self.collections.create_collection(offset, id).await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
                 COLLECTION_OPERATION_COUNTER
@@ -149,7 +149,7 @@ impl ReadSide {
                     collection.increment_document_count();
                     self.document_storage.add_document(doc_id, doc).await?;
                 } else {
-                    collection.update(collection_operation).await?;
+                    collection.update(offset, collection_operation).await?;
                 }
             }
         }

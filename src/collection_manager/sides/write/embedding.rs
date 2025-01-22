@@ -14,17 +14,16 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::WriteOperation;
+use super::{OperationSender, WriteOperation};
 
-#[derive(Debug)]
 pub struct EmbeddingCalculationRequestInput {
     pub text: String,
     pub coll_id: CollectionId,
     pub doc_id: DocumentId,
     pub field_id: FieldId,
-    pub op_sender: tokio::sync::broadcast::Sender<WriteOperation>,
+    pub op_sender: OperationSender,
 }
-#[derive(Debug)]
+
 pub struct EmbeddingCalculationRequest {
     pub model_name: String,
     pub input: EmbeddingCalculationRequestInput,

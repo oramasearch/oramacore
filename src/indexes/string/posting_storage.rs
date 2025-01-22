@@ -12,7 +12,6 @@ pub struct PostingListId(pub u32);
 
 #[derive(Default, Debug)]
 pub struct PostingIdStorage {
-    pub(super) path: PathBuf,
     pub(super) content: RwLock<Content>,
 }
 impl PostingIdStorage {
@@ -23,7 +22,6 @@ impl PostingIdStorage {
             .context("Cannot deserialize posting ids")?;
 
         Ok(Self {
-            path,
             content: RwLock::new(content),
         })
     }

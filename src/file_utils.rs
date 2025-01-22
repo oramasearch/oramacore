@@ -4,7 +4,31 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use tracing::trace;
 
+pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
+    let p: PathBuf = p.as_ref().to_path_buf();
+
+    match std::fs::exists(&p) {
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error while checking if the directory exists: {:?}",
+                e
+            ));
+        }
+        Ok(true) => {
+            trace!("Directory exists. Skip creation.");
+        }
+        Ok(false) => {
+            trace!("Directory does not exist. Creating it.");
+            std::fs::create_dir_all(p).context("Cannot create directory")?;
+        }
+    };
+
+    Ok(())
+}
+
+// TODO: check if this function is still used
 pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Option<Vec<PathBuf>>> {
     let mut result = vec![];
 
@@ -43,6 +67,17 @@ pub struct BufferedFile;
 impl BufferedFile {
     pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {
         let file = std::fs::File::create_new(&path)
+            .with_context(|| format!("Cannot create file at {:?}", path))?;
+        let buf = std::io::BufWriter::new(file);
+        Ok(WriteBufferedFile {
+            path,
+            closed: false,
+            buf,
+        })
+    }
+
+    pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
+        let file = std::fs::File::create(&path)
             .with_context(|| format!("Cannot create file at {:?}", path))?;
         let buf = std::io::BufWriter::new(file);
         Ok(WriteBufferedFile {
