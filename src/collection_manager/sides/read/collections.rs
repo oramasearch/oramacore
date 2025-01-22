@@ -56,7 +56,7 @@ impl CollectionsReader {
         self.ai_service.clone()
     }
 
-    pub(super) async fn get_collection<'s, 'coll>(
+    pub async fn get_collection<'s, 'coll>(
         &'s self,
         id: CollectionId,
     ) -> Option<CollectionReadLock<'coll>>
@@ -68,7 +68,7 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub(super) async fn load(&mut self) -> Result<()> {
+    pub async fn load(&mut self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
@@ -106,7 +106,7 @@ impl CollectionsReader {
             )?;
 
             collection
-                .load(base_dir_for_collections.join(&collection.id.0))
+                .load(base_dir_for_collections.join(&collection.get_id().0))
                 .await
                 .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
@@ -120,7 +120,7 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub(super) async fn commit(&self) -> Result<()> {
+    pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
 
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
@@ -158,7 +158,7 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub(super) async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
+    pub async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
         info!("Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(

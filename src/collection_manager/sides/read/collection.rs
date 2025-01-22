@@ -44,23 +44,23 @@ use super::IndexesConfig;
 
 #[derive(Debug)]
 pub struct CollectionReader {
-    pub(super) id: CollectionId,
-    pub(super) ai_service: Arc<AIService>,
-    pub(super) nlp_service: Arc<NLPService>,
+    id: CollectionId,
+    ai_service: Arc<AIService>,
+    nlp_service: Arc<NLPService>,
 
     document_count: AtomicU64,
 
-    pub(super) fields: DashMap<String, (FieldId, TypedField)>,
+    fields: DashMap<String, (FieldId, TypedField)>,
 
     // indexes
-    pub(super) vector_index: VectorIndex,
-    pub(super) fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
+    vector_index: VectorIndex,
+    fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
-    pub(super) string_index: StringIndex,
-    pub(super) text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
+    string_index: StringIndex,
+    text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
-    pub(super) number_index: NumberIndex,
-    pub(super) bool_index: BoolIndex,
+    number_index: NumberIndex,
+    bool_index: BoolIndex,
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
 }
@@ -105,7 +105,12 @@ impl CollectionReader {
         })
     }
 
-    pub(super) fn get_field_id(&self, field_name: String) -> Result<FieldId> {
+    #[inline]
+    pub fn get_id(&self) -> CollectionId {
+        self.id.clone()
+    }
+
+    pub fn get_field_id(&self, field_name: String) -> Result<FieldId> {
         let field_id = self.fields.get(&field_name);
 
         match field_id {
@@ -114,7 +119,7 @@ impl CollectionReader {
         }
     }
 
-    pub(super) fn get_field_id_with_type(&self, field_name: &str) -> Result<(FieldId, TypedField)> {
+    pub fn get_field_id_with_type(&self, field_name: &str) -> Result<(FieldId, TypedField)> {
         self.fields
             .get(field_name)
             .map(|v| v.clone())
@@ -234,7 +239,7 @@ impl CollectionReader {
         self.document_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(super) async fn update(
+    pub async fn update(
         &self,
         offset: Offset,
         collection_operation: CollectionWriteOperation,
@@ -308,7 +313,7 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
-    pub(super) async fn search(
+    pub async fn search(
         &self,
         search_params: SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
@@ -594,7 +599,7 @@ impl CollectionReader {
         Ok(ret)
     }
 
-    pub(super) fn calculate_facets(
+    pub fn calculate_facets(
         &self,
         token_scores: &HashMap<DocumentId, f32>,
         facets: HashMap<String, FacetDefinition>,

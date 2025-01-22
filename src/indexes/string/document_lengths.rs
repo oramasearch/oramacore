@@ -9,8 +9,8 @@ type Content = HashMap<DocumentId, u32>;
 
 #[derive(Default, Debug)]
 pub struct DocumentLengthsPerDocument {
-    pub(super) path: PathBuf,
-    pub(super) content: RwLock<Content>,
+    path: PathBuf,
+    content: RwLock<Content>,
 }
 impl DocumentLengthsPerDocument {
     pub fn try_new(path: PathBuf) -> Result<Self> {

@@ -167,7 +167,7 @@ impl CollectionWriter {
         Arc::new(parser)
     }
 
-    pub(super) async fn register_fields(
+    pub async fn register_fields(
         &self,
         typed_fields: HashMap<String, TypedField>,
         sender: OperationSender,
@@ -301,7 +301,7 @@ impl CollectionWriter {
         Ok(&self.fields)
     }
 
-    pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
+    pub fn commit(&mut self, path: PathBuf) -> Result<()> {
         // `&mut self` is not used, but it needed to ensure no other thread is using the collection
         info!("Committing collection {}", self.id.0);
 
@@ -341,7 +341,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn load(
+    pub async fn load(
         &mut self,
         path: PathBuf,
         hooks_runtime: Arc<HooksRuntime>,
