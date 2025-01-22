@@ -9,14 +9,17 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
+use crate::nlp::NLPService;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
 };
 
-use crate::collection_manager::dto::{CreateCollectionOptionDTO, LanguageDTO};
+use crate::collection_manager::dto::{
+    CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
+};
 
-use super::OperationSender;
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
+use super::{OperationSender, OramaModelSerializable};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
@@ -29,10 +32,8 @@ pub struct CollectionsWriterConfig {
     pub data_dir: PathBuf,
     #[serde(default = "embedding_queue_limit_default")]
     pub embedding_queue_limit: usize,
-}
-
-fn embedding_queue_limit_default() -> usize {
-    50
+    #[serde(default = "embedding_model_default")]
+    pub default_embedding_model: OramaModelSerializable,
 }
 
 impl CollectionsWriter {
@@ -60,15 +61,15 @@ impl CollectionsWriter {
 
     pub async fn create_collection(
         &self,
-        collection_option: CreateCollectionOptionDTO,
+        collection_option: CreateCollection,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
-        let CreateCollectionOptionDTO {
+        let CreateCollection {
             id,
             description,
             language,
-            typed_fields,
+            embeddings,
         } = collection_option;
 
         info!("Creating collection {:?}", id);
@@ -83,6 +84,22 @@ impl CollectionsWriter {
         sender
             .send(WriteOperation::CreateCollection { id: id.clone() })
             .context("Cannot send create collection")?;
+
+        let model = embeddings
+            .as_ref()
+            .and_then(|embeddings| embeddings.model.as_ref())
+            .or(Some(&self.config.default_embedding_model))
+            .unwrap();
+        let model = model.0;
+        let document_fields = embeddings
+            .map(|embeddings| embeddings.document_fields)
+            .map(|p| DocumentFields::Properties(p))
+            .unwrap_or(DocumentFields::AllStringProperties);
+        let typed_field = TypedField::Embedding(EmbeddingTypedField {
+            model,
+            document_fields,
+        });
+        let typed_fields = HashMap::from_iter([("aa".to_string(), typed_field)]);
 
         collection
             .register_fields(typed_fields, sender.clone(), hooks_runtime)
@@ -130,7 +147,11 @@ impl CollectionsWriter {
     }
 
     #[instrument(skip(self))]
-    pub async fn load(&mut self, hooks_runtime: Arc<HooksRuntime>) -> Result<()> {
+    pub async fn load(
+        &mut self,
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+    ) -> Result<()> {
         // `&mut self` isn't needed here
         // but we need to ensure that the method is not called concurrently
         let data_dir = &self.config.data_dir;
@@ -166,7 +187,7 @@ impl CollectionsWriter {
                 self.embedding_sender.clone(),
             );
             collection
-                .load(collection_dir, hooks_runtime.clone())
+                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
                 .await?;
 
             self.collections
@@ -208,6 +229,14 @@ impl Deref for CollectionWriteLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+fn embedding_queue_limit_default() -> usize {
+    50
+}
+
+fn embedding_model_default() -> OramaModelSerializable {
+    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
 }
 
 #[cfg(test)]

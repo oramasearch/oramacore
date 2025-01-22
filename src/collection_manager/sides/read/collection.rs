@@ -14,14 +14,16 @@ use tokio::join;
 use tracing::{debug, error, info, instrument};
 
 use crate::{
+    ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode,
-            SearchParams, TypedField,
+            EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties,
+            SearchMode, SearchParams, TypedField,
         },
-        sides::{CollectionWriteOperation, DocumentFieldIndexOperation, Offset},
+        sides::{
+            CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
+        },
     },
-    embeddings::{EmbeddingService, LoadedModel},
     file_utils::BufferedFile,
     indexes::{
         bool::BoolIndex,
@@ -43,7 +45,7 @@ use super::IndexesConfig;
 #[derive(Debug)]
 pub struct CollectionReader {
     pub(super) id: CollectionId,
-    pub(super) embedding_service: Arc<EmbeddingService>,
+    pub(super) ai_service: Arc<AIService>,
     pub(super) nlp_service: Arc<NLPService>,
 
     document_count: AtomicU64,
@@ -52,7 +54,7 @@ pub struct CollectionReader {
 
     // indexes
     pub(super) vector_index: VectorIndex,
-    pub(super) fields_per_model: DashMap<Arc<LoadedModel>, Vec<FieldId>>,
+    pub(super) fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
     pub(super) string_index: StringIndex,
     pub(super) text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
@@ -66,7 +68,7 @@ pub struct CollectionReader {
 impl CollectionReader {
     pub fn try_new(
         id: CollectionId,
-        embedding_service: Arc<EmbeddingService>,
+        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         _: IndexesConfig,
     ) -> Result<Self> {
@@ -82,7 +84,7 @@ impl CollectionReader {
 
         Ok(Self {
             id,
-            embedding_service,
+            ai_service,
             nlp_service,
 
             document_count: AtomicU64::new(0),
@@ -131,26 +133,32 @@ impl CollectionReader {
             .context("Cannot load vectors index")?;
 
         let coll_desc_file_path = collection_data_dir.join("info.json");
-        let dump: CollectionInfo = BufferedFile::open(coll_desc_file_path)
+        let dump: dump::CollectionInfo = BufferedFile::open(coll_desc_file_path)
             .context("Cannot open collection file")?
             .read_json_data()
             .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
 
         let dump = match dump {
-            CollectionInfo::V1(dump) => dump,
+            dump::CollectionInfo::V1(dump) => dump,
         };
 
         for (field_name, (field_id, field_type)) in dump.fields {
-            self.fields.insert(field_name, (field_id, field_type));
+            let typed_field: TypedField = match field_type {
+                dump::TypedField::Text(language) => TypedField::Text(language),
+                dump::TypedField::Embedding(embedding) => {
+                    TypedField::Embedding(EmbeddingTypedField {
+                        document_fields: embedding.document_fields,
+                        model: embedding.model.0,
+                    })
+                }
+                dump::TypedField::Number => TypedField::Number,
+                dump::TypedField::Bool => TypedField::Bool,
+            };
+            self.fields.insert(field_name, (field_id, typed_field));
         }
 
         for (orama_model, fields) in dump.used_models {
-            let model = self
-                .embedding_service
-                .get_model(orama_model.clone())
-                .await
-                .context("Model not found")?;
-            self.fields_per_model.insert(model, fields);
+            self.fields_per_model.insert(orama_model.0, fields);
         }
 
         self.text_parser_per_field = self
@@ -180,14 +188,27 @@ impl CollectionReader {
             .commit(data_dir.join("vectors"))
             .context("Cannot commit vectors index")?;
 
-        let dump = CollectionInfo::V1(CollectionInfoV1 {
+        let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
             fields: self
                 .fields
                 .iter()
                 .map(|v| {
                     let (field_name, (field_id, typed_field)) = v.pair();
-                    (field_name.clone(), (*field_id, typed_field.clone()))
+
+                    let typed_field = match typed_field {
+                        TypedField::Bool => dump::TypedField::Bool,
+                        TypedField::Number => dump::TypedField::Number,
+                        TypedField::Text(language) => dump::TypedField::Text(language.clone()),
+                        TypedField::Embedding(embedding) => {
+                            dump::TypedField::Embedding(dump::EmbeddingTypedField {
+                                model: OramaModelSerializable(embedding.model),
+                                document_fields: embedding.document_fields.clone(),
+                            })
+                        }
+                    };
+
+                    (field_name.clone(), (*field_id, typed_field))
                 })
                 .collect(),
             used_models: self
@@ -195,7 +216,7 @@ impl CollectionReader {
                 .iter()
                 .map(|v| {
                     let (model, field_ids) = v.pair();
-                    (model.model_name(), field_ids.clone())
+                    (OramaModelSerializable(model.clone()), field_ids.clone())
                 })
                 .collect(),
         });
@@ -234,16 +255,13 @@ impl CollectionReader {
 
                 match typed_field {
                     TypedField::Embedding(embedding) => {
-                        let loaded_model = self
-                            .embedding_service
-                            .get_model(embedding.model_name)
-                            .await?;
+                        let model = embedding.model;
 
                         self.vector_index
-                            .add_field(offset, field_id, loaded_model.dimensions())?;
+                            .add_field(offset, field_id, model.dimensions())?;
 
                         self.fields_per_model
-                            .entry(loaded_model)
+                            .entry(model)
                             .or_default()
                             .push(field_id);
                     }
@@ -550,7 +568,10 @@ impl CollectionReader {
             let model = e.key();
             let fields = e.value();
 
-            let e = model.embed_query(vec![&term.to_string()]).await?;
+            let e = self
+                .ai_service
+                .embed_query(*model, vec![&term.to_string()])
+                .await?;
 
             for k in e {
                 let r = self.vector_index.search(fields, &k, limit.0)?;
@@ -662,16 +683,42 @@ pub struct Committed {
     pub epoch: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "version")]
-enum CollectionInfo {
-    #[serde(rename = "1")]
-    V1(CollectionInfoV1),
-}
+mod dump {
+    use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-struct CollectionInfoV1 {
-    id: CollectionId,
-    fields: Vec<(String, (FieldId, TypedField))>,
-    used_models: Vec<(String, Vec<FieldId>)>,
+    use crate::{
+        collection_manager::{
+            dto::{DocumentFields, FieldId, LanguageDTO},
+            sides::OramaModelSerializable,
+        },
+        types::CollectionId,
+    };
+
+    #[derive(Debug, Serialize, Deserialize)]
+    #[serde(tag = "version")]
+    pub enum CollectionInfo {
+        #[serde(rename = "1")]
+        V1(CollectionInfoV1),
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct CollectionInfoV1 {
+        pub id: CollectionId,
+        pub fields: Vec<(String, (FieldId, TypedField))>,
+        pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct EmbeddingTypedField {
+        pub model: OramaModelSerializable,
+        pub document_fields: DocumentFields,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub enum TypedField {
+        Text(LanguageDTO),
+        Embedding(EmbeddingTypedField),
+        Number,
+        Bool,
+    }
 }

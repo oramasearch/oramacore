@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Ok, Result};
 use dashmap::DashMap;
 
-use crate::ai::{grpc, AiService};
+use crate::ai::{grpc, AIService};
 use hf::HuggingFaceRepoConfig;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -106,7 +106,7 @@ enum Repo {
 pub struct EmbeddingService {
     fastembed_repo: Option<fe::FastEmbedRepo>,
     hugging_face_repo: Option<hf::HuggingFaceRepo>,
-    ai_service: Option<Arc<AiService>>,
+    ai_service: Option<Arc<AIService>>,
 
     models_repo: HashMap<String, Repo>,
     loaded_models: DashMap<String, Arc<LoadedModel>>,
@@ -115,7 +115,7 @@ pub struct EmbeddingService {
 impl EmbeddingService {
     pub async fn try_new(
         config: EmbeddingConfig,
-        ai_service: Option<Arc<AiService>>,
+        ai_service: Option<Arc<AIService>>,
     ) -> Result<Self> {
         let mut service = EmbeddingService {
             fastembed_repo: None,
@@ -270,7 +270,7 @@ impl EmbeddingService {
         Ok(loaded_model)
     }
 
-    pub fn get_ai_service(&self) -> Option<Arc<AiService>> {
+    pub fn get_ai_service(&self) -> Option<Arc<AIService>> {
         self.ai_service.clone()
     }
 }

@@ -12,7 +12,7 @@ use tracing::error;
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollectionOptionDTO},
+        dto::{CollectionDTO, CreateCollection},
         sides::WriteSide,
     },
     types::{CollectionId, DocumentList},
@@ -87,7 +87,7 @@ async fn get_collection_by_id(
 )]
 async fn create_collection(
     write_side: State<Arc<WriteSide>>,
-    Json(json): Json<CreateCollectionOptionDTO>,
+    Json(json): Json<CreateCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     match write_side.create_collection(json).await {
         Ok(collection_id) => collection_id,

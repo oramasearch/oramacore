@@ -5,14 +5,15 @@ use std::{
 };
 
 use anyhow::Result;
-use async_trait::async_trait;
+use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    ai::OramaModel,
     collection_manager::{
         dto::{DocumentFields, FieldId},
-        sides::hooks::HooksRuntime,
+        sides::hooks::{HookName, HooksRuntime},
     },
     indexes::number::Number,
     metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
@@ -26,58 +27,160 @@ use super::{
     WriteOperation,
 };
 
-pub type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
+pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
+
+pub enum CollectionField {
+    Number(NumberField),
+    Bool(BoolField),
+    String(StringField),
+    Embedding(EmbeddingField),
+}
+impl CollectionField {
+    pub fn new_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        CollectionField::Number(NumberField::new(collection_id, field_id, field_name))
+    }
+
+    pub fn new_bool(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name))
+    }
+
+    pub fn new_string(
+        parser: Arc<TextParser>,
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionField::String(StringField::new(
+            parser,
+            collection_id,
+            field_id,
+            field_name,
+        ))
+    }
+
+    pub fn new_embedding(
+        model: OramaModel,
+        document_fields: DocumentFields,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        hooks_runtime: Arc<HooksRuntime>,
+        collection_id: CollectionId,
+        field_id: FieldId,
+    ) -> Self {
+        CollectionField::Embedding(EmbeddingField::new(
+            model,
+            document_fields,
+            embedding_sender,
+            hooks_runtime,
+            collection_id,
+            field_id,
+        ))
+    }
+
+    pub fn set_embedding_hook(&mut self, name: HookName) {
+        match self {
+            CollectionField::Embedding(f) => f.document_fields = DocumentFields::Hook(name),
+            _ => {} // ignore
+        }
+    }
+
+    pub async fn get_write_operations(
+        &self,
+        doc_id: DocumentId,
+        doc: &FlattenDocument,
+        sender: OperationSender,
+    ) -> Result<()> {
+        match self {
+            CollectionField::Number(f) => f.get_write_operations(doc_id, doc, sender),
+            CollectionField::Bool(f) => f.get_write_operations(doc_id, doc, sender),
+            CollectionField::String(f) => f.get_write_operations(doc_id, doc, sender),
+            CollectionField::Embedding(f) => f.get_write_operations(doc_id, doc, sender).await,
+        }
+    }
+
+    pub fn serialized(&self) -> SerializedFieldIndexer {
+        match self {
+            CollectionField::Number(f) => f.serialized(),
+            CollectionField::Bool(f) => f.serialized(),
+            CollectionField::String(f) => f.serialized(),
+            CollectionField::Embedding(f) => f.serialized(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OramaModelSerializable(pub OramaModel);
+
+impl Serialize for OramaModelSerializable {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        self.0.as_str_name().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OramaModelSerializable {
+    fn deserialize<D>(deserializer: D) -> Result<OramaModelSerializable, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let model_name = String::deserialize(deserializer)?;
+        let model = OramaModel::from_str_name(&model_name)
+            .ok_or_else(|| serde::de::Error::custom("Invalid model name"))?;
+        Ok(OramaModelSerializable(model))
+    }
+}
+
+impl PartialSchema for OramaModelSerializable {
+    fn schema(
+    ) -> axum_openapi3::utoipa::openapi::RefOr<axum_openapi3::utoipa::openapi::schema::Schema> {
+        let b = AnyOfBuilder::new()
+            .item(OramaModel::BgeSmall.as_str_name())
+            .item(OramaModel::BgeBase.as_str_name())
+            .item(OramaModel::BgeLarge.as_str_name())
+            .item(OramaModel::MultilingualE5Small.as_str_name())
+            .item(OramaModel::MultilingualE5Base.as_str_name())
+            .item(OramaModel::MultilingualE5Large.as_str_name());
+        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
+    }
+}
+impl ToSchema for OramaModelSerializable {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SerializedFieldIndexer {
     Number,
     Bool,
     String(Locale),
-    Embedding(String, DocumentFields),
-}
-
-#[async_trait]
-pub trait FieldIndexer: Sync + Send + Debug {
-    async fn get_write_operations(
-        &self,
-        coll_id: CollectionId,
-        doc_id: DocumentId,
-        field_name: String,
-        field_id: FieldId,
-        doc: &FlattenDocument,
-        sender: OperationSender,
-    ) -> Result<()>;
-
-    fn serialized(&self) -> SerializedFieldIndexer;
+    Embedding(OramaModelSerializable, DocumentFields),
 }
 
 #[derive(Debug)]
-pub struct NumberField {}
+pub struct NumberField {
+    collection_id: CollectionId,
+    field_id: FieldId,
+    field_name: String,
+}
 
-impl Default for NumberField {
-    fn default() -> Self {
-        Self::new()
+impl NumberField {
+    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        Self {
+            collection_id,
+            field_id,
+            field_name,
+        }
     }
 }
 
 impl NumberField {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-#[async_trait]
-impl FieldIndexer for NumberField {
-    async fn get_write_operations(
+    fn get_write_operations(
         &self,
-        coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: String,
-        field_id: FieldId,
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let value = doc.get(&field_name).and_then(|v| Number::try_from(v).ok());
+        let value = doc
+            .get(&self.field_name)
+            .and_then(|v| Number::try_from(v).ok());
 
         let value = match value {
             None => return Ok(()),
@@ -85,10 +188,10 @@ impl FieldIndexer for NumberField {
         };
 
         let op = WriteOperation::Collection(
-            coll_id,
+            self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                field_id,
+                self.field_id.clone(),
                 DocumentFieldIndexOperation::IndexNumber { value },
             ),
         );
@@ -104,32 +207,28 @@ impl FieldIndexer for NumberField {
 }
 
 #[derive(Debug)]
-pub struct BoolField {}
-
-impl Default for BoolField {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct BoolField {
+    collection_id: CollectionId,
+    field_id: FieldId,
+    field_name: String,
 }
 
 impl BoolField {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        Self {
+            collection_id,
+            field_id,
+            field_name,
+        }
     }
-}
 
-#[async_trait]
-impl FieldIndexer for BoolField {
-    async fn get_write_operations(
+    fn get_write_operations(
         &self,
-        coll_id: CollectionId,
         doc_id: DocumentId,
-        field_name: String,
-        field_id: FieldId,
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let value = doc.get(&field_name);
+        let value = doc.get(&self.field_name);
 
         let value = match value {
             None => return Ok(()),
@@ -140,10 +239,10 @@ impl FieldIndexer for BoolField {
         };
 
         let op = WriteOperation::Collection(
-            coll_id,
+            self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                field_id,
+                self.field_id.clone(),
                 DocumentFieldIndexOperation::IndexBoolean { value },
             ),
         );
@@ -160,31 +259,38 @@ impl FieldIndexer for BoolField {
 
 #[derive(Debug)]
 pub struct StringField {
+    collection_id: CollectionId,
+    field_id: FieldId,
+    field_name: String,
     parser: Arc<TextParser>,
 }
 impl StringField {
-    pub fn new(parser: Arc<TextParser>) -> Self {
-        Self { parser }
-    }
-}
-
-#[async_trait]
-impl FieldIndexer for StringField {
-    async fn get_write_operations(
-        &self,
-        coll_id: CollectionId,
-        doc_id: DocumentId,
-        field_name: String,
+    pub fn new(
+        parser: Arc<TextParser>,
+        collection_id: CollectionId,
         field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        Self {
+            parser,
+            collection_id,
+            field_id,
+            field_name,
+        }
+    }
+
+    pub fn get_write_operations(
+        &self,
+        doc_id: DocumentId,
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
         let metric = STRING_CALCULATION_METRIC.create(StringCalculationLabels {
-            collection: coll_id.0.clone(),
-            field: field_name.to_string(),
+            collection: self.collection_id.0.clone(),
+            field: self.field_name.to_string(),
         });
 
-        let value = doc.get(&field_name);
+        let value = doc.get(&self.field_name);
 
         let data = match value {
             None => return Ok(()),
@@ -244,10 +350,10 @@ impl FieldIndexer for StringField {
         drop(metric);
 
         let op = WriteOperation::Collection(
-            coll_id,
+            self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                field_id,
+                self.field_id.clone(),
                 DocumentFieldIndexOperation::IndexString {
                     field_length,
                     terms,
@@ -267,43 +373,39 @@ impl FieldIndexer for StringField {
 
 #[derive(Debug)]
 pub struct EmbeddingField {
-    model_name: String,
+    collection_id: CollectionId,
+    field_id: FieldId,
+
+    model: OramaModel,
     document_fields: DocumentFields,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-    hook_runtime: Arc<HooksRuntime>,
+    hooks_runtime: Arc<HooksRuntime>,
 }
 
 impl EmbeddingField {
     pub fn new(
-        model_name: String,
+        model: OramaModel,
         document_fields: DocumentFields,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
+        hooks_runtime: Arc<HooksRuntime>,
+        collection_id: CollectionId,
+        field_id: FieldId,
     ) -> Self {
         Self {
-            model_name,
+            model,
             document_fields,
             embedding_sender,
-            hook_runtime,
+            hooks_runtime,
+            collection_id,
+            field_id,
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-enum SelectEmbeddingPropertiesReturnType {
-    Properties(Vec<String>),
-    Text(String),
-}
-
-#[async_trait]
-impl FieldIndexer for EmbeddingField {
+impl EmbeddingField {
     async fn get_write_operations(
         &self,
-        coll_id: CollectionId,
         doc_id: DocumentId,
-        _field_name: String,
-        field_id: FieldId,
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
@@ -317,8 +419,8 @@ impl FieldIndexer for EmbeddingField {
                 .collect(),
             DocumentFields::Hook(hook_name) => {
                 let hook_exec_result = self
-                    .hook_runtime
-                    .eval(coll_id.clone(), hook_name.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
+                    .hooks_runtime
+                    .eval(self.collection_id.clone(), hook_name.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
                     .await;
 
                 let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
@@ -337,7 +439,15 @@ impl FieldIndexer for EmbeddingField {
                     SelectEmbeddingPropertiesReturnType::Text(v) => v,
                 }
             }
-            _ => unreachable!(),
+            DocumentFields::AllStringProperties => {
+                let mut input = String::new();
+                for (_, value) in doc.iter() {
+                    if let Some(value) = value.as_str() {
+                        input.push_str(value);
+                    }
+                }
+                input
+            }
         };
 
         // The input could be:
@@ -348,12 +458,12 @@ impl FieldIndexer for EmbeddingField {
 
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
-                model_name: self.model_name.clone(),
+                model: self.model.clone(),
                 input: EmbeddingCalculationRequestInput {
                     text: input,
-                    coll_id,
+                    coll_id: self.collection_id.clone(),
                     doc_id,
-                    field_id,
+                    field_id: self.field_id.clone(),
                     op_sender: sender,
                 },
             })
@@ -363,6 +473,16 @@ impl FieldIndexer for EmbeddingField {
     }
 
     fn serialized(&self) -> SerializedFieldIndexer {
-        SerializedFieldIndexer::Embedding(self.model_name.clone(), self.document_fields.clone())
+        SerializedFieldIndexer::Embedding(
+            OramaModelSerializable(self.model.clone()),
+            self.document_fields.clone(),
+        )
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SelectEmbeddingPropertiesReturnType {
+    Properties(Vec<String>),
+    Text(String),
 }

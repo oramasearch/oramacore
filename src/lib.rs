@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use ai::{
-    grpc::{GrpcRepo, GrpcRepoConfig},
-    AiService,
-};
+use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     channel, hooks::HooksRuntime, CollectionsWriterConfig, IndexesConfig, OperationReceiver,
     ReadSide, WriteSide,
 };
-use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
@@ -26,7 +22,7 @@ pub mod collection_manager;
 
 pub mod web_server;
 
-pub mod embeddings;
+// pub mod embeddings;
 
 mod capped_heap;
 pub mod js;
@@ -68,7 +64,7 @@ pub struct ReadSideConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct OramacoreConfig {
     pub http: HttpConfig,
-    pub embeddings: EmbeddingConfig,
+    pub ai_server: AIServiceConfig,
     pub writer_side: WriteSideConfig,
     pub reader_side: ReadSideConfig,
 }
@@ -115,37 +111,14 @@ pub async fn build_orama(
     OperationReceiver,
 )> {
     let OramacoreConfig {
-        embeddings: embedding_config,
+        ai_server,
         writer_side,
         reader_side,
         ..
     } = config;
 
-    let grpc_repo = GrpcRepo::new(
-        GrpcRepoConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 50051,
-            api_key: None,
-        },
-        embedding_config
-            .models
-            .iter()
-            .filter_map(|(name, model)| {
-                if let ModelConfig::Grpc(model) = model {
-                    Some((name.clone(), model.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect(),
-    );
-
-    let ai_service = AiService::new(grpc_repo);
-
-    let embedding_service = EmbeddingService::try_new(embedding_config, Some(Arc::new(ai_service)))
-        .await
-        .with_context(|| "Failed to initialize the EmbeddingService")?;
-    let embedding_service = Arc::new(embedding_service);
+    let ai_service = AIService::new(ai_server);
+    let ai_service = Arc::new(ai_service);
 
     let hooks_runtime = Arc::new(HooksRuntime::new());
 
@@ -162,20 +135,18 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
+    let nlp_service = Arc::new(NLPService::new());
     let mut write_side = WriteSide::new(
         sender.clone(),
         writer_side.config,
-        embedding_service.clone(),
+        ai_service.clone(),
         hooks_runtime,
+        nlp_service.clone(),
     );
-
     write_side.load().await.context("Cannot load write side")?;
 
-    let nlp_service = Arc::new(NLPService::new());
-    let mut collections_reader =
-        ReadSide::try_new(embedding_service, nlp_service, reader_side.config)
-            .context("Cannot create read side")?;
-
+    let mut collections_reader = ReadSide::try_new(ai_service, nlp_service, reader_side.config)
+        .context("Cannot create read side")?;
     collections_reader
         .load()
         .await

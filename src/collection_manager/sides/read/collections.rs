@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::{
+    ai::AIService,
     collection_manager::sides::Offset,
-    embeddings::EmbeddingService,
     file_utils::{create_if_not_exists, BufferedFile},
     nlp::NLPService,
     offset_storage::OffsetStorage,
@@ -28,7 +28,7 @@ pub struct IndexesConfig {
 
 #[derive(Debug)]
 pub struct CollectionsReader {
-    embedding_service: Arc<EmbeddingService>,
+    ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
@@ -37,12 +37,12 @@ pub struct CollectionsReader {
 }
 impl CollectionsReader {
     pub fn try_new(
-        embedding_service: Arc<EmbeddingService>,
+        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         Ok(Self {
-            embedding_service,
+            ai_service,
             nlp_service,
 
             collections: Default::default(),
@@ -52,8 +52,8 @@ impl CollectionsReader {
         })
     }
 
-    pub fn get_embedding_service(&self) -> Arc<EmbeddingService> {
-        self.embedding_service.clone()
+    pub fn get_ai_service(&self) -> Arc<AIService> {
+        self.ai_service.clone()
     }
 
     pub(super) async fn get_collection<'s, 'coll>(
@@ -100,7 +100,7 @@ impl CollectionsReader {
 
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),
-                self.embedding_service.clone(),
+                self.ai_service.clone(),
                 self.nlp_service.clone(),
                 self.indexes_config.clone(),
             )?;
@@ -163,7 +163,7 @@ impl CollectionsReader {
 
         let collection = CollectionReader::try_new(
             id.clone(),
-            self.embedding_service.clone(),
+            self.ai_service.clone(),
             self.nlp_service.clone(),
             self.indexes_config.clone(),
         )?;

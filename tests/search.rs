@@ -1,23 +1,22 @@
 use anyhow::Result;
 use futures::future::Either;
 use futures::{future, pin_mut};
+use http::uri::Scheme;
 use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use oramacore::collection_manager::sides::CollectionsWriterConfig;
+use oramacore::ai::{AIServiceConfig, OramaModel};
 use oramacore::collection_manager::sides::IndexesConfig;
-use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
+use oramacore::collection_manager::sides::{CollectionsWriterConfig, OramaModelSerializable};
+use oramacore::test_utils::create_grpc_server;
 use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
-use std::collections::HashMap;
-use std::env::temp_dir;
 use std::path::PathBuf;
 use std::time::Duration;
 use tempdir::TempDir;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
-use oramacore::embeddings::{EmbeddingConfig, ModelConfig};
 use oramacore::web_server::{HttpConfig, WebServer};
 
 const HOST: &str = "127.0.0.1";
@@ -53,6 +52,8 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
+    let address = create_grpc_server().await.unwrap();
+
     let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
@@ -60,25 +61,19 @@ async fn start_server() {
             allow_cors: false,
             with_prometheus: false,
         },
-        embeddings: EmbeddingConfig {
-            preload: vec![],
-            hugging_face: None,
-            fastembed: Some(FastEmbedRepoConfig {
-                cache_dir: temp_dir(),
-            }),
-            models: HashMap::from_iter([(
-                "gte-small".to_string(),
-                ModelConfig::Fastembed(FastEmbedModelRepoConfig {
-                    real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
-                    dimensions: 384,
-                }),
-            )]),
+        ai_server: AIServiceConfig {
+            scheme: Scheme::HTTP,
+            host: address.ip(),
+            port: address.port(),
+            api_key: None,
+            max_connections: 1,
         },
         writer_side: WriteSideConfig {
             output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
+                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
             },
         },
         reader_side: ReadSideConfig {
