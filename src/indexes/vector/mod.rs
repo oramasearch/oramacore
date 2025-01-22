@@ -76,7 +76,7 @@ impl VectorIndex {
             .chain(self.committed.iter().map(|e| *e.key()))
             .collect::<HashSet<_>>();
 
-        let mut info = VectorIndexInfo {
+        let mut info = VectorIndexInfoV1 {
             fields: self
                 .committed
                 .iter()
@@ -126,6 +126,8 @@ impl VectorIndex {
             info.fields.insert(field_id, offset);
         }
 
+        let info = VectorIndexInfo::V1(info);
+
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
             .write_json_data(&info)
@@ -140,6 +142,9 @@ impl VectorIndex {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json file")?;
+        let info = match info {
+            VectorIndexInfo::V1(info) => info,
+        };
 
         info!(
             "Loading vector index with fields: {:?}",
@@ -204,7 +209,13 @@ impl VectorIndex {
 }
 
 #[derive(Serialize, Deserialize)]
-struct VectorIndexInfo {
+#[serde(tag = "version")]
+enum VectorIndexInfo {
+    #[serde(rename = "1")]
+    V1(VectorIndexInfoV1),
+}
+#[derive(Serialize, Deserialize)]
+struct VectorIndexInfoV1 {
     fields: HashMap<FieldId, Offset>,
 }
 

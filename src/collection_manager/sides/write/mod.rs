@@ -80,6 +80,9 @@ impl WriteSide {
                 return Ok(());
             }
         };
+        let info = match info {
+            WriteSideInfo::V1(info) => info,
+        };
 
         self.document_count
             .store(info.document_count, Ordering::Relaxed);
@@ -98,10 +101,10 @@ impl WriteSide {
         // Anyway it is not a problem, because the document count is only used for the document id generation
         // So, if something goes wrong, we save an higher number, and this is ok.
         let document_count = self.document_count.load(Ordering::Relaxed);
-        let info = WriteSideInfo {
+        let info = WriteSideInfo::V1(WriteSideInfoV1 {
             document_count,
             offset,
-        };
+        });
         BufferedFile::create_or_overwrite(self.data_dir.join("info.json"))
             .context("Cannot create info file")?
             .write_json_data(&info)
@@ -241,7 +244,14 @@ impl WriteSide {
 }
 
 #[derive(Serialize, Deserialize)]
-struct WriteSideInfo {
+#[serde(tag = "version")]
+enum WriteSideInfo {
+    #[serde(rename = "1")]
+    V1(WriteSideInfoV1),
+}
+
+#[derive(Serialize, Deserialize)]
+struct WriteSideInfoV1 {
     document_count: u64,
     offset: Offset,
 }

@@ -299,7 +299,7 @@ impl CollectionWriter {
 
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
-        let dump = CollectionDump {
+        let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
             default_language: self.default_language,
@@ -323,7 +323,7 @@ impl CollectionWriter {
                 .iter()
                 .map(|e| (e.key().clone(), *e.value()))
                 .collect(),
-        };
+        });
 
         BufferedFile::create_or_overwrite(path.join("info.json"))
             .context("Cannot create info.json file")?
@@ -342,6 +342,10 @@ impl CollectionWriter {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize collection info")?;
+
+        let dump = match dump {
+            CollectionDump::V1(dump) => dump,
+        };
 
         self.id = dump.id;
         self.description = dump.description;
@@ -384,7 +388,14 @@ impl CollectionWriter {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CollectionDump {
+#[serde(tag = "version")]
+enum CollectionDump {
+    #[serde(rename = "1")]
+    V1(CollectionDumpV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionDumpV1 {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,

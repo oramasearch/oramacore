@@ -135,12 +135,12 @@ impl NumberIndex {
             self.committed.insert(field_id, new_committed_number);
         }
 
-        let number_index_info = NumberIndexInfo {
+        let number_index_info = NumberIndexInfo::V1(NumberIndexInfoV1 {
             field_infos: fields
                 .into_iter()
                 .filter_map(|(k, v)| v.map(|v| (k, v)))
                 .collect(),
-        };
+        });
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
             .context("Cannot create info.json")?
             .write_json_data(&number_index_info)
@@ -155,6 +155,9 @@ impl NumberIndex {
             .context("Cannot open info.json")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
+        let number_index_info = match number_index_info {
+            NumberIndexInfo::V1(info) => info,
+        };
 
         info!("Loading number index: {:?}", number_index_info.field_infos);
 
@@ -191,7 +194,14 @@ pub enum NumberFilter {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NumberIndexInfo {
+#[serde(tag = "version")]
+enum NumberIndexInfo {
+    #[serde(rename = "1")]
+    V1(NumberIndexInfoV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct NumberIndexInfoV1 {
     field_infos: HashMap<FieldId, Offset>,
 }
 

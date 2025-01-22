@@ -88,6 +88,10 @@ impl CollectionsReader {
             }
         };
 
+        let collections_info = match collections_info {
+            CollectionsInfo::V1(info) => info,
+        };
+
         let base_dir_for_collections = data_dir.join("collections");
 
         for collection_id in collections_info.collection_ids {
@@ -142,9 +146,9 @@ impl CollectionsReader {
             info!("Collection {:?} committed", id);
         }
 
-        let collections_info = CollectionsInfo {
+        let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
             collection_ids: collection_ids.into_iter().collect(),
-        };
+        });
 
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -205,6 +209,12 @@ impl Deref for CollectionReadLock<'_> {
 }
 
 #[derive(Deserialize, Serialize)]
-struct CollectionsInfo {
+#[serde(tag = "version")]
+enum CollectionsInfo {
+    #[serde(rename = "1")]
+    V1(CollectionsInfoV1),
+}
+#[derive(Deserialize, Serialize)]
+struct CollectionsInfoV1 {
     collection_ids: HashSet<CollectionId>,
 }

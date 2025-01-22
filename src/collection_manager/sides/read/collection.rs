@@ -135,6 +135,11 @@ impl CollectionReader {
             .context("Cannot open collection file")?
             .read_json_data()
             .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
+
+        let dump = match dump {
+            CollectionInfo::V1(dump) => dump,
+        };
+
         for (field_name, (field_id, field_type)) in dump.fields {
             self.fields.insert(field_name, (field_id, field_type));
         }
@@ -175,7 +180,7 @@ impl CollectionReader {
             .commit(data_dir.join("vectors"))
             .context("Cannot commit vectors index")?;
 
-        let dump = CollectionInfo {
+        let dump = CollectionInfo::V1(CollectionInfoV1 {
             id: self.id.clone(),
             fields: self
                 .fields
@@ -193,7 +198,7 @@ impl CollectionReader {
                     (model.model_name(), field_ids.clone())
                 })
                 .collect(),
-        };
+        });
 
         let coll_desc_file_path = data_dir.join("info.json");
         BufferedFile::create_or_overwrite(coll_desc_file_path)
@@ -658,8 +663,15 @@ pub struct Committed {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CollectionInfo {
-    pub id: CollectionId,
-    pub fields: Vec<(String, (FieldId, TypedField))>,
-    pub used_models: Vec<(String, Vec<FieldId>)>,
+#[serde(tag = "version")]
+enum CollectionInfo {
+    #[serde(rename = "1")]
+    V1(CollectionInfoV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionInfoV1 {
+    id: CollectionId,
+    fields: Vec<(String, (FieldId, TypedField))>,
+    used_models: Vec<(String, Vec<FieldId>)>,
 }

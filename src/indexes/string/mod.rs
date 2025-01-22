@@ -130,7 +130,7 @@ impl StringIndex {
         std::fs::create_dir_all(new_path.clone())
             .with_context(|| format!("Cannot create directory at {:?}", new_path))?;
 
-        let mut string_index_info = StringIndexInfo {
+        let mut string_index_info = StringIndexInfoV1 {
             fields: self
                 .committed
                 .iter()
@@ -141,7 +141,6 @@ impl StringIndex {
                     (k, v.get_info())
                 })
                 .collect(),
-            version: 0,
         };
 
         for field_id in all_fields {
@@ -210,7 +209,6 @@ impl StringIndex {
 
             let string_index_field_info = StringIndexFieldInfo {
                 field_id,
-                version: 0,
                 fst_path,
                 document_length_path,
                 posting_path,
@@ -229,6 +227,8 @@ impl StringIndex {
                 .fields
                 .insert(field_id, string_index_field_info);
         }
+
+        let string_index_info = StringIndexInfo::V1(string_index_info);
 
         let field_file = new_path.join("info.json");
         BufferedFile::create_or_overwrite(field_file)
@@ -261,6 +261,9 @@ impl StringIndex {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
+        let dump = match dump {
+            StringIndexInfo::V1(dump) => dump,
+        };
 
         debug!("Dump: {:?}", dump);
 
@@ -339,7 +342,6 @@ impl StringIndex {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StringIndexFieldInfo {
     field_id: FieldId,
-    version: u64,
     fst_path: PathBuf,
     document_length_path: PathBuf,
     posting_path: PathBuf,
@@ -348,8 +350,14 @@ pub struct StringIndexFieldInfo {
     offset: Offset,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct StringIndexInfo {
-    version: u64,
+#[serde(tag = "version")]
+enum StringIndexInfo {
+    #[serde(rename = "1")]
+    V1(StringIndexInfoV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StringIndexInfoV1 {
     fields: HashMap<FieldId, StringIndexFieldInfo>,
 }
 
