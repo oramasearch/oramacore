@@ -107,7 +107,8 @@ impl HookStorage {
         let parser = Parser::new(&allocator, code, source_type);
 
         let result = parser.parse();
-        !result.errors.is_empty()
+
+        result.errors.is_empty()
     }
 }
 

@@ -9,6 +9,7 @@ posting_storage
 .foo
 .data
 .dataset
+.local-demo
 
 .vscode
 flamegraph.svg

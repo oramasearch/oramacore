@@ -42,10 +42,15 @@ async fn add_hook_v0(
         .await
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            e.chain()
+                .skip(1)
+                .for_each(|cause| println!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 

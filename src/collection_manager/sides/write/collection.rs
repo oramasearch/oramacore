@@ -152,12 +152,12 @@ impl CollectionWriter {
         }
     }
 
-    fn value_to_typed_field(&self, value_type: ValueType) -> TypedField {
+    fn value_to_typed_field(&self, value_type: ValueType) -> Option<TypedField> {
         match value_type {
-            ValueType::Scalar(ScalarType::String) => TypedField::Text(self.default_language),
-            ValueType::Scalar(ScalarType::Number) => TypedField::Number,
-            ValueType::Scalar(ScalarType::Boolean) => TypedField::Bool,
-            x => unimplemented!("Field type not implemented yet {:?}", x),
+            ValueType::Scalar(ScalarType::String) => Some(TypedField::Text(self.default_language)),
+            ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
+            ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
+            _ => None, // @todo: support other types
         }
     }
 
@@ -277,18 +277,19 @@ impl CollectionWriter {
 
             let field_id = self.get_field_id_by_name(&field_name);
 
-            let typed_field = self.value_to_typed_field(value_type);
-
-            self.create_field(
-                field_id,
-                field_name,
-                typed_field,
-                self.embedding_sender.clone(),
-                sender.clone(),
-                hooks_runtime.clone(),
-            )
-            .await
-            .context("Cannot create field")?;
+            // @todo: add support to other types
+            if let Some(typed_field) = self.value_to_typed_field(value_type) {
+                self.create_field(
+                    field_id,
+                    field_name,
+                    typed_field,
+                    self.embedding_sender.clone(),
+                    sender.clone(),
+                    hooks_runtime.clone(),
+                )
+                .await
+                .context("Cannot create field")?;
+            }
         }
 
         Ok(self.fields.clone())
