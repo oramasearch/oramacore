@@ -5,10 +5,10 @@ use tempdir::TempDir;
 
 use crate::{
     collection_manager::{
-        dto::FieldId,
+        dto::{FieldId, LanguageDTO, TypedField},
         sides::{
-            CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer, StringField,
-            WriteOperation,
+            channel, CollectionWriteOperation, DocumentFieldIndexOperation, FieldIndexer,
+            StringField, WriteOperation,
         },
     },
     indexes::string::{
@@ -44,7 +44,18 @@ pub async fn create_string_index(
         })
         .collect();
 
-    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+    let (sx, mut rx) = channel(1_0000);
+
+    for field_name in &string_fields {
+        sx.send(WriteOperation::Collection(
+            CollectionId("collection".to_string()),
+            CollectionWriteOperation::CreateField {
+                field_id: field_name.0,
+                field_name: field_name.1.clone(),
+                field: TypedField::Text(LanguageDTO::English),
+            },
+        ))?;
+    }
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(id as u64);
@@ -67,8 +78,14 @@ pub async fn create_string_index(
 
     drop(sx);
 
-    while let Ok(operation) = rx.recv().await {
+    while let Ok((offset, operation)) = rx.recv().await {
         match operation {
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::CreateField { field_id, .. },
+            ) => {
+                index.add_field(offset, field_id);
+            }
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::Index(
@@ -80,7 +97,7 @@ pub async fn create_string_index(
                     },
                 ),
             ) => {
-                index.insert(doc_id, field_id, field_length, terms)?;
+                index.insert(offset, doc_id, field_id, field_length, terms)?;
             }
             _ => unreachable!(),
         };
@@ -99,23 +116,34 @@ pub async fn create_uncommitted_string_field_index_from(
     documents: Vec<Document>,
     starting_doc_id: u64,
 ) -> Result<UncommittedStringFieldIndex> {
-    let index = UncommittedStringFieldIndex::new();
-
     let string_field = StringField::new(Arc::new(TextParser::from_locale(
         crate::nlp::locales::Locale::EN,
     )));
 
-    let (sx, mut rx) = tokio::sync::broadcast::channel(1_0000);
+    let (sx, mut rx) = channel(1_0000);
+
+    let collection_id = CollectionId("collection".to_string());
+    let field_name = "field".to_string();
+    let field_id = FieldId(0);
+
+    sx.send(WriteOperation::Collection(
+        collection_id.clone(),
+        CollectionWriteOperation::CreateField {
+            field_id,
+            field_name: field_name.clone(),
+            field: TypedField::Text(LanguageDTO::English),
+        },
+    ))?;
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u64);
         let flatten = doc.into_flatten();
         string_field
             .get_write_operations(
-                CollectionId("collection".to_string()),
+                collection_id.clone(),
                 document_id,
-                "field".to_string(),
-                FieldId(1),
+                field_name.clone(),
+                field_id,
                 &flatten,
                 sx.clone(),
             )
@@ -127,8 +155,12 @@ pub async fn create_uncommitted_string_field_index_from(
 
     drop(sx);
 
-    while let Ok(operation) = rx.recv().await {
+    let mut index = None;
+    while let Ok((offset, operation)) = rx.recv().await {
         match operation {
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateField { .. }) => {
+                index = Some(UncommittedStringFieldIndex::new(offset));
+            }
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::Index(
@@ -141,7 +173,9 @@ pub async fn create_uncommitted_string_field_index_from(
                 ),
             ) => {
                 index
-                    .insert(document_id, field_length, terms)
+                    .as_ref()
+                    .unwrap()
+                    .insert(offset, document_id, field_length, terms)
                     .with_context(|| {
                         format!("test cannot insert index_string {:?}", document_id)
                     })?;
@@ -150,7 +184,7 @@ pub async fn create_uncommitted_string_field_index_from(
         };
     }
 
-    Ok(index)
+    Ok(index.unwrap())
 }
 
 pub async fn create_committed_string_field_index(

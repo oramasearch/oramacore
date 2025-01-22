@@ -6,15 +6,13 @@ use ai::{
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    hooks::HooksRuntime, CollectionsWriterConfig, IndexesConfig, ReadSide, WriteOperation,
-    WriteSide,
+    channel, hooks::HooksRuntime, CollectionsWriterConfig, IndexesConfig, OperationReceiver,
+    ReadSide, WriteSide,
 };
 use embeddings::{EmbeddingConfig, EmbeddingService, ModelConfig};
-use js::deno::JavaScript;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
-use tokio::sync::broadcast::Receiver;
 use tracing::info;
 use web_server::{HttpConfig, WebServer};
 
@@ -38,6 +36,9 @@ mod metrics;
 mod file_utils;
 
 mod merger;
+mod offset_storage;
+
+mod field_id_hashmap;
 
 pub mod ai;
 
@@ -98,10 +99,7 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn connect_write_and_read_side(
-    mut receiver: Receiver<WriteOperation>,
-    read_side: Arc<ReadSide>,
-) {
+pub fn connect_write_and_read_side(mut receiver: OperationReceiver, read_side: Arc<ReadSide>) {
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
             read_side.update(op).await.expect("OUCH!");
@@ -114,7 +112,7 @@ pub async fn build_orama(
 ) -> Result<(
     Option<Arc<WriteSide>>,
     Option<Arc<ReadSide>>,
-    Receiver<WriteOperation>,
+    OperationReceiver,
 )> {
     let OramacoreConfig {
         embeddings: embedding_config,
@@ -151,7 +149,7 @@ pub async fn build_orama(
 
     let hooks_runtime = Arc::new(HooksRuntime::new());
 
-    let (sender, receiver) = tokio::sync::broadcast::channel(10_000);
+    let (sender, receiver) = channel(10_000);
 
     assert_eq!(
         writer_side.output,

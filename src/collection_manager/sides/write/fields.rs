@@ -8,7 +8,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::Sender;
 
 use crate::{
     collection_manager::{
@@ -23,7 +22,8 @@ use crate::{
 
 use super::{
     embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput},
-    CollectionWriteOperation, DocumentFieldIndexOperation, Term, TermStringField, WriteOperation,
+    CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, Term, TermStringField,
+    WriteOperation,
 };
 
 pub type FieldsToIndex = DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>;
@@ -45,7 +45,7 @@ pub trait FieldIndexer: Sync + Send + Debug {
         field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()>;
 
     fn serialized(&self) -> SerializedFieldIndexer;
@@ -75,7 +75,7 @@ impl FieldIndexer for NumberField {
         field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         let value = doc.get(&field_name).and_then(|v| Number::try_from(v).ok());
 
@@ -127,7 +127,7 @@ impl FieldIndexer for BoolField {
         field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         let value = doc.get(&field_name);
 
@@ -177,7 +177,7 @@ impl FieldIndexer for StringField {
         field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         let metric = STRING_CALCULATION_METRIC.create(StringCalculationLabels {
             collection: coll_id.0.clone(),
@@ -305,7 +305,7 @@ impl FieldIndexer for EmbeddingField {
         _field_name: String,
         field_id: FieldId,
         doc: &FlattenDocument,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
     ) -> Result<()> {
         let input: String = match &self.document_fields {
             DocumentFields::Properties(v) => v

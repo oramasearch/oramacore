@@ -14,8 +14,8 @@ use crate::types::DocumentId;
 
 use super::document_lengths::DocumentLengthsPerDocument;
 use super::posting_storage::PostingIdStorage;
-use super::uncommitted::{Positions, TotalDocumentsWithTermInField};
-use super::{CommittedStringFieldIndex, UncommittedStringFieldIndex};
+use super::uncommitted::{DataToCommit, Positions, TotalDocumentsWithTermInField};
+use super::CommittedStringFieldIndex;
 
 struct FTSIter<'stream> {
     stream: Option<fst::map::Stream<'stream>>,
@@ -35,7 +35,7 @@ impl Iterator for FTSIter<'_> {
 }
 
 pub fn merge(
-    uncommitted: &UncommittedStringFieldIndex,
+    data_to_commit: DataToCommit<'_>,
     committed: &CommittedStringFieldIndex,
     document_length_new_path: PathBuf,
     fst_new_path: PathBuf,
@@ -43,8 +43,6 @@ pub fn merge(
     global_info_new_path: PathBuf,
     posting_id_new_path: PathBuf,
 ) -> Result<()> {
-    let data_to_commit = uncommitted.take()?;
-
     committed
         .document_lengths_per_document
         .merge(
@@ -60,7 +58,7 @@ pub fn merge(
     let storage_updates = merge_iter(
         posting_id_generator.clone(),
         uncommitted_iter,
-        committed.fst_map_path.clone(),
+        committed.get_info().fst_path,
         fst_new_path,
     )
     .context("Cannot merge iterators")?;
@@ -87,15 +85,13 @@ pub fn merge(
 }
 
 pub fn create(
-    uncommitted: &UncommittedStringFieldIndex,
+    data_to_commit: DataToCommit<'_>,
     document_length_new_path: PathBuf,
     fst_new_path: PathBuf,
     posting_new_path: PathBuf,
     global_info_new_path: PathBuf,
     posting_id_new_path: PathBuf,
 ) -> Result<()> {
-    let data_to_commit = uncommitted.take().context("Cannot take from uncommitted")?;
-
     let posting_id_generator = AtomicU64::new(0);
 
     DocumentLengthsPerDocument::create(

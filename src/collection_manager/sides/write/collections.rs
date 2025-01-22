@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use serde::Deserialize;
-use tokio::sync::{broadcast::Sender, RwLock, RwLockReadGuard};
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
@@ -15,6 +15,7 @@ use crate::{
 
 use crate::collection_manager::dto::{CreateCollectionOptionDTO, LanguageDTO};
 
+use super::OperationSender;
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
 
 pub struct CollectionsWriter {
@@ -60,7 +61,7 @@ impl CollectionsWriter {
     pub async fn create_collection(
         &self,
         collection_option: CreateCollectionOptionDTO,
-        sender: Sender<WriteOperation>,
+        sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         let CreateCollectionOptionDTO {
