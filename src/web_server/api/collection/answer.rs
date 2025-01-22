@@ -66,7 +66,7 @@ async fn answer_v0(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let ai_service = read_side.get_embedding_service().get_ai_service().unwrap();
+        let ai_service = read_side.get_ai_service();
 
         let _ = tx
             .send(Ok(Event::default().data(

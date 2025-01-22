@@ -4,6 +4,7 @@ use axum_openapi3::utoipa::ToSchema;
 use axum_openapi3::utoipa::{self, IntoParams};
 use serde::{de, Deserialize, Serialize};
 
+use crate::ai::OramaModel;
 use crate::{
     indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
@@ -11,6 +12,7 @@ use crate::{
 };
 
 use super::sides::hooks::HookName;
+use super::sides::OramaModelSerializable;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
@@ -50,33 +52,38 @@ pub enum DocumentFields {
     AllStringProperties,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct EmbeddingTypedField {
-    pub model_name: String,
+    pub model: OramaModel,
     pub document_fields: DocumentFields,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum TypedField {
-    Text(#[schema(inline)] LanguageDTO),
-    Embedding(#[schema(inline)] EmbeddingTypedField),
+    Text(LanguageDTO),
+    Embedding(EmbeddingTypedField),
     Number,
     Bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct CreateCollectionOptionDTO {
+pub struct CreateCollectionEmbeddings {
+    pub model: Option<OramaModelSerializable>,
+    pub document_fields: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
     #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]
     #[schema(inline)]
-    pub typed_fields: HashMap<String, TypedField>,
+    pub embeddings: Option<CreateCollectionEmbeddings>,
 }
 
-impl TryFrom<serde_json::Value> for CreateCollectionOptionDTO {
+impl TryFrom<serde_json::Value> for CreateCollection {
     type Error = anyhow::Error;
 
     fn try_from(value: serde_json::Value) -> anyhow::Result<Self> {
@@ -390,7 +397,7 @@ mod test {
 
     #[test]
     fn test_create_collection_option_dto_serialization() {
-        let _: CreateCollectionOptionDTO = json!({
+        let _: CreateCollection = json!({
             "id": "foo",
             "typed_fields": {
                 "vector": {

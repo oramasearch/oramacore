@@ -5,11 +5,11 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info};
 
 use crate::{
+    ai::{AIService, OramaModel},
     collection_manager::{
         dto::FieldId,
         sides::{CollectionWriteOperation, DocumentFieldIndexOperation},
     },
-    embeddings::EmbeddingService,
     metrics::{EmbeddingCalculationLabels, EMBEDDING_CALCULATION_METRIC},
     types::{CollectionId, DocumentId},
 };
@@ -25,28 +25,27 @@ pub struct EmbeddingCalculationRequestInput {
 }
 
 pub struct EmbeddingCalculationRequest {
-    pub model_name: String,
+    pub model: OramaModel,
     pub input: EmbeddingCalculationRequestInput,
 }
 
-async fn process<I>(embedding_server: Arc<EmbeddingService>, cache: I) -> Result<()>
+async fn process<I>(ai_service: Arc<AIService>, cache: I) -> Result<()>
 where
-    I: Iterator<Item = (String, Vec<EmbeddingCalculationRequestInput>)>,
+    I: Iterator<Item = (OramaModel, Vec<EmbeddingCalculationRequestInput>)>,
 {
     info!("Process embedding batch");
 
-    for (model_name, inputs) in cache {
+    for (model, inputs) in cache {
+        let model_name = model.as_str_name();
         info!(model_name = ?model_name, inputs = %inputs.len(), "Process embedding batch");
 
         let metric = EMBEDDING_CALCULATION_METRIC.create(EmbeddingCalculationLabels {
-            model: model_name.clone(),
+            model: model_name.to_string(),
         });
 
-        let model = embedding_server.get_model(model_name).await.unwrap();
         let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
-
-        let output = model
-            .embed_passage(text_inputs)
+        let output = ai_service
+            .embed_passage(model, text_inputs)
             .await
             .context("Failed to embed text")?;
 
@@ -84,7 +83,7 @@ where
 }
 
 pub fn start_calculate_embedding_loop(
-    embedding_server: Arc<EmbeddingService>,
+    ai_service: Arc<AIService>,
     mut receiver: Receiver<EmbeddingCalculationRequest>,
     limit: usize,
 ) {
@@ -94,7 +93,8 @@ pub fn start_calculate_embedding_loop(
     tokio::task::spawn(async move {
         let mut buffer = Vec::with_capacity(limit);
 
-        let mut cache: HashMap<String, Vec<EmbeddingCalculationRequestInput>> = Default::default();
+        let mut cache: HashMap<OramaModel, Vec<EmbeddingCalculationRequestInput>> =
+            Default::default();
 
         loop {
             // `recv_many` waits for at least one available item
@@ -105,15 +105,13 @@ pub fn start_calculate_embedding_loop(
             }
 
             for item in buffer.drain(..) {
-                let EmbeddingCalculationRequest { model_name, input } = item;
+                let EmbeddingCalculationRequest { model, input } = item;
 
-                let inputs = cache.entry(model_name).or_default();
+                let inputs = cache.entry(model).or_default();
                 inputs.push(input);
             }
 
-            process(embedding_server.clone(), cache.drain())
-                .await
-                .unwrap();
+            process(ai_service.clone(), cache.drain()).await.unwrap();
         }
     });
 }

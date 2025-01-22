@@ -91,7 +91,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
 def serve(config, embeddings_service, models_manager):
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting gRPC server on port {config.grpc_port}")
+    logger.info(f"Starting gRPC server on port {config.port}")
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
     logger.info("gRPC server created")
 
@@ -106,6 +106,6 @@ def serve(config, embeddings_service, models_manager):
 
     logger.info(f"Available gRPC services: {SERVICE_NAMES}")
 
-    server.add_insecure_port(f"{config.host}:{config.grpc_port}")
+    server.add_insecure_port(f"{config.host}:{config.port}")
     server.start()
     server.wait_for_termination()

@@ -5,18 +5,18 @@ use std::{
 };
 
 use anyhow::Result;
+use http::uri::Scheme;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
+    ai::AIServiceConfig,
     build_orama,
-    collection_manager::sides::{CollectionsWriterConfig, IndexesConfig, ReadSide, WriteSide},
-    connect_write_and_read_side,
-    embeddings::{
-        fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig},
-        EmbeddingConfig, ModelConfig,
+    collection_manager::sides::{
+        CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
     },
-    test_utils::generate_new_path,
+    connect_write_and_read_side,
+    test_utils::{create_grpc_server, generate_new_path},
     types::{CollectionId, DocumentList},
     web_server::HttpConfig,
     OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
@@ -30,17 +30,19 @@ fn create_oramacore_config() -> OramacoreConfig {
             allow_cors: false,
             with_prometheus: false,
         },
-        embeddings: EmbeddingConfig {
-            preload: vec![],
-            hugging_face: None,
-            fastembed: None,
-            models: HashMap::new(),
+        ai_server: AIServiceConfig {
+            host: "0.0.0.0".parse().unwrap(),
+            port: 0,
+            api_key: None,
+            max_connections: 1,
+            scheme: Scheme::HTTP,
         },
         writer_side: WriteSideConfig {
             output: SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
+                default_embedding_model: OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
             },
         },
         reader_side: ReadSideConfig {
@@ -52,7 +54,14 @@ fn create_oramacore_config() -> OramacoreConfig {
     }
 }
 
-async fn create(config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
+async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
+    if config.ai_server.port == 0 {
+        let address = create_grpc_server().await?;
+        config.ai_server.host = address.ip();
+        config.ai_server.port = address.port();
+        println!("AI server started on {}", address);
+    }
+
     let (write_side, read_side, rec) = build_orama(config).await?;
 
     connect_write_and_read_side(rec, read_side.clone().unwrap());
@@ -846,85 +855,6 @@ async fn test_facets_should_based_on_term() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn test_vector_search() -> Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let mut config = create_oramacore_config();
-    config.embeddings.preload = vec!["gte-small".to_string()];
-    config.embeddings.fastembed = Some(FastEmbedRepoConfig {
-        cache_dir: std::env::temp_dir(),
-    });
-    config.embeddings.models.insert(
-        "gte-small".to_string(),
-        ModelConfig::Fastembed(FastEmbedModelRepoConfig {
-            real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
-            dimensions: 384,
-        }),
-    );
-    let (write_side, read_side) = create(config).await?;
-
-    let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
-            json!({
-                "id": collection_id.0.clone(),
-                "typed_fields": {
-                    "vector": {
-                        "mode": "embedding",
-                        "model_name": "gte-small",
-                        "document_fields": ["text"],
-                    }
-                }
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    sleep(Duration::from_millis(100)).await;
-
-    insert_docs(
-        write_side.clone(),
-        collection_id.clone(),
-        vec![
-            json!({
-                "id": "1",
-                "text": "The cat is sleeping on the table.",
-            }),
-            json!({
-                "id": "2",
-                "text": "A cat rests peacefully on the sofa.",
-            }),
-            json!({
-                "id": "3",
-                "text": "The dog is barking loudly in the yard.",
-            }),
-        ],
-    )
-    .await?;
-
-    let output = read_side
-        .search(
-            collection_id,
-            json!({
-                "mode": "vector",
-                "term": "The feline is napping comfortably indoors.",
-            })
-            .try_into()?,
-        )
-        .await?;
-
-    // Due to the lack of a large enough dataset,
-    // the search will not return 2 results as expected.
-    // But it should return at least one result.
-    // Anyway, the 3th document should not be returned.
-    assert_ne!(output.count, 0);
-    assert_ne!(output.hits.len(), 0);
-    assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
-
-    Ok(())
-}
-
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_empty_term() -> Result<()> {
@@ -992,35 +922,20 @@ async fn test_empty_term() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "test-python")]
 #[tokio::test]
 async fn test_vector_search_grpc() -> Result<()> {
-    use crate::ai::grpc::GrpcModelConfig;
-
     let _ = tracing_subscriber::fmt::try_init();
 
-    let mut config = create_oramacore_config();
-    config.embeddings.models.insert(
-        "BGESmall".to_string(),
-        ModelConfig::Grpc(GrpcModelConfig {
-            dimensions: 384,
-            real_model_name: "BGESmall".to_string(),
-        }),
-    );
-
-    let (write_side, read_side) = create(config).await?;
+    let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
             json!({
                 "id": collection_id.0.clone(),
-                "typed_fields": {
-                    "vector": {
-                        "mode": "embedding",
-                        "model_name": "BGESmall",
-                        "document_fields": ["text"],
-                    }
+                "embeddings": {
+                    "model": "BGESmall",
+                    "document_fields": ["text"],
                 }
             })
             .try_into()?,
@@ -1078,19 +993,8 @@ async fn test_vector_search_grpc() -> Result<()> {
 #[tokio::test]
 async fn test_commit_and_load2() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
 
-    let mut config = create_oramacore_config();
-    config.embeddings.preload = vec!["gte-small".to_string()];
-    config.embeddings.fastembed = Some(FastEmbedRepoConfig {
-        cache_dir: std::env::temp_dir(),
-    });
-    config.embeddings.models.insert(
-        "gte-small".to_string(),
-        ModelConfig::Fastembed(FastEmbedModelRepoConfig {
-            real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
-            dimensions: 384,
-        }),
-    );
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -1098,13 +1002,10 @@ async fn test_commit_and_load2() -> Result<()> {
         .create_collection(
             json!({
                 "id": collection_id.0.clone(),
-                "typed_fields": {
-                    "vector": {
-                        "mode": "embedding",
-                        "model_name": "gte-small",
-                        "document_fields": ["name"],
-                    }
-                }
+                "embeddings": {
+                    "model_name": "gte-small",
+                    "document_fields": ["name"],
+                },
             })
             .try_into()?,
         )

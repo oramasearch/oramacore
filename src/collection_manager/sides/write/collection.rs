@@ -15,18 +15,17 @@ use tracing::{info, instrument};
 use crate::{
     collection_manager::{
         dto::{CollectionDTO, FieldId},
-        sides::hooks::HooksRuntime,
+        sides::hooks::{HookName, HooksRuntime},
     },
     file_utils::BufferedFile,
-    nlp::{locales::Locale, TextParser},
+    nlp::{locales::Locale, NLPService, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
-    embedding::EmbeddingCalculationRequest,
-    fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
+    embedding::EmbeddingCalculationRequest, fields::FieldsToIndex, CollectionField,
     CollectionWriteOperation, OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
@@ -34,7 +33,7 @@ pub struct CollectionWriter {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
-    fields: DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>,
+    fields: DashMap<String, (ValueType, CollectionField)>,
 
     collection_document_count: AtomicU64,
 
@@ -78,6 +77,15 @@ impl CollectionWriter {
         }
     }
 
+    pub fn set_embedding_hook(&self, hook_name: HookName) {
+        let mut field = match self.fields.get_mut("___orama_auto_embedding") {
+            None => return,
+            Some(field) => field,
+        };
+
+        field.1.set_embedding_hook(hook_name);
+    }
+
     pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
@@ -105,18 +113,11 @@ impl CollectionWriter {
 
         let flatten = doc.clone().into_flatten();
 
-        for (field_name, (_, field)) in fields_to_index {
-            let field_id = self.get_field_id_by_name(&field_name);
+        for entry in fields_to_index {
+            let (_, field) = entry.value();
 
             field
-                .get_write_operations(
-                    self.id.clone(),
-                    doc_id,
-                    field_name,
-                    field_id,
-                    &flatten,
-                    sender.clone(),
-                )
+                .get_write_operations(doc_id, &flatten, sender.clone())
                 .await?;
         }
 
@@ -166,7 +167,7 @@ impl CollectionWriter {
         Arc::new(parser)
     }
 
-    pub(super) async fn register_fields(
+    pub async fn register_fields(
         &self,
         typed_fields: HashMap<String, TypedField>,
         sender: OperationSender,
@@ -206,12 +207,14 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Complex(ComplexType::Embedding),
-                        Arc::new(Box::new(EmbeddingField::new(
-                            embedding_field.model_name.clone(),
+                        CollectionField::new_embedding(
+                            embedding_field.model.clone(),
                             embedding_field.document_fields.clone(),
                             embedding_sender,
                             hooks_runtime,
-                        ))),
+                            self.id.clone(),
+                            field_id,
+                        ),
                     ),
                 );
             }
@@ -221,7 +224,12 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::String),
-                        Arc::new(Box::new(StringField::new(parser))),
+                        CollectionField::new_string(
+                            parser,
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }
@@ -230,7 +238,7 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::Number),
-                        Arc::new(Box::new(NumberField::new())),
+                        CollectionField::new_number(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
@@ -239,7 +247,7 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::Boolean),
-                        Arc::new(Box::new(BoolField::new())),
+                        CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
@@ -265,7 +273,7 @@ impl CollectionWriter {
         doc: Document,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
-    ) -> Result<FieldsToIndex> {
+    ) -> Result<&FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
 
@@ -291,10 +299,10 @@ impl CollectionWriter {
             }
         }
 
-        Ok(self.fields.clone())
+        Ok(&self.fields)
     }
 
-    pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
+    pub fn commit(&mut self, path: PathBuf) -> Result<()> {
         // `&mut self` is not used, but it needed to ensure no other thread is using the collection
         info!("Committing collection {}", self.id.0);
 
@@ -334,10 +342,11 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn load(
+    pub async fn load(
         &mut self,
         path: PathBuf,
         hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
     ) -> Result<()> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
@@ -351,38 +360,54 @@ impl CollectionWriter {
         self.id = dump.id;
         self.description = dump.description;
         self.default_language = dump.default_language;
-        for (name, serialized) in dump.fields {
-            let (value_type, indexer): (ValueType, Arc<Box<dyn FieldIndexer>>) = match serialized {
+        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
+
+        for (field_name, serialized) in dump.fields {
+            let field_id = match self.field_id_by_name.get(&field_name) {
+                None => {
+                    return Err(anyhow!(
+                        "Field {} not found in field_id_by_name",
+                        field_name
+                    ));
+                }
+                Some(field_id) => *field_id,
+            };
+            let (value_type, collection_field): (ValueType, CollectionField) = match serialized {
                 SerializedFieldIndexer::String(locale) => (
                     ValueType::Scalar(ScalarType::String),
-                    Arc::new(Box::new(StringField::new(Arc::new(
-                        TextParser::from_locale(locale),
-                    )))),
+                    CollectionField::new_string(
+                        nlp_service.get(locale.into()),
+                        self.id.clone(),
+                        field_id,
+                        field_name.clone(),
+                    ),
                 ),
                 SerializedFieldIndexer::Number => (
                     ValueType::Scalar(ScalarType::Number),
-                    Arc::new(Box::new(NumberField::new())),
+                    CollectionField::new_number(self.id.clone(), field_id, field_name.clone()),
                 ),
                 SerializedFieldIndexer::Bool => (
                     ValueType::Scalar(ScalarType::Boolean),
-                    Arc::new(Box::new(BoolField::new())),
+                    CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
                 ),
                 SerializedFieldIndexer::Embedding(model, fields) => (
                     ValueType::Complex(ComplexType::Embedding),
-                    Arc::new(Box::new(EmbeddingField::new(
-                        model,
+                    CollectionField::new_embedding(
+                        model.0,
                         fields,
                         self.embedding_sender.clone(),
                         hooks_runtime.clone(),
-                    ))),
+                        self.id.clone(),
+                        field_id,
+                    ),
                 ),
             };
-            self.fields.insert(name, (value_type, indexer));
+            self.fields
+                .insert(field_name, (value_type, collection_field));
         }
         self.collection_document_count
             .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
         self.field_id_generator = AtomicU16::new(dump.field_id_generator);
-        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
 
         Ok(())
     }

@@ -19,10 +19,10 @@ use super::{
 #[derive(Debug)]
 pub struct CommittedStringFieldIndex {
     fst_map: Map<memmap::Mmap>,
-    pub(super) document_lengths_per_document: DocumentLengthsPerDocument,
+    pub document_lengths_per_document: DocumentLengthsPerDocument,
 
-    pub(super) storage: PostingIdStorage,
-    pub(super) posting_id_generator: Arc<AtomicU64>,
+    pub storage: PostingIdStorage,
+    pub posting_id_generator: Arc<AtomicU64>,
 
     global_info: GlobalInfo,
 

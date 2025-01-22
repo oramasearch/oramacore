@@ -27,12 +27,11 @@ pub use operation::*;
 pub use fields::*;
 
 use crate::{
-    collection_manager::dto::{
-        CollectionDTO, CreateCollectionOptionDTO, DocumentFields, EmbeddingTypedField, TypedField,
-    },
-    embeddings::EmbeddingService,
+    ai::AIService,
+    collection_manager::dto::{CollectionDTO, CreateCollection},
     file_utils::BufferedFile,
     metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
+    nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
 };
 
@@ -42,21 +41,23 @@ pub struct WriteSide {
     document_count: AtomicU64,
     data_dir: PathBuf,
     hook_runtime: Arc<HooksRuntime>,
+    nlp_service: Arc<NLPService>,
 }
 
 impl WriteSide {
     pub fn new(
         sender: OperationSender,
         config: CollectionsWriterConfig,
-        embedding_service: Arc<EmbeddingService>,
+        ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
     ) -> WriteSide {
         let data_dir = config.data_dir.clone();
 
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
 
-        start_calculate_embedding_loop(embedding_service.clone(), rx, config.embedding_queue_limit);
+        start_calculate_embedding_loop(ai_service, rx, config.embedding_queue_limit);
 
         WriteSide {
             sender,
@@ -64,11 +65,14 @@ impl WriteSide {
             document_count: AtomicU64::new(0),
             data_dir,
             hook_runtime,
+            nlp_service,
         }
     }
 
     pub async fn load(&mut self) -> Result<()> {
-        self.collections.load(self.hook_runtime.clone()).await?;
+        self.collections
+            .load(self.hook_runtime.clone(), self.nlp_service.clone())
+            .await?;
 
         let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
             .and_then(|f| f.read_json_data())
@@ -113,7 +117,7 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn create_collection(&self, option: CreateCollectionOptionDTO) -> Result<()> {
+    pub async fn create_collection(&self, option: CreateCollection) -> Result<()> {
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
@@ -192,17 +196,7 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
-        let typed_fields = HashMap::from_iter([(
-            "___orama_auto_embedding".to_string(),
-            TypedField::Embedding(EmbeddingTypedField {
-                model_name: "BGESmall".to_string(), // @todo: remove hardcoded value
-                document_fields: DocumentFields::Hook(name),
-            }),
-        )]);
-
-        collection
-            .register_fields(typed_fields, self.sender.clone(), self.hook_runtime.clone())
-            .await?;
+        collection.set_embedding_hook(name);
 
         Ok(())
     }

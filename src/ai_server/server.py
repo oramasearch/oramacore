@@ -31,7 +31,7 @@ if __name__ == "__main__":
     embeddings_service = EmbeddingService(config)
 
     try:
-        logger.info(f"Starting gRPC server on port {config.grpc_port}...")
+        logger.info(f"Starting gRPC server on port {config.port}...")
         serve(config, embeddings_service.embeddings_service, models_service)
     except KeyboardInterrupt:
         logger.info("\nShutting down gracefully...")

@@ -77,19 +77,20 @@ class LLMs:
 @dataclass
 class OramaAIConfig:
     models_cache_dir: Optional[str] = ".embeddings_models_cache"
-    grpc_port: Optional[int] = 50051
+    port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     LLMs: Optional[LLMs] = field(default_factory=LLMs)  # type: ignore
     total_threads: Optional[int] = 12
 
     def __post_init__(self):
-        if Path("config.yaml").exists():
+        if Path("../../config.yaml").exists():
             self.update_from_yaml()
 
-    def update_from_yaml(self, path: str = "config.yaml"):
+    def update_from_yaml(self, path: str = "../../config.yaml"):
         with open(path) as f:
             config = yaml.safe_load(f)
+            config = config.get('ai_server')
 
             for k, v in config.items():
                 if hasattr(self, k):

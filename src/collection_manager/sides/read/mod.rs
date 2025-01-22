@@ -11,9 +11,9 @@ use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 
 use crate::{
+    ai::AIService,
     capped_heap::CappedHeap,
     collection_manager::dto::{SearchParams, SearchResult, SearchResultHit, TokenScore},
-    embeddings::EmbeddingService,
     metrics::{
         CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
         COLLECTION_OPERATION_COUNTER,
@@ -31,7 +31,7 @@ pub struct ReadSide {
 
 impl ReadSide {
     pub fn try_new(
-        embedding_service: Arc<EmbeddingService>,
+        ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
@@ -41,11 +41,7 @@ impl ReadSide {
         .context("Cannot create document storage")?;
 
         Ok(Self {
-            collections: CollectionsReader::try_new(
-                embedding_service,
-                nlp_service,
-                indexes_config,
-            )?,
+            collections: CollectionsReader::try_new(ai_service, nlp_service, indexes_config)?,
             document_storage,
         })
     }
@@ -157,10 +153,10 @@ impl ReadSide {
         Ok(())
     }
 
-    // This is wrong. We should not expose the embedding service to the read side.
+    // This is wrong. We should not expose the ai service to the read side.
     // TODO: Remove this method.
-    pub fn get_embedding_service(&self) -> Arc<EmbeddingService> {
-        self.collections.get_embedding_service()
+    pub fn get_ai_service(&self) -> Arc<AIService> {
+        self.collections.get_ai_service()
     }
 
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {

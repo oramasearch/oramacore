@@ -1,18 +1,19 @@
 use anyhow::Result;
-use oramacore::collection_manager::dto::{CreateCollectionOptionDTO, SearchParams};
-use oramacore::collection_manager::sides::{CollectionsWriterConfig, WriteSide};
+use http::uri::Scheme;
+use oramacore::ai::{AIServiceConfig, OramaModel};
+use oramacore::collection_manager::dto::{CreateCollection, SearchParams};
+use oramacore::collection_manager::sides::{
+    CollectionsWriterConfig, OramaModelSerializable, WriteSide,
+};
 use oramacore::collection_manager::sides::{IndexesConfig, ReadSide};
-use oramacore::embeddings::fe::{FastEmbedModelRepoConfig, FastEmbedRepoConfig};
+use oramacore::test_utils::create_grpc_server;
 use oramacore::types::{CollectionId, DocumentList};
 use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
 use serde_json::json;
-use std::collections::HashMap;
-use std::env::temp_dir;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempdir::TempDir;
 
-use oramacore::embeddings::{EmbeddingConfig, ModelConfig};
 use oramacore::web_server::HttpConfig;
 
 pub fn generate_new_path() -> PathBuf {
@@ -21,6 +22,8 @@ pub fn generate_new_path() -> PathBuf {
 }
 
 async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
+    let address = create_grpc_server().await.unwrap();
+
     let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
@@ -28,25 +31,19 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
             allow_cors: false,
             with_prometheus: false,
         },
-        embeddings: EmbeddingConfig {
-            preload: vec![],
-            hugging_face: None,
-            fastembed: Some(FastEmbedRepoConfig {
-                cache_dir: temp_dir(),
-            }),
-            models: HashMap::from_iter([(
-                "gte-small".to_string(),
-                ModelConfig::Fastembed(FastEmbedModelRepoConfig {
-                    real_model_name: "Xenova/bge-small-en-v1.5".to_string(),
-                    dimensions: 384,
-                }),
-            )]),
+        ai_server: AIServiceConfig {
+            scheme: Scheme::HTTP,
+            host: address.ip(),
+            port: address.port(),
+            api_key: None,
+            max_connections: 1,
         },
         writer_side: WriteSideConfig {
             output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
+                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
             },
         },
         reader_side: ReadSideConfig {
@@ -98,11 +95,11 @@ async fn run_tests() {
     let collection_id = CollectionId("collection-test".to_string());
 
     writer
-        .create_collection(CreateCollectionOptionDTO {
+        .create_collection(CreateCollection {
             id: collection_id.clone(),
             description: None,
             language: None,
-            typed_fields: Default::default(),
+            embeddings: None,
         })
         .await
         .unwrap();

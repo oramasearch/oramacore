@@ -12,7 +12,7 @@ pub struct PostingListId(pub u32);
 
 #[derive(Default, Debug)]
 pub struct PostingIdStorage {
-    pub(super) content: RwLock<Content>,
+    content: RwLock<Content>,
 }
 impl PostingIdStorage {
     pub fn try_new(path: PathBuf) -> Result<Self> {

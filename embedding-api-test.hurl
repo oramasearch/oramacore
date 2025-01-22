@@ -12,11 +12,9 @@ collection_id: jsonpath "$[0]"
 POST {{base_url}}/v0/collections
 {
     "id": "{{collection_id}}",
-    "typed_fields": {
-        "my_embedding": {
-            "model_name": "gte-small",
-            "document_fields": ["content"]
-        }
+    "embeddings": {
+        "model_name": "BGESmall",
+        "document_fields": ["content"]
     }
 }
 HTTP 201
