@@ -38,6 +38,8 @@ mod file_utils;
 mod merger;
 mod offset_storage;
 
+mod field_id_hashmap;
+
 pub mod ai;
 
 #[cfg(test)]

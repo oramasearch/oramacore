@@ -19,6 +19,7 @@ use crate::{
         dto::FieldId,
         sides::{InsertStringTerms, Offset},
     },
+    field_id_hashmap::FieldIdHashMap,
     file_utils::BufferedFile,
     types::DocumentId,
 };
@@ -267,7 +268,7 @@ impl StringIndex {
 
         debug!("Dump: {:?}", dump);
 
-        for (field_id, field_dump) in dump.fields {
+        for (field_id, field_dump) in dump.fields.into_inner() {
             let committed = CommittedStringFieldIndex::try_new(field_dump.clone())
                 .context("Cannot reload committed field")?;
 
@@ -358,7 +359,7 @@ enum StringIndexInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StringIndexInfoV1 {
-    fields: HashMap<FieldId, StringIndexFieldInfo>,
+    fields: FieldIdHashMap<StringIndexFieldInfo>,
 }
 
 #[cfg(test)]

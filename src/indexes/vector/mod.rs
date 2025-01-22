@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     collection_manager::{dto::FieldId, sides::Offset},
+    field_id_hashmap::FieldIdHashMap,
     file_utils::BufferedFile,
     types::DocumentId,
 };
@@ -151,7 +152,7 @@ impl VectorIndex {
             info.fields.keys().collect::<Vec<_>>()
         );
 
-        for (field_id, offset) in info.fields {
+        for (field_id, offset) in info.fields.into_inner() {
             let data_dir = data_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
@@ -216,7 +217,7 @@ enum VectorIndexInfo {
 }
 #[derive(Serialize, Deserialize)]
 struct VectorIndexInfoV1 {
-    fields: HashMap<FieldId, Offset>,
+    fields: FieldIdHashMap<Offset>,
 }
 
 #[cfg(test)]

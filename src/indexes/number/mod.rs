@@ -14,6 +14,7 @@ use uncommitted::UncommittedNumberFieldIndex;
 
 use crate::{
     collection_manager::{dto::FieldId, sides::Offset},
+    field_id_hashmap::FieldIdHashMap,
     file_utils::{create_if_not_exists, BufferedFile},
     types::DocumentId,
 };
@@ -161,7 +162,7 @@ impl NumberIndex {
 
         info!("Loading number index: {:?}", number_index_info.field_infos);
 
-        for (field_id, offset) in number_index_info.field_infos {
+        for (field_id, offset) in number_index_info.field_infos.into_inner() {
             let field_dir = data_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
@@ -202,7 +203,7 @@ enum NumberIndexInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NumberIndexInfoV1 {
-    field_infos: HashMap<FieldId, Offset>,
+    field_infos: FieldIdHashMap<Offset>,
 }
 
 #[cfg(test)]
