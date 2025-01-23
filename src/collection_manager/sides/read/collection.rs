@@ -24,7 +24,7 @@ use crate::{
             CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
         },
     },
-    file_utils::BufferedFile,
+    file_utils::{create_or_overwrite, BufferedFile},
     indexes::{
         bool::BoolIndex,
         number::{NumberFilter, NumberIndex, NumberIndexConfig},
@@ -53,13 +53,13 @@ pub struct CollectionReader {
     fields: DashMap<String, (FieldId, TypedField)>,
 
     // indexes
-    vector_index: VectorIndex,
+    vector_index: Arc<VectorIndex>,
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
-    string_index: StringIndex,
+    string_index: Arc<StringIndex>,
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
-    number_index: NumberIndex,
+    number_index:Arc<NumberIndex>,
     bool_index: BoolIndex,
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
@@ -74,11 +74,14 @@ impl CollectionReader {
     ) -> Result<Self> {
         let vector_index = VectorIndex::try_new(VectorIndexConfig {})
             .context("Cannot create vector index during collection creation")?;
+        let vector_index = Arc::new(vector_index);
 
         let string_index = StringIndex::new(StringIndexConfig {});
+        let string_index = Arc::new(string_index);
 
         let number_index = NumberIndex::try_new(NumberIndexConfig {})
             .context("Cannot create number index during collection creation")?;
+        let number_index = Arc::new(number_index);
 
         let bool_index = BoolIndex::new();
 
@@ -127,10 +130,12 @@ impl CollectionReader {
     }
 
     pub async fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
-        self.string_index
+        Arc::get_mut(&mut self.string_index)
+            .expect("string_index is shared")
             .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
-        self.number_index
+        Arc::get_mut(&mut self.number_index)
+            .expect("number_index is shared")
             .load(collection_data_dir.join("numbers"))
             .context("Cannot load number index")?;
         self.vector_index
@@ -182,16 +187,47 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        self.string_index
-            .commit(data_dir.join("strings"))
+    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        // The following code performs the commit of the indexes on disk.
+        // Because we live inside a async runtime and the commit operation is blocking,
+        // we need to spawn a blocking task to perform the commit operation.
+        // Anyway, we keep the sequential order of the commit operations,
+        // not because it is important but because every commit operation allocates memory
+        // So, to avoid to allocate too much memory, we prefer to perform the commit sequentially.
+        // TODO: understand if we could perform the commit in parallel
+
+        let string_index = self.string_index.clone();
+        let string_dir = data_dir.join("strings");
+        tokio::task::spawn_blocking(move || {
+            string_index
+                .commit(string_dir)
+                .context("Cannot commit string index")
+        })
+            .await
+            .context("Cannot spawn blocking task")?
             .context("Cannot commit string index")?;
-        self.number_index
-            .commit(data_dir.join("numbers"))
+
+        let number_index = self.number_index.clone();
+        let number_dir = data_dir.join("numbers");
+        tokio::task::spawn_blocking(move || {
+            number_index
+                .commit(number_dir)
+                .context("Cannot commit number index")
+        })
+            .await
+            .context("Cannot spawn blocking task")?
             .context("Cannot commit number index")?;
-        self.vector_index
-            .commit(data_dir.join("vectors"))
-            .context("Cannot commit vectors index")?;
+
+        let vector_index = self.vector_index.clone();
+        let vector_dir = data_dir.join("vectors");
+        tokio::task::spawn_blocking(move || {
+            vector_index
+                .commit(vector_dir)
+                .context("Cannot commit vector index")
+        })
+            .await
+            .context("Cannot spawn blocking task")?
+            .context("Cannot commit vector index")?;
 
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
@@ -227,10 +263,9 @@ impl CollectionReader {
         });
 
         let coll_desc_file_path = data_dir.join("info.json");
-        BufferedFile::create_or_overwrite(coll_desc_file_path)
-            .context("Cannot create info.json file")?
-            .write_json_data(&dump)
-            .with_context(|| format!("Cannot serialize collection info for {:?}", self.id))?;
+        create_or_overwrite(coll_desc_file_path, &dump)
+            .await
+            .context("Cannot create info.json file")?;
 
         Ok(())
     }
@@ -555,7 +590,7 @@ impl CollectionReader {
                     &mut scorer,
                     filtered_doc_ids.as_ref(),
                 )
-                .await?;
+                ?;
         }
 
         Ok(scorer.get_scores())

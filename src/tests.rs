@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -1175,6 +1175,77 @@ async fn test_commit_and_load2() -> Result<()> {
         )
         .await?;
     assert_eq!(result.count, 1);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+async fn test_read_commit_should_not_block_search() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    write_side
+        .create_collection(
+            json!({
+                "id": collection_id.0.clone(),
+                "embeddings": {
+                    "model_name": "gte-small",
+                    "document_fields": ["name"],
+                },
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..1_000).map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+            })
+        }),
+    )
+    .await?;
+
+
+    let commit_future = async {
+        sleep(Duration::from_millis(5)).await;
+        let commit_start = Instant::now();
+        read_side.commit().await.unwrap();
+        let commit_end = Instant::now();
+        (commit_start, commit_end)
+    };
+    let search_future = async {
+        sleep(Duration::from_millis(10)).await;
+        let search_start = Instant::now();
+        read_side
+            .search(
+                collection_id.clone(),
+                json!({
+                    "term": "text",
+                })
+                .try_into().unwrap(),
+            ).await.unwrap();
+        let search_end = Instant::now();
+        (search_start, search_end)
+    };
+
+    let ((commit_start, commit_end), (search_start, search_end)) = tokio::join!(
+        commit_future,
+        search_future,
+    );
+
+    // The commit should start before the search start
+    assert!(commit_start < search_start);
+    // The commit should end after the search start
+    assert!(commit_end > search_start);
+    // The commit should end after the search end
+    assert!(commit_end > search_end);
 
     Ok(())
 }

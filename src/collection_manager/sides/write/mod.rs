@@ -132,6 +132,9 @@ impl WriteSide {
     ) -> Result<()> {
         info!("Inserting batch of {} documents", document_list.len());
 
+        // This counter is not atomic with the insert operation.
+        // This means we increment the counter even if the insert operation fails.
+        // TODO: think better
         ADDED_DOCUMENTS_COUNTER
             .create(AddedDocumentsLabels {
                 collection: collection_id.0.clone(),

@@ -8,7 +8,7 @@ use std::{
 use crate::{
     ai::AIService,
     collection_manager::sides::Offset,
-    file_utils::{create_if_not_exists, BufferedFile},
+    file_utils::{create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile},
     nlp::NLPService,
     offset_storage::OffsetStorage,
     types::CollectionId,
@@ -123,13 +123,13 @@ impl CollectionsReader {
     pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
 
-        create_if_not_exists(data_dir).context("Cannot create data directory")?;
+        create_if_not_exists_async(data_dir).await.context("Cannot create data directory")?;
 
         let col = self.collections.read().await;
         let col = &*col;
 
         let collections_dir = data_dir.join("collections");
-        create_if_not_exists(&collections_dir).context("Cannot create 'collections' directory")?;
+        create_if_not_exists_async(&collections_dir).await.context("Cannot create 'collections' directory")?;
 
         let collection_ids: Vec<_> = col.keys().cloned().collect();
 
@@ -138,10 +138,11 @@ impl CollectionsReader {
 
             let collection_dir = collections_dir.join(&id.0);
 
-            create_if_not_exists(&collection_dir)
+            create_if_not_exists_async(&collection_dir)
+                .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
-            reader.commit(collection_dir)?;
+            reader.commit(collection_dir).await?;
 
             info!("Collection {:?} committed", id);
         }
@@ -150,10 +151,9 @@ impl CollectionsReader {
             collection_ids: collection_ids.into_iter().collect(),
         });
 
-        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
-            .context("Cannot create info.json file")?
-            .write_json_data(&collections_info)
-            .context("Cannot serialize info.json file")?;
+        create_or_overwrite(data_dir.join("info.json"), &collections_info)
+            .await
+            .context("Cannot create info.json file")?;
 
         Ok(())
     }
