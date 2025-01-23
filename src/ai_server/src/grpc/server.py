@@ -1,5 +1,6 @@
 import grpc
 import logging
+from json_repair import repair_json
 from grpc_reflection.v1alpha import reflection
 from concurrent.futures import ThreadPoolExecutor
 
@@ -18,7 +19,6 @@ from service_pb2 import (
     PlannedAnswerResponse,
 )
 from src.prompts.party_planner import PartyPlannerActions
-from src.prompts.main import PROMPT_TEMPLATES
 
 
 class LLMService(service_pb2_grpc.LLMServiceServicer):
@@ -98,7 +98,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 prompt=request.input,
                 context=self.party_planner_actions.get_actions(),
             )
-            return PlannedAnswerResponse(plan=response)
+            return PlannedAnswerResponse(plan=repair_json(response))
 
         except Exception as e:
             logging.error(f"Error in PlannedAnswer: {e}", exc_info=True)

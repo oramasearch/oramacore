@@ -7,7 +7,7 @@ service LLMService {
     rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
     rpc Chat (ChatRequest) returns (ChatResponse);
     rpc ChatStream (ChatRequest) returns (stream ChatStreamResponse);
-    rpc PlannedAnswer (PlannedAnswerRequest) returns (PlannedAnswerResponse);
+    rpc PlannedAnswer (PlannedAnswerRequest) returns (stream PlannedAnswerResponse);
 }
 
 enum OramaModel {
