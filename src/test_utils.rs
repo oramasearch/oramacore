@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use grpc_def::{ChatStreamResponse, Embedding};
+use grpc_def::{ChatStreamResponse, Embedding, PlannedAnswerResponse};
 use tempdir::TempDir;
 use tokio::time::sleep;
 use tokio_stream::Stream;
@@ -205,10 +205,13 @@ pub struct GRPCServer {
 
 type EchoResult<T> = Result<Response<T>, Status>;
 type ResponseStream = Pin<Box<dyn Stream<Item = Result<ChatStreamResponse, Status>> + Send>>;
+type PlannedAnswerResponseStream =
+    Pin<Box<dyn Stream<Item = Result<PlannedAnswerResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
 impl grpc_def::llm_service_server::LlmService for GRPCServer {
     type ChatStreamStream = ResponseStream;
+    type PlannedAnswerStream = PlannedAnswerResponseStream;
 
     async fn check_health(
         &self,
@@ -254,6 +257,13 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
         &self,
         _req: tonic::Request<grpc_def::ChatRequest>,
     ) -> EchoResult<Self::ChatStreamStream> {
+        todo!()
+    }
+
+    async fn planned_answer(
+        &self,
+        _req: tonic::Request<grpc_def::PlannedAnswerRequest>,
+    ) -> EchoResult<Self::PlannedAnswerStream> {
         todo!()
     }
 }

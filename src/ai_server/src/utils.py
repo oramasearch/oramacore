@@ -9,6 +9,7 @@ DEFAULT_VISION_MODEL = "microsoft/Phi-3.5-vision-instruct"
 DEFAULT_CONTENT_EXPANSION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_ANSWER_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_ANSWER_PLANNING_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
 @dataclass
@@ -72,6 +73,13 @@ class LLMs:
             sampling_params=SamplingParams(temperature=0.2, top_p=0.95, max_tokens=20),
         )
     )
+    party_planner: Optional[ModelConfig] = field(
+        default_factory=lambda: ModelConfig(
+            id=DEFAULT_ANSWER_PLANNING_MODEL,
+            tensor_parallel_size=1,
+            sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=1024),
+        )
+    )
 
 
 @dataclass
@@ -90,7 +98,7 @@ class OramaAIConfig:
     def update_from_yaml(self, path: str = "../../config.yaml"):
         with open(path) as f:
             config = yaml.safe_load(f)
-            config = config.get('ai_server')
+            config = config.get("ai_server")
 
             for k, v in config.items():
                 if hasattr(self, k):

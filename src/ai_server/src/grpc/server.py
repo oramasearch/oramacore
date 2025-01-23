@@ -1,5 +1,6 @@
 import grpc
 import logging
+from json_repair import repair_json
 from grpc_reflection.v1alpha import reflection
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,13 +16,16 @@ from service_pb2 import (
     ChatStreamResponse,
     HealthCheckResponse,
     LLMType,
+    PlannedAnswerResponse,
 )
+from src.prompts.party_planner import PartyPlannerActions
 
 
 class LLMService(service_pb2_grpc.LLMServiceServicer):
     def __init__(self, embeddings_service, models_manager):
         self.embeddings_service = embeddings_service
         self.models_manager = models_manager
+        self.party_planner_actions = PartyPlannerActions()
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -45,8 +49,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
     def Chat(self, request, context):
         try:
             model_name = LLMType.Name(request.model)
-            logging.info(f"Received Chat request with model: {model_name}, prompt: {request.prompt}")
-
             history = (
                 [
                     {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
@@ -67,8 +69,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
     def ChatStream(self, request, context):
         try:
             model_name = LLMType.Name(request.model)
-            logging.info(f"Received ChatStream request with model: {model_name}, prompt: {request.prompt}")
-
             history = (
                 [
                     {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
@@ -87,6 +87,24 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             logging.error(f"Error in ChatStream: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Error in chat stream: {str(e)}")
+
+    def PlannedAnswer(self, request, context):
+        try:
+            model_name = "party_planner"
+            history = []
+            response = self.models_manager.chat(
+                model_id=model_name.lower(),
+                history=history,
+                prompt=request.input,
+                context=self.party_planner_actions.get_actions(),
+            )
+            return PlannedAnswerResponse(plan=repair_json(response))
+
+        except Exception as e:
+            logging.error(f"Error in PlannedAnswer: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error in planned answer stream: {str(e)}")
+            return PlannedAnswerResponse()
 
 
 def serve(config, embeddings_service, models_manager):
