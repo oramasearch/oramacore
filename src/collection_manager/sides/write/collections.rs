@@ -88,12 +88,11 @@ impl CollectionsWriter {
         let model = embeddings
             .as_ref()
             .and_then(|embeddings| embeddings.model.as_ref())
-            .or(Some(&self.config.default_embedding_model))
-            .unwrap();
+            .unwrap_or(&self.config.default_embedding_model);
         let model = model.0;
         let document_fields = embeddings
             .map(|embeddings| embeddings.document_fields)
-            .map(|p| DocumentFields::Properties(p))
+            .map(DocumentFields::Properties)
             .unwrap_or(DocumentFields::AllStringProperties);
         let typed_field = TypedField::Embedding(EmbeddingTypedField {
             model,
