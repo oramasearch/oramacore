@@ -224,7 +224,7 @@ where
 {
     struct SchemeVisitor;
 
-    impl<'de> serde::de::Visitor<'de> for SchemeVisitor {
+    impl serde::de::Visitor<'_> for SchemeVisitor {
         type Value = Scheme;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

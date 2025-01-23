@@ -12,6 +12,10 @@ use crate::collection_manager::dto::FieldId;
 pub struct FieldIdHashMap<T>(HashMap<FieldId, T>);
 
 impl<T> FieldIdHashMap<T> {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
     pub fn into_inner(self) -> HashMap<FieldId, T> {
         self.0
     }
@@ -53,7 +57,7 @@ impl<T: Serialize> Serialize for FieldIdHashMap<T> {
     where
         S: serde::Serializer,
     {
-        serializer.collect_seq(self.0.iter().map(|(k, v)| (k, v)))
+        serializer.collect_seq(self.0.iter())
     }
 }
 
