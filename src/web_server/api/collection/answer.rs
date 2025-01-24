@@ -47,7 +47,77 @@ enum SseMessage {
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route("/v0/collections/{id}/answer", post(answer_v0))
+        .route(
+            "/v0/collections/{id}/planned_answer",
+            post(planned_answer_v0),
+        )
         .with_state(read_side)
+}
+
+async fn planned_answer_v0(
+    Path(id): Path<String>,
+    read_side: State<Arc<ReadSide>>,
+    Json(interaction): Json<Interaction>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let collection_id = CollectionId(id);
+    let read_side = read_side.clone();
+
+    let query = interaction.query;
+    let conversation = interaction.messages;
+
+    let (tx, rx) = mpsc::channel(100);
+    let rx_stream = ReceiverStream::new(rx);
+
+    tokio::spawn(async move {
+        let ai_service = read_side.get_ai_service();
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serde_json::to_string(&SseMessage::Acknowledge {
+                    message: "Acknowledged".to_string(),
+                })
+                .unwrap(),
+            )))
+            .await;
+
+        let mut stream = ai_service.planned_answer_stream(query).await.unwrap();
+
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(response) => {
+                    if tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Acknowledge {
+                                message: response.plan,
+                            })
+                            .unwrap(),
+                        )))
+                        .await
+                        .is_err()
+                    {
+                        break; // Client disconnected
+                    }
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Error {
+                                message: format!("Error during streaming: {}", e),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                    break;
+                }
+            }
+        }
+    });
+
+    Sse::new(rx_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
+    )
 }
 
 // @todo: this function needs some cleaning. It works but it's not well structured.
