@@ -16,7 +16,11 @@ use crate::{
     collection_manager::{
         dto::{CollectionDTO, FieldId},
         sides::hooks::{HookName, HooksRuntime},
-    }, file_utils::BufferedFile, metrics::{CommitLabels, COMMIT_METRIC}, nlp::{locales::Locale, NLPService, TextParser}, types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType}
+    },
+    file_utils::BufferedFile,
+    metrics::{CommitLabels, COMMIT_METRIC},
+    nlp::{locales::Locale, NLPService, TextParser},
+    types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};

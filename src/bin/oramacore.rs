@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Context, Result};
 use config::Config;
 use oramacore::{start, OramacoreConfig};
-use tracing::{info, instrument, Level};
+use tracing::{info, instrument};
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{filter, fmt, Registry};
+use tracing_subscriber::{fmt, Registry};
 
 #[instrument(level = "info")]
 fn load_config() -> Result<OramacoreConfig> {

@@ -32,7 +32,8 @@ use crate::{
         vector::{VectorIndex, VectorIndexConfig},
     },
     metrics::{
-        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC, SEARCH_METRIC
+        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
+        SEARCH_FILTER_METRIC, SEARCH_METRIC,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,

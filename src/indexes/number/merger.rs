@@ -70,8 +70,7 @@ pub async fn merge(
         committed.commit(new_data_dir)?;
         anyhow::Result::Ok(committed)
     });
-    let committed = committed
-        .context("Failed to create committed index")?;
+    let committed = committed.context("Failed to create committed index")?;
 
     data_to_commit.done().await;
 
@@ -86,12 +85,12 @@ pub async fn create(
     let uncommitted_iter = data_to_commit.iter();
 
     let committed: Result<CommittedNumberFieldIndex> = tokio::task::block_in_place(|| {
-        let committed = CommittedNumberFieldIndex::from_iter(offset, uncommitted_iter, new_data_dir.clone())?;
+        let committed =
+            CommittedNumberFieldIndex::from_iter(offset, uncommitted_iter, new_data_dir.clone())?;
         committed.commit(new_data_dir)?;
         anyhow::Result::Ok(committed)
     });
-    let committed = committed
-        .context("Failed to create committed index")?;
+    let committed = committed.context("Failed to create committed index")?;
 
     data_to_commit.done().await;
 
@@ -109,8 +108,11 @@ mod test {
         let mut offset = 1;
         for (k, v) in v {
             for id in v {
-                offset +=1;
-                uncommitted.insert(Offset(offset), Number::I32(k), DocumentId(id)).await.unwrap();
+                offset += 1;
+                uncommitted
+                    .insert(Offset(offset), Number::I32(k), DocumentId(id))
+                    .await
+                    .unwrap();
             }
         }
 
@@ -121,9 +123,7 @@ mod test {
         let iter = v.into_iter().map(|(k, v)| {
             (
                 k.into(),
-                v.into_iter()
-                    .map(|id| DocumentId(id))
-                    .collect::<HashSet<_>>(),
+                v.into_iter().map(DocumentId).collect::<HashSet<_>>(),
             )
         });
         CommittedNumberFieldIndex::from_iter(Offset(0), iter, generate_new_path()).unwrap()
@@ -131,7 +131,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_number_merge() {
-        let uncommitted_data = create_uncommitted_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]).await;
+        let uncommitted_data =
+            create_uncommitted_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]).await;
         let committed_data = create_committed_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]);
 
         let merged = merge(
@@ -140,13 +141,23 @@ mod test {
             &committed_data,
             generate_new_path(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(
             vec![
-                (Number::I32(1), HashSet::from_iter([DocumentId(1), DocumentId(1)])),
-                (Number::I32(2), HashSet::from_iter([DocumentId(2), DocumentId(2)])),
-                (Number::I32(3), HashSet::from_iter([DocumentId(3), DocumentId(3)]))
+                (
+                    Number::I32(1),
+                    HashSet::from_iter([DocumentId(1), DocumentId(1)])
+                ),
+                (
+                    Number::I32(2),
+                    HashSet::from_iter([DocumentId(2), DocumentId(2)])
+                ),
+                (
+                    Number::I32(3),
+                    HashSet::from_iter([DocumentId(3), DocumentId(3)])
+                )
             ],
             merged.iter().collect::<Vec<_>>()
         );
@@ -154,7 +165,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_number_merge_2() {
-        let uncommitted_data = create_uncommitted_data(vec![(1, vec![1]), (3, vec![2]), (5, vec![3])]).await;
+        let uncommitted_data =
+            create_uncommitted_data(vec![(1, vec![1]), (3, vec![2]), (5, vec![3])]).await;
         let committed_data = create_committed_data(vec![(2, vec![1]), (4, vec![2]), (6, vec![3])]);
 
         let merged = merge(
@@ -163,7 +175,8 @@ mod test {
             &committed_data,
             generate_new_path(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(
             vec![
@@ -180,7 +193,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_number_merge_3() {
-        let uncommitted_data = create_uncommitted_data(vec![(2, vec![1]), (4, vec![2]), (6, vec![3])]).await;
+        let uncommitted_data =
+            create_uncommitted_data(vec![(2, vec![1]), (4, vec![2]), (6, vec![3])]).await;
         let committed_data = create_committed_data(vec![(1, vec![1]), (3, vec![2]), (5, vec![3])]);
 
         let merged = merge(
@@ -189,7 +203,8 @@ mod test {
             &committed_data,
             generate_new_path(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(
             vec![
@@ -206,7 +221,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_number_merge_4() {
-        let uncommitted_data = create_uncommitted_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]).await;
+        let uncommitted_data =
+            create_uncommitted_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]).await;
         let committed_data = create_committed_data(vec![(4, vec![1]), (5, vec![2]), (6, vec![3])]);
 
         let merged = merge(
@@ -215,7 +231,8 @@ mod test {
             &committed_data,
             generate_new_path(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(
             vec![
@@ -232,7 +249,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_number_merge_5() {
-        let uncommitted_data = create_uncommitted_data(vec![(4, vec![1]), (5, vec![2]), (6, vec![3])]).await;
+        let uncommitted_data =
+            create_uncommitted_data(vec![(4, vec![1]), (5, vec![2]), (6, vec![3])]).await;
         let committed_data = create_committed_data(vec![(1, vec![1]), (2, vec![2]), (3, vec![3])]);
 
         let merged = merge(
@@ -241,7 +259,8 @@ mod test {
             &committed_data,
             generate_new_path(),
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         assert_eq!(
             vec![

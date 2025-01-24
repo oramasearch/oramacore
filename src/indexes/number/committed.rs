@@ -5,10 +5,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::{
-    collection_manager::sides::Offset, file_utils::BufferedFile, merger::MergedIterator,
-    types::DocumentId,
-};
+use crate::{collection_manager::sides::Offset, file_utils::BufferedFile, types::DocumentId};
 
 use super::{n::SerializableNumber, Number, NumberFilter};
 

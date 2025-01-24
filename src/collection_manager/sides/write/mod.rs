@@ -30,7 +30,10 @@ use crate::{
     ai::AIService,
     collection_manager::dto::{CollectionDTO, CreateCollection},
     file_utils::BufferedFile,
-    metrics::{AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER, DOCUMENT_PROCESS_METRIC},
+    metrics::{
+        AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
+        DOCUMENT_PROCESS_METRIC,
+    },
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
 };

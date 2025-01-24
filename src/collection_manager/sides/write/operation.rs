@@ -103,9 +103,7 @@ pub struct OperationReceiver {
 }
 
 impl OperationReceiver {
-    pub async fn recv(
-        &mut self,
-    ) -> Option<(Offset, WriteOperation)> {
+    pub async fn recv(&mut self) -> Option<(Offset, WriteOperation)> {
         self.receiver.recv().await
     }
 }

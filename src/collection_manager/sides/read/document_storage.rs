@@ -5,7 +5,9 @@ use tracing::{debug, trace, warn};
 use anyhow::{anyhow, Context, Ok, Result};
 
 use crate::{
-    file_utils::{create_or_overwrite, read_file}, metrics::{CommitLabels, COMMIT_METRIC}, types::{DocumentId, RawJSONDocument}
+    file_utils::{create_or_overwrite, read_file},
+    metrics::{CommitLabels, COMMIT_METRIC},
+    types::{DocumentId, RawJSONDocument},
 };
 
 // The `CommittedDiskDocumentStorage` implementation is not optimal.

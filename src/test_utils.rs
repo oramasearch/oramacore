@@ -142,7 +142,8 @@ pub async fn create_uncommitted_string_field_index_from(
             field_name: field_name.clone(),
             field: TypedField::Text(LanguageDTO::English),
         },
-    )).await?;
+    ))
+    .await?;
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u64);

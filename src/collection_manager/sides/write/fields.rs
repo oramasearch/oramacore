@@ -195,8 +195,7 @@ impl NumberField {
             ),
         );
 
-        sender.send(op)
-        .await?;
+        sender.send(op).await?;
 
         Ok(())
     }
@@ -251,8 +250,7 @@ impl BoolField {
             ),
         );
 
-        sender.send(op)
-            .await?;
+        sender.send(op).await?;
 
         Ok(())
     }
@@ -366,8 +364,7 @@ impl StringField {
             ),
         );
 
-        sender.send(op)
-        .await?;
+        sender.send(op).await?;
 
         Ok(())
     }
