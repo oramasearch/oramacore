@@ -127,7 +127,7 @@ harness = false
 [features]
 default = ["benchmarking"]
 benchmarking = ["tempdir"]
-test-python = []
+no_auto_embedding_field_on_creation = []
 
 [workspace]
 members = []

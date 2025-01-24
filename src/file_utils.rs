@@ -108,6 +108,13 @@ pub async fn create_or_overwrite<T: serde::Serialize>(path: PathBuf, data: &T) -
     Ok(())
 }
 
+pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T> {
+    let vec = tokio::fs::read(&path).await
+        .with_context(|| format!("Cannot open file at {:?}", path))?;
+    serde_json::from_slice(&vec)
+        .with_context(|| format!("Cannot deserialize json data from {:?}", path))
+}
+
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {

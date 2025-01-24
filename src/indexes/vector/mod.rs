@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::{collections::{HashMap, HashSet}, path::PathBuf};
 
 use crate::{
     collection_manager::{dto::FieldId, sides::Offset},
@@ -55,14 +52,12 @@ impl VectorIndex {
             if vectors.is_empty() {
                 continue;
             }
-
             let uncommitted = self
                 .uncommitted
                 .entry(field_id)
                 .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len(), offset));
             uncommitted.insert(offset, (doc_id, vectors))?;
         }
-
         Ok(())
     }
 
@@ -92,6 +87,7 @@ impl VectorIndex {
         info!("Committing vector index with fields: {:?}", all_field_ids);
 
         for field_id in all_field_ids {
+            trace!("Committing field {:?}", field_id);
             let uncommitted = self.uncommitted.get(&field_id);
 
             let uncommitted = match uncommitted {
@@ -109,7 +105,10 @@ impl VectorIndex {
             let mut committed = self
                 .committed
                 .entry(field_id)
-                .or_insert_with(|| CommittedVectorFieldIndex::new(taken.dimension, offset));
+                .or_insert_with(|| {
+                    trace!(dimentsion=?taken.dimension, "Creating new committed index");
+                    CommittedVectorFieldIndex::new(taken.dimension, offset)
+                });
 
             for (doc_id, vectors) in taken.data() {
                 for (_, vector) in vectors {

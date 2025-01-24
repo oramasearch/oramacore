@@ -1,11 +1,11 @@
 use serde::{de::Unexpected, Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug, path::PathBuf, sync::RwLock};
+use std::{collections::HashMap, fmt::Debug, path::PathBuf};
 use tracing::{debug, trace, warn};
 
 use anyhow::{anyhow, Context, Ok, Result};
 
 use crate::{
-    file_utils::BufferedFile,
+    file_utils::{create_or_overwrite, read_file},
     types::{DocumentId, RawJSONDocument},
 };
 
@@ -18,20 +18,17 @@ use crate::{
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
     path: PathBuf,
-    cache: RwLock<HashMap<DocumentId, RawJSONDocument>>,
+    cache: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>>,
 }
 impl CommittedDiskDocumentStorage {
-    fn try_new(path: PathBuf) -> Result<Self> {
-        let cache: RwLock<HashMap<DocumentId, RawJSONDocument>> = Default::default();
+    fn new(path: PathBuf) -> Self {
+        let cache: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>> = Default::default();
 
-        Ok(Self { path, cache })
+        Self { path, cache }
     }
 
-    fn get_documents_by_ids(&self, doc_ids: &[DocumentId]) -> Result<Vec<Option<RawJSONDocument>>> {
-        let lock = match self.cache.read() {
-            std::result::Result::Ok(lock) => lock,
-            std::result::Result::Err(e) => e.into_inner(),
-        };
+    async fn get_documents_by_ids(&self, doc_ids: &[DocumentId]) -> Result<Vec<Option<RawJSONDocument>>> {
+        let lock = self.cache.read().await;
         let mut from_cache: HashMap<DocumentId, RawJSONDocument> = doc_ids
             .iter()
             .filter_map(|id| lock.get(id).map(|d| (*id, d.clone())))
@@ -41,13 +38,19 @@ impl CommittedDiskDocumentStorage {
         trace!(doc_len=?doc_ids.len(), "Read document");
         let mut result = Vec::with_capacity(doc_ids.len());
         for id in doc_ids {
+            trace!(?id, "Reading document");
             if let Some(d) = from_cache.remove(id) {
+                trace!("In cache. skip");
                 result.push(Some(d));
                 continue;
             }
 
             let doc_path = self.path.join(format!("{}", id.0));
-            match std::fs::exists(&doc_path) {
+            trace!(?doc_path, "Check on FS");
+
+            let exists = tokio::fs::try_exists(&doc_path)
+                .await;
+            match exists {
                 Err(e) => {
                     return Err(anyhow!(
                         "Error while checking if the document exists: {:?}",
@@ -55,22 +58,27 @@ impl CommittedDiskDocumentStorage {
                     ));
                 }
                 std::result::Result::Ok(false) => {
+                    trace!("Not found on FS");
                     result.push(None);
                     continue;
                 }
                 std::result::Result::Ok(true) => {}
             };
 
-            trace!(?doc_path, "Reading file");
-            let doc: RawJSONDocumentWrapper = BufferedFile::open(doc_path)
-                .context("Cannot open document file")?
-                .read_json_data()
-                .context("Cannot read document data")?;
-
-            let mut lock = match self.cache.write() {
-                std::result::Result::Ok(lock) => lock,
-                std::result::Result::Err(e) => e.into_inner(),
+            let doc: RawJSONDocumentWrapper = match read_file(doc_path).await {
+                std::result::Result::Err(_) => {
+                    // It could happen the `commit` method creates the file (so the previous check passes)
+                    // but not with the full content written.
+                    // In that case, `read_file` will fail.
+                    // If it happens, this arm is triggered.
+                    trace!("Error on read from FS");
+                    result.push(None);
+                    continue;
+                }
+                std::result::Result::Ok(doc) => doc,
             };
+
+            let mut lock = self.cache.write().await;
             lock.insert(*id, doc.0.clone());
             drop(lock);
 
@@ -80,15 +88,14 @@ impl CommittedDiskDocumentStorage {
         Ok(result)
     }
 
-    fn add(&self, docs: Vec<(DocumentId, RawJSONDocument)>) -> Result<()> {
+    async fn add(&self, docs: Vec<(DocumentId, RawJSONDocument)>) -> Result<()> {
         for (doc_id, doc) in docs {
             let doc_path = self.path.join(format!("{}", doc_id.0));
 
             let doc = RawJSONDocumentWrapper(doc);
 
-            BufferedFile::create(doc_path)
-                .context("Cannot create document file")?
-                .write_json_data(&doc)
+            create_or_overwrite(doc_path, &doc)
+                .await
                 .context("Cannot write document data")?;
         }
 
@@ -103,26 +110,23 @@ pub struct DocumentStorageConfig {
 
 #[derive(Debug)]
 pub struct DocumentStorage {
-    uncommitted: RwLock<HashMap<DocumentId, RawJSONDocument>>,
+    uncommitted: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>>,
     committed: CommittedDiskDocumentStorage,
 }
 
 impl DocumentStorage {
     pub fn try_new(config: DocumentStorageConfig) -> Result<Self> {
-        std::fs::create_dir_all(&config.data_dir).context("Cannot create document directory")?;
+        std::fs::create_dir_all(&config.data_dir)
+            .context("Cannot create document directory")?;
 
         Ok(Self {
             uncommitted: Default::default(),
-            committed: CommittedDiskDocumentStorage::try_new(config.data_dir)
-                .context("Cannot create CommittedDiskDocumentStorage")?,
+            committed: CommittedDiskDocumentStorage::new(config.data_dir),
         })
     }
 
     pub async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
-        let mut uncommitted = match self.uncommitted.write() {
-            std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => e.into_inner(),
-        };
+        let mut uncommitted = self.uncommitted.write().await;
         if uncommitted.insert(doc_id, doc).is_some() {
             warn!("Document {:?} already exists. Overwritten.", doc_id);
         }
@@ -134,17 +138,16 @@ impl DocumentStorage {
         &self,
         doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<RawJSONDocument>>> {
-        debug!("Get documents");
-        let committed = self.committed.get_documents_by_ids(&doc_ids)?;
+        debug!("Get from committed documents");
+        let committed = self.committed.get_documents_by_ids(&doc_ids).await?;
 
-        let uncommitted = match self.uncommitted.read() {
-            std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => e.into_inner(),
-        };
+        trace!("Get from uncommitted documents");
+        let uncommitted = self.uncommitted.read().await;
         let uncommitted: Vec<_> = doc_ids
             .into_iter()
             .map(|doc_id| uncommitted.get(&doc_id).cloned())
             .collect();
+        trace!("Get from uncommitted documents done");
 
         let result = committed
             .into_iter()
@@ -165,21 +168,21 @@ impl DocumentStorage {
         Ok(result)
     }
 
-    pub fn commit(&self) -> Result<()> {
+    pub async fn commit(&self) -> Result<()> {
+        trace!("Commit documents");
         // This implementation is wrong:
         // in the mean time we "dran" + "collection" + "write on FS"
         // The documents aren't reachable. So the search output will not contain them.
         // We should follow the same path of the indexes.
         // TODO: fix me
 
-        let mut uncommitted = match self.uncommitted.write() {
-            std::result::Result::Ok(uncommitted) => uncommitted,
-            std::result::Result::Err(e) => e.into_inner(),
-        };
-        let uncommitted: Vec<_> = uncommitted.drain().collect();
+        let mut lock = self.uncommitted.write().await;
+        let uncommitted: Vec<_> = lock.drain().collect();
+        drop(lock);
 
         self.committed
             .add(uncommitted)
+            .await
             .context("Cannot commit documents")?;
 
         Ok(())

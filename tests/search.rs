@@ -80,6 +80,7 @@ async fn start_server() {
             input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
+                insert_batch_commit_size: 10,
             },
         },
     })

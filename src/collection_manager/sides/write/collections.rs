@@ -81,36 +81,42 @@ impl CollectionsWriter {
             self.embedding_sender.clone(),
         );
 
+        let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
+            let model = embeddings
+                .as_ref()
+                .and_then(|embeddings| embeddings.model.as_ref())
+                .unwrap_or(&self.config.default_embedding_model);
+            let model = model.0;
+            let document_fields = embeddings
+                .map(|embeddings| embeddings.document_fields)
+                .map(DocumentFields::Properties)
+                .unwrap_or(DocumentFields::AllStringProperties);
+            let typed_field = TypedField::Embedding(EmbeddingTypedField {
+                model,
+                document_fields,
+            });
+            HashMap::from_iter([("___orama_auto_embedding".to_string(), typed_field)])
+        } else {
+            HashMap::new()
+        };
+
+        let mut collections = self.collections.write().await;
+        if collections.contains_key(&id) {
+            // This error should be typed.
+            // TODO: create a custom error type
+            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
+        }
+
+        // Send event & Register field should be inside the lock transaction
         sender
             .send(WriteOperation::CreateCollection { id: id.clone() })
             .context("Cannot send create collection")?;
-
-        let model = embeddings
-            .as_ref()
-            .and_then(|embeddings| embeddings.model.as_ref())
-            .unwrap_or(&self.config.default_embedding_model);
-        let model = model.0;
-        let document_fields = embeddings
-            .map(|embeddings| embeddings.document_fields)
-            .map(DocumentFields::Properties)
-            .unwrap_or(DocumentFields::AllStringProperties);
-        let typed_field = TypedField::Embedding(EmbeddingTypedField {
-            model,
-            document_fields,
-        });
-        let typed_fields = HashMap::from_iter([("aa".to_string(), typed_field)]);
-
         collection
             .register_fields(typed_fields, sender.clone(), hooks_runtime)
             .await
             .context("Cannot register fields")?;
 
-        let mut collections = self.collections.write().await;
-        if collections.contains_key(&id) {
-            // This error should be typed.
-            // todo: create a custom error type
-            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
-        }
+        
         collections.insert(id, collection);
         drop(collections);
 

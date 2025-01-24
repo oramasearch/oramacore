@@ -49,6 +49,9 @@ fn create_oramacore_config() -> OramacoreConfig {
             input: SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
+                // Lot of tests commit to test it.
+                // So, we put an high value to avoid problems.
+                insert_batch_commit_size: 10_000,
             },
         },
     }
@@ -1271,7 +1274,8 @@ async fn test_commit_and_load2() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_read_commit_should_not_block_search() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
-    let config = create_oramacore_config();
+    let mut config = create_oramacore_config();
+    config.reader_side.config.insert_batch_commit_size = 10;
 
     let (write_side, read_side) = create(config.clone()).await?;
 

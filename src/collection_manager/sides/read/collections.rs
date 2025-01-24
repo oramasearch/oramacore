@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -19,12 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, warn};
 
-use super::collection::CollectionReader;
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct IndexesConfig {
-    pub data_dir: PathBuf,
-}
+use super::{collection::CollectionReader, IndexesConfig};
 
 #[derive(Debug)]
 pub struct CollectionsReader {
