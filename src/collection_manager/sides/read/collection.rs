@@ -136,6 +136,9 @@ impl CollectionReader {
         self.vector_index
             .load(collection_data_dir.join("vectors"))
             .context("Cannot load vectors index")?;
+        self.bool_index
+            .load(collection_data_dir.join("bools"))
+            .context("Cannot load bool index")?;
 
         let coll_desc_file_path = collection_data_dir.join("info.json");
         let dump: dump::CollectionInfo = BufferedFile::open(coll_desc_file_path)
@@ -143,9 +146,7 @@ impl CollectionReader {
             .read_json_data()
             .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
 
-        let dump = match dump {
-            dump::CollectionInfo::V1(dump) => dump,
-        };
+        let dump::CollectionInfo::V1(dump) = dump;
 
         for (field_name, (field_id, field_type)) in dump.fields {
             let typed_field: TypedField = match field_type {
@@ -192,6 +193,9 @@ impl CollectionReader {
         self.vector_index
             .commit(data_dir.join("vectors"))
             .context("Cannot commit vectors index")?;
+        self.bool_index
+            .commit(data_dir.join("bools"))
+            .context("Cannot commit bool index")?;
 
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
@@ -204,7 +208,7 @@ impl CollectionReader {
                     let typed_field = match typed_field {
                         TypedField::Bool => dump::TypedField::Bool,
                         TypedField::Number => dump::TypedField::Number,
-                        TypedField::Text(language) => dump::TypedField::Text(language.clone()),
+                        TypedField::Text(language) => dump::TypedField::Text(*language),
                         TypedField::Embedding(embedding) => {
                             dump::TypedField::Embedding(dump::EmbeddingTypedField {
                                 model: OramaModelSerializable(embedding.model),
@@ -221,7 +225,7 @@ impl CollectionReader {
                 .iter()
                 .map(|v| {
                     let (model, field_ids) = v.pair();
-                    (OramaModelSerializable(model.clone()), field_ids.clone())
+                    (OramaModelSerializable(*model), field_ids.clone())
                 })
                 .collect(),
         });

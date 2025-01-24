@@ -88,9 +88,7 @@ impl CollectionsReader {
             }
         };
 
-        let collections_info = match collections_info {
-            CollectionsInfo::V1(info) => info,
-        };
+        let CollectionsInfo::V1(collections_info) = collections_info;
 
         let base_dir_for_collections = data_dir.join("collections");
 

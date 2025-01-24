@@ -262,9 +262,7 @@ impl StringIndex {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
-        let dump = match dump {
-            StringIndexInfo::V1(dump) => dump,
-        };
+        let StringIndexInfo::V1(dump) = dump;
 
         debug!("Dump: {:?}", dump);
 

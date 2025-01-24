@@ -143,9 +143,7 @@ impl VectorIndex {
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize info.json file")?;
-        let info = match info {
-            VectorIndexInfo::V1(info) => info,
-        };
+        let VectorIndexInfo::V1(info) = info;
 
         info!(
             "Loading vector index with fields: {:?}",

@@ -156,9 +156,7 @@ impl NumberIndex {
             .context("Cannot open info.json")?
             .read_json_data()
             .context("Cannot deserialize info.json")?;
-        let number_index_info = match number_index_info {
-            NumberIndexInfo::V1(info) => info,
-        };
+        let NumberIndexInfo::V1(number_index_info) = number_index_info;
 
         info!("Loading number index: {:?}", number_index_info.field_infos);
 

@@ -77,9 +77,8 @@ impl CollectionField {
     }
 
     pub fn set_embedding_hook(&mut self, name: HookName) {
-        match self {
-            CollectionField::Embedding(f) => f.document_fields = DocumentFields::Hook(name),
-            _ => {} // ignore
+        if let CollectionField::Embedding(f) = self {
+            f.document_fields = DocumentFields::Hook(name)
         }
     }
 
@@ -191,7 +190,7 @@ impl NumberField {
             self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                self.field_id.clone(),
+                self.field_id,
                 DocumentFieldIndexOperation::IndexNumber { value },
             ),
         );
@@ -233,6 +232,10 @@ impl BoolField {
         let value = match value {
             None => return Ok(()),
             Some(value) => match value.as_bool() {
+                // If the document has a field with the name `field_name` but the value isn't a boolean
+                // we ignore it.
+                // Should we bubble up an error?
+                // TODO: think about it
                 None => return Ok(()),
                 Some(value) => value,
             },
@@ -242,7 +245,7 @@ impl BoolField {
             self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                self.field_id.clone(),
+                self.field_id,
                 DocumentFieldIndexOperation::IndexBoolean { value },
             ),
         );
@@ -353,7 +356,7 @@ impl StringField {
             self.collection_id.clone(),
             CollectionWriteOperation::Index(
                 doc_id,
-                self.field_id.clone(),
+                self.field_id,
                 DocumentFieldIndexOperation::IndexString {
                     field_length,
                     terms,
@@ -458,12 +461,12 @@ impl EmbeddingField {
 
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
-                model: self.model.clone(),
+                model: self.model,
                 input: EmbeddingCalculationRequestInput {
                     text: input,
                     coll_id: self.collection_id.clone(),
                     doc_id,
-                    field_id: self.field_id.clone(),
+                    field_id: self.field_id,
                     op_sender: sender,
                 },
             })
@@ -474,7 +477,7 @@ impl EmbeddingField {
 
     fn serialized(&self) -> SerializedFieldIndexer {
         SerializedFieldIndexer::Embedding(
-            OramaModelSerializable(self.model.clone()),
+            OramaModelSerializable(self.model),
             self.document_fields.clone(),
         )
     }
