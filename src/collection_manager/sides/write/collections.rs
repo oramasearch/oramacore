@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
@@ -19,21 +17,12 @@ use crate::collection_manager::dto::{
 };
 
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
-use super::{OperationSender, OramaModelSerializable};
+use super::{CollectionsWriterConfig, OperationSender};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct CollectionsWriterConfig {
-    pub data_dir: PathBuf,
-    #[serde(default = "embedding_queue_limit_default")]
-    pub embedding_queue_limit: usize,
-    #[serde(default = "embedding_model_default")]
-    pub default_embedding_model: OramaModelSerializable,
 }
 
 impl CollectionsWriter {
@@ -81,36 +70,41 @@ impl CollectionsWriter {
             self.embedding_sender.clone(),
         );
 
+        let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
+            let model = embeddings
+                .as_ref()
+                .and_then(|embeddings| embeddings.model.as_ref())
+                .unwrap_or(&self.config.default_embedding_model);
+            let model = model.0;
+            let document_fields = embeddings
+                .map(|embeddings| embeddings.document_fields)
+                .map(DocumentFields::Properties)
+                .unwrap_or(DocumentFields::AllStringProperties);
+            let typed_field = TypedField::Embedding(EmbeddingTypedField {
+                model,
+                document_fields,
+            });
+            HashMap::from_iter([("___orama_auto_embedding".to_string(), typed_field)])
+        } else {
+            HashMap::new()
+        };
+
+        let mut collections = self.collections.write().await;
+        if collections.contains_key(&id) {
+            // This error should be typed.
+            // TODO: create a custom error type
+            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
+        }
+
+        // Send event & Register field should be inside the lock transaction
         sender
             .send(WriteOperation::CreateCollection { id: id.clone() })
             .context("Cannot send create collection")?;
-
-        let model = embeddings
-            .as_ref()
-            .and_then(|embeddings| embeddings.model.as_ref())
-            .unwrap_or(&self.config.default_embedding_model);
-        let model = model.0;
-        let document_fields = embeddings
-            .map(|embeddings| embeddings.document_fields)
-            .map(DocumentFields::Properties)
-            .unwrap_or(DocumentFields::AllStringProperties);
-        let typed_field = TypedField::Embedding(EmbeddingTypedField {
-            model,
-            document_fields,
-        });
-        let typed_fields = HashMap::from_iter([("aa".to_string(), typed_field)]);
-
         collection
             .register_fields(typed_fields, sender.clone(), hooks_runtime)
             .await
             .context("Cannot register fields")?;
 
-        let mut collections = self.collections.write().await;
-        if collections.contains_key(&id) {
-            // This error should be typed.
-            // todo: create a custom error type
-            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
-        }
         collections.insert(id, collection);
         drop(collections);
 
@@ -228,14 +222,6 @@ impl Deref for CollectionWriteLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
-}
-
-fn embedding_queue_limit_default() -> usize {
-    50
-}
-
-fn embedding_model_default() -> OramaModelSerializable {
-    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
 }
 
 #[cfg(test)]
