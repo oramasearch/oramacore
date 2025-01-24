@@ -208,7 +208,7 @@ impl CollectionWriter {
                     (
                         ValueType::Complex(ComplexType::Embedding),
                         CollectionField::new_embedding(
-                            embedding_field.model.clone(),
+                            embedding_field.model,
                             embedding_field.document_fields.clone(),
                             embedding_sender,
                             hooks_runtime,
@@ -353,9 +353,7 @@ impl CollectionWriter {
             .read_json_data()
             .context("Cannot deserialize collection info")?;
 
-        let dump = match dump {
-            CollectionDump::V1(dump) => dump,
-        };
+        let CollectionDump::V1(dump) = dump;
 
         self.id = dump.id;
         self.description = dump.description;
@@ -376,7 +374,7 @@ impl CollectionWriter {
                 SerializedFieldIndexer::String(locale) => (
                     ValueType::Scalar(ScalarType::String),
                     CollectionField::new_string(
-                        nlp_service.get(locale.into()),
+                        nlp_service.get(locale),
                         self.id.clone(),
                         field_id,
                         field_name.clone(),

@@ -991,6 +991,95 @@ async fn test_vector_search_grpc() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_handle_bool() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        vec![
+            json!({
+                "id": "doc1",
+                "bool": true,
+            }),
+            json!({
+                "id": "doc2",
+                "bool": false,
+            }),
+            json!({
+                "id": "doc3",
+                "bool": true,
+            }),
+            json!({
+                "id": "doc4",
+                "bool": false,
+            }),
+            json!({
+                "id": "doc5",
+                "bool": true,
+            }),
+        ],
+    )
+    .await?;
+
+    let output = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "doc",
+                "where": {
+                    "bool": true,
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+    assert_eq!(output.count, 3);
+
+    read_side.commit().await?;
+
+    let output = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "doc",
+                "where": {
+                    "bool": true,
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+    assert_eq!(output.count, 3);
+
+    let (_, read_side) = create(config).await?;
+
+    let output = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "doc",
+                "where": {
+                    "bool": true,
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+    assert_eq!(output.count, 3);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_commit_and_load2() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let config = create_oramacore_config();

@@ -84,9 +84,7 @@ impl WriteSide {
                 return Ok(());
             }
         };
-        let info = match info {
-            WriteSideInfo::V1(info) => info,
-        };
+        let WriteSideInfo::V1(info) = info;
 
         self.document_count
             .store(info.document_count, Ordering::Relaxed);

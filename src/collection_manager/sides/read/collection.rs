@@ -60,7 +60,7 @@ pub struct CollectionReader {
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
     number_index:Arc<NumberIndex>,
-    bool_index: BoolIndex,
+    bool_index: Arc<BoolIndex>,
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
 }
@@ -84,6 +84,7 @@ impl CollectionReader {
         let number_index = Arc::new(number_index);
 
         let bool_index = BoolIndex::new();
+        let bool_index = Arc::new(bool_index);
 
         Ok(Self {
             id,
@@ -141,6 +142,10 @@ impl CollectionReader {
         self.vector_index
             .load(collection_data_dir.join("vectors"))
             .context("Cannot load vectors index")?;
+        Arc::get_mut(&mut self.bool_index)
+            .expect("bool_index is shared")
+            .load(collection_data_dir.join("bools"))
+            .context("Cannot load bool index")?;
 
         let coll_desc_file_path = collection_data_dir.join("info.json");
         let dump: dump::CollectionInfo = BufferedFile::open(coll_desc_file_path)
@@ -148,9 +153,7 @@ impl CollectionReader {
             .read_json_data()
             .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
 
-        let dump = match dump {
-            dump::CollectionInfo::V1(dump) => dump,
-        };
+        let dump::CollectionInfo::V1(dump) = dump;
 
         for (field_name, (field_id, field_type)) in dump.fields {
             let typed_field: TypedField = match field_type {
@@ -229,6 +232,17 @@ impl CollectionReader {
             .context("Cannot spawn blocking task")?
             .context("Cannot commit vector index")?;
 
+        let bool_index = self.bool_index.clone();
+        let bool_dir = data_dir.join("bools");
+        tokio::task::spawn_blocking(move || {
+            bool_index
+                .commit(bool_dir)
+                .context("Cannot commit bool index")
+        })
+            .await
+            .context("Cannot spawn blocking task")?
+            .context("Cannot commit bool index")?;
+
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
             fields: self
@@ -240,7 +254,7 @@ impl CollectionReader {
                     let typed_field = match typed_field {
                         TypedField::Bool => dump::TypedField::Bool,
                         TypedField::Number => dump::TypedField::Number,
-                        TypedField::Text(language) => dump::TypedField::Text(language.clone()),
+                        TypedField::Text(language) => dump::TypedField::Text(*language),
                         TypedField::Embedding(embedding) => {
                             dump::TypedField::Embedding(dump::EmbeddingTypedField {
                                 model: OramaModelSerializable(embedding.model),
@@ -257,7 +271,7 @@ impl CollectionReader {
                 .iter()
                 .map(|v| {
                     let (model, field_ids) = v.pair();
-                    (OramaModelSerializable(model.clone()), field_ids.clone())
+                    (OramaModelSerializable(*model), field_ids.clone())
                 })
                 .collect(),
         });
