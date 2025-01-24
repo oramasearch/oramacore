@@ -2,13 +2,15 @@ mod collection;
 mod collections;
 mod document_storage;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use collections::CollectionsReader;
-pub use collections::IndexesConfig;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
+use serde::Deserialize;
+use tokio::sync::RwLock;
+use tracing::trace;
 
 use crate::{
     ai::AIService,
@@ -24,9 +26,18 @@ use crate::{
 
 use super::{CollectionWriteOperation, Offset, WriteOperation};
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct IndexesConfig {
+    pub data_dir: PathBuf,
+    #[serde(default = "default_insert_batch_commit_size")]
+    pub insert_batch_commit_size: u64,
+}
+
 pub struct ReadSide {
     collections: CollectionsReader,
     document_storage: DocumentStorage,
+    operation_counter: RwLock<u64>,
+    insert_batch_commit_size: u64,
 }
 
 impl ReadSide {
@@ -40,9 +51,13 @@ impl ReadSide {
         })
         .context("Cannot create document storage")?;
 
+        let insert_batch_commit_size = indexes_config.insert_batch_commit_size;
+
         Ok(Self {
             collections: CollectionsReader::try_new(ai_service, nlp_service, indexes_config)?,
             document_storage,
+            operation_counter: Default::default(),
+            insert_batch_commit_size,
         })
     }
 
@@ -61,6 +76,7 @@ impl ReadSide {
 
         self.document_storage
             .commit()
+            .await
             .context("Cannot commit document storage")?;
 
         Ok(())
@@ -87,11 +103,13 @@ impl ReadSide {
 
         let top_results: Vec<TokenScore> = top_n(token_scores, limit.0);
 
+        trace!("Top results: {:?}", top_results);
         let docs = self
             .document_storage
             .get_documents_by_ids(top_results.iter().map(|m| m.document_id).collect())
             .await?;
 
+        trace!("Calculates hits");
         let hits: Vec<_> = top_results
             .into_iter()
             .zip(docs)
@@ -150,6 +168,20 @@ impl ReadSide {
             }
         }
 
+        let mut lock = self.operation_counter.write().await;
+        *lock += 1;
+        let should_commit = if *lock >= self.insert_batch_commit_size {
+            *lock = 0;
+            true
+        } else {
+            false
+        };
+        drop(lock);
+
+        if should_commit {
+            self.commit().await?;
+        }
+
         Ok(())
     }
 
@@ -186,6 +218,10 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
         .collect();
 
     result
+}
+
+fn default_insert_batch_commit_size() -> u64 {
+    300
 }
 
 #[cfg(test)]

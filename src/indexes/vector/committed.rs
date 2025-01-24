@@ -10,7 +10,7 @@ use hora::{
     index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams},
 };
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::{
     collection_manager::sides::Offset, file_utils::create_if_not_exists, types::DocumentId,
@@ -106,10 +106,13 @@ impl CommittedVectorFieldIndex {
     }
 
     pub fn commit(&mut self, data_dir: PathBuf) -> Result<()> {
+        trace!("Building index");
+
         self.index
             .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
+        trace!("create parent dir");
         let parent_dir = data_dir
             .parent()
             .ok_or_else(|| anyhow!("Cannot get parent dir"))?;
@@ -121,6 +124,7 @@ impl CommittedVectorFieldIndex {
                 return Err(anyhow!("Cannot convert path to string"));
             }
         };
+        trace!("dumping index");
         self.index
             .dump(data_dir)
             .map_err(|e| anyhow!("Cannot dump index: {}", e))

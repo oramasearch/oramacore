@@ -20,7 +20,7 @@ use crate::{
         sides::{InsertStringTerms, Offset},
     },
     field_id_hashmap::FieldIdHashMap,
-    file_utils::BufferedFile,
+    file_utils::{create_if_not_exists, BufferedFile},
     types::DocumentId,
 };
 
@@ -128,7 +128,7 @@ impl StringIndex {
 
         info!("Dumping all fields {:?} at {:?}", all_fields, new_path);
 
-        std::fs::create_dir_all(new_path.clone())
+        create_if_not_exists(new_path.clone())
             .with_context(|| format!("Cannot create directory at {:?}", new_path))?;
 
         let mut string_index_info = StringIndexInfoV1 {
@@ -169,44 +169,14 @@ impl StringIndex {
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
 
-            std::fs::create_dir_all(field_new_path.clone())
-                .with_context(|| format!("Cannot create directory at {:?}", field_new_path))?;
+            create_if_not_exists(field_new_path.clone())
+                .with_context(|| format!("Cannot create directory for field {:?}", field_id))?;
 
             let fst_path = field_new_path.join("fst.bin");
             let posting_path = field_new_path.join("posting.bin");
             let document_length_path = field_new_path.join("dl.bin");
             let global_info_path = field_new_path.join("global_info.bin");
             let posting_id_path = field_new_path.join("posting_id.bin");
-
-            match committed {
-                Some(committed) => {
-                    info!("Merging field_id: {:?}", field_id);
-
-                    merger::merge(
-                        data_to_commit,
-                        &committed,
-                        document_length_path.clone(),
-                        fst_path.clone(),
-                        posting_path.clone(),
-                        global_info_path.clone(),
-                        posting_id_path.clone(),
-                    )
-                    .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
-                }
-                None => {
-                    info!("Dumping new field_id: {:?}", field_id);
-
-                    merger::create(
-                        data_to_commit,
-                        document_length_path.clone(),
-                        fst_path.clone(),
-                        posting_path.clone(),
-                        global_info_path.clone(),
-                        posting_id_path.clone(),
-                    )
-                    .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
-                }
-            };
 
             let string_index_field_info = StringIndexFieldInfo {
                 field_id,
@@ -216,6 +186,28 @@ impl StringIndex {
                 global_info_path,
                 posting_id_path,
                 offset,
+            };
+
+            let string_index_field_info_copy = string_index_field_info.clone();
+            match committed {
+                Some(committed) => {
+                    info!("Merging field_id: {:?}", field_id);
+                    merger::merge(data_to_commit, &committed, string_index_field_info_copy)
+                        .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
+                }
+                None => {
+                    info!("Dumping new field_id: {:?}", field_id);
+
+                    merger::create(
+                        data_to_commit,
+                        string_index_field_info_copy.document_length_path,
+                        string_index_field_info_copy.fst_path,
+                        string_index_field_info_copy.posting_path,
+                        string_index_field_info_copy.global_info_path,
+                        string_index_field_info_copy.posting_id_path,
+                    )
+                    .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
+                }
             };
 
             let committed = CommittedStringFieldIndex::try_new(string_index_field_info.clone())
@@ -280,7 +272,7 @@ impl StringIndex {
         Ok(())
     }
 
-    pub async fn search(
+    pub fn search(
         &self,
         tokens: &[String],
         search_on: Option<&[FieldId]>,
@@ -392,29 +384,25 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_output = scorer.get_scores();
 
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_output = scorer.get_scores();
 
         assert_approx_eq!(
@@ -437,15 +425,13 @@ mod tests {
             )]),
         )?;
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_output = scorer.get_scores();
 
         assert_eq!(after_insert_output.len(), 3);
@@ -456,15 +442,13 @@ mod tests {
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_commit_output = scorer.get_scores();
 
         assert_eq!(after_insert_commit_output.len(), 3);
@@ -495,15 +479,13 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_scores = scorer.get_scores();
 
         let new_path = generate_new_path();
@@ -517,15 +499,13 @@ mod tests {
         };
 
         let mut scorer = BM25Scorer::new();
-        new_string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        new_string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let scores = scorer.get_scores();
 
         // Compare scores
