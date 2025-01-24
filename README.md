@@ -104,6 +104,16 @@ hurl --very-verbose --test --variables-file api-test.hurl.property embedding-api
 
 NB: you need to have the server running before running the tests.
 
+## Metrics
+
+Change the `prometheus.yml` file to match your configuration and run the following command:
+```
+docker run --rm --name prometheus -d -p 9090:9090 -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+docker run --rm --name grafana -d -p 3000:3000 grafana/grafana
+```
+
+NB: the default username and password for Grafana are `admin` and `admin`.
+
 ## License
 
 [AGPLv3](/LICENSE.md)

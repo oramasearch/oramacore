@@ -46,27 +46,27 @@ pub async fn create_string_index(
     let (sx, mut rx) = channel(1_0000);
 
     let collection_id = CollectionId("collection".to_string());
-    let string_fields: Vec<_> = fields
-        .into_iter()
-        .map(|(field_id, field_name)| {
-            sx.send(WriteOperation::Collection(
-                collection_id.clone(),
-                CollectionWriteOperation::CreateField {
-                    field_id,
-                    field_name: field_name.clone(),
-                    field: TypedField::Text(LanguageDTO::English),
-                },
-            ))
-            .unwrap();
 
-            StringField::new(
-                Arc::new(TextParser::from_locale(crate::nlp::locales::Locale::EN)),
-                collection_id.clone(),
+    let mut string_fields = Vec::new();
+    for (field_id, field_name) in fields {
+        sx.send(WriteOperation::Collection(
+            collection_id.clone(),
+            CollectionWriteOperation::CreateField {
                 field_id,
-                field_name,
-            )
-        })
-        .collect();
+                field_name: field_name.clone(),
+                field: TypedField::Text(LanguageDTO::English),
+            },
+        ))
+        .await
+        .unwrap();
+
+        string_fields.push(StringField::new(
+            Arc::new(TextParser::from_locale(crate::nlp::locales::Locale::EN)),
+            collection_id.clone(),
+            field_id,
+            field_name,
+        ))
+    }
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(id as u64);
@@ -75,13 +75,14 @@ pub async fn create_string_index(
         for string_field in &string_fields {
             string_field
                 .get_write_operations(document_id, &flatten, sx.clone())
+                .await
                 .unwrap()
         }
     }
 
     drop(sx);
 
-    while let Ok((offset, operation)) = rx.recv().await {
+    while let Some((offset, operation)) = rx.recv().await {
         match operation {
             WriteOperation::Collection(
                 _,
@@ -100,7 +101,9 @@ pub async fn create_string_index(
                     },
                 ),
             ) => {
-                index.insert(offset, doc_id, field_id, field_length, terms)?;
+                index
+                    .insert(offset, doc_id, field_id, field_length, terms)
+                    .await?;
             }
             _ => unreachable!(),
         };
@@ -139,13 +142,14 @@ pub async fn create_uncommitted_string_field_index_from(
             field_name: field_name.clone(),
             field: TypedField::Text(LanguageDTO::English),
         },
-    ))?;
+    )).await?;
 
     for (id, doc) in documents.into_iter().enumerate() {
         let document_id = DocumentId(starting_doc_id + id as u64);
         let flatten = doc.into_flatten();
         string_field
             .get_write_operations(document_id, &flatten, sx.clone())
+            .await
             .with_context(|| {
                 format!("Test get_write_operations {:?} {:?}", document_id, flatten)
             })?;
@@ -154,7 +158,7 @@ pub async fn create_uncommitted_string_field_index_from(
     drop(sx);
 
     let mut index = None;
-    while let Ok((offset, operation)) = rx.recv().await {
+    while let Some((offset, operation)) = rx.recv().await {
         match operation {
             WriteOperation::Collection(_, CollectionWriteOperation::CreateField { .. }) => {
                 index = Some(UncommittedStringFieldIndex::new(offset));
@@ -174,6 +178,7 @@ pub async fn create_uncommitted_string_field_index_from(
                     .as_ref()
                     .unwrap()
                     .insert(offset, document_id, field_length, terms)
+                    .await
                     .with_context(|| {
                         format!("test cannot insert index_string {:?}", document_id)
                     })?;
@@ -190,7 +195,7 @@ pub async fn create_committed_string_field_index(
 ) -> Result<Option<CommittedStringFieldIndex>> {
     let index = create_string_index(vec![(FieldId(1), "field".to_string())], documents).await?;
 
-    index.commit(generate_new_path())?;
+    index.commit(generate_new_path()).await?;
 
     Ok(index.remove_committed_field(FieldId(1)))
 }

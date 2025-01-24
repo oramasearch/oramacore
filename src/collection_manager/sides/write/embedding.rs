@@ -71,6 +71,7 @@ where
                         DocumentFieldIndexOperation::IndexEmbedding { value: output },
                     ),
                 ))
+                .await
                 .unwrap();
         }
 

@@ -97,7 +97,7 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
 
 pub fn connect_write_and_read_side(mut receiver: OperationReceiver, read_side: Arc<ReadSide>) {
     tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
+        while let Some(op) = receiver.recv().await {
             read_side.update(op).await.expect("OUCH!");
         }
     });

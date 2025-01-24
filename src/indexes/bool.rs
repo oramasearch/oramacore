@@ -1,9 +1,10 @@
-use std::{collections::HashSet, path::PathBuf, sync::RwLock};
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     collection_manager::{dto::FieldId, sides::Offset},
@@ -75,11 +76,8 @@ struct UncommittedBoolFieldIndex {
 }
 
 impl UncommittedBoolFieldIndex {
-    fn add(&self, offset: Offset, value: bool, doc_id: DocumentId) -> Result<()> {
-        let mut inner = match self.inner.write() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    async fn add(&self, offset: Offset, value: bool, doc_id: DocumentId) -> Result<()> {
+        let mut inner = self.inner.write().await;
         // Ignore inserts with lower offset
         if offset <= inner.0.get_offset() {
             warn!("Skip insert number with lower offset");
@@ -92,23 +90,16 @@ impl UncommittedBoolFieldIndex {
         Ok(())
     }
 
-    fn filter(&self, val: bool, doc_ids: &mut HashSet<DocumentId>) -> Result<()> {
-        let inner = match self.inner.read() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    async fn filter(&self, val: bool, doc_ids: &mut HashSet<DocumentId>) -> Result<()> {
+        let inner = self.inner.read().await;
 
         inner.1.filter(val, doc_ids)?;
 
         Ok(())
     }
 
-    fn get_offset(&self) -> Offset {
-        let inner = match self.inner.read() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
-
+    async fn get_offset(&self) -> Offset {
+        let inner = self.inner.read().await;
         inner.0.get_offset()
     }
 }
@@ -151,17 +142,14 @@ impl BoolIndex {
         }
     }
 
-    pub fn add(
+    pub async fn add(
         &self,
         offset: Offset,
         doc_id: DocumentId,
         field_id: FieldId,
         value: bool,
     ) -> Result<()> {
-        debug!(
-            "Adding bool index: doc_id: {:?}, field_id: {:?}, value: {:?}",
-            doc_id, field_id, value
-        );
+        trace!("Adding bool value");
 
         let uncommitted =
             self.uncommitted
@@ -172,12 +160,14 @@ impl BoolIndex {
                         InnerUncommittedNumberFieldIndex::new(),
                     )),
                 });
-        uncommitted.add(offset, value, doc_id)?;
+        uncommitted.add(offset, value, doc_id).await?;
+
+        trace!("Bool value added");
 
         Ok(())
     }
 
-    pub fn filter(&self, field_id: FieldId, val: bool) -> Result<HashSet<DocumentId>> {
+    pub async fn filter(&self, field_id: FieldId, val: bool) -> Result<HashSet<DocumentId>> {
         let mut doc_ids = if let Some(committed) = self.committed.get(&field_id) {
             committed.filter(val)?
         } else {
@@ -185,7 +175,7 @@ impl BoolIndex {
         };
 
         if let Some(uncommitted) = self.uncommitted.get(&field_id) {
-            uncommitted.filter(val, &mut doc_ids)?;
+            uncommitted.filter(val, &mut doc_ids).await?;
         }
 
         Ok(doc_ids)
@@ -222,7 +212,9 @@ impl BoolIndex {
         Ok(())
     }
 
-    pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        info!("Committing bool index");
+
         create_if_not_exists(&data_dir).context("Cannot create data directory for bool index")?;
 
         let info_path = data_dir.join("info.json");
@@ -239,10 +231,20 @@ impl BoolIndex {
             }
         };
 
+        info!(
+            "Committing string fields {:?}",
+            self.uncommitted
+                .iter()
+                .map(|e| *e.key())
+                .collect::<Vec<_>>()
+        );
+
         for e in self.uncommitted.iter() {
             let (field_id, uncommitted) = e.pair();
 
-            let mut uncommitted_data = uncommitted.inner.write().unwrap();
+            info!("Committing field {:?}", field_id);
+
+            let mut uncommitted_data = uncommitted.inner.write().await;
             let (true_docs, false_docs, state) = match uncommitted_data.1.state {
                 BoolIndexState::Left => (
                     uncommitted_data.1.left.true_docs.clone(),
@@ -262,13 +264,21 @@ impl BoolIndex {
             drop(uncommitted_data);
 
             if true_docs.is_empty() && false_docs.is_empty() {
+                info!("Everything is already committed. Skip dumping");
                 continue;
             }
 
-            let offset = uncommitted.get_offset();
+            let offset = uncommitted.get_offset().await;
             field_infos.insert(*field_id, offset);
 
             let old_committed = self.committed.get(field_id);
+
+            info!(
+                ?field_id,
+                committed = old_committed.is_some(),
+                uncommitted_count = true_docs.len() + false_docs.len(),
+                "Committing string index"
+            );
 
             let new_committed = if let Some(old_committed) = old_committed {
                 // This clone duplicates data, so we (potentially) use a lot of memory
@@ -300,10 +310,6 @@ impl BoolIndex {
                     .expect("Dump has always a parent folder"),
             )?;
 
-            debug!(
-                "Dumping bool field {:?} to {:?}",
-                field_id, field_index_dump_path
-            );
             BufferedFile::create_or_overwrite(field_index_dump_path)
                 .context(format!("Cannot create bool field {:?} dump file", field_id))?
                 .write_json_data(&(&new_committed.true_docs, &new_committed.false_docs))
@@ -311,7 +317,7 @@ impl BoolIndex {
 
             self.committed.insert(*field_id, new_committed);
 
-            let mut uncommitted_data = uncommitted.inner.write().unwrap();
+            let mut uncommitted_data = uncommitted.inner.write().await;
             match state {
                 BoolIndexState::Left => {
                     // `clear` keeps the capacity
@@ -329,12 +335,16 @@ impl BoolIndex {
                 }
             };
             drop(uncommitted_data);
+
+            info!("Field committed");
         }
 
+        trace!("Dumping string index info");
         BufferedFile::create_or_overwrite(info_path)
             .context("Cannot create bool info.json file")?
             .write_json_data(&BoolIndexInfo::V1(BoolIndexInfoV1 { field_infos }))
             .context("Cannot deserialize info.json file")?;
+        trace!("String index info dumped");
 
         Ok(())
     }
@@ -356,24 +366,36 @@ struct BoolIndexInfoV1 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_bool_index_filter() -> Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_bool_index_filter() -> Result<()> {
         let index = BoolIndex::new();
 
-        index.add(Offset(1), DocumentId(0), FieldId(0), true)?;
-        index.add(Offset(2), DocumentId(1), FieldId(0), false)?;
-        index.add(Offset(3), DocumentId(2), FieldId(0), true)?;
-        index.add(Offset(4), DocumentId(3), FieldId(0), false)?;
-        index.add(Offset(5), DocumentId(4), FieldId(0), true)?;
-        index.add(Offset(6), DocumentId(5), FieldId(0), false)?;
+        index
+            .add(Offset(1), DocumentId(0), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(2), DocumentId(1), FieldId(0), false)
+            .await?;
+        index
+            .add(Offset(3), DocumentId(2), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(4), DocumentId(3), FieldId(0), false)
+            .await?;
+        index
+            .add(Offset(5), DocumentId(4), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(6), DocumentId(5), FieldId(0), false)
+            .await?;
 
-        let true_docs = index.filter(FieldId(0), true).unwrap();
+        let true_docs = index.filter(FieldId(0), true).await.unwrap();
         assert_eq!(
             true_docs,
             HashSet::from([DocumentId(0), DocumentId(2), DocumentId(4)])
         );
 
-        let false_docs = index.filter(FieldId(0), false).unwrap();
+        let false_docs = index.filter(FieldId(0), false).await.unwrap();
         assert_eq!(
             false_docs,
             HashSet::from([DocumentId(1), DocumentId(3), DocumentId(5)])
@@ -382,21 +404,33 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_bool_index_filter_unknown_field() -> Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_bool_index_filter_unknown_field() -> Result<()> {
         let index = BoolIndex::new();
 
-        index.add(Offset(1), DocumentId(0), FieldId(0), true)?;
-        index.add(Offset(2), DocumentId(1), FieldId(0), false)?;
-        index.add(Offset(3), DocumentId(2), FieldId(0), true)?;
-        index.add(Offset(4), DocumentId(3), FieldId(0), false)?;
-        index.add(Offset(5), DocumentId(4), FieldId(0), true)?;
-        index.add(Offset(6), DocumentId(5), FieldId(0), false)?;
+        index
+            .add(Offset(1), DocumentId(0), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(2), DocumentId(1), FieldId(0), false)
+            .await?;
+        index
+            .add(Offset(3), DocumentId(2), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(4), DocumentId(3), FieldId(0), false)
+            .await?;
+        index
+            .add(Offset(5), DocumentId(4), FieldId(0), true)
+            .await?;
+        index
+            .add(Offset(6), DocumentId(5), FieldId(0), false)
+            .await?;
 
-        let true_docs = index.filter(FieldId(1), true).unwrap();
+        let true_docs = index.filter(FieldId(1), true).await.unwrap();
         assert_eq!(true_docs, HashSet::from([]));
 
-        let false_docs = index.filter(FieldId(1), false).unwrap();
+        let false_docs = index.filter(FieldId(1), false).await.unwrap();
         assert_eq!(false_docs, HashSet::from([]));
 
         Ok(())

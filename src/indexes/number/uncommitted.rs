@@ -1,29 +1,42 @@
 use std::{
     collections::{BTreeMap, HashSet},
     ops::Bound,
-    sync::RwLock,
 };
 
 use anyhow::Result;
+use tokio::sync::RwLock;
 use tracing::warn;
 
 use crate::{collection_manager::sides::Offset, offset_storage::OffsetStorage, types::DocumentId};
 
-use super::{Number, NumberFilter};
+use super::{merger::DataToCommit, Number, NumberFilter};
 
-#[derive(Debug, Default)]
-struct InnerUncommittedNumberFieldIndex {
-    left: BTreeMap<Number, HashSet<DocumentId>>,
-    right: BTreeMap<Number, HashSet<DocumentId>>,
-    state: bool,
+#[derive(Debug, Clone, Copy)]
+pub enum State {
+    Left,
+    Right,
+}
+
+#[derive(Debug)]
+pub struct InnerUncommittedNumberFieldIndex {
+    pub left: BTreeMap<Number, HashSet<DocumentId>>,
+    pub right: BTreeMap<Number, HashSet<DocumentId>>,
+    pub state: State,
 }
 
 impl InnerUncommittedNumberFieldIndex {
+    fn new() -> Self {
+        Self {
+            left: BTreeMap::new(),
+            right: BTreeMap::new(),
+            state: State::Left,
+        }
+    }
+
     fn insert(&mut self, value: Number, document_id: DocumentId) -> Result<()> {
-        let doc_ids = if self.state {
-            &mut self.left
-        } else {
-            &mut self.right
+        let doc_ids = match self.state {
+            State::Left => &mut self.left,
+            State::Right => &mut self.right,
         };
         let doc_ids = doc_ids.entry(value).or_default();
         doc_ids.insert(document_id);
@@ -37,9 +50,9 @@ impl InnerUncommittedNumberFieldIndex {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UncommittedNumberFieldIndex {
-    inner: RwLock<(OffsetStorage, InnerUncommittedNumberFieldIndex)>,
+    pub inner: RwLock<(OffsetStorage, InnerUncommittedNumberFieldIndex)>,
 }
 
 impl UncommittedNumberFieldIndex {
@@ -47,15 +60,17 @@ impl UncommittedNumberFieldIndex {
         let offset_storage = OffsetStorage::new();
         offset_storage.set_offset(offset);
         Self {
-            inner: RwLock::new((offset_storage, InnerUncommittedNumberFieldIndex::default())),
+            inner: RwLock::new((offset_storage, InnerUncommittedNumberFieldIndex::new())),
         }
     }
 
-    pub fn insert(&self, offset: Offset, value: Number, document_id: DocumentId) -> Result<()> {
-        let mut inner = match self.inner.write() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    pub async fn insert(
+        &self,
+        offset: Offset,
+        value: Number,
+        document_id: DocumentId,
+    ) -> Result<()> {
+        let mut inner = self.inner.write().await;
         // Ignore inserts with lower offset
         if offset <= inner.0.get_offset() {
             warn!("Skip insert number with lower offset");
@@ -66,16 +81,17 @@ impl UncommittedNumberFieldIndex {
         Ok(())
     }
 
-    pub fn filter(&self, filter: NumberFilter, doc_ids: &mut HashSet<DocumentId>) -> Result<()> {
-        let inner = match self.inner.read() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    pub async fn filter(
+        &self,
+        filter: NumberFilter,
+        doc_ids: &mut HashSet<DocumentId>,
+    ) -> Result<()> {
+        let inner = self.inner.read().await;
         inner.1.filter(filter, doc_ids)?;
         Ok(())
     }
 
-    pub fn take(&self) -> Result<UncommittedNumberFieldIndexTaken> {
+    pub async fn take(&self) -> Result<DataToCommit<'_>> {
         // There is a subtle bug here: this method should be called only once at time
         // If this method is called twice at the same time, the result will be wrong
         // This is because:
@@ -84,31 +100,27 @@ impl UncommittedNumberFieldIndex {
         // So, if we flipped the state twice, the tree will be cleared twice and we could lose data
         // TODO: investigate how to make this method safe to be called multiple times
 
-        let mut inner = match self.inner.write() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
+        let mut inner = self.inner.write().await;
+        let tree: BTreeMap<Number, HashSet<DocumentId>> = match inner.1.state {
+            State::Left => inner.1.left.clone(),
+            State::Right => inner.1.right.clone(),
         };
-        let tree: BTreeMap<Number, HashSet<DocumentId>> = if inner.1.state {
-            inner.1.left.clone()
-        } else {
-            inner.1.right.clone()
-        };
-        let current_state = inner.1.state;
+        let state_to_clear = inner.1.state;
 
         // It is safe to put here because we are holding the lock
         let current_offset = inner.0.get_offset();
 
         // Route the writes to the other side
-        inner.1.state = !current_state;
+        inner.1.state = match state_to_clear {
+            State::Left => State::Right,
+            State::Right => State::Left,
+        };
         drop(inner);
 
-        let tree_len = tree.len();
-
-        Ok(UncommittedNumberFieldIndexTaken {
-            tree: Box::new(tree.into_iter()),
-            tree_len,
+        Ok(DataToCommit {
+            tree,
             index: self,
-            state: current_state,
+            state_to_clear,
             current_offset,
         })
     }
@@ -125,18 +137,9 @@ impl Iterator for UncommittedNumberFieldIndexTaken<'_> {
     type Item = (Number, HashSet<DocumentId>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.tree.next()
-    }
-}
-impl Drop for UncommittedNumberFieldIndexTaken<'_> {
-    fn drop(&mut self) {
-        let mut lock = self.index.inner.write().unwrap();
-        let tree = if self.state {
-            &mut lock.1.left
-        } else {
-            &mut lock.1.right
-        };
-        tree.clear();
+        let a = self.tree.next();
+        println!("next {:?}", a);
+        a
     }
 }
 impl UncommittedNumberFieldIndexTaken<'_> {
@@ -150,6 +153,16 @@ impl UncommittedNumberFieldIndexTaken<'_> {
 
     pub fn current_offset(&self) -> Offset {
         self.current_offset
+    }
+
+    async fn done(self) {
+        let mut lock = self.index.inner.write().await;
+        let tree = if self.state {
+            &mut lock.1.left
+        } else {
+            &mut lock.1.right
+        };
+        tree.clear();
     }
 }
 
@@ -191,17 +204,23 @@ fn inner_filter(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_indexes_number_uncommitted() -> Result<()> {
-        let index = UncommittedNumberFieldIndex::default();
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_indexes_number_uncommitted() -> Result<()> {
+        let index = UncommittedNumberFieldIndex::new(Offset(0));
 
-        index.insert(Offset(1), Number::I32(1), DocumentId(1))?;
-        index.insert(Offset(2), Number::I32(2), DocumentId(2))?;
-        index.insert(Offset(3), Number::I32(3), DocumentId(3))?;
+        index
+            .insert(Offset(1), Number::I32(1), DocumentId(1))
+            .await?;
+        index
+            .insert(Offset(2), Number::I32(2), DocumentId(2))
+            .await?;
+        index
+            .insert(Offset(3), Number::I32(3), DocumentId(3))
+            .await?;
 
-        let taken = index.take()?;
+        let taken = index.take().await?;
 
-        let collected: Vec<_> = taken.into_iter().collect();
+        let collected: Vec<_> = taken.iter().collect();
         assert_eq!(
             collected,
             vec![

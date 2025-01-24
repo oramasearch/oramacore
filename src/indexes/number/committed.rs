@@ -12,6 +12,8 @@ use crate::{
 
 use super::{n::SerializableNumber, Number, NumberFilter};
 
+const MAX_NUMBER_PER_PAGE: usize = 1_000_000;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Item {
     key: SerializableNumber,
@@ -136,6 +138,10 @@ pub struct CommittedNumberFieldIndex {
 }
 
 impl CommittedNumberFieldIndex {
+    pub fn new(data_dir: PathBuf) -> Self {
+        todo!()
+    }
+
     pub fn filter(&self, filter: &NumberFilter) -> Result<HashSet<DocumentId>> {
         let pages = match filter {
             NumberFilter::Equal(value) => {
@@ -310,8 +316,7 @@ impl CommittedNumberFieldIndex {
             prev = value;
             current_page_count += doc_ids.len();
 
-            // 1000 is a magic number.
-            if current_page_count > 1000 {
+            if current_page_count > MAX_NUMBER_PER_PAGE {
                 current_page.max = value;
                 committed_number_field_index.bounds.push((
                     (
@@ -409,125 +414,11 @@ fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) ->
     }
 }
 
-pub fn merge<
-    K: Ord + Eq + Debug,
-    V: Debug,
-    VV: Extend<V> + IntoIterator<Item = V> + Debug,
-    I1: Iterator<Item = (K, VV)>,
-    I2: Iterator<Item = (K, VV)>,
->(
-    iter1: I1,
-    iter2: I2,
-) -> impl Iterator<Item = (K, VV)> {
-    MergedIterator::new(
-        iter1,
-        iter2,
-        |_, v| v,
-        |_, mut v1, v2| {
-            v1.extend(v2);
-            v1
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use crate::test_utils::generate_new_path;
 
     use super::*;
-
-    #[test]
-    fn test_indexes_number_merge() {
-        let iter1 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
-        let iter2 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
-
-        let merged: Vec<_> = merge(iter1, iter2).collect();
-
-        assert_eq!(
-            vec![(1, vec![1, 1]), (2, vec![2, 2]), (3, vec![3, 3])],
-            merged
-        );
-    }
-
-    #[test]
-    fn test_indexes_number_merge_2() {
-        let iter1 = vec![(1, vec![1]), (3, vec![2]), (5, vec![3])].into_iter();
-        let iter2 = vec![(2, vec![1]), (4, vec![2]), (6, vec![3])].into_iter();
-
-        let merged: Vec<_> = merge(iter1, iter2).collect();
-
-        assert_eq!(
-            vec![
-                (1, vec![1]),
-                (2, vec![1]),
-                (3, vec![2]),
-                (4, vec![2]),
-                (5, vec![3]),
-                (6, vec![3])
-            ],
-            merged
-        );
-    }
-
-    #[test]
-    fn test_indexes_number_merge_3() {
-        let iter1 = vec![(2, vec![1]), (4, vec![2]), (6, vec![3])].into_iter();
-        let iter2 = vec![(1, vec![1]), (3, vec![2]), (5, vec![3])].into_iter();
-
-        let merged: Vec<_> = merge(iter1, iter2).collect();
-
-        assert_eq!(
-            vec![
-                (1, vec![1]),
-                (2, vec![1]),
-                (3, vec![2]),
-                (4, vec![2]),
-                (5, vec![3]),
-                (6, vec![3])
-            ],
-            merged
-        );
-    }
-
-    #[test]
-    fn test_indexes_number_merge_4() {
-        let iter1 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
-        let iter2 = vec![(4, vec![1]), (5, vec![2]), (6, vec![3])].into_iter();
-
-        let merged: Vec<_> = merge(iter1, iter2).collect();
-
-        assert_eq!(
-            vec![
-                (1, vec![1]),
-                (2, vec![2]),
-                (3, vec![3]),
-                (4, vec![1]),
-                (5, vec![2]),
-                (6, vec![3])
-            ],
-            merged
-        );
-    }
-
-    #[test]
-    fn test_indexes_number_merge_5() {
-        let iter1 = vec![(4, vec![1]), (5, vec![2]), (6, vec![3])].into_iter();
-        let iter2 = vec![(1, vec![1]), (2, vec![2]), (3, vec![3])].into_iter();
-
-        let merged: Vec<_> = merge(iter1, iter2).collect();
-
-        assert_eq!(
-            vec![
-                (1, vec![1]),
-                (2, vec![2]),
-                (3, vec![3]),
-                (4, vec![1]),
-                (5, vec![2]),
-                (6, vec![3])
-            ],
-            merged
-        );
-    }
 
     #[test]
     fn test_indexes_number_from_iter() -> Result<()> {

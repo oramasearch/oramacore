@@ -78,7 +78,7 @@ quick-js = "0.4.1"
 
 # Tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 duration-string = "0.5.2"
 deno_core = "0.330.0"
 serde_v8 = "0.239.0"
@@ -120,9 +120,9 @@ path = "src/bin/oramacore.rs"
 name = "embeddings"
 path = "src/bin/embeddings/embeddings.rs"
 
-[[bench]]
-name = "phrase_match"
-harness = false
+# [[bench]]
+# name = "phrase_match"
+# harness = false
 
 [features]
 default = ["benchmarking"]

@@ -1,6 +1,7 @@
-use std::{collections::HashMap, path::PathBuf, sync::RwLock};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
+use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
 use crate::{file_utils::BufferedFile, types::DocumentId};
@@ -36,11 +37,8 @@ impl DocumentLengthsPerDocument {
         Ok(())
     }
 
-    pub fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
-        let lock = match self.content.read() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
+    pub async fn get_length(&self, doc_id: &DocumentId) -> Result<u32> {
+        let lock = self.content.read().await;
         Ok(*lock.get(doc_id).unwrap_or(&1))
     }
 

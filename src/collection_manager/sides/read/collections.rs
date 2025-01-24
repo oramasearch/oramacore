@@ -157,7 +157,7 @@ impl CollectionsReader {
     }
 
     pub async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
-        info!("Creating collection {:?}", id);
+        info!(collection_id=?id, "Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(
             id.clone(),
@@ -167,9 +167,15 @@ impl CollectionsReader {
         )?;
 
         let mut guard = self.collections.write().await;
-        guard.insert(id, collection);
-
+        if guard.contains_key(&id) {
+            warn!(collection_id=?id, "Collection already exists");
+            return Err(anyhow::anyhow!("Collection already exists"));
+        }
+        guard.insert(id.clone(), collection);
         self.offset_storage.set_offset(offset);
+        drop(guard);
+
+        info!(collection_id=?id, "Creating collection {:?}", id);
 
         Ok(())
     }

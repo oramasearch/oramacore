@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::join;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, trace};
 
 use crate::{
     ai::{AIService, OramaModel},
@@ -32,8 +32,7 @@ use crate::{
         vector::{VectorIndex, VectorIndexConfig},
     },
     metrics::{
-        SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
-        SEARCH_METRIC,
+        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC, SEARCH_METRIC
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
@@ -190,37 +189,41 @@ impl CollectionReader {
         Ok(())
     }
 
+    #[instrument(skip(self, data_dir), fields(self.id = ?self.id))]
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        // The following code performs the commit of the indexes on disk.
-        // Because we live inside a async runtime and the commit operation is blocking,
-        // we need to spawn a blocking task to perform the commit operation.
-        // Anyway, we keep the sequential order of the commit operations,
-        // not because it is important but because every commit operation allocates memory
-        // So, to avoid to allocate too much memory, we prefer to perform the commit sequentially.
-        // TODO: understand if we could perform the commit in parallel
+        info!("Committing collection");
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "read",
+            collection: self.id.0.to_string(),
+            index_type: "string",
+        });
         let string_index = self.string_index.clone();
         let string_dir = data_dir.join("strings");
-        tokio::task::spawn_blocking(move || {
-            string_index
-                .commit(string_dir)
-                .context("Cannot commit string index")
-        })
-        .await
-        .context("Cannot spawn blocking task")?
-        .context("Cannot commit string index")?;
+        string_index
+            .commit(string_dir)
+            .await
+            .context("Cannot commit string index")?;
+        drop(m);
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "read",
+            collection: self.id.0.to_string(),
+            index_type: "number",
+        });
         let number_index = self.number_index.clone();
         let number_dir = data_dir.join("numbers");
-        tokio::task::spawn_blocking(move || {
-            number_index
-                .commit(number_dir)
-                .context("Cannot commit number index")
-        })
-        .await
-        .context("Cannot spawn blocking task")?
-        .context("Cannot commit number index")?;
+        number_index
+            .commit(number_dir)
+            .await
+            .context("Cannot commit number index")?;
+        drop(m);
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "read",
+            collection: self.id.0.to_string(),
+            index_type: "vector",
+        });
         let vector_index = self.vector_index.clone();
         let vector_dir = data_dir.join("vectors");
         tokio::task::spawn_blocking(move || {
@@ -231,18 +234,22 @@ impl CollectionReader {
         .await
         .context("Cannot spawn blocking task")?
         .context("Cannot commit vector index")?;
+        drop(m);
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "read",
+            collection: self.id.0.to_string(),
+            index_type: "bool",
+        });
         let bool_index = self.bool_index.clone();
         let bool_dir = data_dir.join("bools");
-        tokio::task::spawn_blocking(move || {
-            bool_index
-                .commit(bool_dir)
-                .context("Cannot commit bool index")
-        })
-        .await
-        .context("Cannot spawn blocking task")?
-        .context("Cannot commit bool index")?;
+        bool_index
+            .commit(bool_dir)
+            .await
+            .context("Cannot commit bool index")?;
+        drop(m);
 
+        trace!("Committing collection info");
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
             fields: self
@@ -275,11 +282,11 @@ impl CollectionReader {
                 })
                 .collect(),
         });
-
         let coll_desc_file_path = data_dir.join("info.json");
         create_or_overwrite(coll_desc_file_path, &dump)
             .await
             .context("Cannot create info.json file")?;
+        trace!("Collection info committed");
 
         Ok(())
     }
@@ -302,6 +309,8 @@ impl CollectionReader {
                 field_name,
                 field: typed_field,
             } => {
+                trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
+
                 self.fields
                     .insert(field_name.clone(), (field_id, typed_field.clone()));
 
@@ -328,22 +337,29 @@ impl CollectionReader {
                     }
                     _ => {}
                 }
+
+                trace!("Field created");
             }
             CollectionWriteOperation::Index(doc_id, field_id, field_op) => {
+                trace!(collection_id=?self.id, ?doc_id, ?field_id, ?field_op, "Indexing a new value");
+
                 self.offset_storage.set_offset(offset);
                 match field_op {
                     DocumentFieldIndexOperation::IndexBoolean { value } => {
-                        self.bool_index.add(offset, doc_id, field_id, value)?;
+                        self.bool_index.add(offset, doc_id, field_id, value).await?;
                     }
                     DocumentFieldIndexOperation::IndexNumber { value } => {
-                        self.number_index.add(offset, doc_id, field_id, value)?;
+                        self.number_index
+                            .add(offset, doc_id, field_id, value)
+                            .await?;
                     }
                     DocumentFieldIndexOperation::IndexString {
                         field_length,
                         terms,
                     } => {
                         self.string_index
-                            .insert(offset, doc_id, field_id, field_length, terms)?;
+                            .insert(offset, doc_id, field_id, field_length, terms)
+                            .await?;
                     }
                     DocumentFieldIndexOperation::IndexEmbedding { value } => {
                         // `insert_batch` is designed to process multiple values at once
@@ -355,6 +371,8 @@ impl CollectionReader {
                             .insert_batch(offset, vec![(doc_id, field_id, vec![value])])?;
                     }
                 }
+
+                trace!("Value indexed");
             }
         };
 
@@ -378,7 +396,7 @@ impl CollectionReader {
             ..
         } = search_params;
 
-        let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter)?;
+        let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter).await?;
         let boost = self.calculate_boost(boost);
 
         let token_scores = match mode {
@@ -447,7 +465,7 @@ impl CollectionReader {
             .collect()
     }
 
-    fn calculate_filtered_doc_ids(
+    async fn calculate_filtered_doc_ids(
         &self,
         where_filter: HashMap<String, Filter>,
     ) -> Result<Option<HashSet<DocumentId>>> {
@@ -483,10 +501,10 @@ impl CollectionReader {
 
         let mut doc_ids = match (&field_type, filter) {
             (TypedField::Number, Filter::Number(filter_number)) => {
-                self.number_index.filter(field_id, filter_number)?
+                self.number_index.filter(field_id, filter_number).await?
             }
             (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                self.bool_index.filter(field_id, filter_bool)?
+                self.bool_index.filter(field_id, filter_bool).await?
             }
             _ => {
                 error!(
@@ -503,10 +521,10 @@ impl CollectionReader {
         for (field_name, field_id, field_type, filter) in filters {
             let doc_ids_for_field = match (&field_type, filter) {
                 (TypedField::Number, Filter::Number(filter_number)) => {
-                    self.number_index.filter(field_id, filter_number)?
+                    self.number_index.filter(field_id, filter_number).await?
                 }
                 (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                    self.bool_index.filter(field_id, filter_bool)?
+                    self.bool_index.filter(field_id, filter_bool).await?
                 }
                 _ => {
                     error!(
@@ -590,19 +608,21 @@ impl CollectionReader {
                 .entry(locale)
                 .or_insert_with(|| text_parser.tokenize(term));
 
-            self.string_index.search(
-                tokens,
-                // This option is not required.
-                // It was introduced because for test purposes we
-                // could avoid to pass every properties
-                // Anyway the production code should always pass the properties
-                // So we could avoid this option
-                // TODO: remove this option
-                Some(&[field_id]),
-                &boost,
-                &mut scorer,
-                filtered_doc_ids.as_ref(),
-            )?;
+            self.string_index
+                .search(
+                    tokens,
+                    // This option is not required.
+                    // It was introduced because for test purposes we
+                    // could avoid to pass every properties
+                    // Anyway the production code should always pass the properties
+                    // So we could avoid this option
+                    // TODO: remove this option
+                    Some(&[field_id]),
+                    &boost,
+                    &mut scorer,
+                    filtered_doc_ids.as_ref(),
+                )
+                .await?;
         }
 
         Ok(scorer.get_scores())
@@ -646,7 +666,7 @@ impl CollectionReader {
         Ok(ret)
     }
 
-    pub fn calculate_facets(
+    pub async fn calculate_facets(
         &self,
         token_scores: &HashMap<DocumentId, f32>,
         facets: HashMap<String, FacetDefinition>,
@@ -677,7 +697,8 @@ impl CollectionReader {
                         for range in facet.ranges {
                             let facet: HashSet<_> = self
                                 .number_index
-                                .filter(field_id, NumberFilter::Between((range.from, range.to)))?
+                                .filter(field_id, NumberFilter::Between((range.from, range.to)))
+                                .await?
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();
@@ -699,7 +720,8 @@ impl CollectionReader {
                         if facets.r#true {
                             let true_facet: HashSet<DocumentId> = self
                                 .bool_index
-                                .filter(field_id, true)?
+                                .filter(field_id, true)
+                                .await?
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();
@@ -708,7 +730,8 @@ impl CollectionReader {
                         if facets.r#false {
                             let false_facet: HashSet<DocumentId> = self
                                 .bool_index
-                                .filter(field_id, false)?
+                                .filter(field_id, false)
+                                .await?
                                 .into_iter()
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
                                 .collect();

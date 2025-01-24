@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic::AtomicU64, Arc};
@@ -8,14 +8,86 @@ use dashmap::DashMap;
 use fst::{Map, MapBuilder, Streamer};
 use memmap::Mmap;
 
+use crate::collection_manager::sides::Offset;
 use crate::file_utils::BufferedFile;
 use crate::merger::MergedIterator;
 use crate::types::DocumentId;
 
 use super::document_lengths::DocumentLengthsPerDocument;
 use super::posting_storage::PostingIdStorage;
-use super::uncommitted::{DataToCommit, Positions, TotalDocumentsWithTermInField};
-use super::{CommittedStringFieldIndex, StringIndexFieldInfo};
+use super::uncommitted::{Positions, TotalDocumentsWithTermInField};
+use super::{
+    CommittedStringFieldIndex, GlobalInfo, StringIndexFieldInfo, UncommittedStringFieldIndex,
+};
+
+pub struct DataToCommit<'uncommitted> {
+    pub index: &'uncommitted UncommittedStringFieldIndex,
+    pub state_to_clear: bool,
+
+    // the state
+    pub total_field_length: u64,
+    pub document_ids: HashSet<DocumentId>,
+    pub field_length_per_doc: HashMap<DocumentId, u32>,
+    #[allow(clippy::type_complexity)]
+    pub tree: Vec<(
+        Vec<u8>,
+        (
+            TotalDocumentsWithTermInField,
+            HashMap<DocumentId, Positions>,
+        ),
+    )>,
+
+    pub current_offset: Offset,
+}
+
+impl DataToCommit<'_> {
+    pub fn get_document_lengths(&self) -> &HashMap<DocumentId, u32> {
+        &self.field_length_per_doc
+    }
+
+    pub fn global_info(&self) -> GlobalInfo {
+        GlobalInfo {
+            total_document_length: self.total_field_length as usize,
+            total_documents: self.document_ids.len(),
+        }
+    }
+
+    pub fn get_offset(&self) -> Offset {
+        self.current_offset
+    }
+
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty()
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            Vec<u8>,
+            (
+                TotalDocumentsWithTermInField,
+                HashMap<DocumentId, Positions>,
+            ),
+        ),
+    > + '_ {
+        self.tree.iter().map(|(k, v)| (k.to_vec(), v.clone()))
+    }
+
+    pub async fn done(self) {
+        let mut lock = self.index.inner.write().await;
+        let tree = if self.state_to_clear {
+            &mut lock.1.left
+        } else {
+            &mut lock.1.right
+        };
+        tree.clear();
+    }
+}
 
 struct FTSIter<'stream> {
     stream: Option<fst::map::Stream<'stream>>,
@@ -34,7 +106,7 @@ impl Iterator for FTSIter<'_> {
     }
 }
 
-pub fn merge(
+pub async fn merge(
     data_to_commit: DataToCommit<'_>,
     committed: &CommittedStringFieldIndex,
     string_index_field_info: StringIndexFieldInfo,
@@ -56,18 +128,21 @@ pub fn merge(
     let max_posting_id = committed.posting_id_generator.load(Ordering::Relaxed);
     let posting_id_generator = Arc::new(AtomicU64::new(max_posting_id + 1));
 
-    let uncommitted_iter = data_to_commit.iter();
-    let storage_updates = merge_iter(
-        posting_id_generator.clone(),
-        uncommitted_iter,
-        committed.get_info().fst_path,
-        fst_path,
-    )
+    let storage_updates = tokio::task::block_in_place(|| {
+        let uncommitted_iter = data_to_commit.iter();
+        merge_iter(
+            posting_id_generator.clone(),
+            uncommitted_iter,
+            committed.get_info().fst_path,
+            fst_path,
+        )
+    })
     .context("Cannot merge iterators")?;
 
     committed
         .storage
-        .apply_delta(storage_updates, posting_path)?;
+        .apply_delta(storage_updates, posting_path)
+        .await?;
 
     let global_info = data_to_commit.global_info() + committed.get_global_info();
     BufferedFile::create(global_info_path)
@@ -81,73 +156,80 @@ pub fn merge(
         .write_json_data(&posting_id)
         .context("Cannot serialize posting_id to file")?;
 
-    data_to_commit.done();
+    data_to_commit.done().await;
 
     Ok(())
 }
 
-pub fn create(
+pub async fn create(
     data_to_commit: DataToCommit<'_>,
-    document_length_new_path: PathBuf,
-    fst_new_path: PathBuf,
-    posting_new_path: PathBuf,
-    global_info_new_path: PathBuf,
-    posting_id_new_path: PathBuf,
+    string_index_field_info: StringIndexFieldInfo,
 ) -> Result<()> {
+    let StringIndexFieldInfo {
+        document_length_path,
+        fst_path,
+        posting_path,
+        global_info_path,
+        posting_id_path,
+        ..
+    } = string_index_field_info;
+
     let posting_id_generator = AtomicU64::new(0);
 
-    DocumentLengthsPerDocument::create(
-        data_to_commit.get_document_lengths(),
-        document_length_new_path,
-    )
-    .context("Cannot create file for document lengths")?;
+    DocumentLengthsPerDocument::create(data_to_commit.get_document_lengths(), document_length_path)
+        .context("Cannot create file for document lengths")?;
 
     let uncommitted_iter = data_to_commit.iter();
 
     let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
         Default::default();
 
-    let mut buf = BufferedFile::create(fst_new_path.clone()).context("Cannot create fst file")?;
-    let mut build = MapBuilder::new(&mut buf)?;
+    let r: Result<()> = tokio::task::block_in_place(|| {
+        let mut buf = BufferedFile::create(fst_path.clone()).context("Cannot create fst file")?;
+        let mut build = MapBuilder::new(&mut buf)?;
 
-    for (key, value) in uncommitted_iter {
-        let new_posting_list_id =
-            posting_id_generator.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        for (key, value) in uncommitted_iter {
+            let new_posting_list_id =
+                posting_id_generator.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        delta_committed_storage.insert(
-            new_posting_list_id,
-            value
-                .1
-                .into_iter()
-                .map(|(doc_id, positions)| (doc_id, positions.0))
-                .collect(),
-        );
+            delta_committed_storage.insert(
+                new_posting_list_id,
+                value
+                    .1
+                    .into_iter()
+                    .map(|(doc_id, positions)| (doc_id, positions.0))
+                    .collect(),
+            );
 
-        build
-            .insert(key, new_posting_list_id)
-            .context("Cannot insert value to FST map")?;
-    }
+            build
+                .insert(key, new_posting_list_id)
+                .context("Cannot insert value to FST map")?;
+        }
 
-    build.finish().context("Cannot finish build of FST map")?;
+        build.finish().context("Cannot finish build of FST map")?;
 
-    buf.close().context("Cannot close buffered file")?;
+        buf.close().context("Cannot close buffered file")?;
 
-    PostingIdStorage::create(delta_committed_storage, posting_new_path)
+        Ok(())
+    });
+    r?;
+
+    PostingIdStorage::create(delta_committed_storage, posting_path)
         .context("Cannot create posting id storage")?;
 
     let global_info = data_to_commit.global_info();
-    BufferedFile::create(global_info_new_path)
+    BufferedFile::create(global_info_path)
         .context("Cannot create global_info file")?
         .write_json_data(&global_info)
         .context("Cannot write global info to file")?;
 
     let posting_id = posting_id_generator.load(Ordering::Relaxed);
-    BufferedFile::create(posting_id_new_path)
+    BufferedFile::create(posting_id_path)
         .context("Cannot create posting_id file")?
         .write_json_data(&posting_id)
         .context("Cannot write posting_id to file")?;
 
-    data_to_commit.done();
+    data_to_commit.done().await;
 
     Ok(())
 }

@@ -1,10 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::RwLock,
-};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use ptrie::Trie;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use crate::{
@@ -13,7 +11,7 @@ use crate::{
     types::DocumentId,
 };
 
-use super::{scorer::BM25Scorer, GlobalInfo};
+use super::{merger::DataToCommit, scorer::BM25Scorer, GlobalInfo};
 
 /* The structure of data needed for BM25 scoring:
  * ```text
@@ -200,7 +198,7 @@ impl InnerInnerUncommittedStringFieldIndex {
         Ok(())
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.total_field_length = 0;
         self.document_ids.clear();
         self.field_length_per_doc.clear();
@@ -210,9 +208,9 @@ impl InnerInnerUncommittedStringFieldIndex {
 
 #[derive(Debug, Default)]
 pub struct InnerUncommittedStringFieldIndex {
-    left: InnerInnerUncommittedStringFieldIndex,
-    right: InnerInnerUncommittedStringFieldIndex,
-    state: bool,
+    pub left: InnerInnerUncommittedStringFieldIndex,
+    pub right: InnerInnerUncommittedStringFieldIndex,
+    pub state: bool,
 }
 
 impl InnerUncommittedStringFieldIndex {
@@ -262,7 +260,7 @@ impl InnerUncommittedStringFieldIndex {
 
 #[derive(Debug)]
 pub struct UncommittedStringFieldIndex {
-    inner: RwLock<(OffsetStorage, InnerUncommittedStringFieldIndex)>,
+    pub inner: RwLock<(OffsetStorage, InnerUncommittedStringFieldIndex)>,
 }
 
 impl UncommittedStringFieldIndex {
@@ -275,17 +273,14 @@ impl UncommittedStringFieldIndex {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn insert(
+    pub async fn insert(
         &self,
         offset: Offset,
         document_id: DocumentId,
         field_length: u16,
         terms: InsertStringTerms,
     ) -> Result<()> {
-        let mut inner = match self.inner.write() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+        let mut inner = self.inner.write().await;
         // Ignore inserts with lower offset
         if offset <= inner.0.get_offset() {
             warn!("Skip insert string with lower offset");
@@ -297,15 +292,12 @@ impl UncommittedStringFieldIndex {
         Ok(())
     }
 
-    pub fn get_global_info(&self) -> GlobalInfo {
-        let inner = match self.inner.read() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    pub async fn get_global_info(&self) -> GlobalInfo {
+        let inner = self.inner.read().await;
         inner.1.get_global_info()
     }
 
-    pub fn search(
+    pub async fn search(
         &self,
         tokens: &[String],
         boost: f32,
@@ -313,20 +305,14 @@ impl UncommittedStringFieldIndex {
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
     ) -> Result<()> {
-        let inner = match self.inner.read() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+        let inner = self.inner.read().await;
         inner
             .1
             .search(tokens, boost, scorer, filtered_doc_ids, global_info)
     }
 
-    pub fn take(&self) -> Result<DataToCommit> {
-        let mut inner = match self.inner.write() {
-            Ok(lock) => lock,
-            Err(p) => p.into_inner(),
-        };
+    pub async fn take(&self) -> Result<DataToCommit> {
+        let mut inner = self.inner.write().await;
         let data = if inner.1.state {
             inner.1.left.clone()
         } else {
@@ -362,76 +348,6 @@ impl UncommittedStringFieldIndex {
     }
 }
 
-pub struct DataToCommit<'uncommitted> {
-    index: &'uncommitted UncommittedStringFieldIndex,
-    state_to_clear: bool,
-
-    // the state
-    total_field_length: u64,
-    document_ids: HashSet<DocumentId>,
-    field_length_per_doc: HashMap<DocumentId, u32>,
-    #[allow(clippy::type_complexity)]
-    tree: Vec<(
-        Vec<u8>,
-        (
-            TotalDocumentsWithTermInField,
-            HashMap<DocumentId, Positions>,
-        ),
-    )>,
-
-    current_offset: Offset,
-}
-
-impl DataToCommit<'_> {
-    pub fn get_document_lengths(&self) -> &HashMap<DocumentId, u32> {
-        &self.field_length_per_doc
-    }
-
-    pub fn global_info(&self) -> GlobalInfo {
-        GlobalInfo {
-            total_document_length: self.total_field_length as usize,
-            total_documents: self.document_ids.len(),
-        }
-    }
-
-    pub fn get_offset(&self) -> Offset {
-        self.current_offset
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tree.is_empty()
-    }
-
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            Vec<u8>,
-            (
-                TotalDocumentsWithTermInField,
-                HashMap<DocumentId, Positions>,
-            ),
-        ),
-    > + '_ {
-        self.tree.iter().map(|(k, v)| (k.to_vec(), v.clone()))
-    }
-
-    // Invoke drop to clear the data
-    pub fn done(self) {}
-}
-
-impl Drop for DataToCommit<'_> {
-    fn drop(&mut self) {
-        let mut lock = self.index.inner.write().unwrap();
-        let tree = if self.state_to_clear {
-            &mut lock.1.left
-        } else {
-            &mut lock.1.right
-        };
-        tree.clear();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -442,7 +358,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted1() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -460,13 +376,15 @@ mod tests {
 
         // Exact match
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let exact_match_output = scorer.get_scores();
         assert_eq!(
             exact_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -476,13 +394,15 @@ mod tests {
 
         // Prefix match
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hel".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hel".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let prefix_match_output = scorer.get_scores();
         assert_eq!(
             prefix_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -492,7 +412,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_boost() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
@@ -508,35 +428,41 @@ mod tests {
 
         // 1.0
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let base_output = scorer.get_scores();
 
         // 0.5
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            0.5,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                0.5,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let half_boost_output = scorer.get_scores();
 
         // 2.0
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            2.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                2.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let twice_boost_output = scorer.get_scores();
 
         assert!(base_output[&DocumentId(0)] > half_boost_output[&DocumentId(0)]);
@@ -548,7 +474,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_nonexistent_term() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
@@ -563,13 +489,15 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["nonexistent".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["nonexistent".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let output = scorer.get_scores();
 
         assert!(
@@ -580,7 +508,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_field_filter() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
@@ -597,13 +525,15 @@ mod tests {
         // Exclude a doc
         {
             let mut scorer = BM25Scorer::new();
-            index.search(
-                &["hello".to_string()],
-                1.0,
-                &mut scorer,
-                Some(&HashSet::from_iter([DocumentId(0)])),
-                &index.get_global_info(),
-            )?;
+            index
+                .search(
+                    &["hello".to_string()],
+                    1.0,
+                    &mut scorer,
+                    Some(&HashSet::from_iter([DocumentId(0)])),
+                    &index.get_global_info().await,
+                )
+                .await?;
             let output = scorer.get_scores();
             assert!(output.contains_key(&DocumentId(0)),);
             assert!(!output.contains_key(&DocumentId(1)),);
@@ -612,13 +542,15 @@ mod tests {
         // Exclude all docs
         {
             let mut scorer = BM25Scorer::new();
-            index.search(
-                &["hello".to_string()],
-                1.0,
-                &mut scorer,
-                Some(&HashSet::new()),
-                &index.get_global_info(),
-            )?;
+            index
+                .search(
+                    &["hello".to_string()],
+                    1.0,
+                    &mut scorer,
+                    Some(&HashSet::new()),
+                    &index.get_global_info().await,
+                )
+                .await?;
             let output = scorer.get_scores();
             assert!(output.is_empty(),);
         }
@@ -626,25 +558,27 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_on_empty_index() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![]).await?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let output = scorer.get_scores();
         assert!(output.is_empty(),);
 
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_large_text() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
@@ -653,13 +587,15 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["word".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["word".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let output = scorer.get_scores();
         assert_eq!(
             output.len(),
@@ -670,7 +606,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_uncommitted_during_commit() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -688,13 +624,15 @@ mod tests {
 
         // Exact match
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let first_match_output = scorer.get_scores();
         assert_eq!(
             first_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -703,56 +641,64 @@ mod tests {
         assert!(first_match_output[&DocumentId(0)] > first_match_output[&DocumentId(1)]);
 
         // During the commit phase
-        let data_to_commit = index.take()?;
+        let data_to_commit = index.take().await?;
 
         // The previous data should still be available
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let second_match_output = scorer.get_scores();
         assert_eq!(first_match_output, second_match_output);
 
         // Insertion is still possible
-        index.insert(
-            Offset(100),
-            DocumentId(2),
-            1,
-            HashMap::from_iter([(
-                Term("hello".to_string()),
-                TermStringField { positions: vec![0] },
-            )]),
-        )?;
+        index
+            .insert(
+                Offset(100),
+                DocumentId(2),
+                1,
+                HashMap::from_iter([(
+                    Term("hello".to_string()),
+                    TermStringField { positions: vec![0] },
+                )]),
+            )
+            .await?;
 
         // And the results are combined
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let third_match_output = scorer.get_scores();
         assert!(third_match_output.contains_key(&DocumentId(0)));
         assert!(third_match_output.contains_key(&DocumentId(1)));
         assert!(third_match_output.contains_key(&DocumentId(2)));
 
-        data_to_commit.done();
+        data_to_commit.done().await;
 
         // After the commit, only the new data is available
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info().await,
+            )
+            .await?;
         let fourth_match_output = scorer.get_scores();
         assert!(!fourth_match_output.contains_key(&DocumentId(0)));
         assert!(!fourth_match_output.contains_key(&DocumentId(1)));

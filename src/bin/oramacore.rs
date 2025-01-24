@@ -1,10 +1,12 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
 use oramacore::{start, OramacoreConfig};
-use tracing::{info, instrument};
+use tracing::{info, instrument, Level};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{filter, fmt, Registry};
 
 #[instrument(level = "info")]
 fn load_config() -> Result<OramacoreConfig> {
@@ -29,9 +31,25 @@ fn load_config() -> Result<OramacoreConfig> {
         .context("Failed to deserialize configuration")
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let debug_file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("log.log")
+        .unwrap();
+
+    let subscriber = Registry::default()
+        .with(
+            // stdout layer, to view everything in the console
+            fmt::layer().compact().with_ansi(true),
+        )
+        .with(
+            // log-debug file, to log the debug
+            fmt::layer().json().with_writer(debug_file),
+        );
+
+    tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let config = match load_config() {
         Ok(config) => config,

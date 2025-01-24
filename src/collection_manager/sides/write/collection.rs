@@ -16,10 +16,7 @@ use crate::{
     collection_manager::{
         dto::{CollectionDTO, FieldId},
         sides::hooks::{HookName, HooksRuntime},
-    },
-    file_utils::BufferedFile,
-    nlp::{locales::Locale, NLPService, TextParser},
-    types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
+    }, file_utils::BufferedFile, metrics::{CommitLabels, COMMIT_METRIC}, nlp::{locales::Locale, NLPService, TextParser}, types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType}
 };
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
@@ -104,6 +101,7 @@ impl CollectionWriter {
                     doc: doc.into_raw()?,
                 },
             ))
+            .await
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
 
         let fields_to_index = self
@@ -262,6 +260,7 @@ impl CollectionWriter {
                     field: typed_field,
                 },
             ))
+            .await
             .context("Cannot sent creation field")?;
         info!("Field created");
 
@@ -302,12 +301,15 @@ impl CollectionWriter {
         Ok(&self.fields)
     }
 
-    pub fn commit(&mut self, path: PathBuf) -> Result<()> {
-        // `&mut self` is not used, but it needed to ensure no other thread is using the collection
+    pub fn commit(&self, path: PathBuf) -> Result<()> {
         info!("Committing collection {}", self.id.0);
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "write",
+            collection: self.id.0.clone(),
+            index_type: "info",
+        });
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
-
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
@@ -338,6 +340,8 @@ impl CollectionWriter {
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
+
+        drop(m);
 
         Ok(())
     }

@@ -13,7 +13,7 @@ writer_side:
         # NB: the elements are in memory, so be careful with this value
         embedding_queue_limit: 50
         # The number of the document insertions after the write side will commit the changes
-        insert_batch_commit_size: 1_000
+        insert_batch_commit_size: 1000
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
         default_embedding_model: BGESmall
@@ -23,7 +23,7 @@ reader_side:
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
-        insert_batch_commit_size: 300
+        insert_batch_commit_size: 3000
 
 ai_server:
     scheme: http

@@ -92,7 +92,7 @@ async fn start_server() {
 
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
+        while let Some(op) = receiver.recv().await {
             let r = collections_reader.update(op).await;
             if let Err(e) = r {
                 println!("--------");

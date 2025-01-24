@@ -60,6 +60,26 @@ pub static SEARCH_FILTER_METRIC: DeltaMetric<SearchFilterLabels> = DeltaMetric {
     },
     phantom: std::marker::PhantomData,
 };
+create_label_struct!(DocumentProcessLabels, {
+    collection: String,
+});
+pub static DOCUMENT_PROCESS_METRIC: DeltaMetric<DocumentProcessLabels> = DeltaMetric {
+    elapsed: &HistogramKey {
+        key: "writer_doc_process_elapsed_sec",
+    },
+    phantom: std::marker::PhantomData,
+};
+create_label_struct!(CommitLabels, {
+    side: &'static str,
+    collection: String,
+    index_type: &'static str,
+});
+pub static COMMIT_METRIC: DeltaMetric<CommitLabels> = DeltaMetric {
+    elapsed: &HistogramKey {
+        key: "commit_elapsed_sec",
+    },
+    phantom: std::marker::PhantomData,
+};
 
 pub struct DeltaMetric<L> {
     elapsed: &'static HistogramKey,

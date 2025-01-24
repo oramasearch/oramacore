@@ -11,7 +11,7 @@ use dashmap::DashMap;
 
 use posting_storage::PostingListId;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
@@ -94,7 +94,7 @@ impl StringIndex {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn insert(
+    pub async fn insert(
         &self,
         offset: Offset,
         doc_id: DocumentId,
@@ -102,6 +102,8 @@ impl StringIndex {
         field_length: u16,
         terms: InsertStringTerms,
     ) -> Result<()> {
+        trace!("Inserting string value");
+
         let uncommitted = match self.uncommitted.get(&field_id) {
             Some(uncommitted) => uncommitted,
             None => {
@@ -111,14 +113,19 @@ impl StringIndex {
                 ));
             }
         };
+        uncommitted
+            .insert(offset, doc_id, field_length, terms)
+            .await?;
 
-        uncommitted.insert(offset, doc_id, field_length, terms)?;
+        trace!("String value inserted");
 
         Ok(())
     }
 
     #[instrument(skip(self, new_path))]
-    pub fn commit(&self, new_path: PathBuf) -> Result<()> {
+    pub async fn commit(&self, new_path: PathBuf) -> Result<()> {
+        info!("Committing string index");
+
         let all_fields = self
             .uncommitted
             .iter()
@@ -126,7 +133,7 @@ impl StringIndex {
             .chain(self.committed.iter().map(|e| *e.key()))
             .collect::<HashSet<_>>();
 
-        info!("Dumping all fields {:?} at {:?}", all_fields, new_path);
+        info!("Committing string fields {:?}", all_fields);
 
         create_if_not_exists(new_path.clone())
             .with_context(|| format!("Cannot create directory at {:?}", new_path))?;
@@ -145,6 +152,8 @@ impl StringIndex {
         };
 
         for field_id in all_fields {
+            info!("Committing field {:?}", field_id);
+
             let uncommitted = match self.uncommitted.get(&field_id) {
                 Some(uncommitted) => uncommitted,
                 None => {
@@ -154,13 +163,12 @@ impl StringIndex {
             };
             let committed = self.committed.get(&field_id);
 
-            let data_to_commit = uncommitted.take().context("Cannot take data to commit")?;
-
+            let data_to_commit = uncommitted
+                .take()
+                .await
+                .context("Cannot take data to commit")?;
             if data_to_commit.is_empty() {
-                info!(
-                    "Everything is already committed for string field {:?}. Skip dumping",
-                    field_id
-                );
+                info!("Everything is already committed. Skip dumping");
                 continue;
             }
 
@@ -168,6 +176,13 @@ impl StringIndex {
             let field_new_path = new_path
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
+
+            info!(
+                ?field_id,
+                committed = committed.is_some(),
+                uncommitted_count = data_to_commit.len(),
+                "Committing string index at {field_new_path:?}"
+            );
 
             create_if_not_exists(field_new_path.clone())
                 .with_context(|| format!("Cannot create directory for field {:?}", field_id))?;
@@ -193,20 +208,15 @@ impl StringIndex {
                 Some(committed) => {
                     info!("Merging field_id: {:?}", field_id);
                     merger::merge(data_to_commit, &committed, string_index_field_info_copy)
+                        .await
                         .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
                 }
                 None => {
                     info!("Dumping new field_id: {:?}", field_id);
 
-                    merger::create(
-                        data_to_commit,
-                        string_index_field_info_copy.document_length_path,
-                        string_index_field_info_copy.fst_path,
-                        string_index_field_info_copy.posting_path,
-                        string_index_field_info_copy.global_info_path,
-                        string_index_field_info_copy.posting_id_path,
-                    )
-                    .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
+                    merger::create(data_to_commit, string_index_field_info_copy)
+                        .await
+                        .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
                 }
             };
 
@@ -219,15 +229,18 @@ impl StringIndex {
             string_index_info
                 .fields
                 .insert(field_id, string_index_field_info);
+
+            info!("Field committed");
         }
 
+        trace!("Dumping string index info");
         let string_index_info = StringIndexInfo::V1(string_index_info);
-
         let field_file = new_path.join("info.json");
         BufferedFile::create_or_overwrite(field_file)
             .context("Cannot create info.json file")?
             .write_json_data(&string_index_info)
             .context("Cannot serialize collection info")?;
+        trace!("String index info dumped");
 
         Ok(())
     }
@@ -272,7 +285,7 @@ impl StringIndex {
         Ok(())
     }
 
-    pub fn search(
+    pub async fn search(
         &self,
         tokens: &[String],
         search_on: Option<&[FieldId]>,
@@ -312,12 +325,16 @@ impl StringIndex {
             // TODO: evaluate the impact of this and fix it if needed
 
             if let Some(uncommitted) = uncommitted {
-                global_info += uncommitted.get_global_info();
-                uncommitted.search(tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)?;
+                global_info += uncommitted.get_global_info().await;
+                uncommitted
+                    .search(tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)
+                    .await?;
             }
 
             if let Some(committed) = committed {
-                committed.search(tokens, boost, scorer, filtered_doc_ids, &global_info)?;
+                committed
+                    .search(tokens, boost, scorer, filtered_doc_ids, &global_info)
+                    .await?;
             }
         }
 
@@ -364,7 +381,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_insert_search_commit_search() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -384,25 +401,29 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let before_output = scorer.get_scores();
 
-        string_index.commit(generate_new_path())?;
+        string_index.commit(generate_new_path()).await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_output = scorer.get_scores();
 
         assert_approx_eq!(
@@ -414,24 +435,28 @@ mod tests {
             before_output[&DocumentId(1)]
         );
 
-        string_index.insert(
-            Offset(100),
-            DocumentId(2),
-            FieldId(0),
-            1,
-            HashMap::from_iter([(
-                Term("hello".to_string()),
-                TermStringField { positions: vec![1] },
-            )]),
-        )?;
+        string_index
+            .insert(
+                Offset(100),
+                DocumentId(2),
+                FieldId(0),
+                1,
+                HashMap::from_iter([(
+                    Term("hello".to_string()),
+                    TermStringField { positions: vec![1] },
+                )]),
+            )
+            .await?;
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_insert_output = scorer.get_scores();
 
         assert_eq!(after_insert_output.len(), 3);
@@ -439,16 +464,18 @@ mod tests {
         assert!(after_insert_output.contains_key(&DocumentId(1)));
         assert!(after_insert_output.contains_key(&DocumentId(2)));
 
-        string_index.commit(generate_new_path())?;
+        string_index.commit(generate_new_path()).await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let after_insert_commit_output = scorer.get_scores();
 
         assert_eq!(after_insert_commit_output.len(), 3);
@@ -459,7 +486,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_commit_and_load() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -479,33 +506,37 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let before_scores = scorer.get_scores();
 
         let new_path = generate_new_path();
-        string_index.commit(new_path.clone()).unwrap();
+        string_index.commit(new_path.clone()).await?;
 
         let new_string_index = {
             let mut index = StringIndex::new(StringIndexConfig {});
-            index.load(new_path).unwrap();
+            index.load(new_path)?;
 
             index
         };
 
         let mut scorer = BM25Scorer::new();
-        new_string_index.search(
-            &["hello".to_string()],
-            None,
-            &Default::default(),
-            &mut scorer,
-            None,
-        )?;
+        new_string_index
+            .search(
+                &["hello".to_string()],
+                None,
+                &Default::default(),
+                &mut scorer,
+                None,
+            )
+            .await?;
         let scores = scorer.get_scores();
 
         // Compare scores
@@ -541,7 +572,7 @@ mod tests {
     };
     use std::{collections::HashMap, sync::Arc};
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_empty_search_query() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -577,7 +608,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_search_nonexistent_term() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -619,7 +650,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_insert_empty_document() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -658,7 +689,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_search_with_field_filter() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -737,7 +768,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_search_with_boosts() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -796,7 +827,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_insert_document_with_stop_words_only() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -838,7 +869,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_search_on_empty_index() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -860,7 +891,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_concurrent_insertions() {
         let id_geneator = Arc::new(Default::default());
         let string_index = Arc::new(StringIndex::new(id_geneator));
@@ -947,7 +978,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_large_documents() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -989,7 +1020,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_high_term_frequency() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -1031,7 +1062,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_term_positions() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);
@@ -1060,7 +1091,7 @@ mod tests {
         string_index.insert_multiple(batch).await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_exact_phrase_match() {
         let id_geneator = Arc::new(Default::default());
         let string_index = StringIndex::new(id_geneator);

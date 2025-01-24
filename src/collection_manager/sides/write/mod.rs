@@ -17,7 +17,7 @@ use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -30,7 +30,7 @@ use crate::{
     ai::AIService,
     collection_manager::dto::{CollectionDTO, CreateCollection},
     file_utils::BufferedFile,
-    metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
+    metrics::{AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER, DOCUMENT_PROCESS_METRIC},
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
 };
@@ -112,7 +112,10 @@ impl WriteSide {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
+        info!("Committing write side");
+
         let offset = self.sender.offset();
 
         self.collections.commit().await?;
@@ -168,6 +171,10 @@ impl WriteSide {
         let sender = self.sender.clone();
 
         for mut doc in document_list {
+            let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
+                collection: collection_id.0.clone(),
+            });
+
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
             let doc_id_value = doc.get("id");
@@ -196,6 +203,8 @@ impl WriteSide {
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
                 .context("Cannot process document")?;
+
+            drop(m);
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -209,8 +218,13 @@ impl WriteSide {
         drop(lock);
 
         if should_commit {
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
+        } else {
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
+
+        info!("Batch of documents inserted");
 
         Ok(())
     }

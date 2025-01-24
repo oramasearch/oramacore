@@ -71,7 +71,7 @@ pub struct Offset(pub u64);
 #[derive(Clone)]
 pub struct OperationSender {
     offset_counter: Arc<AtomicU64>,
-    sender: tokio::sync::broadcast::Sender<(Offset, WriteOperation)>,
+    sender: tokio::sync::mpsc::Sender<(Offset, WriteOperation)>,
 }
 
 impl OperationSender {
@@ -86,32 +86,32 @@ impl OperationSender {
             .store(offset.0, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub fn send(
+    pub async fn send(
         &self,
         operation: WriteOperation,
-    ) -> Result<(), tokio::sync::broadcast::error::SendError<(Offset, WriteOperation)>> {
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<(Offset, WriteOperation)>> {
         let offset = self
             .offset_counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.sender.send((Offset(offset), operation))?;
+        self.sender.send((Offset(offset), operation)).await?;
         Ok(())
     }
 }
 
 pub struct OperationReceiver {
-    receiver: tokio::sync::broadcast::Receiver<(Offset, WriteOperation)>,
+    receiver: tokio::sync::mpsc::Receiver<(Offset, WriteOperation)>,
 }
 
 impl OperationReceiver {
     pub async fn recv(
         &mut self,
-    ) -> Result<(Offset, WriteOperation), tokio::sync::broadcast::error::RecvError> {
+    ) -> Option<(Offset, WriteOperation)> {
         self.receiver.recv().await
     }
 }
 
 pub fn channel(capacity: usize) -> (OperationSender, OperationReceiver) {
-    let (sender, receiver) = tokio::sync::broadcast::channel(capacity);
+    let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
 
     (
         OperationSender {

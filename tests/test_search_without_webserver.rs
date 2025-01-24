@@ -61,7 +61,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
     let collections_reader = collections_reader.unwrap();
     let collections_reader2 = collections_reader.clone();
     tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
+        while let Some(op) = receiver.recv().await {
             let r = collections_reader2.update(op).await;
             if let Err(e) = r {
                 println!("--------");

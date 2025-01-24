@@ -17,3 +17,5 @@ flamegraph.svg
 .envrc
 
 .env
+
+log.log
