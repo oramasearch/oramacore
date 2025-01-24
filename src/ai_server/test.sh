@@ -5,7 +5,7 @@ grpcurl -plaintext localhost:50051 list
 grpcurl -plaintext localhost:50051 orama_ai_service.LLMService/CheckHealth
 
 # Embeddings
-grpcurl -plaintext -d '{ "model": "BGESmall", "input": ["hello, world!", "hey there", "foo bar"], "intent": "passage" }' localhost:50051 orama_ai_service.LLMService/GetEmbedding
+grpcurl -plaintext -d '{ "model": "MultilingualE5Small", "input": ["The quick brown fox jumps over the lazy dog"], "intent": "passage" }' localhost:50051 orama_ai_service.LLMService/GetEmbedding
 
 # Chat (non-streaming)
 grpcurl -plaintext -d '{ "model": "google_query_translator", "prompt": "I am installing my Ryzen 9 9900X and I fear I bent some pins. What should I do?" }' localhost:50051 orama_ai_service.LLMService/Chat

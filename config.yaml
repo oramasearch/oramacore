@@ -20,16 +20,17 @@ reader_side:
 
 ai_server:
     scheme: http
-    host: 127.0.0.1
+    host: 0.0.0.0
     port: 50051
     api_key: ""
     max_connections: 15
     total_threads: 12
 
     embeddings:
-        default_model_group: en
+        default_model_group: small
         dynamically_load_models: false
         execution_providers:
+            - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
     LLMs:
