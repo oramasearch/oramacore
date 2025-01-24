@@ -16,10 +16,10 @@ use std::{
 use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use collections::CollectionsWriter;
-pub use collections::CollectionsWriterConfig;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use operation::*;
 
@@ -35,6 +35,17 @@ use crate::{
     types::{CollectionId, DocumentId, DocumentList},
 };
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct CollectionsWriterConfig {
+    pub data_dir: PathBuf,
+    #[serde(default = "embedding_queue_limit_default")]
+    pub embedding_queue_limit: usize,
+    #[serde(default = "embedding_model_default")]
+    pub default_embedding_model: OramaModelSerializable,
+    #[serde(default = "default_insert_batch_commit_size")]
+    pub insert_batch_commit_size: u64,
+}
+
 pub struct WriteSide {
     sender: OperationSender,
     collections: CollectionsWriter,
@@ -42,6 +53,9 @@ pub struct WriteSide {
     data_dir: PathBuf,
     hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
+
+    operation_counter: RwLock<u64>,
+    insert_batch_commit_size: u64,
 }
 
 impl WriteSide {
@@ -53,6 +67,8 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
     ) -> WriteSide {
         let data_dir = config.data_dir.clone();
+
+        let insert_batch_commit_size = config.insert_batch_commit_size;
 
         let (sx, rx) =
             tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
@@ -66,6 +82,9 @@ impl WriteSide {
             data_dir,
             hook_runtime,
             nlp_service,
+
+            operation_counter: Default::default(),
+            insert_batch_commit_size,
         }
     }
 
@@ -128,7 +147,8 @@ impl WriteSide {
         collection_id: CollectionId,
         document_list: DocumentList,
     ) -> Result<()> {
-        info!("Inserting batch of {} documents", document_list.len());
+        let document_count = document_list.len();
+        info!(?document_count, "Inserting batch of documents");
 
         // This counter is not atomic with the insert operation.
         // This means we increment the counter even if the insert operation fails.
@@ -176,6 +196,20 @@ impl WriteSide {
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
                 .context("Cannot process document")?;
+        }
+
+        let mut lock = self.operation_counter.write().await;
+        *lock += document_count as u64;
+        let should_commit = if *lock >= self.insert_batch_commit_size {
+            *lock = 0;
+            true
+        } else {
+            false
+        };
+        drop(lock);
+
+        if should_commit {
+            self.commit().await?;
         }
 
         Ok(())
@@ -249,4 +283,16 @@ enum WriteSideInfo {
 struct WriteSideInfoV1 {
     document_count: u64,
     offset: Offset,
+}
+
+fn embedding_queue_limit_default() -> usize {
+    50
+}
+
+fn embedding_model_default() -> OramaModelSerializable {
+    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
+}
+
+fn default_insert_batch_commit_size() -> u64 {
+    1_000
 }

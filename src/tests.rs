@@ -43,6 +43,9 @@ fn create_oramacore_config() -> OramacoreConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
                 default_embedding_model: OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
+                // Lot of tests commit to test it.
+                // So, we put an high value to avoid problems.
+                insert_batch_commit_size: 10_000,
             },
         },
         reader_side: ReadSideConfig {

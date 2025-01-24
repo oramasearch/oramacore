@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use serde::Deserialize;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
@@ -19,21 +17,12 @@ use crate::collection_manager::dto::{
 };
 
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
-use super::{OperationSender, OramaModelSerializable};
+use super::{CollectionsWriterConfig, OperationSender};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct CollectionsWriterConfig {
-    pub data_dir: PathBuf,
-    #[serde(default = "embedding_queue_limit_default")]
-    pub embedding_queue_limit: usize,
-    #[serde(default = "embedding_model_default")]
-    pub default_embedding_model: OramaModelSerializable,
 }
 
 impl CollectionsWriter {
@@ -233,14 +222,6 @@ impl Deref for CollectionWriteLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
-}
-
-fn embedding_queue_limit_default() -> usize {
-    50
-}
-
-fn embedding_model_default() -> OramaModelSerializable {
-    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
 }
 
 #[cfg(test)]

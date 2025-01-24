@@ -74,6 +74,7 @@ async fn start_server() {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
                 default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                insert_batch_commit_size: 10,
             },
         },
         reader_side: ReadSideConfig {
