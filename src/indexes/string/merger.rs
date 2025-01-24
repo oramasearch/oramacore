@@ -50,10 +50,7 @@ pub fn merge(
 
     committed
         .document_lengths_per_document
-        .merge(
-            data_to_commit.get_document_lengths(),
-            document_length_path,
-        )
+        .merge(data_to_commit.get_document_lengths(), document_length_path)
         .context("Cannot merge document lengths")?;
 
     let max_posting_id = committed.posting_id_generator.load(Ordering::Relaxed);

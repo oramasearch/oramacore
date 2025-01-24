@@ -27,7 +27,10 @@ impl CommittedDiskDocumentStorage {
         Self { path, cache }
     }
 
-    async fn get_documents_by_ids(&self, doc_ids: &[DocumentId]) -> Result<Vec<Option<RawJSONDocument>>> {
+    async fn get_documents_by_ids(
+        &self,
+        doc_ids: &[DocumentId],
+    ) -> Result<Vec<Option<RawJSONDocument>>> {
         let lock = self.cache.read().await;
         let mut from_cache: HashMap<DocumentId, RawJSONDocument> = doc_ids
             .iter()
@@ -48,8 +51,7 @@ impl CommittedDiskDocumentStorage {
             let doc_path = self.path.join(format!("{}", id.0));
             trace!(?doc_path, "Check on FS");
 
-            let exists = tokio::fs::try_exists(&doc_path)
-                .await;
+            let exists = tokio::fs::try_exists(&doc_path).await;
             match exists {
                 Err(e) => {
                     return Err(anyhow!(
@@ -116,8 +118,7 @@ pub struct DocumentStorage {
 
 impl DocumentStorage {
     pub fn try_new(config: DocumentStorageConfig) -> Result<Self> {
-        std::fs::create_dir_all(&config.data_dir)
-            .context("Cannot create document directory")?;
+        std::fs::create_dir_all(&config.data_dir).context("Cannot create document directory")?;
 
         Ok(Self {
             uncommitted: Default::default(),

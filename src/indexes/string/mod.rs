@@ -192,12 +192,8 @@ impl StringIndex {
             match committed {
                 Some(committed) => {
                     info!("Merging field_id: {:?}", field_id);
-                    merger::merge(
-                        data_to_commit,
-                        &committed,
-                        string_index_field_info_copy,
-                    )
-                    .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
+                    merger::merge(data_to_commit, &committed, string_index_field_info_copy)
+                        .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
                 }
                 None => {
                     info!("Dumping new field_id: {:?}", field_id);
@@ -388,29 +384,25 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_output = scorer.get_scores();
 
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_output = scorer.get_scores();
 
         assert_approx_eq!(
@@ -433,15 +425,13 @@ mod tests {
             )]),
         )?;
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_output = scorer.get_scores();
 
         assert_eq!(after_insert_output.len(), 3);
@@ -452,15 +442,13 @@ mod tests {
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_commit_output = scorer.get_scores();
 
         assert_eq!(after_insert_commit_output.len(), 3);
@@ -491,15 +479,13 @@ mod tests {
         .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_scores = scorer.get_scores();
 
         let new_path = generate_new_path();
@@ -513,15 +499,13 @@ mod tests {
         };
 
         let mut scorer = BM25Scorer::new();
-        new_string_index
-            .search(
-                &["hello".to_string()],
-                None,
-                &Default::default(),
-                &mut scorer,
-                None,
-            )
-            ?;
+        new_string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let scores = scorer.get_scores();
 
         // Compare scores

@@ -59,7 +59,7 @@ pub struct CollectionReader {
     string_index: Arc<StringIndex>,
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
-    number_index:Arc<NumberIndex>,
+    number_index: Arc<NumberIndex>,
     bool_index: Arc<BoolIndex>,
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
@@ -206,9 +206,9 @@ impl CollectionReader {
                 .commit(string_dir)
                 .context("Cannot commit string index")
         })
-            .await
-            .context("Cannot spawn blocking task")?
-            .context("Cannot commit string index")?;
+        .await
+        .context("Cannot spawn blocking task")?
+        .context("Cannot commit string index")?;
 
         let number_index = self.number_index.clone();
         let number_dir = data_dir.join("numbers");
@@ -217,9 +217,9 @@ impl CollectionReader {
                 .commit(number_dir)
                 .context("Cannot commit number index")
         })
-            .await
-            .context("Cannot spawn blocking task")?
-            .context("Cannot commit number index")?;
+        .await
+        .context("Cannot spawn blocking task")?
+        .context("Cannot commit number index")?;
 
         let vector_index = self.vector_index.clone();
         let vector_dir = data_dir.join("vectors");
@@ -228,9 +228,9 @@ impl CollectionReader {
                 .commit(vector_dir)
                 .context("Cannot commit vector index")
         })
-            .await
-            .context("Cannot spawn blocking task")?
-            .context("Cannot commit vector index")?;
+        .await
+        .context("Cannot spawn blocking task")?
+        .context("Cannot commit vector index")?;
 
         let bool_index = self.bool_index.clone();
         let bool_dir = data_dir.join("bools");
@@ -239,9 +239,9 @@ impl CollectionReader {
                 .commit(bool_dir)
                 .context("Cannot commit bool index")
         })
-            .await
-            .context("Cannot spawn blocking task")?
-            .context("Cannot commit bool index")?;
+        .await
+        .context("Cannot spawn blocking task")?
+        .context("Cannot commit bool index")?;
 
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
@@ -590,21 +590,19 @@ impl CollectionReader {
                 .entry(locale)
                 .or_insert_with(|| text_parser.tokenize(term));
 
-            self.string_index
-                .search(
-                    tokens,
-                    // This option is not required.
-                    // It was introduced because for test purposes we
-                    // could avoid to pass every properties
-                    // Anyway the production code should always pass the properties
-                    // So we could avoid this option
-                    // TODO: remove this option
-                    Some(&[field_id]),
-                    &boost,
-                    &mut scorer,
-                    filtered_doc_ids.as_ref(),
-                )
-                ?;
+            self.string_index.search(
+                tokens,
+                // This option is not required.
+                // It was introduced because for test purposes we
+                // could avoid to pass every properties
+                // Anyway the production code should always pass the properties
+                // So we could avoid this option
+                // TODO: remove this option
+                Some(&[field_id]),
+                &boost,
+                &mut scorer,
+                filtered_doc_ids.as_ref(),
+            )?;
         }
 
         Ok(scorer.get_scores())

@@ -108,7 +108,8 @@ impl CommittedVectorFieldIndex {
     pub fn commit(&mut self, data_dir: PathBuf) -> Result<()> {
         trace!("Building index");
 
-        self.index.build(Metric::Euclidean)
+        self.index
+            .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
         trace!("create parent dir");

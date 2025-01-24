@@ -116,7 +116,6 @@ impl CollectionsWriter {
             .await
             .context("Cannot register fields")?;
 
-        
         collections.insert(id, collection);
         drop(collections);
 

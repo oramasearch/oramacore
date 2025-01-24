@@ -1305,7 +1305,6 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     )
     .await?;
 
-
     let commit_future = async {
         sleep(Duration::from_millis(5)).await;
         let commit_start = Instant::now();
@@ -1322,16 +1321,17 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
                 json!({
                     "term": "text",
                 })
-                .try_into().unwrap(),
-            ).await.unwrap();
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
         let search_end = Instant::now();
         (search_start, search_end)
     };
 
-    let ((commit_start, commit_end), (search_start, search_end)) = tokio::join!(
-        commit_future,
-        search_future,
-    );
+    let ((commit_start, commit_end), (search_start, search_end)) =
+        tokio::join!(commit_future, search_future,);
 
     // The commit should start before the search start
     assert!(commit_start < search_start);

@@ -26,7 +26,6 @@ use crate::{
 
 use super::{CollectionWriteOperation, Offset, WriteOperation};
 
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct IndexesConfig {
     pub data_dir: PathBuf,
@@ -238,4 +237,3 @@ mod tests {
         assert_sync_send::<CollectionReader>();
     }
 }
-
