@@ -146,6 +146,21 @@ impl AIService {
         Ok(response.into_inner())
     }
 
+    pub async fn planned_answer_stream(
+        &self,
+        input: String,
+    ) -> Result<Streaming<PlannedAnswerResponse>> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+        let request = Request::new(PlannedAnswerRequest { input });
+
+        let response: Response<Streaming<PlannedAnswerResponse>> = conn
+            .planned_answer(request)
+            .await
+            .context("Cannot initiate chat stream request")?;
+
+        Ok(response.into_inner())
+    }
+
     fn get_grpc_conversation(&self, interactions: Option<Vec<InteractionMessage>>) -> Conversation {
         use crate::collection_manager::dto::Role as DtoRole;
 
