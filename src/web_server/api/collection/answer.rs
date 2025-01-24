@@ -47,6 +47,10 @@ enum SseMessage {
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route("/v0/collections/{id}/answer", post(answer_v0))
+        .route(
+            "/v0/collections/{id}/planned_answer",
+            post(planned_answer_v0),
+        )
         .with_state(read_side)
 }
 
