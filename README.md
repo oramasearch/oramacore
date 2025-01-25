@@ -16,9 +16,9 @@ It includes a fully-fledged full-text search engine, vector database, LLM interf
     - ✅ Built-in multiple LLM inference setup
     - ✅ Basic JavaScript integration
     - ✅ Disk persistence
-    - 🚧 Vector compression
     - ✅ Unified configuration
-    - 🚧 Dockerfile for load testing in production environment
+    - ✅ Dockerfile for load testing in production environment
+    - 🚧 Vector compression
     - 🚧 Benchmarks
 
 - **v1.0.0**. ETA Feb 28th, 2025 (🎉 production ready!)
