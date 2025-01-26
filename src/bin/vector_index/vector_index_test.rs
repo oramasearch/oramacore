@@ -1,7 +1,7 @@
 use anyhow::Result;
-use rustorama::embeddings::OramaModel;
-use rustorama::indexes::vector::{VectorIndex, VectorIndexConfig};
-use rustorama::types::DocumentId;
+use oramacore::embeddings::OramaModel;
+use oramacore::indexes::vector::{VectorIndex, VectorIndexConfig};
+use oramacore::types::DocumentId;
 use serde::Deserialize;
 use std::fs;
 use std::time::Instant;

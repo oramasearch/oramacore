@@ -1,9 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
     ops::{Add, AddAssign},
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -11,17 +9,18 @@ use anyhow::{anyhow, Context, Result};
 pub use committed::CommittedStringFieldIndex;
 use dashmap::DashMap;
 
-use document_lengths::DocumentLengthsPerDocument;
-use fst::Map;
-use memmap::Mmap;
-use posting_storage::{PostingIdStorage, PostingListId};
+use posting_storage::PostingListId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, warn};
 pub use uncommitted::UncommittedStringFieldIndex;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::write::InsertStringTerms},
-    file_utils::BufferedFile,
+    collection_manager::{
+        dto::FieldId,
+        sides::{InsertStringTerms, Offset},
+    },
+    field_id_hashmap::FieldIdHashMap,
+    file_utils::{create_if_not_exists, BufferedFile},
     types::DocumentId,
 };
 
@@ -89,16 +88,31 @@ impl StringIndex {
         }
     }
 
+    pub fn add_field(&self, offset: Offset, field_id: FieldId) {
+        self.uncommitted
+            .insert(field_id, UncommittedStringFieldIndex::new(offset));
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn insert(
         &self,
+        offset: Offset,
         doc_id: DocumentId,
         field_id: FieldId,
         field_length: u16,
         terms: InsertStringTerms,
     ) -> Result<()> {
-        let uncommitted = self.uncommitted.entry(field_id).or_default();
-        uncommitted.insert(doc_id, field_length, terms)?;
+        let uncommitted = match self.uncommitted.get(&field_id) {
+            Some(uncommitted) => uncommitted,
+            None => {
+                return Err(anyhow!(
+                    "Field {:?} is not present in uncommitted",
+                    field_id
+                ));
+            }
+        };
+
+        uncommitted.insert(offset, doc_id, field_length, terms)?;
 
         Ok(())
     }
@@ -114,117 +128,106 @@ impl StringIndex {
 
         info!("Dumping all fields {:?} at {:?}", all_fields, new_path);
 
-        std::fs::create_dir_all(new_path.clone())
+        create_if_not_exists(new_path.clone())
             .with_context(|| format!("Cannot create directory at {:?}", new_path))?;
 
-        let mut dump = StringFieldsDump {
-            fields: Default::default(),
-            version: 0,
+        let mut string_index_info = StringIndexInfoV1 {
+            fields: self
+                .committed
+                .iter()
+                .map(|e| {
+                    let k = *e.key();
+                    let v = e.value();
+
+                    (k, v.get_info())
+                })
+                .collect(),
         };
 
         for field_id in all_fields {
-            let data_to_commit = self.uncommitted.get(&field_id);
+            let uncommitted = match self.uncommitted.get(&field_id) {
+                Some(uncommitted) => uncommitted,
+                None => {
+                    warn!("Field {:?} is not present in uncommitted", field_id);
+                    continue;
+                }
+            };
             let committed = self.committed.get(&field_id);
 
-            let field_new_path = new_path.join(format!("{}", field_id.0));
+            let data_to_commit = uncommitted.take().context("Cannot take data to commit")?;
 
-            std::fs::create_dir_all(field_new_path.clone())
-                .with_context(|| format!("Cannot create directory at {:?}", field_new_path))?;
+            if data_to_commit.is_empty() {
+                info!(
+                    "Everything is already committed for string field {:?}. Skip dumping",
+                    field_id
+                );
+                continue;
+            }
 
-            let mut fst_new_path = field_new_path.join("fst.bin");
-            let mut posting_new_path = field_new_path.join("posting.bin");
-            let mut document_length_new_path = field_new_path.join("dl.bin");
-            let mut global_info_new_path = field_new_path.join("global_info.bin");
-            let mut posting_id_new_path = field_new_path.join("posting_id.bin");
+            let offset = data_to_commit.get_offset();
+            let field_new_path = new_path
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
 
-            match (data_to_commit, committed) {
-                (Some(data_to_commit), Some(committed)) => {
+            create_if_not_exists(field_new_path.clone())
+                .with_context(|| format!("Cannot create directory for field {:?}", field_id))?;
+
+            let fst_path = field_new_path.join("fst.bin");
+            let posting_path = field_new_path.join("posting.bin");
+            let document_length_path = field_new_path.join("dl.bin");
+            let global_info_path = field_new_path.join("global_info.bin");
+            let posting_id_path = field_new_path.join("posting_id.bin");
+
+            let string_index_field_info = StringIndexFieldInfo {
+                field_id,
+                fst_path,
+                document_length_path,
+                posting_path,
+                global_info_path,
+                posting_id_path,
+                offset,
+            };
+
+            let string_index_field_info_copy = string_index_field_info.clone();
+            match committed {
+                Some(committed) => {
                     info!("Merging field_id: {:?}", field_id);
-
-                    merger::merge(
-                        &data_to_commit,
-                        &committed,
-                        document_length_new_path.clone(),
-                        fst_new_path.clone(),
-                        posting_new_path.clone(),
-                        global_info_new_path.clone(),
-                        posting_id_new_path.clone(),
-                    )
-                    .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
+                    merger::merge(data_to_commit, &committed, string_index_field_info_copy)
+                        .with_context(|| format!("Cannot merge field_id: {:?}", field_id))?;
                 }
-                (Some(data_to_commit), None) => {
-                    info!("Creating field_id: {:?}", field_id);
+                None => {
+                    info!("Dumping new field_id: {:?}", field_id);
 
                     merger::create(
-                        &data_to_commit,
-                        document_length_new_path.clone(),
-                        fst_new_path.clone(),
-                        posting_new_path.clone(),
-                        global_info_new_path.clone(),
-                        posting_id_new_path.clone(),
+                        data_to_commit,
+                        string_index_field_info_copy.document_length_path,
+                        string_index_field_info_copy.fst_path,
+                        string_index_field_info_copy.posting_path,
+                        string_index_field_info_copy.global_info_path,
+                        string_index_field_info_copy.posting_id_path,
                     )
                     .with_context(|| format!("Cannot create field_id: {:?}", field_id))?;
                 }
-                (None, Some(committed)) => {
-                    warn!(
-                        "Field {:?} hasn't uncommitted data and is complitely committed. skip",
-                        field_id
-                    );
-
-                    fst_new_path = committed.fst_map_path.clone();
-                    document_length_new_path = committed.document_lengths_per_document.path.clone();
-                    posting_new_path = committed.storage.path.clone();
-                    global_info_new_path = committed.global_info_path.clone();
-                    posting_id_new_path = committed.max_posting_id_path.clone();
-                }
-                (None, None) => {
-                    unreachable!(
-                        "Field {:?} is not present in uncommitted or committed",
-                        field_id
-                    );
-                }
             };
 
-            let field_dump = StringFieldDumpData {
-                field_id,
-                version: 0,
-                fst_new_path,
-                document_length_new_path,
-                posting_new_path,
-                global_info_new_path,
-                posting_id_new_path,
-            };
+            let committed = CommittedStringFieldIndex::try_new(string_index_field_info.clone())
+                .context("Cannot reload committed field")?;
 
-            // Reload field
-            let global_info: GlobalInfo =
-                BufferedFile::open(field_dump.global_info_new_path.clone())
-                    .context("Cannot open global info file")?
-                    .read_json_data()
-                    .context("Cannot deserialize global info")?;
-
-            let file = File::open(field_dump.fst_new_path.clone())?;
-            let mmap = unsafe { Mmap::map(&file)? };
-            let map = Map::new(mmap)?;
-
-            let committed = CommittedStringFieldIndex::new(
-                map,
-                field_dump.fst_new_path.clone(),
-                DocumentLengthsPerDocument::new(field_dump.document_length_new_path.clone()),
-                PostingIdStorage::new(field_dump.posting_new_path.clone()),
-                field_dump.posting_id_new_path.clone(),
-                global_info,
-                field_dump.global_info_new_path.clone(),
-            );
+            // Replace old field or insert new one
             self.committed.insert(field_id, committed);
 
-            dump.fields.insert(field_id, field_dump);
+            string_index_info
+                .fields
+                .insert(field_id, string_index_field_info);
         }
 
-        let field_file = new_path.join("fields.json");
-        BufferedFile::create(field_file)
-            .context("Cannot create fields.json file")?
-            .write_json_data(&dump)
-            .context("Cannot serialize collection field")?;
+        let string_index_info = StringIndexInfo::V1(string_index_info);
+
+        let field_file = new_path.join("info.json");
+        BufferedFile::create_or_overwrite(field_file)
+            .context("Cannot create info.json file")?
+            .write_json_data(&string_index_info)
+            .context("Cannot serialize collection info")?;
 
         Ok(())
     }
@@ -246,50 +249,34 @@ impl StringIndex {
             Ok(true) => {}
         };
 
-        let field_file = path.join("fields.json");
-        let dump: StringFieldsDump = BufferedFile::open(field_file.clone())
-            .context("Cannot open fields file")?
+        let field_file = path.join("info.json");
+        let dump: StringIndexInfo = BufferedFile::open(field_file.clone())
+            .context("Cannot open info.json file")?
             .read_json_data()
-            .context("Cannot deserialize fields")?;
+            .context("Cannot deserialize info.json")?;
+        let StringIndexInfo::V1(dump) = dump;
 
         debug!("Dump: {:?}", dump);
 
-        for (field_id, field_dump) in dump.fields {
-            let global_info: GlobalInfo =
-                BufferedFile::open(field_dump.global_info_new_path.clone())
-                    .context("Cannot open global info file")?
-                    .read_json_data()
-                    .context("Cannot deserialize global info")?;
-
-            let file = File::open(field_dump.fst_new_path.clone())?;
-            let mmap = unsafe { Mmap::map(&file)? };
-            let map = Map::new(mmap)?;
-
-            let mut committed = CommittedStringFieldIndex::new(
-                map,
-                field_dump.fst_new_path,
-                DocumentLengthsPerDocument::new(field_dump.document_length_new_path),
-                PostingIdStorage::new(field_dump.posting_new_path),
-                field_dump.posting_id_new_path.clone(),
-                global_info,
-                field_dump.global_info_new_path,
-            );
-
-            let posting_id = std::fs::read(field_dump.posting_id_new_path.clone()).unwrap();
-            let posting_id: u64 = serde_json::from_slice(&posting_id).unwrap();
-            committed.posting_id_generator = Arc::new(AtomicU64::new(posting_id));
+        for (field_id, field_dump) in dump.fields.into_inner() {
+            let committed = CommittedStringFieldIndex::try_new(field_dump.clone())
+                .context("Cannot reload committed field")?;
 
             self.committed.insert(field_id, committed);
+            self.uncommitted.insert(
+                field_id,
+                UncommittedStringFieldIndex::new(field_dump.offset),
+            );
         }
 
         Ok(())
     }
 
-    pub async fn search(
+    pub fn search(
         &self,
-        tokens: Vec<String>,
+        tokens: &[String],
         search_on: Option<&[FieldId]>,
-        boost: HashMap<FieldId, f32>,
+        boost: &HashMap<FieldId, f32>,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<()> {
@@ -326,17 +313,11 @@ impl StringIndex {
 
             if let Some(uncommitted) = uncommitted {
                 global_info += uncommitted.get_global_info();
-                uncommitted.search(
-                    &tokens,
-                    boost / 10.0,
-                    scorer,
-                    filtered_doc_ids,
-                    &global_info,
-                )?;
+                uncommitted.search(tokens, boost / 10.0, scorer, filtered_doc_ids, &global_info)?;
             }
 
             if let Some(committed) = committed {
-                committed.search(&tokens, boost, scorer, filtered_doc_ids, &global_info)?;
+                committed.search(tokens, boost, scorer, filtered_doc_ids, &global_info)?;
             }
         }
 
@@ -349,20 +330,26 @@ impl StringIndex {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct StringFieldDumpData {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StringIndexFieldInfo {
     field_id: FieldId,
-    version: u64,
-    fst_new_path: PathBuf,
-    document_length_new_path: PathBuf,
-    posting_new_path: PathBuf,
-    global_info_new_path: PathBuf,
-    posting_id_new_path: PathBuf,
+    fst_path: PathBuf,
+    document_length_path: PathBuf,
+    posting_path: PathBuf,
+    global_info_path: PathBuf,
+    posting_id_path: PathBuf,
+    offset: Offset,
 }
 #[derive(Debug, Serialize, Deserialize)]
-struct StringFieldsDump {
-    version: u64,
-    fields: HashMap<FieldId, StringFieldDumpData>,
+#[serde(tag = "version")]
+enum StringIndexInfo {
+    #[serde(rename = "1")]
+    V1(StringIndexInfoV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StringIndexInfoV1 {
+    fields: FieldIdHashMap<StringIndexFieldInfo>,
 }
 
 #[cfg(test)]
@@ -371,7 +358,7 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        collection_manager::sides::write::{Term, TermStringField},
+        collection_manager::sides::{Term, TermStringField},
         test_utils::{create_string_index, generate_new_path},
     };
 
@@ -379,6 +366,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_indexes_string_insert_search_commit_search() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
         let string_index = create_string_index(
             vec![(FieldId(0), "field".to_string())],
             vec![
@@ -391,32 +380,29 @@ mod tests {
                 })
                 .try_into()?,
             ],
-        )?;
+        )
+        .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_output = scorer.get_scores();
 
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_output = scorer.get_scores();
 
         assert_approx_eq!(
@@ -429,6 +415,7 @@ mod tests {
         );
 
         string_index.insert(
+            Offset(100),
             DocumentId(2),
             FieldId(0),
             1,
@@ -437,17 +424,14 @@ mod tests {
                 TermStringField { positions: vec![1] },
             )]),
         )?;
-
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_output = scorer.get_scores();
 
         assert_eq!(after_insert_output.len(), 3);
@@ -458,15 +442,13 @@ mod tests {
         string_index.commit(generate_new_path())?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let after_insert_commit_output = scorer.get_scores();
 
         assert_eq!(after_insert_commit_output.len(), 3);
@@ -493,18 +475,17 @@ mod tests {
                 })
                 .try_into()?,
             ],
-        )?;
+        )
+        .await?;
 
         let mut scorer = BM25Scorer::new();
-        string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let before_scores = scorer.get_scores();
 
         let new_path = generate_new_path();
@@ -518,15 +499,13 @@ mod tests {
         };
 
         let mut scorer = BM25Scorer::new();
-        new_string_index
-            .search(
-                vec!["hello".to_string()],
-                None,
-                Default::default(),
-                &mut scorer,
-                None,
-            )
-            .await?;
+        new_string_index.search(
+            &["hello".to_string()],
+            None,
+            &Default::default(),
+            &mut scorer,
+            None,
+        )?;
         let scores = scorer.get_scores();
 
         // Compare scores

@@ -1,4 +1,4 @@
-# Puython 3.11 suggested
+# Python 3.11 suggested
 
 numpy
 grpcio-tools
@@ -16,9 +16,14 @@ opentelemetry-api
 opentelemetry-sdk
 pyyaml
 cachetools
-vllm
 json-repair
 pillow
 
 pytest
 pytest-mock
+
+onnxruntime-gpu
+transformers
+accelerate
+einops
+bitsandbytes

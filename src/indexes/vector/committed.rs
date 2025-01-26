@@ -10,9 +10,11 @@ use hora::{
     index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams},
 };
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{trace, warn};
 
-use crate::types::DocumentId;
+use crate::{
+    collection_manager::sides::Offset, file_utils::create_if_not_exists, types::DocumentId,
+};
 
 #[derive(
     Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
@@ -23,13 +25,18 @@ impl IdxType for IdxID {}
 #[derive(Debug)]
 pub struct CommittedVectorFieldIndex {
     index: HNSWIndex<f32, IdxID>,
+    offset: Offset,
 }
 
 impl CommittedVectorFieldIndex {
-    pub fn new(dimension: usize) -> Self {
+    pub fn new(dimension: usize, offset: Offset) -> Self {
         let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
         let index = HNSWIndex::<f32, IdxID>::new(dimension, &params);
-        Self { index }
+        Self { index, offset }
+    }
+
+    pub fn offset(&self) -> Offset {
+        self.offset
     }
 
     pub fn search(
@@ -85,7 +92,7 @@ impl CommittedVectorFieldIndex {
         Ok(())
     }
 
-    pub fn load(data_dir: PathBuf) -> Result<Self> {
+    pub fn load(data_dir: PathBuf, offset: Offset) -> Result<Self> {
         let data_dir = match data_dir.to_str() {
             Some(data_dir) => data_dir,
             None => {
@@ -95,13 +102,21 @@ impl CommittedVectorFieldIndex {
 
         let index = HNSWIndex::<f32, IdxID>::load(data_dir)
             .map_err(|e| anyhow!("Cannot load index: {}", e))?;
-        Ok(Self { index })
+        Ok(Self { index, offset })
     }
 
     pub fn commit(&mut self, data_dir: PathBuf) -> Result<()> {
+        trace!("Building index");
+
         self.index
             .build(Metric::Euclidean)
             .map_err(|e| anyhow!("Cannot build index: {}", e))?;
+
+        trace!("create parent dir");
+        let parent_dir = data_dir
+            .parent()
+            .ok_or_else(|| anyhow!("Cannot get parent dir"))?;
+        create_if_not_exists(parent_dir)?;
 
         let data_dir = match data_dir.to_str() {
             Some(data_dir) => data_dir,
@@ -109,6 +124,7 @@ impl CommittedVectorFieldIndex {
                 return Err(anyhow!("Cannot convert path to string"));
             }
         };
+        trace!("dumping index");
         self.index
             .dump(data_dir)
             .map_err(|e| anyhow!("Cannot dump index: {}", e))
@@ -131,7 +147,7 @@ mod tests {
         let data_dir = generate_new_path();
 
         let index = {
-            let mut index = CommittedVectorFieldIndex::new(3);
+            let mut index = CommittedVectorFieldIndex::new(3, Offset(0));
             let data = (0..N)
                 .map(|i| {
                     let doc_id = DocumentId(i as u64);
@@ -156,7 +172,7 @@ mod tests {
         let mut output_before = HashMap::new();
         index.search(&[0.0, 0.0, 0.0], 2, &mut output_before)?;
 
-        let deserialized = CommittedVectorFieldIndex::load(data_dir.clone())?;
+        let deserialized = CommittedVectorFieldIndex::load(data_dir.clone(), Offset(1))?;
 
         let mut output_after = HashMap::new();
         deserialized.search(&[0.0, 0.0, 0.0], 2, &mut output_after)?;
@@ -168,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_score() -> Result<()> {
-        let mut index = CommittedVectorFieldIndex::new(3);
+        let mut index = CommittedVectorFieldIndex::new(3, Offset(0));
         index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
         index.insert((DocumentId(2), vec![-1.0, 0.0, 0.0]))?;
 
@@ -185,7 +201,7 @@ mod tests {
         let data_dir = generate_new_path();
         index.commit(data_dir.clone())?;
 
-        let new_index = CommittedVectorFieldIndex::load(data_dir)?;
+        let new_index = CommittedVectorFieldIndex::load(data_dir, Offset(0))?;
 
         let mut output_after_load = HashMap::new();
         new_index.search(&[0.999, 0.001, -0.001], 2, &mut output_after_load)?;
@@ -197,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_with_one() -> Result<()> {
-        let mut index = CommittedVectorFieldIndex::new(3);
+        let mut index = CommittedVectorFieldIndex::new(3, Offset(0));
         index.insert((DocumentId(1), vec![1.0, 0.0, 0.0]))?;
 
         index
@@ -208,7 +224,7 @@ mod tests {
         let data_dir = generate_new_path();
         index.commit(data_dir.clone())?;
 
-        let new_index = CommittedVectorFieldIndex::load(data_dir)?;
+        let new_index = CommittedVectorFieldIndex::load(data_dir, Offset(0))?;
 
         let mut output_after_load = HashMap::new();
         new_index.search(&[0.999, 0.001, -1.0], 2, &mut output_after_load)?;

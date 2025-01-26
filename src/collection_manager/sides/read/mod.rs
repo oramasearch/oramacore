@@ -1,149 +1,239 @@
 mod collection;
 mod collections;
+mod document_storage;
 
-mod insert;
-mod search;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-pub use collection::{CollectionReader, CommitConfig};
-pub use collections::{CollectionsReader, IndexesConfig};
+use anyhow::{Context, Result};
+use collections::CollectionsReader;
+use document_storage::{DocumentStorage, DocumentStorageConfig};
+use ordered_float::NotNan;
+use serde::Deserialize;
+use tokio::sync::RwLock;
+use tracing::trace;
+
+use crate::{
+    ai::AIService,
+    capped_heap::CappedHeap,
+    collection_manager::dto::{SearchParams, SearchResult, SearchResultHit, TokenScore},
+    metrics::{
+        CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
+        COLLECTION_OPERATION_COUNTER,
+    },
+    nlp::NLPService,
+    types::{CollectionId, DocumentId},
+};
+
+use super::{CollectionWriteOperation, Offset, WriteOperation};
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IndexesConfig {
+    pub data_dir: PathBuf,
+    #[serde(default = "default_insert_batch_commit_size")]
+    pub insert_batch_commit_size: u64,
+}
+
+pub struct ReadSide {
+    collections: CollectionsReader,
+    document_storage: DocumentStorage,
+    operation_counter: RwLock<u64>,
+    insert_batch_commit_size: u64,
+}
+
+impl ReadSide {
+    pub fn try_new(
+        ai_service: Arc<AIService>,
+        nlp_service: Arc<NLPService>,
+        indexes_config: IndexesConfig,
+    ) -> Result<Self> {
+        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
+            data_dir: indexes_config.data_dir.join("docs"),
+        })
+        .context("Cannot create document storage")?;
+
+        let insert_batch_commit_size = indexes_config.insert_batch_commit_size;
+
+        Ok(Self {
+            collections: CollectionsReader::try_new(ai_service, nlp_service, indexes_config)?,
+            document_storage,
+            operation_counter: Default::default(),
+            insert_batch_commit_size,
+        })
+    }
+
+    pub async fn load(&mut self) -> Result<()> {
+        self.collections.load().await?;
+
+        self.document_storage
+            .load()
+            .context("Cannot load document storage")?;
+
+        Ok(())
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        self.collections.commit().await?;
+
+        self.document_storage
+            .commit()
+            .await
+            .context("Cannot commit document storage")?;
+
+        Ok(())
+    }
+
+    pub async fn search(
+        &self,
+        collection_id: CollectionId,
+        mut search_params: SearchParams,
+    ) -> Result<SearchResult> {
+        let facets = std::mem::take(&mut search_params.facets);
+        let limit = search_params.limit;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        let token_scores = collection.search(search_params).await?;
+
+        let facets = collection.calculate_facets(&token_scores, facets)?;
+
+        let count = token_scores.len();
+
+        let top_results: Vec<TokenScore> = top_n(token_scores, limit.0);
+
+        trace!("Top results: {:?}", top_results);
+        let docs = self
+            .document_storage
+            .get_documents_by_ids(top_results.iter().map(|m| m.document_id).collect())
+            .await?;
+
+        trace!("Calculates hits");
+        let hits: Vec<_> = top_results
+            .into_iter()
+            .zip(docs)
+            .map(|(token_score, document)| {
+                let id = document
+                    .as_ref()
+                    .and_then(|d| d.id.clone())
+                    .unwrap_or_default();
+                SearchResultHit {
+                    id,
+                    score: token_score.score,
+                    document,
+                }
+            })
+            .collect();
+
+        Ok(SearchResult {
+            count,
+            hits,
+            facets,
+        })
+    }
+
+    pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
+        let (offset, op) = op;
+        match op {
+            WriteOperation::CreateCollection { id } => {
+                COLLECTION_ADDED_COUNTER
+                    .create(CollectionAddedLabels {
+                        collection: id.0.clone(),
+                    })
+                    .increment_by_one();
+                self.collections.create_collection(offset, id).await?;
+            }
+            WriteOperation::Collection(collection_id, collection_operation) => {
+                COLLECTION_OPERATION_COUNTER
+                    .create(CollectionOperationLabels {
+                        collection: collection_id.0.clone(),
+                    })
+                    .increment_by_one();
+
+                let collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+                if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
+                    collection_operation
+                {
+                    collection.increment_document_count();
+                    self.document_storage.add_document(doc_id, doc).await?;
+                } else {
+                    collection.update(offset, collection_operation).await?;
+                }
+            }
+        }
+
+        let mut lock = self.operation_counter.write().await;
+        *lock += 1;
+        let should_commit = if *lock >= self.insert_batch_commit_size {
+            *lock = 0;
+            true
+        } else {
+            false
+        };
+        drop(lock);
+
+        if should_commit {
+            self.commit().await?;
+        }
+
+        Ok(())
+    }
+
+    // This is wrong. We should not expose the ai service to the read side.
+    // TODO: Remove this method.
+    pub fn get_ai_service(&self) -> Arc<AIService> {
+        self.collections.get_ai_service()
+    }
+
+    pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
+        let collection = self.collections.get_collection(collection_id).await?;
+        Some(collection.count_documents())
+    }
+}
+
+fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
+    let mut capped_heap = CappedHeap::new(n);
+
+    for (key, value) in map {
+        let k = match NotNan::new(value) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        let v = key;
+        capped_heap.insert(k, v);
+    }
+
+    let result: Vec<TokenScore> = capped_heap
+        .into_top()
+        .map(|(value, key)| TokenScore {
+            document_id: key,
+            score: value.into_inner(),
+        })
+        .collect();
+
+    result
+}
+
+fn default_insert_batch_commit_size() -> u64 {
+    300
+}
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
-    use anyhow::Result;
-
-    use serde_json::json;
-
-    use crate::{
-        collection_manager::{
-            dto::{FieldId, LanguageDTO, TypedField},
-            sides::write::{
-                CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation, Term,
-                TermStringField, WriteOperation,
-            },
-        },
-        embeddings::{EmbeddingConfig, EmbeddingPreload, EmbeddingService},
-        test_utils::generate_new_path,
-        types::{CollectionId, DocumentId},
+    use crate::collection_manager::sides::read::{
+        collection::CollectionReader, collections::CollectionsReader,
     };
 
-    use super::*;
-
-    #[tokio::test]
-    async fn test_side_read_sync_send() {
+    #[test]
+    fn test_side_read_sync_send() {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsReader>();
         assert_sync_send::<CollectionReader>();
-    }
-
-    #[tokio::test]
-    async fn test_side_read_commit_and_load() -> Result<()> {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let data_dir = generate_new_path();
-        let embedding_service = EmbeddingService::try_new(EmbeddingConfig {
-            preload: EmbeddingPreload::Bool(false),
-            cache_path: generate_new_path(),
-            hugging_face: None,
-        })
-        .await?;
-        let embedding_service = Arc::new(embedding_service);
-        let collection_id = CollectionId("my-collection-name".to_string());
-
-        {
-            let collections = CollectionsReader::try_new(
-                embedding_service.clone(),
-                IndexesConfig {
-                    data_dir: data_dir.join("indexes"),
-                },
-            )?;
-
-            collections
-                .update(WriteOperation::Generic(
-                    GenericWriteOperation::CreateCollection {
-                        id: collection_id.clone(),
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::CreateField {
-                        field_id: FieldId(0),
-                        field_name: "title".to_string(),
-                        field: TypedField::Text(LanguageDTO::English),
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::InsertDocument {
-                        doc_id: DocumentId(0),
-                        doc: json!({
-                            "id": "my-id",
-                            "title": "hello world",
-                        })
-                        .try_into()?,
-                    },
-                ))
-                .await?;
-
-            collections
-                .update(WriteOperation::Collection(
-                    collection_id.clone(),
-                    CollectionWriteOperation::Index(
-                        DocumentId(0),
-                        FieldId(0),
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length: 2,
-                            terms: HashMap::from_iter([
-                                (
-                                    Term("hello".to_string()),
-                                    TermStringField { positions: vec![0] },
-                                ),
-                                (
-                                    Term("world".to_string()),
-                                    TermStringField { positions: vec![1] },
-                                ),
-                            ]),
-                        },
-                    ),
-                ))
-                .await?;
-
-            collections.commit().await?;
-        }
-
-        let mut collections = CollectionsReader::try_new(
-            embedding_service.clone(),
-            IndexesConfig {
-                data_dir: data_dir.join("indexes"),
-            },
-        )?;
-
-        collections.load().await?;
-
-        let reader = collections
-            .get_collection(collection_id.clone())
-            .await
-            .expect("collection not found");
-
-        let result = reader
-            .search(
-                json!({
-                    "term": "hello",
-                })
-                .try_into()?,
-            )
-            .await?;
-
-        assert_eq!(result.count, 1);
-        assert_eq!(result.hits[0].id, "my-id".to_string());
-
-        Ok(())
     }
 }

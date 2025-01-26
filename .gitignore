@@ -10,3 +10,10 @@ posting_storage
 .data
 .dataset
 .local-demo
+
+.vscode
+flamegraph.svg
+.direnv/
+.envrc
+
+.env

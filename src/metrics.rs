@@ -24,7 +24,6 @@ macro_rules! create_label_struct {
     };
 }
 create_label_struct!(EmbeddingCalculationLabels, {
-    collection: String,
     model: String,
 });
 pub static EMBEDDING_CALCULATION_METRIC: DeltaMetric<EmbeddingCalculationLabels> = DeltaMetric {

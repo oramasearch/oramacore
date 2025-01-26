@@ -1,125 +1,120 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use serde::Deserialize;
-use tokio::sync::{broadcast::Sender, RwLock};
-use tracing::{info, instrument, warn};
+use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::{info, instrument};
 
+use crate::collection_manager::sides::hooks::HooksRuntime;
+use crate::nlp::NLPService;
 use crate::{
-    collection_manager::dto::CollectionDTO,
-    embeddings::EmbeddingService,
-    file_utils::{list_directory_in_path, BufferedFile},
-    metrics::{AddedDocumentsLabels, ADDED_DOCUMENTS_COUNTER},
-    types::{CollectionId, DocumentId, DocumentList},
+    collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
 };
 
-use crate::collection_manager::dto::{CreateCollectionOptionDTO, LanguageDTO};
+use crate::collection_manager::dto::{
+    CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
+};
 
-use super::{collection::CollectionWriter, GenericWriteOperation, WriteOperation};
+use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
+use super::{CollectionsWriterConfig, OperationSender};
 
 pub struct CollectionsWriter {
-    document_id_generator: Arc<AtomicU64>,
-    sender: Sender<WriteOperation>,
-    embedding_service: Arc<EmbeddingService>,
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct CollectionsWriterConfig {
-    pub data_dir: PathBuf,
+    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 impl CollectionsWriter {
     pub fn new(
-        sender: Sender<WriteOperation>,
-        embedding_service: Arc<EmbeddingService>,
         config: CollectionsWriterConfig,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> CollectionsWriter {
         CollectionsWriter {
-            document_id_generator: Default::default(),
-            sender,
-            embedding_service,
             collections: Default::default(),
             config,
+            embedding_sender,
         }
     }
 
-    fn generate_document_id(&self) -> DocumentId {
-        let id = self
-            .document_id_generator
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        DocumentId(id)
+    pub async fn get_collection<'s, 'coll>(
+        &'s self,
+        id: CollectionId,
+    ) -> Option<CollectionWriteLock<'coll>>
+    where
+        's: 'coll,
+    {
+        let r = self.collections.read().await;
+        CollectionWriteLock::try_new(r, id)
     }
 
     pub async fn create_collection(
         &self,
-        collection_option: CreateCollectionOptionDTO,
-    ) -> Result<CollectionId> {
-        let CreateCollectionOptionDTO {
+        collection_option: CreateCollection,
+        sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
+    ) -> Result<()> {
+        let CreateCollection {
             id,
             description,
             language,
-            typed_fields,
+            embeddings,
         } = collection_option;
 
-        let id = CollectionId(id);
-
         info!("Creating collection {:?}", id);
-        self.sender
-            .send(WriteOperation::Generic(
-                GenericWriteOperation::CreateCollection { id: id.clone() },
-            ))
-            .context("Cannot send create collection")?;
 
         let collection = CollectionWriter::new(
             id.clone(),
             description,
             language.unwrap_or(LanguageDTO::English),
+            self.embedding_sender.clone(),
         );
 
-        for (field_name, field_type) in typed_fields {
-            let field_id = collection.get_field_id_by_name(&field_name);
-
-            collection
-                .create_field(
-                    field_id,
-                    field_name,
-                    field_type,
-                    self.embedding_service.clone(),
-                    &self.sender,
-                )
-                .await
-                .context("Cannot create field")?;
-        }
+        let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
+            let model = embeddings
+                .as_ref()
+                .and_then(|embeddings| embeddings.model.as_ref())
+                .unwrap_or(&self.config.default_embedding_model);
+            let model = model.0;
+            let document_fields = embeddings
+                .map(|embeddings| embeddings.document_fields)
+                .map(DocumentFields::Properties)
+                .unwrap_or(DocumentFields::AllStringProperties);
+            let typed_field = TypedField::Embedding(EmbeddingTypedField {
+                model,
+                document_fields,
+            });
+            HashMap::from_iter([("___orama_auto_embedding".to_string(), typed_field)])
+        } else {
+            HashMap::new()
+        };
 
         let mut collections = self.collections.write().await;
         if collections.contains_key(&id) {
-            return Err(anyhow!("Collection already exists"));
+            // This error should be typed.
+            // TODO: create a custom error type
+            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
         }
-        collections.insert(id.clone(), collection);
+
+        // Send event & Register field should be inside the lock transaction
+        sender
+            .send(WriteOperation::CreateCollection { id: id.clone() })
+            .context("Cannot send create collection")?;
+        collection
+            .register_fields(typed_fields, sender.clone(), hooks_runtime)
+            .await
+            .context("Cannot register fields")?;
+
+        collections.insert(id, collection);
         drop(collections);
 
-        Ok(id)
+        Ok(())
     }
 
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
 
         collections.iter().map(|(_, coll)| coll.as_dto()).collect()
-    }
-
-    pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
-        let collections = self.collections.read().await;
-        let collection = collections.get(&collection_id);
-        collection.map(|c| c.as_dto())
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -131,12 +126,6 @@ impl CollectionsWriter {
         let mut collections = self.collections.write().await;
 
         std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-
-        let document_id = self.document_id_generator.load(Ordering::Relaxed);
-        BufferedFile::create(data_dir.join("document_id"))
-            .context("Cannot create document id file")?
-            .write_json_data(&document_id)
-            .context("Cannot serialize document id")?;
 
         for (collection_id, collection) in collections.iter_mut() {
             let collection_dir = data_dir.join(collection_id.0.clone());
@@ -151,7 +140,11 @@ impl CollectionsWriter {
     }
 
     #[instrument(skip(self))]
-    pub async fn load(&mut self) -> Result<()> {
+    pub async fn load(
+        &mut self,
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+    ) -> Result<()> {
         // `&mut self` isn't needed here
         // but we need to ensure that the method is not called concurrently
         let data_dir = &self.config.data_dir;
@@ -180,10 +173,14 @@ impl CollectionsWriter {
 
             let collection_id = CollectionId(file_name);
 
-            let mut collection =
-                CollectionWriter::new(collection_id.clone(), None, LanguageDTO::English);
+            let mut collection = CollectionWriter::new(
+                collection_id.clone(),
+                None,
+                LanguageDTO::English,
+                self.embedding_sender.clone(),
+            );
             collection
-                .load(collection_dir, self.embedding_service.clone())
+                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
                 .await?;
 
             self.collections
@@ -192,71 +189,38 @@ impl CollectionsWriter {
                 .insert(collection_id, collection);
         }
 
-        let document_id = BufferedFile::open(data_dir.join("document_id"))
-            .context("Cannot open document id file")?
-            .read_json_data::<u64>()
-            .context("Cannot deserialize document id")?;
-
-        self.document_id_generator
-            .store(document_id, Ordering::Relaxed);
-
         Ok(())
     }
+}
 
-    pub async fn write(
-        &self,
-        collection_id: CollectionId,
-        document_list: DocumentList,
-    ) -> Result<()> {
-        info!("Inserting batch of {} documents", document_list.len());
-        ADDED_DOCUMENTS_COUNTER
-            .create(AddedDocumentsLabels {
-                collection: collection_id.0.clone(),
-            })
-            .increment_by(document_list.len());
+pub struct CollectionWriteLock<'guard> {
+    lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+    id: CollectionId,
+}
 
-        let collections = self.collections.read().await;
-
-        let collection = collections
-            .get(&collection_id)
-            .ok_or_else(|| anyhow!("Collection not found"))?;
-
-        for mut doc in document_list {
-            let doc_id = self.generate_document_id();
-
-            let doc_id_value = doc.get("id");
-            // Forces the id to be set, if not set
-            if doc_id_value.is_none() {
-                doc.inner.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(cuid2::create_id()),
-                );
-            } else if let Some(doc_id_value) = doc_id_value {
-                if !doc_id_value.is_string() {
-                    // The search result contains the document id and it is defined as a string.
-                    // So, if the original document id is not a string, we should overwrite it with a new one
-                    // Anyway, this implies the loss of the original document id. For instance we could support number as well
-                    // TODO: think better
-                    warn!("Document id is not a string, overwriting it with new one");
-                    doc.inner.insert(
-                        "id".to_string(),
-                        serde_json::Value::String(cuid2::create_id()),
-                    );
-                }
+impl<'guard> CollectionWriteLock<'guard> {
+    pub fn try_new(
+        lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
+        id: CollectionId,
+    ) -> Option<Self> {
+        let guard = lock.get(&id);
+        match &guard {
+            Some(_) => {
+                let _ = guard;
+                Some(CollectionWriteLock { lock, id })
             }
-
-            collection
-                .process_new_document(
-                    doc_id,
-                    doc,
-                    self.embedding_service.clone(),
-                    &self.sender.clone(),
-                )
-                .await
-                .context("Cannot process document")?;
+            None => None,
         }
+    }
+}
 
-        Ok(())
+impl Deref for CollectionWriteLock<'_> {
+    type Target = CollectionWriter;
+
+    fn deref(&self) -> &Self::Target {
+        // safety: the collection contains the id because we checked it before
+        // no one can remove the collection from the map because we hold a read lock
+        self.lock.get(&self.id).unwrap()
     }
 }
 

@@ -5,10 +5,11 @@ use std::{
 
 use anyhow::Result;
 use ptrie::Trie;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::write::{InsertStringTerms, TermStringField},
+    collection_manager::sides::{InsertStringTerms, Offset, TermStringField},
+    offset_storage::OffsetStorage,
     types::DocumentId,
 };
 
@@ -76,7 +77,6 @@ impl InnerInnerUncommittedStringFieldIndex {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     pub fn insert(
         &mut self,
         document_id: DocumentId,
@@ -140,6 +140,7 @@ impl InnerInnerUncommittedStringFieldIndex {
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
+        let mut total_matches = 0_usize;
         for token in tokens {
             let (current, mut postfixes) = self.tree.find_postfixes_with_current(token.bytes());
 
@@ -188,9 +189,13 @@ impl InnerInnerUncommittedStringFieldIndex {
                         0.75,
                         boost,
                     );
+
+                    total_matches += 1;
                 }
             }
         }
+
+        info!(total_matches = total_matches, "Uncommitted total matches");
 
         Ok(())
     }
@@ -255,21 +260,24 @@ impl InnerUncommittedStringFieldIndex {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UncommittedStringFieldIndex {
-    inner: RwLock<InnerUncommittedStringFieldIndex>,
+    inner: RwLock<(OffsetStorage, InnerUncommittedStringFieldIndex)>,
 }
 
 impl UncommittedStringFieldIndex {
-    pub fn new() -> Self {
+    pub fn new(offset: Offset) -> Self {
+        let offset_storage = OffsetStorage::new();
+        offset_storage.set_offset(offset);
         Self {
-            inner: RwLock::new(InnerUncommittedStringFieldIndex::new()),
+            inner: RwLock::new((offset_storage, InnerUncommittedStringFieldIndex::new())),
         }
     }
 
     #[allow(clippy::type_complexity)]
     pub fn insert(
         &self,
+        offset: Offset,
         document_id: DocumentId,
         field_length: u16,
         terms: InsertStringTerms,
@@ -278,7 +286,15 @@ impl UncommittedStringFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.insert(document_id, field_length, terms)
+        // Ignore inserts with lower offset
+        if offset <= inner.0.get_offset() {
+            warn!("Skip insert string with lower offset");
+            return Ok(());
+        }
+        inner.1.insert(document_id, field_length, terms)?;
+        inner.0.set_offset(offset);
+
+        Ok(())
     }
 
     pub fn get_global_info(&self) -> GlobalInfo {
@@ -286,7 +302,7 @@ impl UncommittedStringFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.get_global_info()
+        inner.1.get_global_info()
     }
 
     pub fn search(
@@ -301,7 +317,9 @@ impl UncommittedStringFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        inner.search(tokens, boost, scorer, filtered_doc_ids, global_info)
+        inner
+            .1
+            .search(tokens, boost, scorer, filtered_doc_ids, global_info)
     }
 
     pub fn take(&self) -> Result<DataToCommit> {
@@ -309,15 +327,17 @@ impl UncommittedStringFieldIndex {
             Ok(lock) => lock,
             Err(p) => p.into_inner(),
         };
-        let data = if inner.state {
-            inner.left.clone()
+        let data = if inner.1.state {
+            inner.1.left.clone()
         } else {
-            inner.right.clone()
+            inner.1.right.clone()
         };
-        let current_state = inner.state;
+        let current_state = inner.1.state;
+
+        let current_offset = inner.0.get_offset();
 
         // Route the writes to the other side
-        inner.state = !current_state;
+        inner.1.state = !current_state;
         drop(inner);
 
         let InnerInnerUncommittedStringFieldIndex {
@@ -337,6 +357,7 @@ impl UncommittedStringFieldIndex {
             document_ids,
             field_length_per_doc,
             tree,
+            current_offset,
         })
     }
 }
@@ -349,6 +370,7 @@ pub struct DataToCommit<'uncommitted> {
     total_field_length: u64,
     document_ids: HashSet<DocumentId>,
     field_length_per_doc: HashMap<DocumentId, u32>,
+    #[allow(clippy::type_complexity)]
     tree: Vec<(
         Vec<u8>,
         (
@@ -356,6 +378,8 @@ pub struct DataToCommit<'uncommitted> {
             HashMap<DocumentId, Positions>,
         ),
     )>,
+
+    current_offset: Offset,
 }
 
 impl DataToCommit<'_> {
@@ -368,6 +392,14 @@ impl DataToCommit<'_> {
             total_document_length: self.total_field_length as usize,
             total_documents: self.document_ids.len(),
         }
+    }
+
+    pub fn get_offset(&self) -> Offset {
+        self.current_offset
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty()
     }
 
     pub fn iter(
@@ -392,9 +424,9 @@ impl Drop for DataToCommit<'_> {
     fn drop(&mut self) {
         let mut lock = self.index.inner.write().unwrap();
         let tree = if self.state_to_clear {
-            &mut lock.left
+            &mut lock.1.left
         } else {
-            &mut lock.right
+            &mut lock.1.right
         };
         tree.clear();
     }
@@ -404,14 +436,14 @@ impl Drop for DataToCommit<'_> {
 mod tests {
     use serde_json::json;
 
-    use crate::collection_manager::sides::write::Term;
+    use crate::collection_manager::sides::Term;
     use crate::indexes::string::scorer::BM25Scorer;
     use crate::test_utils::create_uncommitted_string_field_index;
 
     use super::*;
 
-    #[test]
-    fn test_indexes_string_uncommitted() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted1() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let index = create_uncommitted_string_field_index(vec![
@@ -423,7 +455,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?;
+        ])
+        .await?;
 
         // Exact match
         let mut scorer = BM25Scorer::new();
@@ -459,8 +492,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_boost() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_boost() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -470,7 +503,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?;
+        ])
+        .await?;
 
         // 1.0
         let mut scorer = BM25Scorer::new();
@@ -514,8 +548,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_nonexistent_term() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_nonexistent_term() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -525,7 +559,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?;
+        ])
+        .await?;
 
         let mut scorer = BM25Scorer::new();
         index.search(
@@ -545,8 +580,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_field_filter() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_field_filter() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -556,7 +591,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?;
+        ])
+        .await?;
 
         // Exclude a doc
         {
@@ -590,9 +626,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_on_empty_index() -> Result<()> {
-        let index = create_uncommitted_string_field_index(vec![])?;
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_on_empty_index() -> Result<()> {
+        let index = create_uncommitted_string_field_index(vec![]).await?;
 
         let mut scorer = BM25Scorer::new();
         index.search(
@@ -608,12 +644,13 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_large_text() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_large_text() -> Result<()> {
         let index = create_uncommitted_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
         })
-        .try_into()?])?;
+        .try_into()?])
+        .await?;
 
         let mut scorer = BM25Scorer::new();
         index.search(
@@ -633,8 +670,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_uncommitted_during_commit() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_uncommitted_during_commit() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let index = create_uncommitted_string_field_index(vec![
@@ -646,7 +683,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?;
+        ])
+        .await?;
 
         // Exact match
         let mut scorer = BM25Scorer::new();
@@ -681,6 +719,7 @@ mod tests {
 
         // Insertion is still possible
         index.insert(
+            Offset(100),
             DocumentId(2),
             1,
             HashMap::from_iter([(

@@ -1,16 +1,15 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
-use rustorama::{
+use oramacore::{
     build_orama,
     collection_manager::sides::{
-        read::{CollectionsReader, IndexesConfig},
-        write::CollectionsWriter,
-        CollectionsWriterConfig,
+        ReadSide, IndexesConfig,
+        CollectionsWriterConfig, WriteSide,
     },
-    embeddings::{EmbeddingConfig, EmbeddingPreload},
+    embeddings::EmbeddingConfig,
     web_server::HttpConfig,
-    ReadSideConfig, RustoramaConfig, WriteSideConfig,
+    OramacoreConfig, ReadSideConfig, WriteSideConfig,
 };
 use tempdir::TempDir;
 
@@ -20,11 +19,11 @@ fn generate_new_path() -> PathBuf {
 }
 
 pub async fn start_all() -> Result<(
-    Arc<CollectionsWriter>,
-    Arc<CollectionsReader>,
+    Arc<WriteSide>,
+    Arc<ReadSide>,
     tokio::task::JoinHandle<()>,
 )> {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -32,18 +31,20 @@ pub async fn start_all() -> Result<(
             with_prometheus: false,
         },
         embeddings: EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
+            preload: vec![],
             hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+            fastembed: None,
+            models: HashMap::new(),
         },
         writer_side: WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
+                embedding_queue_limit: 50,
             },
         },
         reader_side: ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
+            input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
             },

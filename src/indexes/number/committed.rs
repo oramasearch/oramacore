@@ -5,7 +5,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::{file_utils::BufferedFile, merger::MergedIterator, types::DocumentId};
+use crate::{
+    collection_manager::sides::Offset, file_utils::BufferedFile, merger::MergedIterator,
+    types::DocumentId,
+};
 
 use super::{n::SerializableNumber, Number, NumberFilter};
 
@@ -124,6 +127,7 @@ impl Page {
 
 #[derive(Debug)]
 pub struct CommittedNumberFieldIndex {
+    offset: Offset,
     /// List of chunks.
     pages: Vec<Page>,
     /// Map of the bounds of each chunk.
@@ -238,7 +242,7 @@ And this should not happen. Return the last page."#);
         Ok(page)
     }
 
-    pub fn load(data_dir: PathBuf) -> Result<Self> {
+    pub fn load(offset: Offset, data_dir: PathBuf) -> Result<Self> {
         let bounds: Vec<((SerializableNumber, SerializableNumber), ChunkId)> =
             BufferedFile::open(data_dir.join("bounds.json"))
                 .context("Cannot open bounds file")?
@@ -258,7 +262,11 @@ And this should not happen. Return the last page."#);
             });
         }
 
-        Ok(CommittedNumberFieldIndex { bounds, pages })
+        Ok(CommittedNumberFieldIndex {
+            offset,
+            bounds,
+            pages,
+        })
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
@@ -274,6 +282,7 @@ And this should not happen. Return the last page."#);
 
 impl CommittedNumberFieldIndex {
     pub fn from_iter<T: IntoIterator<Item = (Number, HashSet<DocumentId>)>>(
+        offset: Offset,
         iter: T,
         base_dir: PathBuf,
     ) -> Result<Self> {
@@ -281,6 +290,7 @@ impl CommittedNumberFieldIndex {
             .context("Cannot create the base directory for the committed number index")?;
 
         let mut committed_number_field_index = CommittedNumberFieldIndex {
+            offset,
             pages: Vec::new(),
             bounds: Vec::new(),
         };
@@ -382,6 +392,10 @@ impl CommittedNumberFieldIndex {
             }
         })
     }
+
+    pub fn current_offset(&self) -> Offset {
+        self.offset
+    }
 }
 
 fn get_filter_fn<'filter>(filter: &'filter NumberFilter) -> Box<dyn Fn(&Item) -> bool + 'filter> {
@@ -418,17 +432,9 @@ pub fn merge<
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use crate::test_utils::generate_new_path;
 
-    use anyhow::Result;
-
-    use crate::{
-        indexes::number::{committed::merge, Number},
-        test_utils::generate_new_path,
-        types::DocumentId,
-    };
-
-    use super::CommittedNumberFieldIndex;
+    use super::*;
 
     #[test]
     fn test_indexes_number_merge() {
@@ -539,7 +545,7 @@ mod tests {
         ];
 
         let committed_number_field_index =
-            CommittedNumberFieldIndex::from_iter(data, generate_new_path())?;
+            CommittedNumberFieldIndex::from_iter(Offset(9), data, generate_new_path())?;
 
         let output = committed_number_field_index
             .filter(&crate::indexes::number::NumberFilter::Equal(Number::I32(0)))?;

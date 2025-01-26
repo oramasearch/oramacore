@@ -1,0 +1,8 @@
+.dataset
+.data
+.custom_models
+.fastembed_cache
+__pycache__
+target
+.venv
+.embeddings_models

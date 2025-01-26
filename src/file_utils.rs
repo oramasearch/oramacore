@@ -4,7 +4,57 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use tokio::io::AsyncWriteExt;
+use tracing::trace;
 
+pub async fn create_if_not_exists_async<P: AsRef<Path>>(p: P) -> Result<()> {
+    let p: PathBuf = p.as_ref().to_path_buf();
+
+    let output = tokio::fs::try_exists(&p).await;
+    match output {
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error while checking if the directory exists: {:?}",
+                e
+            ));
+        }
+        Ok(true) => {
+            trace!("Directory exists. Skip creation.");
+        }
+        Ok(false) => {
+            trace!("Directory does not exist. Creating it.");
+            tokio::fs::create_dir_all(p)
+                .await
+                .context("Cannot create directory")?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
+    let p: PathBuf = p.as_ref().to_path_buf();
+
+    match std::fs::exists(&p) {
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Error while checking if the directory exists: {:?}",
+                e
+            ));
+        }
+        Ok(true) => {
+            trace!("Directory exists. Skip creation.");
+        }
+        Ok(false) => {
+            trace!("Directory does not exist. Creating it.");
+            std::fs::create_dir_all(p).context("Cannot create directory")?;
+        }
+    };
+
+    Ok(())
+}
+
+// TODO: check if this function is still used
 pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Option<Vec<PathBuf>>> {
     let mut result = vec![];
 
@@ -39,10 +89,48 @@ pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Option<Vec<PathBuf
     Ok(Some(result))
 }
 
+pub async fn create_or_overwrite<T: serde::Serialize>(path: PathBuf, data: &T) -> Result<()> {
+    let mut file = tokio::fs::File::create(&path)
+        .await
+        .with_context(|| format!("Cannot create file at {:?}", path))?;
+    let v = serde_json::to_vec(data)
+        .with_context(|| format!("Cannot write json data to {:?}", path))?;
+    file.write_all(&v)
+        .await
+        .with_context(|| format!("Cannot write json data to {:?}", path))?;
+    file.flush()
+        .await
+        .with_context(|| format!("Cannot flush file {:?}", path))?;
+    file.sync_all()
+        .await
+        .with_context(|| format!("Cannot sync_all file {:?}", path))?;
+
+    Ok(())
+}
+
+pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T> {
+    let vec = tokio::fs::read(&path)
+        .await
+        .with_context(|| format!("Cannot open file at {:?}", path))?;
+    serde_json::from_slice(&vec)
+        .with_context(|| format!("Cannot deserialize json data from {:?}", path))
+}
+
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {
         let file = std::fs::File::create_new(&path)
+            .with_context(|| format!("Cannot create file at {:?}", path))?;
+        let buf = std::io::BufWriter::new(file);
+        Ok(WriteBufferedFile {
+            path,
+            closed: false,
+            buf,
+        })
+    }
+
+    pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
+        let file = std::fs::File::create(&path)
             .with_context(|| format!("Cannot create file at {:?}", path))?;
         let buf = std::io::BufWriter::new(file);
         Ok(WriteBufferedFile {

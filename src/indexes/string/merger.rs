@@ -14,8 +14,8 @@ use crate::types::DocumentId;
 
 use super::document_lengths::DocumentLengthsPerDocument;
 use super::posting_storage::PostingIdStorage;
-use super::uncommitted::{Positions, TotalDocumentsWithTermInField};
-use super::{CommittedStringFieldIndex, UncommittedStringFieldIndex};
+use super::uncommitted::{DataToCommit, Positions, TotalDocumentsWithTermInField};
+use super::{CommittedStringFieldIndex, StringIndexFieldInfo};
 
 struct FTSIter<'stream> {
     stream: Option<fst::map::Stream<'stream>>,
@@ -35,22 +35,22 @@ impl Iterator for FTSIter<'_> {
 }
 
 pub fn merge(
-    uncommitted: &UncommittedStringFieldIndex,
+    data_to_commit: DataToCommit<'_>,
     committed: &CommittedStringFieldIndex,
-    document_length_new_path: PathBuf,
-    fst_new_path: PathBuf,
-    posting_new_path: PathBuf,
-    global_info_new_path: PathBuf,
-    posting_id_new_path: PathBuf,
+    string_index_field_info: StringIndexFieldInfo,
 ) -> Result<()> {
-    let data_to_commit = uncommitted.take()?;
+    let StringIndexFieldInfo {
+        document_length_path,
+        fst_path,
+        posting_path,
+        global_info_path,
+        posting_id_path,
+        ..
+    } = string_index_field_info;
 
     committed
         .document_lengths_per_document
-        .merge(
-            data_to_commit.get_document_lengths(),
-            document_length_new_path,
-        )
+        .merge(data_to_commit.get_document_lengths(), document_length_path)
         .context("Cannot merge document lengths")?;
 
     let max_posting_id = committed.posting_id_generator.load(Ordering::Relaxed);
@@ -60,23 +60,23 @@ pub fn merge(
     let storage_updates = merge_iter(
         posting_id_generator.clone(),
         uncommitted_iter,
-        committed.fst_map_path.clone(),
-        fst_new_path,
+        committed.get_info().fst_path,
+        fst_path,
     )
     .context("Cannot merge iterators")?;
 
     committed
         .storage
-        .apply_delta(storage_updates, posting_new_path)?;
+        .apply_delta(storage_updates, posting_path)?;
 
     let global_info = data_to_commit.global_info() + committed.get_global_info();
-    BufferedFile::create(global_info_new_path)
+    BufferedFile::create(global_info_path)
         .context("Cannot create file for global info")?
         .write_json_data(&global_info)
         .context("Cannot serialize global info to file")?;
 
     let posting_id = posting_id_generator.load(Ordering::Relaxed);
-    BufferedFile::create(posting_id_new_path)
+    BufferedFile::create(posting_id_path)
         .context("Cannot create file for posting_id")?
         .write_json_data(&posting_id)
         .context("Cannot serialize posting_id to file")?;
@@ -87,15 +87,13 @@ pub fn merge(
 }
 
 pub fn create(
-    uncommitted: &UncommittedStringFieldIndex,
+    data_to_commit: DataToCommit<'_>,
     document_length_new_path: PathBuf,
     fst_new_path: PathBuf,
     posting_new_path: PathBuf,
     global_info_new_path: PathBuf,
     posting_id_new_path: PathBuf,
 ) -> Result<()> {
-    let data_to_commit = uncommitted.take().context("Cannot take from uncommitted")?;
-
     let posting_id_generator = AtomicU64::new(0);
 
     DocumentLengthsPerDocument::create(

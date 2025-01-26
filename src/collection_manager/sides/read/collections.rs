@@ -1,143 +1,55 @@
-use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    sync::Arc,
+};
 
 use crate::{
-    collection_manager::sides::{
-        document_storage::{DiskDocumentStorage, DocumentStorage, DocumentStorageConfig},
-        read::collection::CommitConfig,
-        CollectionWriteOperation, DocumentFieldIndexOperation, GenericWriteOperation,
-        WriteOperation,
+    ai::AIService,
+    collection_manager::sides::Offset,
+    file_utils::{
+        create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
-    embeddings::EmbeddingService,
-    file_utils::list_directory_in_path,
-    metrics::{
-        CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
-        COLLECTION_OPERATION_COUNTER,
-    },
+    nlp::NLPService,
+    offset_storage::OffsetStorage,
     types::CollectionId,
 };
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, error, info, instrument};
+use tracing::{info, instrument, warn};
 
-use super::collection::CollectionReader;
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct IndexesConfig {
-    pub data_dir: PathBuf,
-}
+use super::{collection::CollectionReader, IndexesConfig};
 
 #[derive(Debug)]
 pub struct CollectionsReader {
-    embedding_service: Arc<EmbeddingService>,
+    ai_service: Arc<AIService>,
+    nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
-    document_storage: Arc<dyn DocumentStorage>,
     indexes_config: IndexesConfig,
+
+    offset_storage: OffsetStorage,
 }
 impl CollectionsReader {
     pub fn try_new(
-        embedding_service: Arc<EmbeddingService>,
+        ai_service: Arc<AIService>,
+        nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
-        let document_storage = DiskDocumentStorage::try_new(DocumentStorageConfig {
-            data_dir: indexes_config.data_dir.join("docs"),
-        })
-        .context("Cannot create document storage")?;
-
-        let document_storage = Arc::new(document_storage);
-
         Ok(Self {
-            embedding_service,
+            ai_service,
+            nlp_service,
+
             collections: Default::default(),
-            document_storage,
             indexes_config,
+
+            offset_storage: OffsetStorage::new(),
         })
     }
 
-    pub async fn update(&self, op: WriteOperation) -> Result<()> {
-        match op {
-            WriteOperation::Generic(GenericWriteOperation::CreateCollection { id }) => {
-                info!("CreateCollection {:?}", id);
-                COLLECTION_ADDED_COUNTER
-                    .create(CollectionAddedLabels {
-                        collection: id.0.to_string(),
-                    })
-                    .increment_by_one();
-
-                let collection_reader = CollectionReader::try_new(
-                    id.clone(),
-                    self.embedding_service.clone(),
-                    Arc::clone(&self.document_storage),
-                    self.indexes_config.clone(),
-                )?;
-
-                self.collections.write().await.insert(id, collection_reader);
-            }
-            WriteOperation::Collection(collection_id, coll_op) => {
-                let collections = self.collections.read().await;
-
-                COLLECTION_OPERATION_COUNTER
-                    .create(CollectionOperationLabels {
-                        collection: collection_id.0.to_string(),
-                    })
-                    .increment_by_one();
-
-                let collection_reader = match collections.get(&collection_id) {
-                    Some(collection_reader) => collection_reader,
-                    None => {
-                        error!(target: "Collection not found", ?collection_id);
-                        return Err(anyhow::anyhow!("Collection not found"));
-                    }
-                };
-
-                match coll_op {
-                    CollectionWriteOperation::CreateField {
-                        field_id,
-                        field_name,
-                        field,
-                    } => {
-                        collection_reader
-                            .create_field(field_id, field_name, field)
-                            .await
-                            .context("Cannot create field")?;
-                    }
-                    CollectionWriteOperation::InsertDocument { doc_id, doc } => {
-                        collection_reader
-                            .insert_document(doc_id, doc)
-                            .await
-                            .context("cannot insert document")?;
-                    }
-                    CollectionWriteOperation::Index(doc_id, field_id, field_op) => match field_op {
-                        DocumentFieldIndexOperation::IndexBoolean { value } => {
-                            collection_reader
-                                .index_boolean(doc_id, field_id, value)
-                                .context("cannot index boolean")?;
-                        }
-                        DocumentFieldIndexOperation::IndexNumber { value } => {
-                            collection_reader
-                                .index_number(doc_id, field_id, value)
-                                .context("cannot index number")?;
-                        }
-                        DocumentFieldIndexOperation::IndexString {
-                            field_length,
-                            terms,
-                        } => {
-                            collection_reader
-                                .index_string(doc_id, field_id, field_length, terms)
-                                .context("cannot index string")?;
-                        }
-                        DocumentFieldIndexOperation::IndexEmbedding { value } => {
-                            collection_reader
-                                .index_embedding(doc_id, field_id, value)
-                                .context("cannot index embedding")?;
-                        }
-                    },
-                }
-            }
-        };
-
-        Ok(())
+    pub fn get_ai_service(&self) -> Arc<AIService> {
+        self.ai_service.clone()
     }
 
     pub async fn get_collection<'s, 'coll>(
@@ -156,63 +68,39 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
-        let document_storage = Arc::get_mut(&mut self.document_storage)
-            .expect("`load` should be called at the beginning of the program");
-        document_storage
-            .load()
-            .context("Cannot load document storage")?;
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        match std::fs::exists(data_dir) {
+        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot deserialize info.json file")
+        {
+            Ok(info) => info,
             Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Error while checking if the data directory exists: {:?}",
+                warn!(
+                    "Cannot read info.json file: {:?}. Skip loading collections",
                     e
-                ));
-            }
-            Ok(true) => {
-                debug!("Data directory exists.");
-            }
-            Ok(false) => {
-                info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-            }
-        }
-
-        let base_dir_for_collections = data_dir.join("collections");
-
-        let collection_dirs = list_directory_in_path(&base_dir_for_collections)
-            .context("Cannot read collection list from disk")?;
-
-        let collection_dirs = match collection_dirs {
-            Some(collection_dirs) => collection_dirs,
-            None => {
-                info!(
-                    "No collections found in data directory {:?}. Skipping load.",
-                    data_dir
                 );
                 return Ok(());
             }
         };
 
-        for collection_dir in collection_dirs {
+        let CollectionsInfo::V1(collections_info) = collections_info;
+
+        let base_dir_for_collections = data_dir.join("collections");
+
+        for collection_id in collections_info.collection_ids {
+            let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
-
-            let file_name = collection_dir
-                .file_name()
-                .expect("File name is always given at this point");
-            let file_name: String = file_name.to_string_lossy().into();
-
-            let collection_id = CollectionId(file_name);
 
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),
-                self.embedding_service.clone(),
-                self.document_storage.clone(),
+                self.ai_service.clone(),
+                self.nlp_service.clone(),
                 self.indexes_config.clone(),
             )?;
 
             collection
-                .load(base_dir_for_collections.join(&collection.id.0))
+                .load(base_dir_for_collections.join(&collection.get_id().0))
                 .await
                 .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
@@ -229,41 +117,59 @@ impl CollectionsReader {
     pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
 
-        match std::fs::exists(data_dir) {
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Error while checking if the data directory exists: {:?}",
-                    e
-                ));
-            }
-            Ok(true) => {
-                debug!("Data directory exists.");
-            }
-            Ok(false) => {
-                info!("Data directory does not exist. Creating it.");
-                std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
-            }
-        };
+        create_if_not_exists_async(data_dir)
+            .await
+            .context("Cannot create data directory")?;
 
         let col = self.collections.read().await;
         let col = &*col;
 
         let collections_dir = data_dir.join("collections");
-        std::fs::create_dir_all(&collections_dir)
+        create_if_not_exists_async(&collections_dir)
+            .await
             .context("Cannot create 'collections' directory")?;
+
+        let collection_ids: Vec<_> = col.keys().cloned().collect();
 
         for (id, reader) in col {
             info!("Committing collection {:?}", id);
 
-            reader.commit(CommitConfig {
-                folder_to_commit: collections_dir.join(&id.0),
-                epoch: 0,
-            })?;
+            let collection_dir = collections_dir.join(&id.0);
+
+            create_if_not_exists_async(&collection_dir)
+                .await
+                .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
+
+            reader.commit(collection_dir).await?;
+
+            info!("Collection {:?} committed", id);
         }
 
-        self.document_storage
-            .commit()
-            .context("Cannot commit document storage")?;
+        let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
+            collection_ids: collection_ids.into_iter().collect(),
+        });
+
+        create_or_overwrite(data_dir.join("info.json"), &collections_info)
+            .await
+            .context("Cannot create info.json file")?;
+
+        Ok(())
+    }
+
+    pub async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
+        info!("Creating collection {:?}", id);
+
+        let collection = CollectionReader::try_new(
+            id.clone(),
+            self.ai_service.clone(),
+            self.nlp_service.clone(),
+            self.indexes_config.clone(),
+        )?;
+
+        let mut guard = self.collections.write().await;
+        guard.insert(id, collection);
+
+        self.offset_storage.set_offset(offset);
 
         Ok(())
     }
@@ -298,4 +204,15 @@ impl Deref for CollectionReadLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "version")]
+enum CollectionsInfo {
+    #[serde(rename = "1")]
+    V1(CollectionsInfoV1),
+}
+#[derive(Deserialize, Serialize)]
+struct CollectionsInfoV1 {
+    collection_ids: HashSet<CollectionId>,
 }

@@ -4,4 +4,4 @@ scrape_configs:
   - job_name: node
     static_configs:
       - targets:
-        - 192.168.1.18:8080
+        - 192.168.1.14:8080

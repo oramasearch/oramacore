@@ -1,54 +1,67 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    fs::File,
     sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{Context, Result};
 use fst::{Automaton, IntoStreamer, Map, Streamer};
-use tracing::warn;
+use memmap::Mmap;
+use tracing::{info, warn};
 
-use crate::types::DocumentId;
+use crate::{file_utils::BufferedFile, types::DocumentId};
 
 use super::{
     document_lengths::DocumentLengthsPerDocument, posting_storage::PostingIdStorage,
-    scorer::BM25Scorer, GlobalInfo,
+    scorer::BM25Scorer, GlobalInfo, StringIndexFieldInfo,
 };
 
 #[derive(Debug)]
 pub struct CommittedStringFieldIndex {
     fst_map: Map<memmap::Mmap>,
-    pub(super) fst_map_path: PathBuf,
-    pub(super) document_lengths_per_document: DocumentLengthsPerDocument,
+    pub document_lengths_per_document: DocumentLengthsPerDocument,
 
-    pub(super) storage: PostingIdStorage,
-    pub(super) posting_id_generator: Arc<AtomicU64>,
-    pub(super) max_posting_id_path: PathBuf,
+    pub storage: PostingIdStorage,
+    pub posting_id_generator: Arc<AtomicU64>,
 
     global_info: GlobalInfo,
-    pub(super) global_info_path: PathBuf,
+
+    info: StringIndexFieldInfo,
 }
 
 impl CommittedStringFieldIndex {
-    pub fn new(
-        fst_map: Map<memmap::Mmap>,
-        fst_map_path: PathBuf,
-        document_lengths_per_document: DocumentLengthsPerDocument,
-        storage: PostingIdStorage,
-        max_posting_id_path: PathBuf,
-        global_info: GlobalInfo,
-        global_info_path: PathBuf,
-    ) -> Self {
-        Self {
+    pub fn try_new(string_index_field_info: StringIndexFieldInfo) -> Result<Self> {
+        // Reload field
+        let global_info: GlobalInfo =
+            BufferedFile::open(string_index_field_info.global_info_path.clone())
+                .context("Cannot open global info file")?
+                .read_json_data()
+                .context("Cannot deserialize global info")?;
+
+        let posting_id = std::fs::read(string_index_field_info.posting_id_path.clone()).unwrap();
+        let posting_id: u64 = serde_json::from_slice(&posting_id).unwrap();
+
+        let file = File::open(string_index_field_info.fst_path.clone())?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        let fst_map = Map::new(mmap)?;
+
+        let document_lengths_per_document = DocumentLengthsPerDocument::try_new(
+            string_index_field_info.document_length_path.clone(),
+        )?;
+        let storage = PostingIdStorage::try_new(string_index_field_info.posting_path.clone())?;
+
+        Ok(CommittedStringFieldIndex {
             fst_map,
-            fst_map_path,
             document_lengths_per_document,
             storage,
-            max_posting_id_path,
-            posting_id_generator: Arc::new(AtomicU64::new(0)),
+            posting_id_generator: Arc::new(AtomicU64::new(posting_id)),
             global_info,
-            global_info_path,
-        }
+            info: string_index_field_info,
+        })
+    }
+
+    pub fn get_info(&self) -> StringIndexFieldInfo {
+        self.info.clone()
     }
 
     pub fn get_global_info(&self) -> GlobalInfo {
@@ -103,7 +116,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -140,6 +153,7 @@ impl CommittedStringFieldIndex {
             }
         }
 
+        let mut total_matches = 0_usize;
         for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
@@ -155,7 +169,17 @@ impl CommittedStringFieldIndex {
                 })
                 .count();
 
-            let total_boost = (sequences_count as f32 * 2.0) + boost;
+            // We have different kind of boosting:
+            // 1. Boost for the exact match: not implemented
+            // 2. Boost for the phrase match when the terms appear in sequence (without holes): implemented
+            // 3. Boost for the phrase match when the terms appear in sequence (with holes): not implemented
+            // 4. Boost for the phrase match when the terms appear in any order: implemented
+            // 5. Boost defined by the user: implemented
+            // We should allow the user to configure which boost to use and how much it impacts the score.
+            // TODO: think about this
+            let boost_any_order = positions.len() as f32;
+            let boost_sequence = sequences_count as f32 * 2.0;
+            let total_boost = boost_any_order + boost_sequence + boost;
 
             for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
                 matches
@@ -171,8 +195,12 @@ impl CommittedStringFieldIndex {
                     0.75,
                     total_boost,
                 );
+
+                total_matches += 1;
             }
         }
+
+        info!(total_matches = total_matches, "Committed total matches");
 
         Ok(())
     }
@@ -200,7 +228,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id)? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -252,8 +280,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_indexes_string_committed() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let index = create_committed_string_field_index(vec![
@@ -265,7 +293,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // Exact match
@@ -302,8 +331,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_boost() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_boost() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -313,7 +342,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // 1.0
@@ -358,8 +388,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_nonexistent_term() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_nonexistent_term() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -369,7 +399,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         let mut scorer = BM25Scorer::new();
@@ -390,8 +421,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_field_filter() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_field_filter() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
                 "field": "hello hello world",
@@ -401,7 +432,8 @@ mod tests {
                 "field": "hello tom",
             })
             .try_into()?,
-        ])?
+        ])
+        .await?
         .unwrap();
 
         // Exclude a doc
@@ -436,12 +468,13 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_indexes_string_committed_large_text() -> Result<()> {
+    #[tokio::test]
+    async fn test_indexes_string_committed_large_text() -> Result<()> {
         let index = create_committed_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
         })
-        .try_into()?])?
+        .try_into()?])
+        .await?
         .unwrap();
 
         let mut scorer = BM25Scorer::new();

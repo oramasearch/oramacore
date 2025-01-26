@@ -11,12 +11,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use tower_http::trace::TraceLayer;
 use tracing::{info, info_span};
 
-use crate::collection_manager::sides::{read::CollectionsReader, write::CollectionsWriter};
+use crate::collection_manager::sides::{ReadSide, WriteSide};
 mod collection;
 
 pub fn api_config(
-    writers: Option<Arc<CollectionsWriter>>,
-    readers: Option<Arc<CollectionsReader>>,
+    write_side: Option<Arc<WriteSide>>,
+    read_side: Option<Arc<ReadSide>>,
     prometheus_handle: Option<PrometheusHandle>,
 ) -> Router {
     reset_openapi();
@@ -29,12 +29,12 @@ pub fn api_config(
             .add(prometheus_handler())
             .with_state(Arc::new(prometheus_handle));
         info!("Prometheus metrics enabled");
-        router.nest("/", metric)
+        router.merge(metric)
     } else {
         router
     };
 
-    let router = router.nest("/", collection::apis(writers, readers));
+    let router = router.merge(collection::apis(write_side, read_side));
 
     let counter = Arc::new(AtomicUsize::new(0));
 

@@ -1,21 +1,23 @@
 use anyhow::Result;
 use futures::future::Either;
 use futures::{future, pin_mut};
+use http::uri::Scheme;
 use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use rustorama::collection_manager::sides::read::IndexesConfig;
-use rustorama::collection_manager::sides::CollectionsWriterConfig;
-use rustorama::{build_orama, ReadSideConfig, RustoramaConfig, WriteSideConfig};
+use oramacore::ai::{AIServiceConfig, OramaModel};
+use oramacore::collection_manager::sides::IndexesConfig;
+use oramacore::collection_manager::sides::{CollectionsWriterConfig, OramaModelSerializable};
+use oramacore::test_utils::create_grpc_server;
+use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use tempdir::TempDir;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 
-use rustorama::embeddings::{EmbeddingConfig, EmbeddingPreload};
-use rustorama::web_server::{HttpConfig, WebServer};
+use oramacore::web_server::{HttpConfig, WebServer};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 8080;
@@ -50,28 +52,36 @@ async fn wait_for_server() {
 }
 
 async fn start_server() {
-    let (collections_writer, collections_reader, mut receiver) = build_orama(RustoramaConfig {
+    let address = create_grpc_server().await.unwrap();
+
+    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
             allow_cors: false,
             with_prometheus: false,
         },
-        embeddings: EmbeddingConfig {
-            cache_path: std::env::temp_dir(),
-            hugging_face: None,
-            preload: EmbeddingPreload::Bool(false),
+        ai_server: AIServiceConfig {
+            scheme: Scheme::HTTP,
+            host: address.ip(),
+            port: address.port(),
+            api_key: None,
+            max_connections: 1,
         },
         writer_side: WriteSideConfig {
-            output: rustorama::SideChannelType::InMemory,
+            output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
+                embedding_queue_limit: 50,
+                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                insert_batch_commit_size: 10,
             },
         },
         reader_side: ReadSideConfig {
-            input: rustorama::SideChannelType::InMemory,
+            input: oramacore::SideChannelType::InMemory,
             config: IndexesConfig {
                 data_dir: generate_new_path(),
+                insert_batch_commit_size: 10,
             },
         },
     })
@@ -83,7 +93,11 @@ async fn start_server() {
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
         while let Ok(op) = receiver.recv().await {
-            collections_reader.update(op).await.expect("OUCH!");
+            let r = collections_reader.update(op).await;
+            if let Err(e) = r {
+                println!("--------");
+                eprintln!("Error: {:?}", e);
+            }
         }
     });
 

@@ -180,7 +180,7 @@ impl<'de> Deserialize<'de> for SerializableNumber {
                     4 => Ok(SerializableNumber(Number::F32(f32::NEG_INFINITY))),
                     d => Err(A::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(d.into()),
-                        &"1, 2",
+                        &"1, 2, 3, 4",
                     )),
                 }
             }

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicU16, AtomicU64},
@@ -9,34 +10,37 @@ use std::{
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::Sender;
 use tracing::{info, instrument};
 
 use crate::{
-    collection_manager::dto::{CollectionDTO, FieldId},
-    embeddings::EmbeddingService,
+    collection_manager::{
+        dto::{CollectionDTO, FieldId},
+        sides::hooks::{HookName, HooksRuntime},
+    },
     file_utils::BufferedFile,
-    nlp::{locales::Locale, TextParser},
+    nlp::{locales::Locale, NLPService, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
-    fields::{BoolField, EmbeddingField, FieldIndexer, FieldsToIndex, NumberField, StringField},
-    CollectionWriteOperation, SerializedFieldIndexer, WriteOperation,
+    embedding::EmbeddingCalculationRequest, fields::FieldsToIndex, CollectionField,
+    CollectionWriteOperation, OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
 pub struct CollectionWriter {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
-    fields: DashMap<String, (ValueType, Arc<Box<dyn FieldIndexer>>)>,
+    fields: DashMap<String, (ValueType, CollectionField)>,
 
-    document_count: AtomicU64,
+    collection_document_count: AtomicU64,
 
     field_id_generator: AtomicU16,
     field_id_by_name: DashMap<String, FieldId>,
+
+    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
 
 impl CollectionWriter {
@@ -44,15 +48,17 @@ impl CollectionWriter {
         id: CollectionId,
         description: Option<String>,
         default_language: LanguageDTO,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> Self {
         Self {
             id: id.clone(),
             description,
             default_language,
-            document_count: Default::default(),
+            collection_document_count: Default::default(),
             fields: Default::default(),
             field_id_by_name: DashMap::new(),
             field_id_generator: AtomicU16::new(0),
+            embedding_sender,
         }
     }
 
@@ -61,7 +67,7 @@ impl CollectionWriter {
             id: self.id.clone(),
             description: self.description.clone(),
             document_count: self
-                .document_count
+                .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             fields: self
                 .fields
@@ -71,14 +77,23 @@ impl CollectionWriter {
         }
     }
 
-    pub(super) async fn process_new_document(
+    pub fn set_embedding_hook(&self, hook_name: HookName) {
+        let mut field = match self.fields.get_mut("___orama_auto_embedding") {
+            None => return,
+            Some(field) => field,
+        };
+
+        field.1.set_embedding_hook(hook_name);
+    }
+
+    pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
         doc: Document,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
+        sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
-        self.document_count
+        self.collection_document_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         sender
@@ -86,40 +101,30 @@ impl CollectionWriter {
                 self.id.clone(),
                 CollectionWriteOperation::InsertDocument {
                     doc_id,
-                    doc: doc.clone(),
+                    doc: doc.into_raw()?,
                 },
             ))
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
 
         let fields_to_index = self
-            .get_fields_to_index(doc.clone(), embedding_service.clone(), sender)
+            .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
             .await
             .context("Cannot get fields to index")?;
 
         let flatten = doc.clone().into_flatten();
-        for entry in fields_to_index.iter() {
-            let (field_name, (_, field)) = entry.pair();
 
-            let field_id = self.get_field_id_by_name(field_name);
+        for entry in fields_to_index {
+            let (_, field) = entry.value();
 
-            let write_operations = field.get_write_operations(
-                self.id.clone(),
-                doc_id,
-                field_name,
-                field_id,
-                &flatten,
-            )?;
-            for write_operation in write_operations {
-                sender
-                    .send(write_operation)
-                    .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
-            }
+            field
+                .get_write_operations(doc_id, &flatten, sender.clone())
+                .await?;
         }
 
         Ok(())
     }
 
-    pub(super) fn get_field_id_by_name(&self, name: &str) -> FieldId {
+    fn get_field_id_by_name(&self, name: &str) -> FieldId {
         use dashmap::Entry;
 
         let v = self.field_id_by_name.get(name);
@@ -147,12 +152,12 @@ impl CollectionWriter {
         }
     }
 
-    pub(super) fn value_to_typed_field(&self, value_type: ValueType) -> TypedField {
+    fn value_to_typed_field(&self, value_type: ValueType) -> Option<TypedField> {
         match value_type {
-            ValueType::Scalar(ScalarType::String) => TypedField::Text(self.default_language),
-            ValueType::Scalar(ScalarType::Number) => TypedField::Number,
-            ValueType::Scalar(ScalarType::Boolean) => TypedField::Bool,
-            x => unimplemented!("Field type not implemented yet {:?}", x),
+            ValueType::Scalar(ScalarType::String) => Some(TypedField::Text(self.default_language)),
+            ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
+            ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
+            _ => None, // @todo: support other types
         }
     }
 
@@ -162,28 +167,54 @@ impl CollectionWriter {
         Arc::new(parser)
     }
 
-    #[instrument(skip(self, sender, embedding_service))]
-    pub(super) async fn create_field(
+    pub async fn register_fields(
+        &self,
+        typed_fields: HashMap<String, TypedField>,
+        sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
+    ) -> Result<()> {
+        for (field_name, field_type) in typed_fields {
+            let field_id = self.get_field_id_by_name(&field_name);
+
+            self.create_field(
+                field_id,
+                field_name,
+                field_type,
+                self.embedding_sender.clone(),
+                sender.clone(),
+                hooks_runtime.clone(),
+            )
+            .await
+            .context("Cannot create field")?;
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self, sender, embedding_sender))]
+    async fn create_field(
         &self,
         field_id: FieldId,
         field_name: String,
         typed_field: TypedField,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
+        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         match &typed_field {
             TypedField::Embedding(embedding_field) => {
-                let model = embedding_service
-                    .get_model(embedding_field.model_name.clone())
-                    .await?;
                 self.fields.insert(
                     field_name.clone(),
                     (
                         ValueType::Complex(ComplexType::Embedding),
-                        Arc::new(Box::new(EmbeddingField::new(
-                            model,
+                        CollectionField::new_embedding(
+                            embedding_field.model,
                             embedding_field.document_fields.clone(),
-                        ))),
+                            embedding_sender,
+                            hooks_runtime,
+                            self.id.clone(),
+                            field_id,
+                        ),
                     ),
                 );
             }
@@ -193,7 +224,12 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::String),
-                        Arc::new(Box::new(StringField::new(parser))),
+                        CollectionField::new_string(
+                            parser,
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }
@@ -202,7 +238,7 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::Number),
-                        Arc::new(Box::new(NumberField::new())),
+                        CollectionField::new_number(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
@@ -211,7 +247,7 @@ impl CollectionWriter {
                     field_name.clone(),
                     (
                         ValueType::Scalar(ScalarType::Boolean),
-                        Arc::new(Box::new(BoolField::new())),
+                        CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
@@ -232,12 +268,12 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn get_fields_to_index(
+    async fn get_fields_to_index(
         &self,
         doc: Document,
-        embedding_service: Arc<EmbeddingService>,
-        sender: &Sender<WriteOperation>,
-    ) -> Result<FieldsToIndex> {
+        sender: OperationSender,
+        hooks_runtime: Arc<HooksRuntime>,
+    ) -> Result<&FieldsToIndex> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
 
@@ -248,29 +284,31 @@ impl CollectionWriter {
 
             let field_id = self.get_field_id_by_name(&field_name);
 
-            let typed_field = self.value_to_typed_field(value_type);
-
-            self.create_field(
-                field_id,
-                field_name,
-                typed_field,
-                embedding_service.clone(),
-                sender,
-            )
-            .await
-            .context("Cannot create field")?;
+            // @todo: add support to other types
+            if let Some(typed_field) = self.value_to_typed_field(value_type) {
+                self.create_field(
+                    field_id,
+                    field_name,
+                    typed_field,
+                    self.embedding_sender.clone(),
+                    sender.clone(),
+                    hooks_runtime.clone(),
+                )
+                .await
+                .context("Cannot create field")?;
+            }
         }
 
-        Ok(self.fields.clone())
+        Ok(&self.fields)
     }
 
-    pub(super) fn commit(&mut self, path: PathBuf) -> Result<()> {
+    pub fn commit(&mut self, path: PathBuf) -> Result<()> {
         // `&mut self` is not used, but it needed to ensure no other thread is using the collection
         info!("Committing collection {}", self.id.0);
 
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
-        let dump = CollectionDump {
+        let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
             default_language: self.default_language,
@@ -284,7 +322,7 @@ impl CollectionWriter {
                 })
                 .collect(),
             document_count: self
-                .document_count
+                .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             field_id_generator: self
                 .field_id_generator
@@ -294,9 +332,9 @@ impl CollectionWriter {
                 .iter()
                 .map(|e| (e.key().clone(), *e.value()))
                 .collect(),
-        };
+        });
 
-        BufferedFile::create(path.join("info.json"))
+        BufferedFile::create_or_overwrite(path.join("info.json"))
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
@@ -304,59 +342,84 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub(super) async fn load(
+    pub async fn load(
         &mut self,
         path: PathBuf,
-        embedding_service: Arc<EmbeddingService>,
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
     ) -> Result<()> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize collection info")?;
 
+        let CollectionDump::V1(dump) = dump;
+
         self.id = dump.id;
         self.description = dump.description;
         self.default_language = dump.default_language;
-        for (name, serialized) in dump.fields {
-            let (value_type, indexer): (ValueType, Arc<Box<dyn FieldIndexer>>) = match serialized {
+        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
+
+        for (field_name, serialized) in dump.fields {
+            let field_id = match self.field_id_by_name.get(&field_name) {
+                None => {
+                    return Err(anyhow!(
+                        "Field {} not found in field_id_by_name",
+                        field_name
+                    ));
+                }
+                Some(field_id) => *field_id,
+            };
+            let (value_type, collection_field): (ValueType, CollectionField) = match serialized {
                 SerializedFieldIndexer::String(locale) => (
                     ValueType::Scalar(ScalarType::String),
-                    Arc::new(Box::new(StringField::new(Arc::new(
-                        TextParser::from_locale(locale),
-                    )))),
+                    CollectionField::new_string(
+                        nlp_service.get(locale),
+                        self.id.clone(),
+                        field_id,
+                        field_name.clone(),
+                    ),
                 ),
                 SerializedFieldIndexer::Number => (
                     ValueType::Scalar(ScalarType::Number),
-                    Arc::new(Box::new(NumberField::new())),
+                    CollectionField::new_number(self.id.clone(), field_id, field_name.clone()),
                 ),
                 SerializedFieldIndexer::Bool => (
                     ValueType::Scalar(ScalarType::Boolean),
-                    Arc::new(Box::new(BoolField::new())),
+                    CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
                 ),
                 SerializedFieldIndexer::Embedding(model, fields) => (
                     ValueType::Complex(ComplexType::Embedding),
-                    Arc::new(Box::new(EmbeddingField::new(
-                        embedding_service
-                            .get_model(model)
-                            .await
-                            .context("Cannot load model")?,
+                    CollectionField::new_embedding(
+                        model.0,
                         fields,
-                    ))),
+                        self.embedding_sender.clone(),
+                        hooks_runtime.clone(),
+                        self.id.clone(),
+                        field_id,
+                    ),
                 ),
             };
-            self.fields.insert(name, (value_type, indexer));
+            self.fields
+                .insert(field_name, (value_type, collection_field));
         }
-        self.document_count
+        self.collection_document_count
             .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
         self.field_id_generator = AtomicU16::new(dump.field_id_generator);
-        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
 
         Ok(())
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CollectionDump {
+#[serde(tag = "version")]
+enum CollectionDump {
+    #[serde(rename = "1")]
+    V1(CollectionDumpV1),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CollectionDumpV1 {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,

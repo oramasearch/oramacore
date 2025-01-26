@@ -1,3 +1,4 @@
+use anyhow::Result;
 use anyhow::{Context, Error};
 use deno_core::{JsRuntime, RuntimeOptions};
 use std::sync::mpsc;
@@ -83,12 +84,12 @@ impl JavaScript {
         Self { sender }
     }
 
-    pub async fn eval<T: serde::Serialize>(
+    pub async fn eval<T: serde::Serialize, R: serde::de::DeserializeOwned>(
         &self,
         operation: Operation,
         code: String,
         input: T,
-    ) -> Result<String, Error> {
+    ) -> Result<R> {
         let input_json = serde_json::to_value(input)?;
         let (response_tx, response_rx) = oneshot::channel();
         let job = Job {
@@ -101,6 +102,8 @@ impl JavaScript {
         self.sender
             .send(job)
             .map_err(|_| Error::msg("Runtime thread disconnected"))?;
-        response_rx.await?
+        let res = response_rx.await??;
+
+        serde_json::from_str(&res).context("Unable to deserialize string into valid data structure")
     }
 }
