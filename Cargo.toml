@@ -76,9 +76,6 @@ rand_chacha = "0.3.1"
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 quick-js = "0.4.1"
 
-simsimd = "6.2.3"
-approx = "0.5.1"
-
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

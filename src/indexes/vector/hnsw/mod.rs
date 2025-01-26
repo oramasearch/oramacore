@@ -6,10 +6,8 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
-/// A function pointer type for distance calculations:
 type DistanceFn = fn(&[f32], &[f32]) -> Option<f64>;
 
-/// A simple distance function: 1 - dot(a,b).
 #[inline]
 fn default_distance(a: &[f32], b: &[f32]) -> Option<f64> {
     Some(1.0 - dot(a, b))
@@ -79,11 +77,9 @@ impl<K: Ord + Hash + Clone + Debug> LayerNode<K> {
     }
 }
 
-/// A single layer of the HNSW graph.
 #[derive(Clone, Debug)]
 pub struct Layer<K: Ord + Hash + Clone + Debug> {
     pub nodes: HashMap<K, Box<LayerNode<K>>>,
-    /// Possibly store a node key that is an "entry point"
     pub entry_point: Option<K>,
 }
 
