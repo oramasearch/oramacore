@@ -588,4 +588,74 @@ mod new_tests {
         let results = graph.search(&[0.5, 0.5], 2);
         assert_eq!(results.len(), 2);
     }
+
+    #[test]
+    fn real_world_test() {
+        use serde::Deserialize;
+        use serde_json;
+
+        #[derive(Debug, Deserialize, Clone)]
+        struct Question(String, Vec<i32>);
+
+        let json_str =
+            include_str!("datasets_bge-base_12k-questions-embeddings-quantized-32-bytes.json");
+        let questions: Vec<Question> = serde_json::from_str(json_str).unwrap();
+
+        dbg!(format!(
+            "loaded {} questions and embeddings...",
+            questions.len()
+        ));
+
+        let mut graph = Graph::new();
+        graph.m = 4;
+        graph.ef_search = 10;
+        graph.ef_construction = 10;
+        graph
+            .add(
+                questions
+                    .iter()
+                    .take(200)
+                    .enumerate()
+                    .map(|(i, q)| {
+                        if i % 100 == 0 {
+                            println!("Inserted {} nodes", i);
+                        }
+                        Node::new(i as i32, q.1.iter().map(|&x| x as f32).collect())
+                    })
+                    .collect(),
+            )
+            .unwrap();
+
+        println!("Inserted all documents into the graph.");
+
+        let target: Vec<f32> = vec![
+            168, 231, 129, 67, 66, 165, 136, 247, 49, 19, 47, 48, 174, 34, 217, 104, 170, 86, 197,
+            116, 153, 201, 81, 117, 237, 99, 54, 137, 206, 2, 229, 204,
+        ]
+        .iter()
+        .map(|&x| x as f32)
+        .collect();
+
+        println!("Performing search on the graph...");
+
+        let graph_results = graph.search(&target, 10);
+
+        println!("Performing brute-force search...");
+        let brute_force_results = brute_force_search(
+            &questions
+                .iter()
+                .take(200)
+                .enumerate()
+                .map(|(i, q)| (i as i32, q.1.iter().map(|&x| x as f32).collect()))
+                .collect::<Vec<_>>(),
+            &target,
+            10,
+            default_distance,
+        );
+
+        dbg!(graph_results.clone());
+        dbg!(brute_force_results.clone());
+
+        assert_eq!(graph_results[0].key, brute_force_results[0].0);
+    }
 }
