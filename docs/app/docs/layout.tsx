@@ -11,7 +11,6 @@ const docsOptions: DocsLayoutProps = {
       transform(option, node) {
         const meta = source.getNodeMeta(node);
         if (!meta) {
-          console.log('No meta for', node);
           return option;
         }
 
