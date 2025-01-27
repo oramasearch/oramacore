@@ -24,6 +24,7 @@ use crate::{
 
 fn create_oramacore_config() -> OramacoreConfig {
     OramacoreConfig {
+        log: Default::default(),
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -46,6 +47,7 @@ fn create_oramacore_config() -> OramacoreConfig {
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
+                javascript_queue_limit: 10_000,
             },
         },
         reader_side: ReadSideConfig {
@@ -78,7 +80,7 @@ async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<Read
     Ok((write_side, read_side))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_simple_text_search() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -138,7 +140,7 @@ async fn test_simple_text_search() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_filter_on_unknown_field() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -168,7 +170,7 @@ async fn test_filter_on_unknown_field() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_filter_field_with_from_filter_type() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -213,7 +215,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_commit_and_load() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
@@ -299,7 +301,7 @@ async fn test_commit_and_load() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_collection_id_already_exists() -> Result<()> {
     let (write_side, _) = create(create_oramacore_config()).await?;
 
@@ -323,7 +325,7 @@ async fn test_collection_id_already_exists() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_get_collections() -> Result<()> {
     let (write_side, _) = create(create_oramacore_config()).await?;
 
@@ -344,7 +346,7 @@ async fn test_get_collections() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_search_documents_order() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -386,7 +388,7 @@ async fn test_search_documents_order() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_search_documents_limit() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -432,7 +434,7 @@ async fn test_search_documents_limit() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_filter_number() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -575,7 +577,7 @@ async fn test_filter_number() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_facets_number() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -662,7 +664,7 @@ async fn test_facets_number() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_filter_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -724,7 +726,7 @@ async fn test_filter_bool() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_facets_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -775,7 +777,7 @@ async fn test_facets_bool() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_facets_should_based_on_term() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
@@ -928,7 +930,7 @@ async fn test_empty_term() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_vector_search_grpc() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
@@ -996,7 +998,7 @@ async fn test_vector_search_grpc() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_handle_bool() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
 
@@ -1085,7 +1087,7 @@ async fn test_handle_bool() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_commit_and_load2() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let config = create_oramacore_config();

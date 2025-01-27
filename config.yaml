@@ -4,6 +4,10 @@ http:
     allow_cors: true
     with_prometheus: true
 
+log:
+    # Comment the following line to disable the logging
+    file_path: "./log.log"
+
 writer_side:
     output: in-memory
     config:
@@ -17,13 +21,16 @@ writer_side:
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
         default_embedding_model: MultilingualE5Small
+        # The maximum number of request to javascript runtime that can be stored in the queue
+        # NB: the elements are in memory, so be careful with this value
+        javascript_queue_limit: 50
 
 reader_side:
     input: in-memory
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
-        insert_batch_commit_size: 300
+        insert_batch_commit_size: 3000
 
 ai_server:
     scheme: http
@@ -37,7 +44,7 @@ ai_server:
         default_model_group: small
         dynamically_load_models: false
         execution_providers:
-            - CUDAExecutionProvider
+            # - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
     LLMs:

@@ -99,6 +99,7 @@ impl CollectionsWriter {
         // Send event & Register field should be inside the lock transaction
         sender
             .send(WriteOperation::CreateCollection { id: id.clone() })
+            .await
             .context("Cannot send create collection")?;
         collection
             .register_fields(typed_fields, sender.clone(), hooks_runtime)
@@ -120,14 +121,11 @@ impl CollectionsWriter {
     pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.config.data_dir;
 
-        // This `write lock` will not change the content of the collections
-        // But it is requered to ensure that the collections are not being modified
-        // while we are saving them to disk
-        let mut collections = self.collections.write().await;
+        let collections = self.collections.read().await;
 
         std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
 
-        for (collection_id, collection) in collections.iter_mut() {
+        for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
             collection.commit(collection_dir)?;
         }
@@ -228,7 +226,7 @@ impl Deref for CollectionWriteLock<'_> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_writer_sync_send() {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsWriter>();

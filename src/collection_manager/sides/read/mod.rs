@@ -10,7 +10,7 @@ use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 use serde::Deserialize;
 use tokio::sync::RwLock;
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
     ai::AIService,
@@ -97,7 +97,7 @@ impl ReadSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         let token_scores = collection.search(search_params).await?;
 
-        let facets = collection.calculate_facets(&token_scores, facets)?;
+        let facets = collection.calculate_facets(&token_scores, facets).await?;
 
         let count = token_scores.len();
 
@@ -134,6 +134,8 @@ impl ReadSide {
     }
 
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
+        trace!(offset=?op.0, "Updating read side");
+
         let (offset, op) = op;
         match op {
             WriteOperation::CreateCollection { id } => {
@@ -160,8 +162,10 @@ impl ReadSide {
                 if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
                     collection_operation
                 {
+                    trace!(?doc_id, "Inserting document");
                     collection.increment_document_count();
                     self.document_storage.add_document(doc_id, doc).await?;
+                    trace!(?doc_id, "Document inserted");
                 } else {
                     collection.update(offset, collection_operation).await?;
                 }
@@ -179,8 +183,13 @@ impl ReadSide {
         drop(lock);
 
         if should_commit {
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
+        } else {
+            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
+
+        trace!("Updating done");
 
         Ok(())
     }

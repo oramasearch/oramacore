@@ -104,6 +104,20 @@ hurl --very-verbose --test --variables-file api-test.hurl.property embedding-api
 
 NB: you need to have the server running before running the tests.
 
+## Opentelemetry
+
+OramaCore integrates Grafana and Prometheus for monitoring and collenting metrics.
+Make sure your OramaCore configuration enables the prometheus exporter (`http.with_prometheus: true`).
+Change the `otel/prometheus.yml` file to match your IP configuration and run the following command:
+```
+docker run --rm --name prometheus -d -p 9090:9090 -v $(pwd)/otel/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+docker run --rm --name grafana -d -p 3000:3000 grafana/grafana
+```
+
+We have a Grafana dashboard available at `otel/OramaCore Dashboard.json`. You can import it into your Grafana instance.
+
+NB: the default username and password for Grafana are `admin` and `admin`.
+
 ## License
 
 [AGPLv3](/LICENSE.md)

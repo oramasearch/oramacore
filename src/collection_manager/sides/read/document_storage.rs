@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Ok, Result};
 
 use crate::{
     file_utils::{create_or_overwrite, read_file},
+    metrics::{CommitLabels, COMMIT_METRIC},
     types::{DocumentId, RawJSONDocument},
 };
 
@@ -177,6 +178,11 @@ impl DocumentStorage {
         // We should follow the same path of the indexes.
         // TODO: fix me
 
+        let m = COMMIT_METRIC.create(CommitLabels {
+            side: "read",
+            collection: "".to_string(),
+            index_type: "document",
+        });
         let mut lock = self.uncommitted.write().await;
         let uncommitted: Vec<_> = lock.drain().collect();
         drop(lock);
@@ -185,6 +191,7 @@ impl DocumentStorage {
             .add(uncommitted)
             .await
             .context("Cannot commit documents")?;
+        drop(m);
 
         Ok(())
     }

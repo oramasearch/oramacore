@@ -55,6 +55,7 @@ async fn start_server() {
     let address = create_grpc_server().await.unwrap();
 
     let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
+        log: Default::default(),
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -75,6 +76,7 @@ async fn start_server() {
                 embedding_queue_limit: 50,
                 default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
                 insert_batch_commit_size: 10,
+                javascript_queue_limit: 10_000,
             },
         },
         reader_side: ReadSideConfig {
@@ -92,7 +94,7 @@ async fn start_server() {
 
     let collections_reader = collections_reader.unwrap();
     tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
+        while let Some(op) = receiver.recv().await {
             let r = collections_reader.update(op).await;
             if let Err(e) = r {
                 println!("--------");

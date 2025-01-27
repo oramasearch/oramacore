@@ -167,6 +167,12 @@ impl UncommittedVectorFieldIndexTaken<'_> {
     pub fn current_offset(&self) -> Offset {
         self.current_offset
     }
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
     pub fn close(self) {
         let mut lock = match self.index.inner.write() {
             Ok(lock) => lock,

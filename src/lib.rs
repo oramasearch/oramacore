@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
@@ -61,8 +61,14 @@ pub struct ReadSideConfig {
     pub config: IndexesConfig,
 }
 
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct LogConfig {
+    pub file_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct OramacoreConfig {
+    pub log: LogConfig,
     pub http: HttpConfig,
     pub ai_server: AIServiceConfig,
     pub writer_side: WriteSideConfig,
@@ -70,6 +76,8 @@ pub struct OramacoreConfig {
 }
 
 pub async fn start(config: OramacoreConfig) -> Result<()> {
+    info!("Starting oramacore");
+
     let prometheus_hadler = if config.http.with_prometheus {
         Some(
             PrometheusBuilder::new()
@@ -97,7 +105,7 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
 
 pub fn connect_write_and_read_side(mut receiver: OperationReceiver, read_side: Arc<ReadSide>) {
     tokio::spawn(async move {
-        while let Ok(op) = receiver.recv().await {
+        while let Some(op) = receiver.recv().await {
             read_side.update(op).await.expect("OUCH!");
         }
     });
@@ -117,10 +125,13 @@ pub async fn build_orama(
         ..
     } = config;
 
+    info!("Building ai_service");
     let ai_service = AIService::new(ai_server);
     let ai_service = Arc::new(ai_service);
 
-    let hooks_runtime = Arc::new(HooksRuntime::new());
+    info!("Building hooks_runtime");
+    let hooks_runtime = HooksRuntime::new(50).await;
+    let hooks_runtime = Arc::new(hooks_runtime);
 
     let (sender, receiver) = channel(10_000);
 
@@ -135,7 +146,10 @@ pub async fn build_orama(
         "Only in-memory is supported"
     );
 
+    info!("Building nlp_service");
     let nlp_service = Arc::new(NLPService::new());
+
+    info!("Building write_side");
     let mut write_side = WriteSide::new(
         sender.clone(),
         writer_side.config,
@@ -145,15 +159,16 @@ pub async fn build_orama(
     );
     write_side.load().await.context("Cannot load write side")?;
 
-    let mut collections_reader = ReadSide::try_new(ai_service, nlp_service, reader_side.config)
+    info!("Building read_side");
+    let mut read_side = ReadSide::try_new(ai_service, nlp_service, reader_side.config)
         .context("Cannot create read side")?;
-    collections_reader
+    read_side
         .load()
         .await
         .context("Cannot load collection reader")?;
 
     let write_side = Some(Arc::new(write_side));
-    let collections_reader = Some(Arc::new(collections_reader));
+    let collections_reader = Some(Arc::new(read_side));
 
     Ok((write_side, collections_reader, receiver))
 }

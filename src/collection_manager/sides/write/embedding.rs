@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::{
     ai::{AIService, OramaModel},
@@ -10,7 +10,9 @@ use crate::{
         dto::FieldId,
         sides::{CollectionWriteOperation, DocumentFieldIndexOperation},
     },
-    metrics::{EmbeddingCalculationLabels, EMBEDDING_CALCULATION_METRIC},
+    metrics::{
+        EmbeddingCalculationLabels, Empty, EMBEDDING_CALCULATION_METRIC, EMBEDDING_REQUEST_GAUDGE,
+    },
     types::{CollectionId, DocumentId},
 };
 
@@ -71,6 +73,7 @@ where
                         DocumentFieldIndexOperation::IndexEmbedding { value: output },
                     ),
                 ))
+                .await
                 .unwrap();
         }
 
@@ -85,25 +88,28 @@ where
 pub fn start_calculate_embedding_loop(
     ai_service: Arc<AIService>,
     mut receiver: Receiver<EmbeddingCalculationRequest>,
-    limit: usize,
+    limit: u32,
 ) {
     // `limit` is the number of items to process in a batch
     assert!(limit > 0);
 
     tokio::task::spawn(async move {
-        let mut buffer = Vec::with_capacity(limit);
-
+        let mut buffer = Vec::with_capacity(limit as usize);
         let mut cache: HashMap<OramaModel, Vec<EmbeddingCalculationRequestInput>> =
             Default::default();
 
         loop {
             // `recv_many` waits for at least one available item
-            let item_count = receiver.recv_many(&mut buffer, limit).await;
+            let item_count = receiver.recv_many(&mut buffer, limit as usize).await;
             // `recv_many` returns 0 if the channel is closed
             if item_count == 0 {
+                warn!("Embedding calculation receiver closed");
                 break;
             }
 
+            EMBEDDING_REQUEST_GAUDGE
+                .create(Empty {})
+                .decrement_by(item_count as u32);
             for item in buffer.drain(..) {
                 let EmbeddingCalculationRequest { model, input } = item;
 
@@ -113,5 +119,7 @@ pub fn start_calculate_embedding_loop(
 
             process(ai_service.clone(), cache.drain()).await.unwrap();
         }
+
+        warn!("Stop embedding calculation loop");
     });
 }

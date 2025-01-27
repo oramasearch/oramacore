@@ -1,7 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, sync::RwLock};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
+use tokio::sync::RwLock;
 
 use crate::{file_utils::BufferedFile, types::DocumentId};
 
@@ -39,23 +40,20 @@ impl PostingIdStorage {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn get_posting(&self, posting_id: &u64) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
-        let lock = match self.content.read() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
+    pub async fn get_posting(
+        &self,
+        posting_id: &u64,
+    ) -> Result<Option<Vec<(DocumentId, Vec<usize>)>>> {
+        let lock = self.content.read().await;
         Ok(lock.get(posting_id).cloned())
     }
 
-    pub fn apply_delta(
+    pub async fn apply_delta(
         &self,
         delta: DashMap<u64, Vec<(DocumentId, Vec<usize>)>>,
         new_path: PathBuf,
     ) -> Result<()> {
-        let mut lock = match self.content.write() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
+        let mut lock = self.content.write().await;
         for (posting_id, posting) in delta {
             let entry = lock.entry(posting_id).or_default();
             entry.extend(posting);

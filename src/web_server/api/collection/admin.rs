@@ -8,7 +8,7 @@ use axum::{
 };
 use axum_openapi3::*;
 use serde_json::json;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::{
     collection_manager::{
@@ -117,9 +117,16 @@ async fn add_documents(
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
+    info!("Adding documents to collection {:?}", collection_id);
     match write_side.write(collection_id, json).await {
-        Ok(_) => {}
+        Ok(_) => {
+            info!("Documents added to collection");
+        }
         Err(e) => {
+            error!("Error adding documents to collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),

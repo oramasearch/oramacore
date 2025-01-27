@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
+use crate::metrics::{Empty, OPERATION_GAUGE};
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
 use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
@@ -71,7 +72,7 @@ pub struct Offset(pub u64);
 #[derive(Clone)]
 pub struct OperationSender {
     offset_counter: Arc<AtomicU64>,
-    sender: tokio::sync::broadcast::Sender<(Offset, WriteOperation)>,
+    sender: tokio::sync::mpsc::Sender<(Offset, WriteOperation)>,
 }
 
 impl OperationSender {
@@ -86,36 +87,41 @@ impl OperationSender {
             .store(offset.0, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub fn send(
+    pub async fn send(
         &self,
         operation: WriteOperation,
-    ) -> Result<(), tokio::sync::broadcast::error::SendError<(Offset, WriteOperation)>> {
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<(Offset, WriteOperation)>> {
+        OPERATION_GAUGE.create(Empty {}).increment_by(1);
         let offset = self
             .offset_counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.sender.send((Offset(offset), operation))?;
+        self.sender.send((Offset(offset), operation)).await?;
         Ok(())
     }
 }
 
 pub struct OperationReceiver {
-    receiver: tokio::sync::broadcast::Receiver<(Offset, WriteOperation)>,
+    receiver: tokio::sync::mpsc::Receiver<(Offset, WriteOperation)>,
 }
 
 impl OperationReceiver {
-    pub async fn recv(
-        &mut self,
-    ) -> Result<(Offset, WriteOperation), tokio::sync::broadcast::error::RecvError> {
-        self.receiver.recv().await
+    pub async fn recv(&mut self) -> Option<(Offset, WriteOperation)> {
+        let r = self.receiver.recv().await;
+        OPERATION_GAUGE.create(Empty {}).decrement_by(1);
+        r
     }
 }
 
 pub fn channel(capacity: usize) -> (OperationSender, OperationReceiver) {
-    let (sender, receiver) = tokio::sync::broadcast::channel(capacity);
+    let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
 
     (
         OperationSender {
-            offset_counter: Arc::new(AtomicU64::new(0)),
+            //  We internally use `0` to represent "no offset"
+            // So, we start at `1` to avoid confusion
+            // This is a bit of a hack, we should model this better
+            // TODO: model this better
+            offset_counter: Arc::new(AtomicU64::new(1)),
             sender,
         },
         OperationReceiver { receiver },

@@ -51,6 +51,8 @@ impl VectorIndex {
         offset: Offset,
         data: Vec<(DocumentId, FieldId, Vec<Vec<f32>>)>,
     ) -> Result<()> {
+        trace!("Inserting vector values");
+
         for (doc_id, field_id, vectors) in data {
             if vectors.is_empty() {
                 continue;
@@ -61,11 +63,16 @@ impl VectorIndex {
                 .or_insert_with(|| UncommittedVectorFieldIndex::new(vectors[0].len(), offset));
             uncommitted.insert(offset, (doc_id, vectors))?;
         }
+
+        trace!("Inserted vector values");
+
         Ok(())
     }
 
     #[instrument(skip(self, data_dir))]
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        info!("Committing vector index");
+
         std::fs::create_dir_all(&data_dir).context("Cannot create directory for vector index")?;
 
         let all_field_ids = self
@@ -87,10 +94,11 @@ impl VectorIndex {
                 .collect(),
         };
 
-        info!("Committing vector index with fields: {:?}", all_field_ids);
+        info!("Committing vector fields {:?}", all_field_ids);
 
         for field_id in all_field_ids {
-            trace!("Committing field {:?}", field_id);
+            info!("Committing field {:?}", field_id);
+
             let uncommitted = self.uncommitted.get(&field_id);
 
             let uncommitted = match uncommitted {
@@ -102,10 +110,22 @@ impl VectorIndex {
             };
 
             let mut taken = uncommitted.take();
+            if taken.is_empty() {
+                info!("Everything is already committed. Skip dumping");
+                continue;
+            }
+
+            let committed = self.committed.entry(field_id);
+
+            info!(
+                ?field_id,
+                committed = matches!(committed, dashmap::mapref::entry::Entry::Occupied(_)),
+                uncommitted_count = taken.len(),
+                "Committing vector index"
+            );
 
             let offset = taken.current_offset();
-
-            let mut committed = self.committed.entry(field_id).or_insert_with(|| {
+            let mut committed = committed.or_insert_with(|| {
                 trace!(dimentsion=?taken.dimension, "Creating new committed index");
                 CommittedVectorFieldIndex::new(taken.dimension, offset)
             });
@@ -124,14 +144,17 @@ impl VectorIndex {
             committed.commit(data_dir)?;
 
             info.fields.insert(field_id, offset);
+
+            info!("Field committed");
         }
 
+        trace!("Dumping vector index info");
         let info = VectorIndexInfo::V1(info);
-
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
             .write_json_data(&info)
             .context("Cannot serialize info.json file")?;
+        trace!("Vector index info dumped");
 
         Ok(())
     }

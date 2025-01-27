@@ -68,7 +68,7 @@ impl CommittedStringFieldIndex {
         self.global_info.clone()
     }
 
-    pub fn search(
+    pub async fn search(
         &self,
         tokens: &[String],
         boost: f32,
@@ -82,12 +82,14 @@ impl CommittedStringFieldIndex {
 
         if tokens.len() == 1 {
             self.search_without_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+                .await
         } else {
             self.search_with_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+                .await
         }
     }
 
-    pub fn search_with_phrase_match(
+    pub async fn search_with_phrase_match(
         &self,
         tokens: &[String],
         boost: f32,
@@ -116,7 +118,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id).await? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -143,6 +145,7 @@ impl CommittedStringFieldIndex {
                     let field_length = self
                         .document_lengths_per_document
                         .get_length(&doc_id)
+                        .await
                         .context("Failed to get document length")?;
                     v.matches.push((
                         field_length,
@@ -205,7 +208,7 @@ impl CommittedStringFieldIndex {
         Ok(())
     }
 
-    pub fn search_without_phrase_match(
+    pub async fn search_without_phrase_match(
         &self,
         tokens: &[String],
         boost: f32,
@@ -228,7 +231,7 @@ impl CommittedStringFieldIndex {
             // TODO: think about this
 
             while let Some((_, posting_list_id)) = stream.next() {
-                let postings = match self.storage.get_posting(&posting_list_id)? {
+                let postings = match self.storage.get_posting(&posting_list_id).await? {
                     Some(postings) => postings,
                     None => {
                         warn!("posting list not found: skipping");
@@ -248,6 +251,7 @@ impl CommittedStringFieldIndex {
                     let field_length = self
                         .document_lengths_per_document
                         .get_length(&doc_id)
+                        .await
                         .context("Failed to get document length")?;
                     let term_occurrence_in_field = positions.len() as u32;
 
@@ -280,7 +284,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_committed() -> Result<()> {
         let _ = tracing_subscriber::fmt::try_init();
 
@@ -299,13 +303,15 @@ mod tests {
 
         // Exact match
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let exact_match_output = scorer.get_scores();
         assert_eq!(
             exact_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -315,13 +321,15 @@ mod tests {
 
         // Prefix match
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hel".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hel".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let prefix_match_output = scorer.get_scores();
         assert_eq!(
             prefix_match_output.keys().cloned().collect::<HashSet<_>>(),
@@ -331,7 +339,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_committed_boost() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
@@ -348,35 +356,41 @@ mod tests {
 
         // 1.0
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let base_output = scorer.get_scores();
 
         // 0.5
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            0.5,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                0.5,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let half_boost_output = scorer.get_scores();
 
         // 2.0
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["hello".to_string()],
-            2.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["hello".to_string()],
+                2.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let twice_boost_output = scorer.get_scores();
 
         assert!(base_output[&DocumentId(0)] > half_boost_output[&DocumentId(0)]);
@@ -388,7 +402,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_committed_nonexistent_term() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
@@ -404,13 +418,15 @@ mod tests {
         .unwrap();
 
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["nonexistent".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["nonexistent".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let output = scorer.get_scores();
 
         assert!(
@@ -421,7 +437,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_committed_field_filter() -> Result<()> {
         let index = create_committed_string_field_index(vec![
             json!({
@@ -439,13 +455,15 @@ mod tests {
         // Exclude a doc
         {
             let mut scorer = BM25Scorer::new();
-            index.search(
-                &["hello".to_string()],
-                1.0,
-                &mut scorer,
-                Some(&HashSet::from_iter([DocumentId(0)])),
-                &index.get_global_info(),
-            )?;
+            index
+                .search(
+                    &["hello".to_string()],
+                    1.0,
+                    &mut scorer,
+                    Some(&HashSet::from_iter([DocumentId(0)])),
+                    &index.get_global_info(),
+                )
+                .await?;
             let output = scorer.get_scores();
             assert!(output.contains_key(&DocumentId(0)),);
             assert!(!output.contains_key(&DocumentId(1)),);
@@ -454,13 +472,15 @@ mod tests {
         // Exclude all docs
         {
             let mut scorer = BM25Scorer::new();
-            index.search(
-                &["hello".to_string()],
-                1.0,
-                &mut scorer,
-                Some(&HashSet::new()),
-                &index.get_global_info(),
-            )?;
+            index
+                .search(
+                    &["hello".to_string()],
+                    1.0,
+                    &mut scorer,
+                    Some(&HashSet::new()),
+                    &index.get_global_info(),
+                )
+                .await?;
             let output = scorer.get_scores();
             assert!(output.is_empty(),);
         }
@@ -468,7 +488,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_indexes_string_committed_large_text() -> Result<()> {
         let index = create_committed_string_field_index(vec![json!({
             "field": "word ".repeat(10000),
@@ -478,13 +498,15 @@ mod tests {
         .unwrap();
 
         let mut scorer = BM25Scorer::new();
-        index.search(
-            &["word".to_string()],
-            1.0,
-            &mut scorer,
-            None,
-            &index.get_global_info(),
-        )?;
+        index
+            .search(
+                &["word".to_string()],
+                1.0,
+                &mut scorer,
+                None,
+                &index.get_global_info(),
+            )
+            .await?;
         let output = scorer.get_scores();
         assert_eq!(
             output.len(),

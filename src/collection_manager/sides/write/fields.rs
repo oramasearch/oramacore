@@ -16,7 +16,10 @@ use crate::{
         sides::hooks::{HookName, HooksRuntime},
     },
     indexes::number::Number,
-    metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
+    metrics::{
+        Empty, StringCalculationLabels, EMBEDDING_REQUEST_GAUDGE, PENDING_EMBEDDING_REQUEST_GAUDGE,
+        STRING_CALCULATION_METRIC,
+    },
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
@@ -89,9 +92,9 @@ impl CollectionField {
         sender: OperationSender,
     ) -> Result<()> {
         match self {
-            CollectionField::Number(f) => f.get_write_operations(doc_id, doc, sender),
-            CollectionField::Bool(f) => f.get_write_operations(doc_id, doc, sender),
-            CollectionField::String(f) => f.get_write_operations(doc_id, doc, sender),
+            CollectionField::Number(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionField::Bool(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionField::String(f) => f.get_write_operations(doc_id, doc, sender).await,
             CollectionField::Embedding(f) => f.get_write_operations(doc_id, doc, sender).await,
         }
     }
@@ -171,7 +174,7 @@ impl NumberField {
 }
 
 impl NumberField {
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         doc_id: DocumentId,
         doc: &FlattenDocument,
@@ -195,7 +198,7 @@ impl NumberField {
             ),
         );
 
-        sender.send(op)?;
+        sender.send(op).await?;
 
         Ok(())
     }
@@ -221,7 +224,7 @@ impl BoolField {
         }
     }
 
-    fn get_write_operations(
+    async fn get_write_operations(
         &self,
         doc_id: DocumentId,
         doc: &FlattenDocument,
@@ -250,7 +253,7 @@ impl BoolField {
             ),
         );
 
-        sender.send(op)?;
+        sender.send(op).await?;
 
         Ok(())
     }
@@ -282,7 +285,7 @@ impl StringField {
         }
     }
 
-    pub fn get_write_operations(
+    pub async fn get_write_operations(
         &self,
         doc_id: DocumentId,
         doc: &FlattenDocument,
@@ -364,7 +367,7 @@ impl StringField {
             ),
         );
 
-        sender.send(op)?;
+        sender.send(op).await?;
 
         Ok(())
     }
@@ -459,6 +462,9 @@ impl EmbeddingField {
         // - "too long": we should chunk it in a smart way
         // TODO: implement that logic
 
+        PENDING_EMBEDDING_REQUEST_GAUDGE
+            .create(Empty {})
+            .increment_by_one();
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
                 model: self.model,
@@ -471,6 +477,10 @@ impl EmbeddingField {
                 },
             })
             .await?;
+        PENDING_EMBEDDING_REQUEST_GAUDGE
+            .create(Empty {})
+            .decrement_by_one();
+        EMBEDDING_REQUEST_GAUDGE.create(Empty {}).increment_by_one();
 
         Ok(())
     }
