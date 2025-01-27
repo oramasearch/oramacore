@@ -96,7 +96,7 @@ impl UncommittedNumberFieldIndex {
         // If this method is called twice at the same time, the result will be wrong
         // This is because:
         // - the state is flipped
-        // - the tree is cleared on `UncommittedNumberFieldIndexTaken` drop (which happens at the end of the commit)
+        // - the tree is cleared on `DataToCommit` drop (which happens at the end of the commit)
         // So, if we flipped the state twice, the tree will be cleared twice and we could lose data
         // TODO: investigate how to make this method safe to be called multiple times
 
@@ -123,46 +123,6 @@ impl UncommittedNumberFieldIndex {
             state_to_clear,
             current_offset,
         })
-    }
-}
-
-pub struct UncommittedNumberFieldIndexTaken<'index> {
-    tree: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)>>,
-    tree_len: usize,
-    state: bool,
-    index: &'index UncommittedNumberFieldIndex,
-    current_offset: Offset,
-}
-impl Iterator for UncommittedNumberFieldIndexTaken<'_> {
-    type Item = (Number, HashSet<DocumentId>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let a = self.tree.next();
-        println!("next {:?}", a);
-        a
-    }
-}
-impl UncommittedNumberFieldIndexTaken<'_> {
-    pub fn len(&self) -> usize {
-        self.tree_len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn current_offset(&self) -> Offset {
-        self.current_offset
-    }
-
-    async fn done(self) {
-        let mut lock = self.index.inner.write().await;
-        let tree = if self.state {
-            &mut lock.1.left
-        } else {
-            &mut lock.1.right
-        };
-        tree.clear();
     }
 }
 

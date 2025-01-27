@@ -16,7 +16,10 @@ use crate::{
         sides::hooks::{HookName, HooksRuntime},
     },
     indexes::number::Number,
-    metrics::{StringCalculationLabels, STRING_CALCULATION_METRIC},
+    metrics::{
+        Empty, StringCalculationLabels, EMBEDDING_REQUEST_GAUDGE, PENDING_EMBEDDING_REQUEST_GAUDGE,
+        STRING_CALCULATION_METRIC,
+    },
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
@@ -459,6 +462,9 @@ impl EmbeddingField {
         // - "too long": we should chunk it in a smart way
         // TODO: implement that logic
 
+        PENDING_EMBEDDING_REQUEST_GAUDGE
+            .create(Empty {})
+            .increment_by_one();
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
                 model: self.model,
@@ -471,6 +477,10 @@ impl EmbeddingField {
                 },
             })
             .await?;
+        PENDING_EMBEDDING_REQUEST_GAUDGE
+            .create(Empty {})
+            .decrement_by_one();
+        EMBEDDING_REQUEST_GAUDGE.create(Empty {}).increment_by_one();
 
         Ok(())
     }

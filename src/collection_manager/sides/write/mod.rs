@@ -17,7 +17,7 @@ use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -42,11 +42,13 @@ use crate::{
 pub struct CollectionsWriterConfig {
     pub data_dir: PathBuf,
     #[serde(default = "embedding_queue_limit_default")]
-    pub embedding_queue_limit: usize,
+    pub embedding_queue_limit: u32,
     #[serde(default = "embedding_model_default")]
     pub default_embedding_model: OramaModelSerializable,
     #[serde(default = "default_insert_batch_commit_size")]
     pub insert_batch_commit_size: u64,
+    #[serde(default = "javascript_queue_limit_default")]
+    pub javascript_queue_limit: u32,
 }
 
 pub struct WriteSide {
@@ -73,8 +75,9 @@ impl WriteSide {
 
         let insert_batch_commit_size = config.insert_batch_commit_size;
 
-        let (sx, rx) =
-            tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(config.embedding_queue_limit);
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+            config.embedding_queue_limit as usize,
+        );
 
         start_calculate_embedding_loop(ai_service, rx, config.embedding_queue_limit);
 
@@ -224,7 +227,7 @@ impl WriteSide {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
         } else {
-            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
+            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
 
         info!("Batch of documents inserted");
@@ -302,7 +305,10 @@ struct WriteSideInfoV1 {
     offset: Offset,
 }
 
-fn embedding_queue_limit_default() -> usize {
+fn embedding_queue_limit_default() -> u32 {
+    50
+}
+fn javascript_queue_limit_default() -> u32 {
     50
 }
 

@@ -126,17 +126,11 @@ impl Debug for HooksRuntime {
     }
 }
 
-impl Default for HooksRuntime {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl HooksRuntime {
-    pub fn new() -> Self {
+    pub async fn new(channel_limit: usize) -> Self {
         Self {
             hooks: HookStorage::new(),
-            javascript_runtime: JavaScript::new(),
+            javascript_runtime: JavaScript::new(channel_limit).await,
         }
     }
 

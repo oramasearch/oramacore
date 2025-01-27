@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use metrics::{counter, histogram, Label};
+use metrics::{counter, gauge, histogram, IntoF64, Label};
 use num_traits::cast;
 use tracing::error;
 
@@ -192,5 +192,61 @@ impl HistogramImpl {
 }
 pub static SEARCH_FILTER_HISTOGRAM: Histogram<SearchFilterLabels> = Histogram {
     key: "reader_search_filter_matched_historgram",
+    phantom: std::marker::PhantomData,
+};
+
+pub struct Gauge<Labels> {
+    key: &'static str,
+    phantom: std::marker::PhantomData<Labels>,
+}
+impl<Labels: Into<Vec<Label>>> Gauge<Labels> {
+    pub fn create(&self, labels: Labels) -> GaugeImpl {
+        GaugeImpl {
+            key: self.key,
+            labels: labels.into(),
+        }
+    }
+}
+pub struct GaugeImpl {
+    key: &'static str,
+    labels: Vec<Label>,
+}
+impl GaugeImpl {
+    pub fn increment_by_one(self) {
+        self.increment_by(1);
+    }
+    pub fn decrement_by_one(self) {
+        self.decrement_by(1);
+    }
+    pub fn increment_by<T: IntoF64>(self, value: T) {
+        let gauge = gauge!(self.key, self.labels);
+        gauge.increment(value);
+    }
+    pub fn decrement_by<T: IntoF64>(self, value: T) {
+        let gauge = gauge!(self.key, self.labels);
+        gauge.decrement(value);
+    }
+}
+
+pub struct Empty {}
+impl From<Empty> for Vec<Label> {
+    fn from(_: Empty) -> Self {
+        vec![]
+    }
+}
+pub static OPERATION_GAUGE: Gauge<Empty> = Gauge {
+    key: "operation_gauge",
+    phantom: std::marker::PhantomData,
+};
+pub static EMBEDDING_REQUEST_GAUDGE: Gauge<Empty> = Gauge {
+    key: "embedding_request_gauge",
+    phantom: std::marker::PhantomData,
+};
+pub static PENDING_EMBEDDING_REQUEST_GAUDGE: Gauge<Empty> = Gauge {
+    key: "pending_embedding_request_gauge",
+    phantom: std::marker::PhantomData,
+};
+pub static JAVASCRIPT_REQUEST_GAUDGE: Gauge<Empty> = Gauge {
+    key: "javascript_request_gauge",
     phantom: std::marker::PhantomData,
 };

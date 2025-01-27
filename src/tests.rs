@@ -24,6 +24,7 @@ use crate::{
 
 fn create_oramacore_config() -> OramacoreConfig {
     OramacoreConfig {
+        log: Default::default(),
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
             port: 2222,
@@ -46,6 +47,7 @@ fn create_oramacore_config() -> OramacoreConfig {
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
+                javascript_queue_limit: 10_000,
             },
         },
         reader_side: ReadSideConfig {

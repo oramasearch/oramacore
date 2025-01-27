@@ -135,9 +135,9 @@ pub struct CommittedNumberFieldIndex {
 }
 
 impl CommittedNumberFieldIndex {
-    pub fn new(data_dir: PathBuf) -> Self {
-        todo!()
-    }
+    // pub fn new(data_dir: PathBuf) -> Self {
+    //     todo!()
+    // }
 
     pub fn filter(&self, filter: &NumberFilter) -> Result<HashSet<DocumentId>> {
         let pages = match filter {

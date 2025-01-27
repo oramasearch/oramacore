@@ -53,14 +53,14 @@ pub struct CollectionReader {
     fields: DashMap<String, (FieldId, TypedField)>,
 
     // indexes
-    vector_index: Arc<VectorIndex>,
+    vector_index: VectorIndex,
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
-    string_index: Arc<StringIndex>,
+    string_index: StringIndex,
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
-    number_index: Arc<NumberIndex>,
-    bool_index: Arc<BoolIndex>,
+    number_index: NumberIndex,
+    bool_index: BoolIndex,
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
 }
@@ -74,17 +74,13 @@ impl CollectionReader {
     ) -> Result<Self> {
         let vector_index = VectorIndex::try_new(VectorIndexConfig {})
             .context("Cannot create vector index during collection creation")?;
-        let vector_index = Arc::new(vector_index);
 
         let string_index = StringIndex::new(StringIndexConfig {});
-        let string_index = Arc::new(string_index);
 
         let number_index = NumberIndex::try_new(NumberIndexConfig {})
             .context("Cannot create number index during collection creation")?;
-        let number_index = Arc::new(number_index);
 
         let bool_index = BoolIndex::new();
-        let bool_index = Arc::new(bool_index);
 
         Ok(Self {
             id,
@@ -131,19 +127,16 @@ impl CollectionReader {
     }
 
     pub async fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
-        Arc::get_mut(&mut self.string_index)
-            .expect("string_index is shared")
+        self.string_index
             .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
-        Arc::get_mut(&mut self.number_index)
-            .expect("number_index is shared")
+        self.number_index
             .load(collection_data_dir.join("numbers"))
             .context("Cannot load number index")?;
         self.vector_index
             .load(collection_data_dir.join("vectors"))
             .context("Cannot load vectors index")?;
-        Arc::get_mut(&mut self.bool_index)
-            .expect("bool_index is shared")
+        self.bool_index
             .load(collection_data_dir.join("bools"))
             .context("Cannot load bool index")?;
 
@@ -199,9 +192,8 @@ impl CollectionReader {
             collection: self.id.0.to_string(),
             index_type: "string",
         });
-        let string_index = self.string_index.clone();
         let string_dir = data_dir.join("strings");
-        string_index
+        self.string_index
             .commit(string_dir)
             .await
             .context("Cannot commit string index")?;
@@ -212,9 +204,8 @@ impl CollectionReader {
             collection: self.id.0.to_string(),
             index_type: "number",
         });
-        let number_index = self.number_index.clone();
         let number_dir = data_dir.join("numbers");
-        number_index
+        self.number_index
             .commit(number_dir)
             .await
             .context("Cannot commit number index")?;
@@ -225,16 +216,10 @@ impl CollectionReader {
             collection: self.id.0.to_string(),
             index_type: "vector",
         });
-        let vector_index = self.vector_index.clone();
         let vector_dir = data_dir.join("vectors");
-        tokio::task::spawn_blocking(move || {
-            vector_index
-                .commit(vector_dir)
-                .context("Cannot commit vector index")
-        })
-        .await
-        .context("Cannot spawn blocking task")?
-        .context("Cannot commit vector index")?;
+        self.vector_index
+            .commit(vector_dir)
+            .context("Cannot commit vector index")?;
         drop(m);
 
         let m = COMMIT_METRIC.create(CommitLabels {
@@ -242,9 +227,8 @@ impl CollectionReader {
             collection: self.id.0.to_string(),
             index_type: "bool",
         });
-        let bool_index = self.bool_index.clone();
         let bool_dir = data_dir.join("bools");
-        bool_index
+        self.bool_index
             .commit(bool_dir)
             .await
             .context("Cannot commit bool index")?;
@@ -602,7 +586,7 @@ impl CollectionReader {
             let text_parser = self.text_parser_per_field.get(&field_id);
             let (locale, text_parser) = match text_parser.as_ref() {
                 None => return Err(anyhow!("No text parser for this field")),
-                Some(text_parser) => (text_parser.0, &text_parser.1),
+                Some(text_parser) => (text_parser.0, text_parser.1.clone()),
             };
 
             let tokens = tokens_cache

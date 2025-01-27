@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
+use crate::metrics::{Empty, OPERATION_GAUGE};
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
 use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
@@ -90,6 +91,7 @@ impl OperationSender {
         &self,
         operation: WriteOperation,
     ) -> Result<(), tokio::sync::mpsc::error::SendError<(Offset, WriteOperation)>> {
+        OPERATION_GAUGE.create(Empty {}).increment_by(1);
         let offset = self
             .offset_counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -104,7 +106,9 @@ pub struct OperationReceiver {
 
 impl OperationReceiver {
     pub async fn recv(&mut self) -> Option<(Offset, WriteOperation)> {
-        self.receiver.recv().await
+        let r = self.receiver.recv().await;
+        OPERATION_GAUGE.create(Empty {}).decrement_by(1);
+        r
     }
 }
 
@@ -113,7 +117,11 @@ pub fn channel(capacity: usize) -> (OperationSender, OperationReceiver) {
 
     (
         OperationSender {
-            offset_counter: Arc::new(AtomicU64::new(0)),
+            //  We internally use `0` to represent "no offset"
+            // So, we start at `1` to avoid confusion
+            // This is a bit of a hack, we should model this better
+            // TODO: model this better
+            offset_counter: Arc::new(AtomicU64::new(1)),
             sender,
         },
         OperationReceiver { receiver },
