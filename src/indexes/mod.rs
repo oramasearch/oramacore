@@ -3,6 +3,11 @@ pub mod number;
 pub mod string;
 pub mod vector;
 
+pub mod fst;
+pub mod map;
+pub mod ordered_key;
+pub mod radix;
+
 // START FROM HERE:
 // Task: `commit` action shouldn't block insertions & searches.
 //

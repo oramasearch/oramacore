@@ -100,7 +100,7 @@ impl std::ops::Add for Number {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct SerializableNumber(pub Number);
 
 impl Serialize for SerializableNumber {

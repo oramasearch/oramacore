@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use tokio::join;
 use tracing::{debug, error, info, instrument, trace};
 
+mod committed;
+mod uncommitted;
+
 use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
@@ -52,15 +55,20 @@ pub struct CollectionReader {
 
     fields: DashMap<String, (FieldId, TypedField)>,
 
+    // uncommitted_collection: UncommittedCollection,
+    // committed_collection: CommittedCollection,
+
     // indexes
     vector_index: VectorIndex,
-    fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
-
     string_index: StringIndex,
-    text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
     number_index: NumberIndex,
     bool_index: BoolIndex,
+
+    fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
+
+    text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
+
     // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
 }
