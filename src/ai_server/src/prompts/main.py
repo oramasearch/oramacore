@@ -80,11 +80,11 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
     # ------------------------------
     "party_planner:system": textwrap.dedent(
         """
-        You are an AI action planner. Given a set of allowed actions and user input, output a minimal sequence of actions to achieve the desired outcome.
+        You are an AI action planner. Given a set of allowed actions and user input, output the minimal sequence of actions to achieve the desired outcome.
 
         ### Input Format
-        actions: Array of allowed action names and their descriptions
-        input: User's desired outcome
+        actions (### Actions): Array of allowed action names and their descriptions
+        input (### Input): The user's inquiry you need to derive the list of actions from
 
         ### Output Format 
         JSON object with array of ordered steps:
@@ -92,14 +92,14 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
           "actions": [
             {
               "step": "action_name",
-              "description": "Specific description of how to apply this action"
+              "description": "Specific description of how and why to apply this action"
             }
           ]
         }
 
         ### Constraints
-        - Only use actions from the provided allowed set
-        - Minimize number of steps
+        - Only use actions from the provided allowed set. Any other action is strictly forbidden.
+        - Minimize number of steps. Ideally no more than four.
         - Each step must move toward the goal
         - Return error object if goal is impossible with given actions
 

@@ -9,7 +9,7 @@ DEFAULT_VISION_MODEL = "microsoft/Phi-3.5-vision-instruct"
 DEFAULT_CONTENT_EXPANSION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_ANSWER_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-DEFAULT_ANSWER_PLANNING_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_ANSWER_PLANNING_MODEL = "microsoft/Phi-3.5-mini-instruct"
 
 
 @dataclass

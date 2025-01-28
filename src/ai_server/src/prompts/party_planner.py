@@ -20,16 +20,19 @@ DEFAULT_PARTY_PLANNER_ACTIONS = [
     },
     {
         "step": "IMPROVE_INPUT",
-        "description": "Improve the input provided by the user. Correct wording, phrasing, or anything else you find necessary.",
+        "description": "If the user requires it, improve the input provided by the user. Correct wording, phrasing, or anything else you find necessary.",
     },
     {
         "step": "CREATE_CODE",
         "description": "Create a code snippet. It can be a solution to a problem, a code example, or a code snippet to test a library.",
     },
-    {"step": "SUMMARIZE_FINDINGS", "description": "Summarize the findings from the research."},
+    {
+        "step": "SUMMARIZE_FINDINGS",
+        "description": 'Summarize the findings from the research. Usually this is done as a last step before "GIVE_REPLY".',
+    },
     {
         "step": "ASK_FOLLOWUP",
-        "description": "Ask follow-up questions to clarify the inquiry or gather more information.",
+        "description": "Ask follow-up questions to clarify the inquiry or gather more information. To be used when the user question is not clear.",
     },
     {
         "step": "GIVE_REPLY",
