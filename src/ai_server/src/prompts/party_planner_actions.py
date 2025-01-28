@@ -72,15 +72,45 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
     },
-    "IMPROVE_INPUT": {"side": "PYTHON", "returns": "TEXT"},
-    "CREATE_CODE": {"side": "PYTHON", "returns": "JSON"},
+    "IMPROVE_INPUT": {
+        "side": "PYTHON",
+        "prompt:system": dedent(
+            """
+            You're an AI assistant. You'll be given a user input (### Input) and a description (### Description) of the task to execute.
+
+            Your job is to improve the input following the instructions provided in the description (### Description) field.
+            
+            Reply in plain text.
+            """
+        ),
+        "prompt:user": COMMON_USER_PROMPT,
+        "returns": "TEXT",
+    },
+    "CREATE_CODE": {
+        "side": "PYTHON",
+        "prompt:system": dedent(
+            """
+            You're an AI coding assistant. You'll be given an input (### Input) and a description (### Description), and your job is to follow the instructions in the description to generate some code based on the input.
+
+            You must return a valid JSON object structured the following way:
+
+            {
+                "code": "<example-code>"
+            }
+
+            Reply with a valid JSON object and nothing more.
+            """
+        ),
+        "prompt:user": COMMON_USER_PROMPT,
+        "returns": "JSON",
+    },
     "SUMMARIZE_FINDINGS": {
         "side": "PYTHON",
         "prompt:system": dedent(
             """
             You're an AI assistant. Your job is to summarize the findings you'll be given (### Input) following a description (### Description) that will give your direction on how to summarize them.
 
-            Be brief but exhaustive.
+            Be brief but exhaustive. Reply in plain text.
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
@@ -106,6 +136,8 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             The input identifies a user inquiry. The context provides all you need to know in order to provide a correct answer.
 
             Using the context only, provide an answer to the user.
+
+            Reply in plain text.
             """
         ),
         "prompt:user": lambda input, context: f"### Input\n{input}\n\n### Context\n{context}",
