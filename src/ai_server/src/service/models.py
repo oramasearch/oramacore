@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 
 from src.utils import OramaAIConfig
 from src.prompts.main import PROMPT_TEMPLATES
+from src.prompts.party_planner_actions import DEFAULT_PARTY_PLANNER_ACTIONS_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,33 @@ class ModelsManager:
             if model_id in self._models:
                 del self._models[model_id]
             raise
+
+    def action(self, action: str, input: str, description: str, history: List[Any]) -> str:
+        print(
+            f'\n================\nPerforming action {action} on input "{input}" with description "{description}"\n================\n'
+        )
+
+        actual_model_id = self._model_refs.get("action")
+        model_config = self._models.get(actual_model_id)
+        model = model_config["model"]
+        tokenizer = model_config["tokenizer"]
+
+        action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
+
+        history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
+        history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
+
+        formatted_chat = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
+        tokenizer.pad_token = tokenizer.eos_token
+
+        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
+
+        outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
+
+        decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+
+        return decoded_output
 
     def chat(self, model_id: str, history: List[Any], prompt: str, context: Optional[str] = None) -> str:
         actual_model_id = self._model_refs.get(model_id)

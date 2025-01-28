@@ -9,7 +9,8 @@ DEFAULT_VISION_MODEL = "microsoft/Phi-3.5-vision-instruct"
 DEFAULT_CONTENT_EXPANSION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 DEFAULT_ANSWER_MODEL = "Qwen/Qwen2.5-3B-Instruct"
-DEFAULT_ANSWER_PLANNING_MODEL = "microsoft/Phi-3.5-mini-instruct"
+DEFAULT_ANSWER_PLANNING_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+DEFAULT_ACTION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 
 
 @dataclass
@@ -30,7 +31,7 @@ class EmbeddingsConfig:
 
 @dataclass
 class SamplingParams:
-    temperature: float = 0.2
+    temperature: float = 0.1
     top_p: float = 0.95
     max_tokens: int = 512
 
@@ -78,6 +79,13 @@ class LLMs:
             id=DEFAULT_ANSWER_PLANNING_MODEL,
             tensor_parallel_size=1,
             sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=1024),
+        )
+    )
+    action: Optional[ModelConfig] = field(
+        default_factory=lambda: ModelConfig(
+            id=DEFAULT_ACTION_MODEL,
+            tensor_parallel_size=1,
+            sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=512),
         )
     )
 

@@ -81,13 +81,27 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
     "party_planner:system": textwrap.dedent(
         """
         You are an AI action planner. Given a set of allowed actions and user input, output the minimal sequence of actions to achieve the desired outcome.
+        You'll be given a series of actions (### Actions) in a JSON format, and a user input (### Input) in natural language
+        Your job is to return a valid JSON containing the minimum number of steps you think it would take to generate the best possible answer to the user.
 
-        ### Input Format
-        actions (### Actions): Array of allowed action names and their descriptions
-        input (### Input): The user's inquiry you need to derive the list of actions from
+        RULES TO FOLLOW STRICTLY:
+        - Only use actions from the provided allowed set. Any other action is strictly forbidden.
+        - Minimize number of steps. Ideally no more than four.
+        - Each step must move toward the goal
+        - Return error object if goal is impossible with given actions
 
-        ### Output Format 
-        JSON object with array of ordered steps:
+        Let me give you an example:
+
+        ```
+        Input: "Can you give me an example of how my data has to look when using the standard getExpandedRowModel() function?"
+        Actions: ["OPTIMIZE_QUERY", "PERFORM_ORAMA_SEARCH", "CREATE_CODE", "SUMMARIZE_FINDINGS", "GIVE_REPLY"]
+        Output: {"actions":[{ "step": "OPTIMIZE_QUERY", "description": "Optimize query into a more search-friendly query" }, { "step": "PERFORM_SEARCH", "description": "Use optimized query to perform search in the index" }, { "step": "CREATE_CODE", "description": "Craft code examples about using getExpandedRowModel() function" }, { "step": "SUMMARIZE_FINDINGS", "description": "Summarize the findings from the research and code generation" }]}
+        ```
+
+        Remember, each step will produce the input for the next one. So you must only combine actions that can work one after another.
+        
+        You must return an JSON object that looks like this:
+
         {
           "actions": [
             {
@@ -97,16 +111,7 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
           ]
         }
 
-        ### Constraints
-        - Only use actions from the provided allowed set. Any other action is strictly forbidden.
-        - Minimize number of steps. Ideally no more than four.
-        - Each step must move toward the goal
-        - Return error object if goal is impossible with given actions
-
-        ### Example
-        Input: "Can you give me an example of how my data has to look when using the standard getExpandedRowModel() function?"
-        Actions: ["OPTIMIZE_QUERY", "PERFORM_ORAMA_SEARCH", "CREATE_CODE", "SUMMARIZE_FINDINGS", "GIVE_REPLY"]
-        Output: {"actions":[{ "step": "OPTIMIZE_QUERY", "description": "Optimize query into a more search-friendly query" }, { "step": "PERFORM_SEARCH", "description": "Use optimized query to perform search in the index" }, { "step": "CREATE_CODE", "description": "Craft code examples about using getExpandedRowModel() function" }, { "step": "SUMMARIZE_FINDINGS", "description": "Summarize the findings from the research and code generation" }]}
+        Reply with a valid JSON and nothing more.
         """
     ),
     "party_planner:user": lambda input, actions: f"### Input\n{input}\n\n### Actions\n{actions}",

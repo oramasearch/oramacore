@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import List
 from dataclasses import dataclass
 
 DEFAULT_PARTY_PLANNER_ACTIONS = [
