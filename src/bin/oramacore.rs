@@ -44,12 +44,13 @@ async fn main() -> anyhow::Result<()> {
     let subscriber = Registry::default().with(fmt::layer().compact().with_ansi(true));
     let subscriber: Box<dyn Subscriber + Send + Sync + 'static> =
         if let Some(file_path) = &oramacore_config.log.file_path {
+            println!("Logging to file: {:?}", file_path);
             let debug_file = OpenOptions::new()
-                .append(false)
+                .write(true)
                 .create(true)
                 .truncate(true)
                 .open(file_path)
-                .unwrap();
+                .expect("Cannot open log file");
             Box::new(subscriber.with(fmt::layer().json().with_writer(debug_file)))
         } else {
             Box::new(subscriber)
