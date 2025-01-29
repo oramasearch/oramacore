@@ -156,15 +156,18 @@ impl CollectionWriter {
 
     fn value_to_typed_field(&self, value_type: ValueType) -> Option<TypedField> {
         match value_type {
-            ValueType::Scalar(ScalarType::String) => Some(TypedField::Text(self.default_language)),
+            ValueType::Scalar(ScalarType::String) => {
+                Some(TypedField::Text(self.default_language.into()))
+            }
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
             _ => None, // @todo: support other types
         }
     }
 
-    fn get_text_parser(&self, language: LanguageDTO) -> Arc<TextParser> {
-        let locale: Locale = language.into();
+    fn get_text_parser(&self, locale: Locale) -> Arc<TextParser> {
+        // TextParser is expensive to create, so we cache it
+        // TODO: add a cache
         let parser = TextParser::from_locale(locale);
         Arc::new(parser)
     }
@@ -220,8 +223,8 @@ impl CollectionWriter {
                     ),
                 );
             }
-            TypedField::Text(language) => {
-                let parser = self.get_text_parser(*language);
+            TypedField::Text(locale) => {
+                let parser = self.get_text_parser(locale.clone());
                 self.fields.insert(
                     field_name.clone(),
                     (

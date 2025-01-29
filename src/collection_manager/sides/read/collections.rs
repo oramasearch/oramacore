@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, warn};
+use tracing_subscriber::fmt::format;
 
 use super::{collection::CollectionReader, IndexesConfig};
 
@@ -138,7 +139,10 @@ impl CollectionsReader {
                 .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
-            reader.commit(collection_dir).await?;
+            reader
+                .commit(collection_dir)
+                .await
+                .with_context(|| format!("Cannot commit collection {:?}", reader.get_id()))?;
 
             info!("Collection {:?} committed", id);
         }

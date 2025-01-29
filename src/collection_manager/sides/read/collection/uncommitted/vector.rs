@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
@@ -16,10 +16,19 @@ impl VectorField {
         Self { data: Vec::new() }
     }
 
-    pub fn search(&self, target: &[f32], output: &mut HashMap<DocumentId, f32>) -> Result<()> {
+    pub fn search(
+        &self,
+        target: &[f32],
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        output: &mut HashMap<DocumentId, f32>,
+    ) -> Result<()> {
         let magnetude = calculate_magnetude(target);
 
         for (id, vectors) in &self.data {
+            if filtered_doc_ids.map_or(false, |ids| !ids.contains(id)) {
+                continue;
+            }
+
             for (m, vector) in vectors {
                 let score = score_vector(vector, target)?;
 

@@ -23,7 +23,7 @@ pub struct TokenScore {
     pub score: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema, PartialEq, Eq)]
 pub enum LanguageDTO {
     English,
 }
@@ -44,7 +44,7 @@ impl From<Locale> for LanguageDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
@@ -60,7 +60,7 @@ pub struct EmbeddingTypedField {
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
-    Text(LanguageDTO),
+    Text(Locale),
     Embedding(EmbeddingTypedField),
     Number,
     Bool,

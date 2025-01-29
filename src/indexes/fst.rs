@@ -23,34 +23,30 @@ impl Debug for FSTIndex {
 }
 
 impl FSTIndex {
-    pub fn from_iter<I, K, F>(
-        iter: I,
-        data_dir: PathBuf,
-        mut f: F
-    ) -> Result<Self>
+    pub fn from_iter<I, K>(iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (K, u64)>,
         K: AsRef<[u8]>,
-        F: FnMut(&[u8], u64) -> ()
     {
         std::fs::create_dir_all(&data_dir)
             .context("Cannot create the base directory for the committed index")?;
 
         let path_to_commit = data_dir.join(FILE_NAME);
 
-        let mut buffered_file = BufferedFile::create(path_to_commit.clone()).context("Cannot create file")?;
+        let mut buffered_file =
+            BufferedFile::create(path_to_commit.clone()).context("Cannot create file")?;
         let mut build = MapBuilder::new(&mut buffered_file)?;
 
         for (key, value) in iter {
-            f(key.as_ref(), value);
-
             build
                 .insert(key, value)
                 .context("Cannot insert value to FST map")?;
         }
 
         build.finish().context("Cannot finish build of FST map")?;
-        buffered_file.close().context("Cannot close buffered file")?;
+        buffered_file
+            .close()
+            .context("Cannot close buffered file")?;
 
         Self::load(data_dir)
     }
@@ -90,6 +86,10 @@ impl FSTIndex {
             stream: Some(stream),
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Vec<u8>, u64)> + '_ {
+        self.search_with_key("")
+    }
 }
 
 pub struct FTSIter<'stream, 'input> {
@@ -109,7 +109,6 @@ impl<'s, 'input> Iterator for FTSIter<'s, 'input> {
     }
 }
 
-
 pub struct FTSIterWithKey<'stream, 'input> {
     stream: Option<fst::map::Stream<'stream, StartsWith<fst::automaton::Str<'input>>>>,
 }
@@ -123,11 +122,9 @@ impl<'s, 'input> Iterator for FTSIterWithKey<'s, 'input> {
             Some(stream) => stream,
             None => return None,
         };
-        stream.next()
-            .map(|(key, value)| (key.to_vec(), value))
+        stream.next().map(|(key, value)| (key.to_vec(), value))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -143,17 +140,14 @@ mod tests {
             ("foo".as_bytes(), 1),
         ];
         let data_dir = generate_new_path();
-        let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone(), |_, _| {})?;
+        let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
         test(&paged_index)?;
 
         let paged_index = FSTIndex::load(data_dir)?;
         test(&paged_index)?;
 
         fn test(paged_index: &FSTIndex) -> Result<()> {
-            assert_eq!(
-                paged_index.search("f").collect::<Vec<_>>(),
-                vec![2, 1]
-            );
+            assert_eq!(paged_index.search("f").collect::<Vec<_>>(), vec![2, 1]);
             Ok(())
         }
 

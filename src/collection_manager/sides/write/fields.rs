@@ -109,7 +109,7 @@ impl CollectionField {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OramaModelSerializable(pub OramaModel);
 
 impl Serialize for OramaModelSerializable {

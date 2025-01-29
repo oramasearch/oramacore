@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicU64},
-};
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -28,14 +24,19 @@ impl NumberField {
         Ok(Self { inner })
     }
 
+    pub fn load(data_dir: PathBuf) -> Result<Self> {
+        let inner = OrderedKeyIndex::load(data_dir)?;
+        Ok(Self { inner })
+    }
+
     pub fn filter<'s, 'iter>(
         &'s self,
-        filter_number: NumberFilter,
+        filter_number: &NumberFilter,
     ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
     where
         's: 'iter,
     {
-        let (min, max) = match &filter_number {
+        let (min, max) = match filter_number {
             NumberFilter::Equal(value) => (SerializableNumber(*value), SerializableNumber(*value)),
             NumberFilter::Between((min, max)) => {
                 (SerializableNumber(*min), SerializableNumber(*max))
@@ -62,9 +63,10 @@ impl NumberField {
         Ok(items.flat_map(|item| item.values))
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (SerializableNumber, HashSet<DocumentId>)> + 's {
-        self.inner
-            .iter()
+    pub fn iter<'s>(
+        &'s self,
+    ) -> impl Iterator<Item = (SerializableNumber, HashSet<DocumentId>)> + 's {
+        self.inner.iter()
     }
 }
 

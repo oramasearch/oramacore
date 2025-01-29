@@ -11,6 +11,8 @@ pub struct Map<Key, Value> {
     // For instance, https://crates.io/crates/odht
     // TODO: think about this
     inner: HashMap<Key, Value>,
+
+    file_path: PathBuf,
 }
 
 impl<Key: Debug, Value: Debug> Debug for Map<Key, Value> {
@@ -22,42 +24,77 @@ impl<Key: Debug, Value: Debug> Debug for Map<Key, Value> {
 impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
     Map<Key, Value>
 {
-    pub fn from_hash_map(
-        hash_map: HashMap<Key, Value>
-    ) -> Self {
-        Self { inner: hash_map }
+    pub fn from_hash_map(hash_map: HashMap<Key, Value>, file_path: PathBuf) -> Result<Self> {
+        let s = Self {
+            inner: hash_map,
+            file_path,
+        };
+
+        s.commit()?;
+
+        Ok(s)
     }
 
-    pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
+    pub fn from_iter<I>(iter: I, file_path: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (Key, Value)>,
     {
-        create_if_not_exists(&data_dir)
-            .context("Cannot create the base directory for the committed index")?;
-        let path_to_commit = data_dir.join("index.map");
-
         let map: HashMap<_, _> = iter.collect();
+        Self::from_hash_map(map, file_path)
+    }
 
-        BufferedFile::create(path_to_commit.clone())
+    pub fn commit(&self) -> Result<()> {
+        create_if_not_exists(&self.file_path.parent().expect("file_path has a parent"))
+            .context("Cannot create the base directory for the committed index")?;
+        BufferedFile::create_or_overwrite(self.file_path.clone())
             .context("Cannot create file")?
-            .write_json_data(&map)
+            .write_bincode_data(&self.inner)
             .context("Cannot write map to file")?;
 
-        Ok(Self { inner: map })
+        Ok(())
     }
 
     pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let path_to_commit = data_dir.join("index.map");
+        let file_path = data_dir.join("index.map");
 
-        let map: HashMap<Key, Value> = BufferedFile::open(path_to_commit.clone())
+        let map: HashMap<Key, Value> = BufferedFile::open(file_path.clone())
             .context("Cannot open file")?
             .read_json_data()
             .context("Cannot read map from file")?;
 
-        Ok(Self { inner: map })
+        Ok(Self {
+            inner: map,
+            file_path,
+        })
     }
 
     pub fn get(&self, key: &Key) -> Option<&Value> {
         self.inner.get(key)
+    }
+    pub fn file_path(&self) -> PathBuf {
+        self.file_path.clone()
+    }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn values(&self) -> impl Iterator<Item = &Value> {
+        self.inner.values()
+    }
+
+    pub fn insert(&mut self, key: Key, value: Value) {
+        self.inner.insert(key, value);
+    }
+}
+
+impl<Key: Ord, Value> Map<Key, Value> {
+    pub fn get_max_key(&self) -> Option<&Key> {
+        self.inner.keys().max()
+    }
+}
+
+impl<Key: Debug + Eq + Hash, Value: Debug> Map<Key, Vec<Value>> {
+    pub fn merge(&mut self, key: Key, iter: impl Iterator<Item = Value>) {
+        let entry = self.inner.entry(key).or_default();
+        entry.extend(iter);
     }
 }

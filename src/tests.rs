@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use http::uri::Scheme;
 use serde_json::json;
 use tokio::time::sleep;
@@ -1106,7 +1106,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     insert_docs(
         write_side.clone(),
@@ -1124,7 +1125,8 @@ async fn test_commit_and_load2() -> Result<()> {
             }),
         ],
     )
-    .await?;
+    .await
+    .unwrap();
 
     let before_commit_result = read_side
         .search(
@@ -1139,7 +1141,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(before_commit_result.count, 1);
 
     write_side.commit().await?;
@@ -1159,7 +1162,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(before_commit_result.count, after_commit_result.count);
 
@@ -1187,7 +1191,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
     // We reload the read side
@@ -1205,7 +1210,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(before_commit_result.count, after_load_result.count);
 
@@ -1219,7 +1225,8 @@ async fn test_commit_and_load2() -> Result<()> {
             "age": 20,
         })],
     )
-    .await?;
+    .await
+    .unwrap();
     let result = read_side
         .search(
             collection_id.clone(),
@@ -1233,11 +1240,12 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
-    // write_side.commit().await?;
-    read_side.commit().await?;
+    write_side.commit().await.unwrap();
+    read_side.commit().await.unwrap();
 
     let (_, read_side) = create(config.clone()).await?;
     let result = read_side
@@ -1253,7 +1261,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
     let result = read_side
@@ -1270,7 +1279,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 1);
 
     Ok(())

@@ -19,11 +19,14 @@ impl BoolField {
         false_docs: HashSet<DocumentId>,
         data_dir: PathBuf,
     ) -> Result<Self> {
-        let inner = OrderedKeyIndex::from_iter([
-            (BoolWrapper::False, false_docs),
-            (BoolWrapper::True, true_docs),
-            
-        ].into_iter(), data_dir)?;
+        let inner = OrderedKeyIndex::from_iter(
+            [
+                (BoolWrapper::False, false_docs),
+                (BoolWrapper::True, true_docs),
+            ]
+            .into_iter(),
+            data_dir,
+        )?;
 
         Ok(Self { inner })
     }
@@ -52,10 +55,14 @@ impl BoolField {
     }
 
     pub fn clone_inner(&self) -> Result<(HashSet<DocumentId>, HashSet<DocumentId>)> {
-        let false_docs: HashSet<_> = self.inner.get_items(BoolWrapper::False, BoolWrapper::False)?
+        let false_docs: HashSet<_> = self
+            .inner
+            .get_items(BoolWrapper::False, BoolWrapper::False)?
             .flat_map(|item| item.values)
             .collect();
-        let true_docs: HashSet<_> = self.inner.get_items(BoolWrapper::True, BoolWrapper::True)?
+        let true_docs: HashSet<_> = self
+            .inner
+            .get_items(BoolWrapper::True, BoolWrapper::True)?
             .flat_map(|item| item.values)
             .collect();
 

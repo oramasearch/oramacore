@@ -54,7 +54,7 @@ pub async fn create_string_index(
             CollectionWriteOperation::CreateField {
                 field_id,
                 field_name: field_name.clone(),
-                field: TypedField::Text(LanguageDTO::English),
+                field: TypedField::Text(LanguageDTO::English.into()),
             },
         ))
         .await
@@ -140,7 +140,7 @@ pub async fn create_uncommitted_string_field_index_from(
         CollectionWriteOperation::CreateField {
             field_id,
             field_name: field_name.clone(),
-            field: TypedField::Text(LanguageDTO::English),
+            field: TypedField::Text(LanguageDTO::English.into()),
         },
     ))
     .await?;

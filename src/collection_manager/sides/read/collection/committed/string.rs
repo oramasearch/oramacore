@@ -1,15 +1,24 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash, path::PathBuf};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
-use fst::MapBuilder;
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::read::collection::uncommitted::{Positions, TotalDocumentsWithTermInField}, file_utils::{create_if_not_exists, BufferedFile}, indexes::{
+    collection_manager::sides::read::collection::uncommitted::{
+        Positions, TotalDocumentsWithTermInField,
+    },
+    file_utils::create_if_not_exists,
+    indexes::{
         fst::FSTIndex,
         map::Map,
-        string::{document_lengths, BM25Scorer, GlobalInfo},
-    }, types::DocumentId
+        string::{BM25Scorer, GlobalInfo},
+    },
+    merger::MergedIterator,
+    types::DocumentId,
 };
 
 #[derive(Debug)]
@@ -22,7 +31,15 @@ pub struct StringField {
 
 impl StringField {
     pub fn from_iter(
-        uncommitted_iter: impl Iterator<Item = (Vec<u8>, (TotalDocumentsWithTermInField, HashMap<DocumentId, Positions>))>,
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, Positions>,
+                ),
+            ),
+        >,
         length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
     ) -> Result<Self> {
@@ -32,36 +49,119 @@ impl StringField {
 
         let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
             Default::default();
-        let iter = uncommitted_iter
-            .map(|(key, value)| {
+        let iter = uncommitted_iter.map(|(key, value)| {
+            let new_posting_list_id = posting_id_generator;
+            posting_id_generator += 1;
+
+            delta_committed_storage.insert(
+                new_posting_list_id,
+                value
+                    .1
+                    .into_iter()
+                    .map(|(doc_id, positions)| (doc_id, positions.0))
+                    .collect(),
+            );
+
+            (key, new_posting_list_id)
+        });
+
+        let index = FSTIndex::from_iter(iter, data_dir.clone()).context("Cannot commit fst")?;
+        let posting_id_storage_file_path = data_dir.join("posting_id_storage.map");
+        let length_per_documents_file_path = data_dir.join("length_per_documents.map");
+        Ok(Self {
+            index,
+            posting_storage: PostingIdStorage {
+                inner: Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
+                    .context("Cannot commit posting id storage")?,
+            },
+            document_lengths_per_document: DocumentLengthsPerDocument::from_map(
+                Map::from_hash_map(length_per_documents, length_per_documents_file_path)
+                    .context("Cannot commit document lengths per document storage")?,
+            ),
+        })
+    }
+
+    pub fn from_iter_and_committed(
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, Positions>,
+                ),
+            ),
+        >,
+        committed: &Self,
+        length_per_documents: HashMap<DocumentId, u32>,
+        data_dir: PathBuf,
+    ) -> Result<Self> {
+        let new_posting_storage_file = data_dir.join("posting_id_storage.map");
+        let old_posting_storage_file = committed.posting_storage.get_backed_file();
+        std::fs::copy(old_posting_storage_file, &new_posting_storage_file)
+            .context("Cannot copy posting storage file")?;
+        let posting_storage = PostingIdStorage::load(new_posting_storage_file)
+            .context("Cannot load posting storage")?;
+        let mut posting_id_generator = posting_storage.get_max_posting_id() + 1;
+        let posting_storage = RefCell::new(posting_storage);
+
+        let committed_iter = committed.index.iter();
+        let merged_iterator = MergedIterator::new(
+            uncommitted_iter,
+            committed_iter,
+            |_, (_, positions_per_document_id)| {
                 let new_posting_list_id = posting_id_generator;
                 posting_id_generator += 1;
 
-                delta_committed_storage.insert(
+                let mut lock = posting_storage.borrow_mut();
+                lock.insert(
                     new_posting_list_id,
-                    value
-                        .1
+                    positions_per_document_id
                         .into_iter()
                         .map(|(doc_id, positions)| (doc_id, positions.0))
                         .collect(),
                 );
 
-                (key, new_posting_list_id)
-            });
+                new_posting_list_id
+            },
+            |_, (_, positions_per_document_id), committed_posting_id| {
+                let mut lock = posting_storage.borrow_mut();
+                lock.merge(
+                    committed_posting_id,
+                    positions_per_document_id
+                        .into_iter()
+                        .map(|(doc_id, positions)| (doc_id, positions.0)),
+                );
 
-        let index = FSTIndex::from_iter(iter, data_dir, |k, v| {
+                committed_posting_id
+            },
+        );
 
-        })?;
+        let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
+        let old_document_lengths_per_document_file =
+            committed.document_lengths_per_document.get_backed_file();
+        std::fs::copy(
+            old_document_lengths_per_document_file,
+            &new_document_lengths_per_document_file,
+        )
+        .context("Cannot copy posting storage file")?;
+        let mut document_lengths_per_document =
+            DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
+                .context("Cannot load document lengths per document")?;
+        for (k, v) in length_per_documents {
+            document_lengths_per_document.insert(k, v);
+        }
 
+        let index =
+            FSTIndex::from_iter(merged_iterator, data_dir.clone()).context("Cannot commit fst")?;
         Ok(Self {
             index,
-            posting_storage: PostingIdStorage {
-                inner: Map::from_hash_map(delta_committed_storage),
-            },
-            document_lengths_per_document: DocumentLengthsPerDocument {
-                inner: Map::from_hash_map(length_per_documents),
-            },
+            posting_storage: posting_storage.into_inner(),
+            document_lengths_per_document,
         })
+    }
+
+    pub fn global_info(&self) -> GlobalInfo {
+        self.document_lengths_per_document.global_info.clone()
     }
 
     pub fn search(
@@ -83,7 +183,7 @@ impl StringField {
         }
     }
 
-    pub fn search_without_phrase_match(
+    fn search_without_phrase_match(
         &self,
         tokens: &[String],
         boost: f32,
@@ -146,7 +246,7 @@ impl StringField {
         Ok(())
     }
 
-    pub fn search_with_phrase_match(
+    fn search_with_phrase_match(
         &self,
         tokens: &[String],
         boost: f32,
@@ -264,17 +364,67 @@ struct PostingIdStorage {
     inner: Map<u64, Vec<(DocumentId, Vec<usize>)>>,
 }
 impl PostingIdStorage {
+    fn load(file_path: PathBuf) -> Result<Self> {
+        Ok(Self {
+            inner: Map::load(file_path)?,
+        })
+    }
+
     fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, Vec<usize>)>> {
         self.inner.get(posting_id)
+    }
+
+    fn get_backed_file(&self) -> PathBuf {
+        self.inner.file_path()
+    }
+
+    fn get_max_posting_id(&self) -> u64 {
+        self.inner.get_max_key().map(|m| *m).unwrap_or(0)
+    }
+
+    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, Vec<usize>)>) {
+        self.inner.insert(posting_id, posting);
+    }
+
+    fn merge(&mut self, posting_id: u64, posting: impl Iterator<Item = (DocumentId, Vec<usize>)>) {
+        self.inner.merge(posting_id, posting);
     }
 }
 
 #[derive(Debug)]
 struct DocumentLengthsPerDocument {
     inner: Map<DocumentId, u32>,
+    global_info: GlobalInfo,
 }
 impl DocumentLengthsPerDocument {
+    fn from_map(inner: Map<DocumentId, u32>) -> Self {
+        let total_documents = inner.len();
+        let total_document_length = inner.values().map(|v| *v as usize).sum();
+        Self {
+            inner,
+            global_info: GlobalInfo {
+                total_documents,
+                total_document_length,
+            },
+        }
+    }
+
+    fn load(file_path: PathBuf) -> Result<Self> {
+        let inner = Map::load(file_path)?;
+        Ok(Self::from_map(inner))
+    }
+
     fn get_length(&self, doc_id: &DocumentId) -> u32 {
         self.inner.get(doc_id).copied().unwrap_or(1)
+    }
+
+    fn get_backed_file(&self) -> PathBuf {
+        self.inner.file_path()
+    }
+
+    fn insert(&mut self, doc_id: DocumentId, len: u32) {
+        self.global_info.total_documents += 1;
+        self.global_info.total_document_length += len as usize;
+        self.inner.insert(doc_id, len);
     }
 }

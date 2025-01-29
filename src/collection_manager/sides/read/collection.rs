@@ -8,12 +8,20 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use committed::CommittedCollection;
 use dashmap::DashMap;
+use dump::{CollectionInfo, CollectionInfoV1};
+use merge::{merge_number_field, merge_string_field};
 use serde::{Deserialize, Serialize};
-use tokio::join;
-use tracing::{debug, error, info, instrument, trace};
+use tokio::{
+    join,
+    sync::{Mutex, RwLock},
+};
+use tracing::{debug, error, info, instrument, trace, warn};
+use uncommitted::UncommittedCollection;
 
 mod committed;
+mod merge;
 mod uncommitted;
 
 use crate::{
@@ -23,17 +31,10 @@ use crate::{
             EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties,
             SearchMode, SearchParams, TypedField,
         },
-        sides::{
-            CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
-        },
+        sides::{CollectionWriteOperation, Offset},
     },
-    file_utils::{create_or_overwrite, BufferedFile},
-    indexes::{
-        bool::BoolIndex,
-        number::{NumberFilter, NumberIndex, NumberIndexConfig},
-        string::{BM25Scorer, StringIndex, StringIndexConfig},
-        vector::{VectorIndex, VectorIndexConfig},
-    },
+    file_utils::BufferedFile,
+    indexes::{number::NumberFilter, string::BM25Scorer, vector::VectorIndex},
     metrics::{
         CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
         SEARCH_FILTER_METRIC, SEARCH_METRIC,
@@ -55,22 +56,21 @@ pub struct CollectionReader {
 
     fields: DashMap<String, (FieldId, TypedField)>,
 
-    // uncommitted_collection: UncommittedCollection,
-    // committed_collection: CommittedCollection,
+    uncommitted_collection: RwLock<UncommittedCollection>,
+    committed_collection: RwLock<CommittedCollection>,
 
     // indexes
-    vector_index: VectorIndex,
-    string_index: StringIndex,
+    // vector_index: VectorIndex,
+    // string_index: StringIndex,
 
-    number_index: NumberIndex,
-    bool_index: BoolIndex,
-
+    // number_index: NumberIndex,
+    // bool_index: BoolIndex,
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
-    // TODO: textparser -> vec<field_id>
     offset_storage: OffsetStorage,
+    commit_insert_mutex: Mutex<()>,
 }
 
 impl CollectionReader {
@@ -80,36 +80,20 @@ impl CollectionReader {
         nlp_service: Arc<NLPService>,
         _: IndexesConfig,
     ) -> Result<Self> {
-        let vector_index = VectorIndex::try_new(VectorIndexConfig {})
-            .context("Cannot create vector index during collection creation")?;
-
-        let string_index = StringIndex::new(StringIndexConfig {});
-
-        let number_index = NumberIndex::try_new(NumberIndexConfig {})
-            .context("Cannot create number index during collection creation")?;
-
-        let bool_index = BoolIndex::new();
-
         Ok(Self {
             id,
             ai_service,
             nlp_service,
-
             document_count: AtomicU64::new(0),
-
-            vector_index,
             fields_per_model: Default::default(),
-
-            string_index,
             text_parser_per_field: Default::default(),
-
-            number_index,
-
-            bool_index,
-
             fields: Default::default(),
 
+            uncommitted_collection: RwLock::new(UncommittedCollection::new()),
+            committed_collection: RwLock::new(CommittedCollection::new()),
+
             offset_storage: Default::default(),
+            commit_insert_mutex: Default::default(),
         })
     }
 
@@ -134,7 +118,63 @@ impl CollectionReader {
             .ok_or_else(|| anyhow!("Field not found"))
     }
 
-    pub async fn load(&mut self, collection_data_dir: PathBuf) -> Result<()> {
+    pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
+        let collection_info_path = data_dir.join("info.info");
+        let previous_offset: Offset = match BufferedFile::open(collection_info_path.clone())
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+        {
+            Ok(offset) => offset,
+            Err(e) => {
+                warn!("Cannot read previous collection info from {:?} due to {:?}. Skip loading collection", collection_info_path, e);
+                return Ok(());
+            }
+        };
+
+        let collection_info_path = data_dir.join(format!("info-offset-{}.info", previous_offset.0));
+        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+            .context("Cannot read previous collection info")?;
+
+        let dump::CollectionInfo::V1(collection_info) = collection_info;
+
+        for (field_name, (field_id, field_type)) in collection_info.fields {
+            let typed_field: TypedField = match field_type {
+                dump::TypedField::Text(locale) => TypedField::Text(locale),
+                dump::TypedField::Embedding(embedding) => {
+                    TypedField::Embedding(EmbeddingTypedField {
+                        document_fields: embedding.document_fields,
+                        model: embedding.model.0,
+                    })
+                }
+                dump::TypedField::Number => TypedField::Number,
+                dump::TypedField::Bool => TypedField::Bool,
+            };
+            self.fields.insert(field_name, (field_id, typed_field));
+        }
+
+        for (orama_model, fields) in collection_info.used_models {
+            self.fields_per_model.insert(orama_model.0, fields);
+        }
+
+        self.text_parser_per_field = self
+            .fields
+            .iter()
+            .filter_map(|e| {
+                if let TypedField::Text(l) = e.1 {
+                    let locale = l.into();
+                    Some((e.0, (locale, self.nlp_service.get(locale))))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let lock = self.committed_collection.write().await;
+        lock.load(data_dir).await?;
+
+        /*
         self.string_index
             .load(collection_data_dir.join("strings"))
             .context("Cannot load string index")?;
@@ -187,6 +227,7 @@ impl CollectionReader {
                 }
             })
             .collect();
+        */
 
         Ok(())
     }
@@ -195,6 +236,237 @@ impl CollectionReader {
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         info!("Committing collection");
 
+        // We stop insertion operations while we are committing
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
+        let offset = self.offset_storage.get_offset();
+
+        let collection_info_path = data_dir.join("info.info");
+        let previous_offset: Option<Offset> = match BufferedFile::open(collection_info_path.clone())
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+        {
+            Ok(offset) => Some(offset),
+            Err(_) => None,
+        };
+
+        let previous_offset_collection_info_path = previous_offset.map(|previous_offset| {
+            data_dir.join(format!("info-offset-{}.info", previous_offset.0))
+        });
+        let mut current_collection_info = if let Some(previous_offset_collection_info_path) =
+            previous_offset_collection_info_path
+        {
+            let previous_collection_info: CollectionInfo =
+                BufferedFile::open(previous_offset_collection_info_path)
+                    .context("Cannot open previous collection info")?
+                    .read_json_data()
+                    .context("Cannot read previous collection info")?;
+
+            match previous_collection_info {
+                CollectionInfo::V1(info) => info,
+            }
+        } else {
+            CollectionInfoV1 {
+                fields: Default::default(),
+                id: self.id.clone(),
+                used_models: Default::default(),
+            }
+        };
+
+        let committed = self.committed_collection.read().await;
+        let uncommitted = self.uncommitted_collection.read().await;
+
+        println!(
+            "fields: {:?} current_collection_info {:?}",
+            self.fields, current_collection_info
+        );
+
+        println!(
+            "number fields: {:?}",
+            uncommitted.get_number_fields().collect::<Vec<_>>()
+        );
+        println!(
+            "string fields: {:?}",
+            uncommitted.get_string_fields().collect::<Vec<_>>()
+        );
+
+        let mut number_fields = HashMap::new();
+        let number_dir = data_dir.join("numbers");
+        for field_id in uncommitted.get_number_fields() {
+            let uncommitted_number_index = uncommitted.number_index.get(&field_id).unwrap();
+            let committed_number_index = committed.number_index.get(&field_id);
+
+            let field_dir = number_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let new_committed_number_index =
+                merge_number_field(uncommitted_number_index, committed_number_index, field_dir)
+                    .with_context(|| {
+                        format!(
+                            "Cannot merge {:?} field for collection {:?}",
+                            field_id, self.id
+                        )
+                    })?;
+            number_fields.insert(*field_id, new_committed_number_index);
+
+            let field = current_collection_info
+                .fields
+                .iter_mut()
+                .find(|(_, (field_id, _))| field_id == field_id);
+            match field {
+                Some((_, (_, typed_field))) => {
+                    if typed_field != &mut dump::TypedField::Number {
+                        error!("Field {:?} is changing type and this is not allowed. before {:?} after {:?}", field_id, typed_field, dump::TypedField::Number);
+                        return Err(anyhow!(
+                            "Field {:?} is changing type and this is not allowed",
+                            field_id
+                        ));
+                    }
+                }
+                None => {
+                    let field_name = self
+                        .fields
+                        .iter()
+                        .find(|e| e.0 == *field_id)
+                        .context("Field not registered")?;
+                    let field_name = field_name.key().to_string();
+                    current_collection_info
+                        .fields
+                        .push((field_name, (*field_id, dump::TypedField::Number)));
+                }
+            }
+        }
+
+        let mut string_fields = HashMap::new();
+        let string_dir = data_dir.join("strings");
+        for field_id in uncommitted.get_string_fields() {
+            let uncommitted_string_index = uncommitted.string_index.get(&field_id).unwrap();
+            let committed_string_index = committed.string_index.get(&field_id);
+
+            let field_dir = string_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let new_committed_string_index =
+                merge_string_field(uncommitted_string_index, committed_string_index, field_dir)
+                    .with_context(|| {
+                        format!(
+                            "Cannot merge {:?} field for collection {:?}",
+                            field_id, self.id
+                        )
+                    })?;
+            string_fields.insert(*field_id, new_committed_string_index);
+
+            let field_locale = self
+                .text_parser_per_field
+                .get(&field_id)
+                .map(|e| e.0)
+                .context("String field not registered")?;
+            let field = current_collection_info
+                .fields
+                .iter_mut()
+                .find(|(_, (f, _))| f == field_id);
+            match field {
+                Some((_, (_, typed_field))) => {
+                    if typed_field != &mut dump::TypedField::Text(field_locale) {
+                        error!("Field {:?} is changing type and this is not allowed. before {:?} after {:?}", field_id, typed_field, dump::TypedField::Text(field_locale));
+                        return Err(anyhow!(
+                            "Field {:?} is changing type and this is not allowed",
+                            field_id
+                        ));
+                    }
+                }
+                None => {
+                    let field_name = self
+                        .fields
+                        .iter()
+                        .find(|e| e.0 == *field_id)
+                        .context("Field not registered")?;
+                    let field_name = field_name.key().to_string();
+                    current_collection_info.fields.push((
+                        field_name,
+                        (*field_id, dump::TypedField::Text(field_locale)),
+                    ));
+                }
+            }
+        }
+
+        // Read lock ends
+        drop(committed);
+        drop(uncommitted);
+
+        // The following loop should be fast, so the read lock is not held for a long time
+        let (mut committed, mut uncommitted) = join!(
+            self.committed_collection.write(),
+            self.uncommitted_collection.write()
+        );
+        for (field_id, field) in number_fields {
+            uncommitted.number_index.remove(&field_id);
+            committed.number_index.insert(field_id, field);
+        }
+        for (field_id, field) in string_fields {
+            uncommitted.string_index.remove(&field_id);
+            committed.string_index.insert(field_id, field);
+        }
+        drop(committed);
+        drop(uncommitted);
+
+        let new_offset_collection_info_path =
+            data_dir.join(format!("info-offset-{}.info", offset.0));
+        BufferedFile::create(new_offset_collection_info_path)
+            .context("Cannot create previous collection info")?
+            .write_json_data(&current_collection_info)
+            .context("Cannot write previous collection info")?;
+
+        BufferedFile::create_or_overwrite(collection_info_path)
+            .context("Cannot create previous collection info")?
+            .write_json_data(&offset)
+            .context("Cannot write previous collection info")?;
+
+        drop(commit_insert_mutex_lock);
+
+        /*
+
+            let data_dir = data_dir.join("fields");
+
+        let number_dir = data_dir.join("numbers");
+        for (field_id, field) in &uncommitted.number_index {
+            let committed = committed.number_index.get(field_id);
+
+            let field_dir = number_dir.join(format!("field-{}", field_id.0));
+
+            let new_committed_field = merge_number_field(field, committed, field_dir)?;
+
+            committed.number_index.insert(*field_id, new_committed_field);
+        }
+
+        let bool_dir = data_dir.join("bools");
+        for (field_id, field) in &uncommitted.bool_index {
+            let committed = committed.bool_index.get(field_id);
+
+            let field_dir = bool_dir.join(format!("field-{}", field_id.0));
+
+            let new_committed_field = merge_bool_field(uncommitted, committed, field_dir)?;
+
+            committed.bool_index.insert(*field_id, new_committed_field);
+        }
+
+        let strings_dir = data_dir.join("strings");
+        for (field_id, field) in &uncommitted.string_index {
+            let committed = committed.string_index.get(field_id);
+
+            let field_dir = strings_dir.join(format!("field-{}", field_id.0));
+
+            let new_committed_field = merge_string_field(uncommitted, committed, field_dir)?;
+
+
+            committed.string_index.insert(*field_id, new_committed_field);
+        }
+
+        Ok(())
+
+             */
+
+        /*
         let m = COMMIT_METRIC.create(CommitLabels {
             side: "read",
             collection: self.id.0.to_string(),
@@ -280,6 +552,7 @@ impl CollectionReader {
             .await
             .context("Cannot create info.json file")?;
         trace!("Collection info committed");
+        */
 
         Ok(())
     }
@@ -293,6 +566,9 @@ impl CollectionReader {
         offset: Offset,
         collection_operation: CollectionWriteOperation,
     ) -> Result<()> {
+        // We don't allow insertion during the commit
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
         match collection_operation {
             CollectionWriteOperation::InsertDocument { .. } => {
                 unreachable!("InsertDocument is not managed by the collection");
@@ -313,8 +589,8 @@ impl CollectionReader {
                     TypedField::Embedding(embedding) => {
                         let model = embedding.model;
 
-                        self.vector_index
-                            .add_field(offset, field_id, model.dimensions())?;
+                        // self.vector_index
+                        //     .add_field(offset, field_id, model.dimensions())?;
 
                         self.fields_per_model
                             .entry(model)
@@ -326,7 +602,6 @@ impl CollectionReader {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
                             .insert(field_id, (locale, text_parser));
-                        self.string_index.add_field(offset, field_id);
                     }
                     _ => {}
                 }
@@ -337,37 +612,17 @@ impl CollectionReader {
                 trace!(collection_id=?self.id, ?doc_id, ?field_id, ?field_op, "Indexing a new value");
 
                 self.offset_storage.set_offset(offset);
-                match field_op {
-                    DocumentFieldIndexOperation::IndexBoolean { value } => {
-                        self.bool_index.add(offset, doc_id, field_id, value).await?;
-                    }
-                    DocumentFieldIndexOperation::IndexNumber { value } => {
-                        self.number_index
-                            .add(offset, doc_id, field_id, value)
-                            .await?;
-                    }
-                    DocumentFieldIndexOperation::IndexString {
-                        field_length,
-                        terms,
-                    } => {
-                        self.string_index
-                            .insert(offset, doc_id, field_id, field_length, terms)
-                            .await?;
-                    }
-                    DocumentFieldIndexOperation::IndexEmbedding { value } => {
-                        // `insert_batch` is designed to process multiple values at once
-                        // We are inserting only one value, and this is not good for performance
-                        // We should add an API to accept a single value and avoid the rebuild step
-                        // Instead, we could move the "rebuild" logic to the `VectorIndex`
-                        // TODO: do it.
-                        self.vector_index
-                            .insert_batch(offset, vec![(doc_id, field_id, vec![value])])?;
-                    }
-                }
+
+                self.uncommitted_collection
+                    .write()
+                    .await
+                    .insert(field_id, doc_id, field_op)?;
 
                 trace!("Value indexed");
             }
         };
+
+        drop(commit_insert_mutex_lock);
 
         Ok(())
     }
@@ -395,19 +650,29 @@ impl CollectionReader {
         let token_scores = match mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
-                self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
-                    .await?
+                self.search_full_text(
+                    &search_params.term,
+                    properties,
+                    boost,
+                    filtered_doc_ids.as_ref(),
+                )
+                .await?
             }
             SearchMode::Vector(search_params) => {
-                self.search_vector(&search_params.term, filtered_doc_ids, &limit)
+                self.search_vector(&search_params.term, filtered_doc_ids.as_ref(), &limit)
                     .await?
             }
             SearchMode::Hybrid(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
 
                 let (vector, fulltext) = join!(
-                    self.search_vector(&search_params.term, filtered_doc_ids.clone(), &limit),
-                    self.search_full_text(&search_params.term, properties, boost, filtered_doc_ids)
+                    self.search_vector(&search_params.term, filtered_doc_ids.as_ref(), &limit),
+                    self.search_full_text(
+                        &search_params.term,
+                        properties,
+                        boost,
+                        filtered_doc_ids.as_ref()
+                    )
                 );
                 let vector = vector?;
                 let fulltext = fulltext?;
@@ -466,6 +731,11 @@ impl CollectionReader {
             return Ok(None);
         }
 
+        info!(
+            "where_filter: {:?} {:?}",
+            where_filter, self.uncommitted_collection
+        );
+
         let metric = SEARCH_FILTER_METRIC.create(SearchFilterLabels {
             collection: self.id.0.to_string(),
         });
@@ -492,45 +762,11 @@ impl CollectionReader {
             field_name, field_type, filter
         );
 
-        let mut doc_ids = match (&field_type, filter) {
-            (TypedField::Number, Filter::Number(filter_number)) => {
-                self.number_index.filter(field_id, filter_number).await?
-            }
-            (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                self.bool_index.filter(field_id, filter_bool).await?
-            }
-            _ => {
-                error!(
-                    "Filter on field {:?}({:?}) not supported",
-                    field_name, field_type
-                );
-                anyhow::bail!(
-                    "Filter on field {:?}({:?}) not supported",
-                    field_name,
-                    field_type
-                )
-            }
-        };
+        let mut doc_ids =
+            get_filtered_document(&self, field_name, field_id, &field_type, filter).await?;
         for (field_name, field_id, field_type, filter) in filters {
-            let doc_ids_for_field = match (&field_type, filter) {
-                (TypedField::Number, Filter::Number(filter_number)) => {
-                    self.number_index.filter(field_id, filter_number).await?
-                }
-                (TypedField::Bool, Filter::Bool(filter_bool)) => {
-                    self.bool_index.filter(field_id, filter_bool).await?
-                }
-                _ => {
-                    error!(
-                        "Filter on field {:?}({:?}) not supported",
-                        field_name, field_type
-                    );
-                    anyhow::bail!(
-                        "Filter on field {:?}({:?}) not supported",
-                        field_name,
-                        field_type
-                    )
-                }
-            };
+            let doc_ids_for_field =
+                get_filtered_document(&self, field_name, field_id, &field_type, filter).await?;
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
@@ -583,11 +819,14 @@ impl CollectionReader {
         term: &str,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
 
         let mut tokens_cache: HashMap<Locale, Vec<String>> = Default::default();
+
+        let committed_lock = self.committed_collection.read().await;
+        let uncommitted_lock = self.uncommitted_collection.read().await;
 
         for field_id in properties {
             info!(?field_id, "Searching on field");
@@ -601,21 +840,26 @@ impl CollectionReader {
                 .entry(locale)
                 .or_insert_with(|| text_parser.tokenize(term));
 
-            self.string_index
-                .search(
-                    tokens,
-                    // This option is not required.
-                    // It was introduced because for test purposes we
-                    // could avoid to pass every properties
-                    // Anyway the production code should always pass the properties
-                    // So we could avoid this option
-                    // TODO: remove this option
-                    Some(&[field_id]),
-                    &boost,
-                    &mut scorer,
-                    filtered_doc_ids.as_ref(),
-                )
-                .await?;
+            let committed_global_info = committed_lock.global_info(&field_id);
+            let uncommitted_global_info = uncommitted_lock.global_info(&field_id);
+            let global_info = committed_global_info + uncommitted_global_info;
+
+            committed_lock.fulltext_search(
+                tokens,
+                vec![field_id],
+                &boost,
+                filtered_doc_ids,
+                &mut scorer,
+                &global_info,
+            )?;
+            uncommitted_lock.fulltext_search(
+                tokens,
+                vec![field_id],
+                &boost,
+                filtered_doc_ids,
+                &mut scorer,
+                &global_info,
+            )?;
         }
 
         Ok(scorer.get_scores())
@@ -624,10 +868,13 @@ impl CollectionReader {
     async fn search_vector(
         &self,
         term: &str,
-        filtered_doc_ids: Option<HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: &Limit,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let mut ret: HashMap<DocumentId, f32> = HashMap::new();
+        let mut output: HashMap<DocumentId, f32> = HashMap::new();
+
+        let committed_lock = self.committed_collection.read().await;
+        let uncommitted_lock = self.uncommitted_collection.read().await;
 
         for e in &self.fields_per_model {
             let model = e.key();
@@ -639,24 +886,18 @@ impl CollectionReader {
                 .await?;
 
             for k in e {
-                let r = self.vector_index.search(fields, &k, limit.0)?;
-
-                for (doc_id, score) in r {
-                    if !filtered_doc_ids
-                        .as_ref()
-                        .map(|f| f.contains(&doc_id))
-                        .unwrap_or(true)
-                    {
-                        continue;
-                    }
-
-                    let v = ret.entry(doc_id).or_default();
-                    *v += score;
-                }
+                committed_lock.vector_search(
+                    &k,
+                    &fields,
+                    filtered_doc_ids,
+                    limit.0,
+                    &mut output,
+                )?;
+                uncommitted_lock.vector_search(&k, &fields, filtered_doc_ids, &mut output)?;
             }
         }
 
-        Ok(ret)
+        Ok(output)
     }
 
     pub async fn calculate_facets(
@@ -664,6 +905,8 @@ impl CollectionReader {
         token_scores: &HashMap<DocumentId, f32>,
         facets: HashMap<String, FacetDefinition>,
     ) -> Result<Option<HashMap<String, FacetResult>>> {
+        Ok(None)
+        /*
         if facets.is_empty() {
             Ok(None)
         } else {
@@ -743,6 +986,7 @@ impl CollectionReader {
             }
             Ok(Some(res_facets))
         }
+        */
     }
 }
 
@@ -759,6 +1003,7 @@ mod dump {
             dto::{DocumentFields, FieldId, LanguageDTO},
             sides::OramaModelSerializable,
         },
+        nlp::locales::Locale,
         types::CollectionId,
     };
 
@@ -776,17 +1021,97 @@ mod dump {
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct EmbeddingTypedField {
         pub model: OramaModelSerializable,
         pub document_fields: DocumentFields,
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub enum TypedField {
-        Text(LanguageDTO),
+        Text(Locale),
         Embedding(EmbeddingTypedField),
         Number,
         Bool,
+    }
+}
+
+async fn get_bool_filtered_document(
+    reader: &CollectionReader,
+    field_id: FieldId,
+    filter_bool: bool,
+) -> Result<HashSet<DocumentId>> {
+    let lock = reader.uncommitted_collection.read().await;
+    let uncommitted_output = lock.calculate_bool_filter(field_id, filter_bool)?;
+
+    let lock = reader.committed_collection.read().await;
+    let committed_output = lock.calculate_bool_filter(field_id, filter_bool)?;
+
+    let result = match (uncommitted_output, committed_output) {
+        (Some(uncommitted_output), Some(committed_output)) => {
+            committed_output.chain(uncommitted_output).collect()
+        }
+        (Some(uncommitted_output), None) => uncommitted_output.collect(),
+        (None, Some(committed_output)) => committed_output.collect(),
+        // This case probable means the field is not a number indexed
+        (None, None) => HashSet::new(),
+    };
+
+    Ok(result)
+}
+
+async fn get_number_filtered_document(
+    reader: &CollectionReader,
+    field_id: FieldId,
+    filter_number: NumberFilter,
+) -> Result<HashSet<DocumentId>> {
+    let lock = reader.uncommitted_collection.read().await;
+    let uncommitted_output = lock
+        .calculate_number_filter(field_id, &filter_number)
+        .context("Cannot calculate uncommitted filter")?;
+
+    let lock = reader.committed_collection.read().await;
+    let committed_output = lock
+        .calculate_number_filter(field_id, &filter_number)
+        .context("Cannot calculate committed filter")?;
+
+    let result = match (uncommitted_output, committed_output) {
+        (Some(uncommitted_output), Some(committed_output)) => {
+            committed_output.chain(uncommitted_output).collect()
+        }
+        (Some(uncommitted_output), None) => uncommitted_output.collect(),
+        (None, Some(committed_output)) => committed_output.collect(),
+        // This case probable means the field is not a number indexed
+        (None, None) => HashSet::new(),
+    };
+
+    Ok(result)
+}
+
+async fn get_filtered_document(
+    reader: &CollectionReader,
+    field_name: String,
+    field_id: FieldId,
+    field_type: &TypedField,
+    filter: Filter,
+) -> Result<HashSet<DocumentId>> {
+    match (&field_type, filter) {
+        (TypedField::Number, Filter::Number(filter_number)) => {
+            get_number_filtered_document(reader, field_id, filter_number).await
+        }
+        (TypedField::Bool, Filter::Bool(filter_bool)) => {
+            get_bool_filtered_document(reader, field_id, filter_bool).await
+        }
+        _ => {
+            error!(
+                "Filter on field {:?}({:?}) not supported",
+                field_name, field_type
+            );
+            anyhow::bail!(
+                "Filter on field {:?}({:?}) not supported",
+                field_name,
+                field_type
+            )
+        }
     }
 }

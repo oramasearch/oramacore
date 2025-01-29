@@ -4,7 +4,7 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::{InsertStringTerms, Term, TermStringField},
+    collection_manager::sides::{InsertStringTerms, TermStringField},
     indexes::{
         radix::RadixIndex,
         string::{BM25Scorer, GlobalInfo},
@@ -47,7 +47,7 @@ pub struct Positions(pub Vec<usize>);
 #[derive(Debug)]
 pub struct StringField {
     /// The sum of the length of all the content in the field in the collection
-    total_field_length: u64,
+    total_field_length: usize,
     /// Set of document ids that has the field
     document_ids: HashSet<DocumentId>,
     /// The length for each document in the collection
@@ -69,6 +69,13 @@ impl StringField {
         }
     }
 
+    pub fn global_info(&self) -> GlobalInfo {
+        GlobalInfo {
+            total_document_length: self.total_field_length,
+            total_documents: self.document_ids.len(),
+        }
+    }
+
     pub fn insert(&mut self, document_id: DocumentId, field_length: u16, terms: InsertStringTerms) {
         self.document_ids.insert(document_id);
 
@@ -85,7 +92,7 @@ impl StringField {
 
             let TermStringField { positions } = term_string_field;
 
-            self.total_field_length += u64::from(field_length);
+            self.total_field_length += usize::from(field_length);
 
             match self.inner.get_mut(k.bytes()) {
                 Some(v) => {
@@ -175,5 +182,19 @@ impl StringField {
         info!(total_matches = total_matches, "Uncommitted total matches");
 
         Ok(())
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            Vec<u8>,
+            (
+                TotalDocumentsWithTermInField,
+                HashMap<DocumentId, Positions>,
+            ),
+        ),
+    > + '_ {
+        self.inner.inner.iter()
     }
 }

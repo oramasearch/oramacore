@@ -15,10 +15,17 @@ use crate::{
     types::DocumentId,
 };
 
-mod bool;
-mod number;
-mod string;
-mod vector;
+pub mod bool;
+pub mod number;
+pub mod string;
+pub mod vector;
+
+pub mod fields {
+    pub use super::bool::BoolField;
+    pub use super::number::NumberField;
+    pub use super::string::StringField;
+    pub use super::vector::VectorField;
+}
 
 pub use string::{Positions, TotalDocumentsWithTermInField};
 
@@ -31,18 +38,35 @@ pub struct UncommittedCollection {
 }
 
 impl UncommittedCollection {
+    pub fn new() -> Self {
+        Self {
+            number_index: HashMap::new(),
+            bool_index: HashMap::new(),
+            string_index: HashMap::new(),
+            vector_index: HashMap::new(),
+        }
+    }
+
+    pub fn global_info(&self, field_id: &FieldId) -> GlobalInfo {
+        self.string_index
+            .get(field_id)
+            .map(StringField::global_info)
+            .unwrap_or_default()
+    }
+
     pub fn vector_search(
         &self,
         target: &[f32],
-        properties: Vec<FieldId>,
+        properties: &[FieldId],
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         for vector_field in properties {
             let vector_field = self
                 .vector_index
-                .get(&vector_field)
+                .get(vector_field)
                 .context("Field is not a vector field")?;
-            vector_field.search(target, output)?;
+            vector_field.search(target, filtered_doc_ids, output)?;
         }
 
         Ok(())
@@ -53,25 +77,23 @@ impl UncommittedCollection {
         tokens: &Vec<String>,
         properties: Vec<FieldId>,
         boost: &'boost HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&HashSet<DocumentId>>,
         scorer: &'scorer mut BM25Scorer<DocumentId>,
         global_info: &GlobalInfo,
     ) -> Result<()> {
         for field_id in properties {
-            let index = self
-                .string_index
-                .get(&field_id)
-                .expect("Field is not a string field");
+            let index = match self.string_index.get(&field_id) {
+                Some(index) => index,
+                // If the field is not indexed, we skip it
+                // This could be:
+                // - a field id is not a string field (this should not happen)
+                // - is not yet committed
+                None => continue,
+            };
 
             let field_boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            index.search(
-                &tokens,
-                field_boost,
-                scorer,
-                filtered_doc_ids.as_ref(),
-                global_info,
-            )?;
+            index.search(&tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
         }
 
         Ok(())
@@ -80,31 +102,32 @@ impl UncommittedCollection {
     pub fn calculate_number_filter<'s, 'iter>(
         &'s self,
         field_id: FieldId,
-        filter_number: NumberFilter,
-    ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
+        filter_number: &NumberFilter,
+    ) -> Result<Option<impl Iterator<Item = DocumentId> + 'iter>>
     where
         's: 'iter,
     {
-        let number_index = self
-            .number_index
-            .get(&field_id)
-            .context("Field is not a number field")?;
-        Ok(number_index.filter(filter_number))
+        let number_index = match self.number_index.get(&field_id) {
+            Some(index) => index,
+            None => return Ok(None),
+        };
+        Ok(Some(number_index.filter(filter_number)))
     }
 
     pub fn calculate_bool_filter<'s, 'iter>(
         &'s self,
         field_id: FieldId,
         value: bool,
-    ) -> Result<impl Iterator<Item = DocumentId> + 'iter>
+    ) -> Result<Option<impl Iterator<Item = DocumentId> + 'iter>>
     where
         's: 'iter,
     {
-        let bool_index = self
-            .bool_index
-            .get(&field_id)
-            .context("Field is not a bool field")?;
-        Ok(bool_index.filter(value))
+        let bool_index = match self.bool_index.get(&field_id) {
+            Some(index) => index,
+            None => return Ok(None),
+        };
+
+        Ok(Some(bool_index.filter(value)))
     }
 
     pub fn insert(
@@ -144,5 +167,13 @@ impl UncommittedCollection {
         };
 
         Ok(())
+    }
+
+    pub fn get_number_fields(&self) -> impl Iterator<Item = &FieldId> {
+        self.number_index.keys()
+    }
+
+    pub fn get_string_fields(&self) -> impl Iterator<Item = &FieldId> {
+        self.string_index.keys()
     }
 }

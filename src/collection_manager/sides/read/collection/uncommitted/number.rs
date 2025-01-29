@@ -29,12 +29,12 @@ impl NumberField {
 
     pub fn filter<'s, 'iter>(
         &'s self,
-        filter_number: NumberFilter,
+        filter_number: &NumberFilter,
     ) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
     {
-        inner_filter(&self.inner, &filter_number)
+        inner_filter(&self.inner, filter_number)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
