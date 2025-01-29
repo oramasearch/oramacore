@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Result;
 use http::uri::Scheme;
+use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -39,6 +40,7 @@ fn create_oramacore_config() -> OramacoreConfig {
             scheme: Scheme::HTTP,
         },
         writer_side: WriteSideConfig {
+            master_api_key: Secret::new("my-master-api-key".to_string()),
             output: SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
@@ -310,6 +312,7 @@ async fn test_collection_id_already_exists() -> Result<()> {
 
     let output = write_side
         .create_collection(
+            Secret::new("my-master-api-key".to_string()),
             json!({
                 "id": collection_id.0.clone(),
             })
@@ -939,6 +942,7 @@ async fn test_vector_search_grpc() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            Secret::new("my-master-api-key".to_string()),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
@@ -1097,6 +1101,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            Secret::new("my-master-api-key".to_string()),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
@@ -1287,6 +1292,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            Secret::new("my-master-api-key".to_string()),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
@@ -1351,6 +1357,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side
         .create_collection(
+            Secret::new("my-master-api-key".to_string()),
             json!({
                 "id": collection_id.0.clone(),
             })

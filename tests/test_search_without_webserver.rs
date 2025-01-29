@@ -3,12 +3,13 @@ use http::uri::Scheme;
 use oramacore::ai::{AIServiceConfig, OramaModel};
 use oramacore::collection_manager::dto::{CreateCollection, SearchParams};
 use oramacore::collection_manager::sides::{
-    CollectionsWriterConfig, OramaModelSerializable, WriteSide,
+    CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig,
 };
 use oramacore::collection_manager::sides::{IndexesConfig, ReadSide};
 use oramacore::test_utils::create_grpc_server;
 use oramacore::types::{CollectionId, DocumentList};
-use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
+use oramacore::{build_orama, OramacoreConfig, ReadSideConfig};
+use redact::Secret;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
             max_connections: 1,
         },
         writer_side: WriteSideConfig {
+            master_api_key: Secret::new("my-master-api-key".to_string()),
             output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
@@ -99,12 +101,15 @@ async fn run_tests() {
     let collection_id = CollectionId("collection-test".to_string());
 
     writer
-        .create_collection(CreateCollection {
-            id: collection_id.clone(),
-            description: None,
-            language: None,
-            embeddings: None,
-        })
+        .create_collection(
+            Secret::new("my-master-api-key".to_string()),
+            CreateCollection {
+                id: collection_id.clone(),
+                description: None,
+                language: None,
+                embeddings: None,
+            },
+        )
         .await
         .unwrap();
 

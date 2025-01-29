@@ -6,7 +6,9 @@ use axum::{
     response::IntoResponse,
     Json, Router,
 };
+use axum_extra::{headers, TypedHeader};
 use axum_openapi3::*;
+use redact::Secret;
 use serde_json::json;
 use tracing::{error, info};
 
@@ -87,11 +89,17 @@ async fn get_collection_by_id(
 )]
 async fn create_collection(
     write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): TypedHeader<headers::Authorization<headers::authorization::Bearer>>,
     Json(json): Json<CreateCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    match write_side.create_collection(json).await {
+    let master_api_key = Secret::new(auth.0.token().to_string());
+
+    match write_side.create_collection(master_api_key, json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
+            // If master_api_key is wrong we return 500
+            // This is not correct, we should return a different http status code
+            // TODO: do it
             error!("Error creating collection: {}", e);
             e.chain()
                 .skip(1)

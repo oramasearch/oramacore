@@ -3,8 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    channel, hooks::HooksRuntime, CollectionsWriterConfig, IndexesConfig, OperationReceiver,
-    ReadSide, WriteSide,
+    channel, hooks::HooksRuntime, IndexesConfig, OperationReceiver, ReadSide, WriteSide,
+    WriteSideConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
@@ -50,11 +50,6 @@ pub enum SideChannelType {
     InMemory,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub struct WriteSideConfig {
-    pub output: SideChannelType,
-    pub config: CollectionsWriterConfig,
-}
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: SideChannelType,
@@ -152,7 +147,7 @@ pub async fn build_orama(
     info!("Building write_side");
     let mut write_side = WriteSide::new(
         sender.clone(),
-        writer_side.config,
+        writer_side,
         ai_service.clone(),
         hooks_runtime,
         nlp_service.clone(),
