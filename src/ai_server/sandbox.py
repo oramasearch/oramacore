@@ -1,4 +1,6 @@
 import json
+import time
+from datetime import timedelta
 from json_repair import repair_json
 from src.utils import OramaAIConfig
 from src.actions.main import Actions
@@ -14,7 +16,7 @@ config = OramaAIConfig()
 models_service = ModelsManager(config)
 act = Actions(config)
 
-INPUT = "I just started playing golf, and I need a pair of shoes. Ideally under 150 USD. What should I buy?"
+INPUT = "I can't run Orama on Deno 'cause it gives me an error where JS uses 'assert type' instead of 'with'. How do I fix this?"
 
 
 def print_json(data):
@@ -31,6 +33,8 @@ history = []
 steps = {}
 
 for action in actions:
+    time_start = time.perf_counter()
+
     step_name = action["step"]
     is_orama_step = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[step_name]["side"] == EXECUTION_SIDE_ORAMACORE
     returns_json = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[step_name]["returns"] == RETURN_TYPE_TEXT
@@ -58,6 +62,12 @@ for action in actions:
             print(f"Skipping action {step_name} as it requires a missing OramaCore integration")
             print("================")
 
+    time_end = time.perf_counter()
+    elapsed_ms = (time_end - time_start) * 1000
+    print(f"Action {step_name} took {elapsed_ms:.2f} ms")
+
+print("================")
+print(" STEPS ")
 print("================")
 # print(json.dumps(history, indent=2))
 print(json.dumps(steps, indent=2))
