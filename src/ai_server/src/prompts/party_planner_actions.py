@@ -1,5 +1,11 @@
 from textwrap import dedent
 
+RETURN_TYPE_TEXT = "TEXT"
+RETURN_TYPE_JSON = "JSON"
+
+EXECUTION_SIDE_PYTHON = "PYTHON"
+EXECUTION_SIDE_ORAMACORE = "ORAMACORE"
+
 COMMON_USER_PROMPT = lambda input, description: dedent(
     f"""
             ### Input
@@ -12,7 +18,7 @@ COMMON_USER_PROMPT = lambda input, description: dedent(
 
 DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
     "OPTIMIZE_QUERY": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You are an AI assistant. Your job is to optimize a given user input into an optimized query for searching on search engines like Google or similar.
@@ -27,10 +33,10 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "JSON",
+        "returns": RETURN_TYPE_JSON,
     },
     "GENERATE_QUERIES": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You are an AI assistant. Your job is to create one or more optimized queries out of a user input.
@@ -45,11 +51,11 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "JSON",
+        "returns": RETURN_TYPE_JSON,
     },
-    "PERFORM_ORAMA_SEARCH": {"side": "ORAMACORE", "returns": "JSON"},
+    "PERFORM_ORAMA_SEARCH": {"side": EXECUTION_SIDE_ORAMACORE, "returns": RETURN_TYPE_JSON},
     "DESCRIBE_INPUT_CODE": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You are an AI assistant. Your job is to describe a given input code in natural language, to extract key features, intent, and errors (if any).
@@ -70,10 +76,10 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "JSON",
+        "returns": RETURN_TYPE_JSON,
     },
     "IMPROVE_INPUT": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You're an AI assistant. You'll be given a user input (### Input) and a description (### Description) of the task to execute.
@@ -84,10 +90,10 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "TEXT",
+        "returns": RETURN_TYPE_TEXT,
     },
     "CREATE_CODE": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You're an AI coding assistant. You'll be given an input (### Input) and a description (### Description), and your job is to follow the instructions in the description to generate some code based on the input.
@@ -105,7 +111,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "returns": "JSON",
     },
     "SUMMARIZE_FINDINGS": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You're an AI assistant. Your job is to summarize the findings you'll be given (### Input) following a description (### Description) that will give your direction on how to summarize them.
@@ -114,10 +120,10 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "TEXT",
+        "returns": RETURN_TYPE_TEXT,
     },
     "ASK_FOLLOWUP": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
             You're an AI assistant. The user has asked a question (### Input) that you may not have understood completely.
@@ -125,22 +131,34 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             """
         ),
         "prompt:user": COMMON_USER_PROMPT,
-        "returns": "TEXT",
+        "returns": RETURN_TYPE_TEXT,
     },
     "GIVE_REPLY": {
-        "side": "PYTHON",
+        "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
             """
-            You're an AI assistant. You'll be given a markdown text with two fields, input (### Input) and context (### Context).
+            You are a AI support agent. You are helping a user with his question around the product.
+		    Your task is to provide a solution to the user's question.
+		    You'll be provided a context (### Context) and a question (### Question).
 
-            The input identifies a user inquiry. The context provides all you need to know in order to provide a correct answer.
+		    RULES TO FOLLOW STRICTLY:
 
-            Using the context only, provide an answer to the user.
+		    You should provide a solution to the user's question based on the context and question.
+		    You should provide code snippets, quotes, or any other resource that can help the user, only when you can derive them from the context.
+		    You should separate content into paragraphs.
+		    You shouldn't put the returning text between quotes.
+		    You shouldn't use headers.
+		    You shouldn't mention "context" or "question" in your response, just provide the answer. That's very important.
 
-            Reply in plain text.
+		    You MUST include the language name when providing code snippets.
+		    You MUST reply with valid markdown code.
+		    You MUST only use the information provided in the context and the question to generate the answer. External information or your own knowledge should be avoided.
+		    You MUST say one the following sentences if the context or the conversation history is not enough to provide a solution. Be aware that past messages are considered context:
+                - "I'm sorry. Could you clarify your question? I'm not sure I fully understood it.", if the user question is not clear or seems to be incomplete.
+            You MUST read the user prompt carefully. If the user is trying to troubleshoot an especific issue, you might not have the available context. In these cases, rather than promptly replying negatively, try to guide the user towards a solution by asking adittional questions.
             """
         ),
-        "prompt:user": lambda input, context: f"### Input\n{input}\n\n### Context\n{context}",
-        "returns": "TEXT",
+        "prompt:user": lambda input, context: f"### Question\n{input}\n\n### Context\n{context}",
+        "returns": RETURN_TYPE_TEXT,
     },
 }

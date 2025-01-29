@@ -16,7 +16,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS = [
     },
     {
         "step": "DESCRIBE_INPUT_CODE",
-        "description": "Describe the input code snippet to understand its purpose and functionality.",
+        "description": "Describe the input code snippet to understand its purpose and functionality. This should only be used when the input includes some code.",
     },
     {
         "step": "IMPROVE_INPUT",
