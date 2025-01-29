@@ -18,7 +18,8 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            ApiKey, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode, SearchParams, TypedField
+            ApiKey, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit,
+            Properties, SearchMode, SearchParams, TypedField,
         },
         sides::{
             CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
@@ -110,7 +111,7 @@ impl CollectionReader {
 
     pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
         if api_key != self.read_api_key {
-            return Err(anyhow!("Invalid read api key"))
+            return Err(anyhow!("Invalid read api key"));
         }
         Ok(())
     }

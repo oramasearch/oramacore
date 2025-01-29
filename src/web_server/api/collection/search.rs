@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State}, http::StatusCode, response::IntoResponse, routing::post, Json, Router
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
 };
 use axum_openapi3::*;
 use serde::Deserialize;
@@ -9,7 +13,10 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    collection_manager::{dto::{ApiKey, SearchParams}, sides::ReadSide},
+    collection_manager::{
+        dto::{ApiKey, SearchParams},
+        sides::ReadSide,
+    },
     types::CollectionId,
 };
 
@@ -36,13 +43,11 @@ async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
     axum::Json(())
 }
 
-
 #[derive(Deserialize)]
 struct SearchQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
-
 
 // #[endpoint(
 //     method = "POST",

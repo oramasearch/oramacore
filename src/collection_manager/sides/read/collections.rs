@@ -157,7 +157,12 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub async fn create_collection(&self, offset: Offset, id: CollectionId, read_api_key: ApiKey) -> Result<()> {
+    pub async fn create_collection(
+        &self,
+        offset: Offset,
+        id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<()> {
         info!(collection_id=?id, "Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(

@@ -116,7 +116,11 @@ async fn run_tests() {
         .unwrap();
 
     writer
-        .write(ApiKey(Secret::new("my-write-api-key".to_string())), collection_id.clone(), generate_test_data())
+        .write(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            generate_test_data(),
+        )
         .await
         .unwrap();
 
@@ -129,7 +133,11 @@ async fn run_tests() {
     .unwrap();
     for _ in 0..10_000 {
         reader
-            .search(ApiKey(Secret::new("my-read-api-key".to_string())), collection_id.clone(), param.clone())
+            .search(
+                ApiKey(Secret::new("my-read-api-key".to_string())),
+                collection_id.clone(),
+                param.clone(),
+            )
             .await
             .unwrap();
     }

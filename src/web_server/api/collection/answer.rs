@@ -1,6 +1,6 @@
 use crate::ai::LlmType;
 use crate::collection_manager::dto::{
-    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult
+    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
 };
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;

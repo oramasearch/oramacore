@@ -147,7 +147,9 @@ impl ReadSide {
                         collection: id.0.clone(),
                     })
                     .increment_by_one();
-                self.collections.create_collection(offset, id, read_api_key).await?;
+                self.collections
+                    .create_collection(offset, id, read_api_key)
+                    .await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
                 COLLECTION_OPERATION_COUNTER

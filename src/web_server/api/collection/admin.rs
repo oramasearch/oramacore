@@ -82,7 +82,8 @@ async fn get_collection_by_id(
     }
 }
 
-type AuthorizationBearerHeader = TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
+type AuthorizationBearerHeader =
+    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[endpoint(
     method = "POST",

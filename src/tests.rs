@@ -13,9 +13,12 @@ use tokio::time::sleep;
 use crate::{
     ai::AIServiceConfig,
     build_orama,
-    collection_manager::{dto::ApiKey, sides::{
-        CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
-    }},
+    collection_manager::{
+        dto::ApiKey,
+        sides::{
+            CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
+        },
+    },
     connect_write_and_read_side,
     test_utils::{create_grpc_server, generate_new_path},
     types::{CollectionId, DocumentList},
@@ -1438,7 +1441,9 @@ where
     let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
     let document_list: DocumentList = document_list.try_into()?;
 
-    write_side.write(write_api_key, collection_id, document_list).await?;
+    write_side
+        .write(write_api_key, collection_id, document_list)
+        .await?;
 
     sleep(Duration::from_millis(100)).await;
 

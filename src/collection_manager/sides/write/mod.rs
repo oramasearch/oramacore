@@ -15,7 +15,6 @@ use std::{
 
 use super::hooks::{HookName, HooksRuntime};
 use anyhow::{Context, Result};
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{info, instrument, trace, warn};

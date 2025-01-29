@@ -14,7 +14,7 @@ use crate::{
 };
 
 use crate::collection_manager::dto::{
-    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField
+    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
@@ -102,7 +102,10 @@ impl CollectionsWriter {
 
         // Send event & Register field should be inside the lock transaction
         sender
-            .send(WriteOperation::CreateCollection { id: id.clone(), read_api_key })
+            .send(WriteOperation::CreateCollection {
+                id: id.clone(),
+                read_api_key,
+            })
             .await
             .context("Cannot send create collection")?;
         collection

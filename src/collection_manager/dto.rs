@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use axum_openapi3::utoipa::{self, IntoParams};
+use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use redact::Secret;
 use serde::{de, Deserialize, Serialize};
 
