@@ -24,6 +24,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
     if let Some(read_side) = read_side {
         collection_router
             .merge(search::apis(read_side.clone()))
+            .merge(actions::apis(read_side.clone()))
             .merge(answer::apis(read_side))
     } else {
         collection_router
