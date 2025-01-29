@@ -4,6 +4,7 @@ use axum::Router;
 
 use crate::collection_manager::sides::{ReadSide, WriteSide};
 
+mod actions;
 mod admin;
 mod answer;
 mod hooks;

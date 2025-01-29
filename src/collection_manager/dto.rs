@@ -352,6 +352,12 @@ pub struct DeleteHookParams {
     pub name: HookName,
 }
 
+#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+pub struct ExecuteActionPayload {
+    pub name: String, // we're not using an enum here since users will be able to define their own actions
+    pub context: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
