@@ -54,12 +54,10 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
         Ok(())
     }
 
-    pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let file_path = data_dir.join("index.map");
-
+    pub fn load(file_path: PathBuf) -> Result<Self> {
         let map: HashMap<Key, Value> = BufferedFile::open(file_path.clone())
             .context("Cannot open file")?
-            .read_json_data()
+            .read_bincode_data()
             .context("Cannot read map from file")?;
 
         Ok(Self {

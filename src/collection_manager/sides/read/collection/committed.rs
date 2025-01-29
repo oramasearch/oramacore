@@ -4,9 +4,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use bool::{BoolField, BoolWrapper};
-use number::NumberField;
-use string::StringField;
+use bool::{BoolField, BoolFieldInfo, BoolWrapper};
+use number::{NumberField, NumberFieldInfo};
+use string::{StringField, StringFieldInfo};
 use vector::VectorField;
 
 use crate::{
@@ -27,9 +27,9 @@ mod string;
 mod vector;
 
 pub mod fields {
-    pub use super::bool::BoolField;
-    pub use super::number::NumberField;
-    pub use super::string::StringField;
+    pub use super::bool::{BoolField, BoolFieldInfo};
+    pub use super::number::{NumberField, NumberFieldInfo};
+    pub use super::string::{StringField, StringFieldInfo};
     pub use super::vector::VectorField;
 
     pub use super::bool::BoolWrapper;
@@ -53,11 +53,24 @@ impl CommittedCollection {
         }
     }
 
-    pub fn load(&mut self, data_dir: PathBuf) -> Result<()> {
-        self.number_index = NumberField::load_all(&data_dir)?;
-        self.bool_index = BoolField::load_all(&data_dir)?;
-        self.string_index = StringField::load_all(&data_dir)?;
-        self.vector_index = VectorField::load_all(&data_dir)?;
+    pub fn load(
+        &mut self,
+        number_field_infos: Vec<(FieldId, NumberFieldInfo)>,
+        bool_field_infos: Vec<(FieldId, BoolFieldInfo)>,
+        string_field_infos: Vec<(FieldId, StringFieldInfo)>,
+    ) -> Result<()> {
+        for (field_id, info) in number_field_infos {
+            let number_field = NumberField::load(info)?;
+            self.number_index.insert(field_id, number_field);
+        }
+        for (field_id, info) in bool_field_infos {
+            let bool_field = BoolField::load(info)?;
+            self.bool_index.insert(field_id, bool_field);
+        }
+        for (field_id, info) in string_field_infos {
+            let string_field = StringField::load(info)?;
+            self.string_index.insert(field_id, string_field);
+        }
 
         Ok(())
     }

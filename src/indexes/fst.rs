@@ -10,6 +10,7 @@ const FILE_NAME: &str = "index.fst";
 
 pub struct FSTIndex {
     inner: Map<Mmap>,
+    file_path: PathBuf,
 }
 
 impl Debug for FSTIndex {
@@ -23,18 +24,16 @@ impl Debug for FSTIndex {
 }
 
 impl FSTIndex {
-    pub fn from_iter<I, K>(iter: I, data_dir: PathBuf) -> Result<Self>
+    pub fn from_iter<I, K>(iter: I, file_path: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (K, u64)>,
         K: AsRef<[u8]>,
     {
-        std::fs::create_dir_all(&data_dir)
+        std::fs::create_dir_all(file_path.parent().expect("file path has no parent"))
             .context("Cannot create the base directory for the committed index")?;
 
-        let path_to_commit = data_dir.join(FILE_NAME);
-
         let mut buffered_file =
-            BufferedFile::create(path_to_commit.clone()).context("Cannot create file")?;
+            BufferedFile::create(file_path.clone()).context("Cannot create file")?;
         let mut build = MapBuilder::new(&mut buffered_file)?;
 
         for (key, value) in iter {
@@ -48,17 +47,19 @@ impl FSTIndex {
             .close()
             .context("Cannot close buffered file")?;
 
-        Self::load(data_dir)
+        Self::load(file_path)
     }
 
-    pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let path_to_commit = data_dir.join(FILE_NAME);
-
-        let file = File::open(path_to_commit)?;
+    pub fn load(file_path: PathBuf) -> Result<Self> {
+        let file = File::open(&file_path)?;
         let mmap = unsafe { Mmap::map(&file)? };
         let inner = Map::new(mmap)?;
 
-        Ok(Self { inner })
+        Ok(Self { inner, file_path })
+    }
+
+    pub fn file_path(&self) -> PathBuf {
+        self.file_path.clone()
     }
 
     pub fn search<'s, 'input>(&'s self, token: &'input str) -> FTSIter<'s, 'input>

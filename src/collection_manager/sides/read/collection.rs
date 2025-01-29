@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use committed::CommittedCollection;
 use dashmap::DashMap;
 use dump::{CollectionInfo, CollectionInfoV1};
-use merge::{merge_number_field, merge_string_field};
+use merge::{merge_bool_field, merge_number_field, merge_string_field};
 use serde::{Deserialize, Serialize};
 use tokio::{
     join,
@@ -34,10 +34,10 @@ use crate::{
         sides::{CollectionWriteOperation, Offset},
     },
     file_utils::BufferedFile,
-    indexes::{number::NumberFilter, string::BM25Scorer, vector::VectorIndex},
+    indexes::{number::NumberFilter, string::BM25Scorer},
     metrics::{
-        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
-        SEARCH_FILTER_METRIC, SEARCH_METRIC,
+        SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
+        SEARCH_METRIC,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
@@ -171,8 +171,12 @@ impl CollectionReader {
             })
             .collect();
 
-        let lock = self.committed_collection.write().await;
-        lock.load(data_dir).await?;
+        let mut lock = self.committed_collection.write().await;
+        lock.load(
+            collection_info.number_field_infos,
+            collection_info.bool_field_infos,
+            collection_info.string_field_infos,
+        )?;
 
         /*
         self.string_index
@@ -270,25 +274,14 @@ impl CollectionReader {
                 fields: Default::default(),
                 id: self.id.clone(),
                 used_models: Default::default(),
+                number_field_infos: Default::default(),
+                string_field_infos: Default::default(),
+                bool_field_infos: Default::default(),
             }
         };
 
         let committed = self.committed_collection.read().await;
         let uncommitted = self.uncommitted_collection.read().await;
-
-        println!(
-            "fields: {:?} current_collection_info {:?}",
-            self.fields, current_collection_info
-        );
-
-        println!(
-            "number fields: {:?}",
-            uncommitted.get_number_fields().collect::<Vec<_>>()
-        );
-        println!(
-            "string fields: {:?}",
-            uncommitted.get_string_fields().collect::<Vec<_>>()
-        );
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
@@ -307,6 +300,16 @@ impl CollectionReader {
                             field_id, self.id
                         )
                     })?;
+            let field_info = new_committed_number_index.get_field_info();
+            current_collection_info.number_field_infos = current_collection_info
+                .number_field_infos
+                .into_iter()
+                .filter(|(k, _)| k != field_id)
+                .collect();
+            current_collection_info
+                .number_field_infos
+                .push((*field_id, field_info));
+
             number_fields.insert(*field_id, new_committed_number_index);
 
             let field = current_collection_info
@@ -354,7 +357,16 @@ impl CollectionReader {
                             field_id, self.id
                         )
                     })?;
+            let field_info = new_committed_string_index.get_field_info();
             string_fields.insert(*field_id, new_committed_string_index);
+            current_collection_info.string_field_infos = current_collection_info
+                .string_field_infos
+                .into_iter()
+                .filter(|(k, _)| k != field_id)
+                .collect();
+            current_collection_info
+                .string_field_infos
+                .push((*field_id, field_info));
 
             let field_locale = self
                 .text_parser_per_field
@@ -390,6 +402,62 @@ impl CollectionReader {
             }
         }
 
+        let mut bool_fields = HashMap::new();
+        let bool_dir = data_dir.join("bools");
+        for field_id in uncommitted.get_bool_fields() {
+            let uncommitted_bool_index = uncommitted.bool_index.get(&field_id).unwrap();
+            let committed_bool_index = committed.bool_index.get(&field_id);
+
+            let field_dir = bool_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let new_committed_bool_index =
+                merge_bool_field(uncommitted_bool_index, committed_bool_index, field_dir)
+                    .with_context(|| {
+                        format!(
+                            "Cannot merge {:?} field for collection {:?}",
+                            field_id, self.id
+                        )
+                    })?;
+            let field_info = new_committed_bool_index.get_field_info();
+            bool_fields.insert(*field_id, new_committed_bool_index);
+            current_collection_info.bool_field_infos = current_collection_info
+                .bool_field_infos
+                .into_iter()
+                .filter(|(k, _)| k != field_id)
+                .collect();
+            current_collection_info
+                .bool_field_infos
+                .push((*field_id, field_info));
+
+            let field = current_collection_info
+                .fields
+                .iter_mut()
+                .find(|(_, (f, _))| f == field_id);
+            match field {
+                Some((_, (_, typed_field))) => {
+                    if typed_field != &mut dump::TypedField::Bool {
+                        error!("Field {:?} is changing type and this is not allowed. before {:?} after {:?}", field_id, typed_field, dump::TypedField::Bool);
+                        return Err(anyhow!(
+                            "Field {:?} is changing type and this is not allowed",
+                            field_id
+                        ));
+                    }
+                }
+                None => {
+                    let field_name = self
+                        .fields
+                        .iter()
+                        .find(|e| e.0 == *field_id)
+                        .context("Field not registered")?;
+                    let field_name = field_name.key().to_string();
+                    current_collection_info
+                        .fields
+                        .push((field_name, (*field_id, dump::TypedField::Bool)));
+                }
+            }
+        }
+
         // Read lock ends
         drop(committed);
         drop(uncommitted);
@@ -414,7 +482,7 @@ impl CollectionReader {
             data_dir.join(format!("info-offset-{}.info", offset.0));
         BufferedFile::create(new_offset_collection_info_path)
             .context("Cannot create previous collection info")?
-            .write_json_data(&current_collection_info)
+            .write_json_data(&CollectionInfo::V1(current_collection_info))
             .context("Cannot write previous collection info")?;
 
         BufferedFile::create_or_overwrite(collection_info_path)
@@ -1000,12 +1068,14 @@ mod dump {
 
     use crate::{
         collection_manager::{
-            dto::{DocumentFields, FieldId, LanguageDTO},
+            dto::{DocumentFields, FieldId},
             sides::OramaModelSerializable,
         },
         nlp::locales::Locale,
         types::CollectionId,
     };
+
+    use super::committed;
 
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(tag = "version")]
@@ -1019,6 +1089,9 @@ mod dump {
         pub id: CollectionId,
         pub fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
+        pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,
+        pub string_field_infos: Vec<(FieldId, committed::fields::StringFieldInfo)>,
+        pub bool_field_infos: Vec<(FieldId, committed::fields::BoolFieldInfo)>,
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -176,4 +176,8 @@ impl UncommittedCollection {
     pub fn get_string_fields(&self) -> impl Iterator<Item = &FieldId> {
         self.string_index.keys()
     }
+
+    pub fn get_bool_fields(&self) -> impl Iterator<Item = &FieldId> {
+        self.bool_index.keys()
+    }
 }

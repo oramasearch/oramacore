@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::{
@@ -65,19 +66,22 @@ impl StringField {
             (key, new_posting_list_id)
         });
 
-        let index = FSTIndex::from_iter(iter, data_dir.clone()).context("Cannot commit fst")?;
         let posting_id_storage_file_path = data_dir.join("posting_id_storage.map");
         let length_per_documents_file_path = data_dir.join("length_per_documents.map");
+        let fst_file_path = data_dir.join("fst.map");
+        let index = FSTIndex::from_iter(iter, fst_file_path).context("Cannot commit fst")?;
+        let document_lengths_per_document = DocumentLengthsPerDocument::from_map(
+            Map::from_hash_map(length_per_documents, length_per_documents_file_path)
+                .context("Cannot commit document lengths per document storage")?,
+        );
+        let posting_storage = PostingIdStorage::from_map(
+            Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
+                .context("Cannot commit posting id storage")?,
+        );
         Ok(Self {
             index,
-            posting_storage: PostingIdStorage {
-                inner: Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
-                    .context("Cannot commit posting id storage")?,
-            },
-            document_lengths_per_document: DocumentLengthsPerDocument::from_map(
-                Map::from_hash_map(length_per_documents, length_per_documents_file_path)
-                    .context("Cannot commit document lengths per document storage")?,
-            ),
+            posting_storage,
+            document_lengths_per_document,
         })
     }
 
@@ -97,8 +101,16 @@ impl StringField {
     ) -> Result<Self> {
         let new_posting_storage_file = data_dir.join("posting_id_storage.map");
         let old_posting_storage_file = committed.posting_storage.get_backed_file();
-        std::fs::copy(old_posting_storage_file, &new_posting_storage_file)
-            .context("Cannot copy posting storage file")?;
+
+        let d = std::fs::File::open(&old_posting_storage_file).expect("AAAA");
+        println!("{:?}", d.metadata().expect("AAAA"));
+
+        std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(|| {
+            format!(
+                "Cannot copy posting storage file: old {:?} -> new {:?}",
+                old_posting_storage_file, new_posting_storage_file
+            )
+        })?;
         let posting_storage = PostingIdStorage::load(new_posting_storage_file)
             .context("Cannot load posting storage")?;
         let mut posting_id_generator = posting_storage.get_max_posting_id() + 1;
@@ -151,13 +163,36 @@ impl StringField {
             document_lengths_per_document.insert(k, v);
         }
 
+        let fst_file_path = data_dir.join("fst.map");
         let index =
-            FSTIndex::from_iter(merged_iterator, data_dir.clone()).context("Cannot commit fst")?;
+            FSTIndex::from_iter(merged_iterator, fst_file_path).context("Cannot commit fst")?;
         Ok(Self {
             index,
             posting_storage: posting_storage.into_inner(),
             document_lengths_per_document,
         })
+    }
+
+    pub fn load(info: StringFieldInfo) -> Result<Self> {
+        let index = FSTIndex::load(info.fst_file_path)?;
+        let posting_storage = PostingIdStorage::load(info.posting_id_storage_file_path)?;
+        let document_lengths_per_document =
+            DocumentLengthsPerDocument::load(info.document_lengths_per_document_file_path)?;
+        Ok(Self {
+            index,
+            posting_storage,
+            document_lengths_per_document,
+        })
+    }
+
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        StringFieldInfo {
+            document_lengths_per_document_file_path: self
+                .document_lengths_per_document
+                .get_backed_file(),
+            posting_id_storage_file_path: self.posting_storage.get_backed_file(),
+            fst_file_path: self.index.file_path(),
+        }
     }
 
     pub fn global_info(&self) -> GlobalInfo {
@@ -364,6 +399,10 @@ struct PostingIdStorage {
     inner: Map<u64, Vec<(DocumentId, Vec<usize>)>>,
 }
 impl PostingIdStorage {
+    fn from_map(inner: Map<u64, Vec<(DocumentId, Vec<usize>)>>) -> Self {
+        Self { inner }
+    }
+
     fn load(file_path: PathBuf) -> Result<Self> {
         Ok(Self {
             inner: Map::load(file_path)?,
@@ -427,4 +466,11 @@ impl DocumentLengthsPerDocument {
         self.global_info.total_document_length += len as usize;
         self.inner.insert(doc_id, len);
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StringFieldInfo {
+    pub posting_id_storage_file_path: PathBuf,
+    pub document_lengths_per_document_file_path: PathBuf,
+    pub fst_file_path: PathBuf,
 }

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     indexes::{
@@ -13,6 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct NumberField {
     inner: OrderedKeyIndex<SerializableNumber, DocumentId>,
+    data_dir: PathBuf,
 }
 
 impl NumberField {
@@ -20,13 +22,20 @@ impl NumberField {
     where
         I: Iterator<Item = (SerializableNumber, HashSet<DocumentId>)>,
     {
-        let inner = OrderedKeyIndex::from_iter(iter, data_dir)?;
-        Ok(Self { inner })
+        let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
+        Ok(Self { inner, data_dir })
     }
 
-    pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let inner = OrderedKeyIndex::load(data_dir)?;
-        Ok(Self { inner })
+    pub fn load(info: NumberFieldInfo) -> Result<Self> {
+        let data_dir = info.data_dir;
+        let inner = OrderedKeyIndex::load(data_dir.clone())?;
+        Ok(Self { inner, data_dir })
+    }
+
+    pub fn get_field_info(&self) -> NumberFieldInfo {
+        NumberFieldInfo {
+            data_dir: self.data_dir.clone(),
+        }
     }
 
     pub fn filter<'s, 'iter>(
@@ -78,4 +87,9 @@ impl BoundedValue for SerializableNumber {
     fn min_value() -> Self {
         SerializableNumber(Number::F32(f32::NEG_INFINITY))
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NumberFieldInfo {
+    pub data_dir: PathBuf,
 }

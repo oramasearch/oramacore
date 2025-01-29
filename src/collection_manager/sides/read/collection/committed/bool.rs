@@ -11,6 +11,7 @@ use crate::{
 #[derive(Debug)]
 pub struct BoolField {
     inner: OrderedKeyIndex<BoolWrapper, DocumentId>,
+    data_dir: PathBuf,
 }
 
 impl BoolField {
@@ -25,18 +26,30 @@ impl BoolField {
                 (BoolWrapper::True, true_docs),
             ]
             .into_iter(),
-            data_dir,
+            data_dir.clone(),
         )?;
 
-        Ok(Self { inner })
+        Ok(Self { inner, data_dir })
     }
 
     pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (BoolWrapper, HashSet<DocumentId>)>,
     {
-        let inner = OrderedKeyIndex::from_iter(iter, data_dir)?;
-        Ok(Self { inner })
+        let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
+        Ok(Self { inner, data_dir })
+    }
+
+    pub fn load(info: BoolFieldInfo) -> Result<Self> {
+        let data_dir = info.data_dir;
+        let inner = OrderedKeyIndex::load(data_dir.clone())?;
+        Ok(Self { inner, data_dir })
+    }
+
+    pub fn get_field_info(&self) -> BoolFieldInfo {
+        BoolFieldInfo {
+            data_dir: self.data_dir.clone(),
+        }
     }
 
     pub fn filter<'s, 'iter>(
@@ -145,4 +158,9 @@ impl BoundedValue for BoolWrapper {
     fn min_value() -> Self {
         BoolWrapper::Min
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BoolFieldInfo {
+    pub data_dir: PathBuf,
 }
