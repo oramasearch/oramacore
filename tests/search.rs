@@ -7,6 +7,7 @@ use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
 use oramacore::ai::{AIServiceConfig, OramaModel};
+use oramacore::collection_manager::dto::ApiKey;
 use oramacore::collection_manager::sides::{CollectionsWriterConfig, OramaModelSerializable};
 use oramacore::collection_manager::sides::{IndexesConfig, WriteSideConfig};
 use oramacore::test_utils::create_grpc_server;
@@ -71,7 +72,7 @@ async fn start_server() {
             max_connections: 1,
         },
         writer_side: WriteSideConfig {
-            master_api_key: Secret::new("my-master-api-key".to_string()),
+            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
             output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),

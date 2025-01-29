@@ -15,7 +15,7 @@ use tracing::{info, trace};
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
-    collection_manager::dto::{SearchParams, SearchResult, SearchResultHit, TokenScore},
+    collection_manager::dto::{ApiKey, SearchParams, SearchResult, SearchResultHit, TokenScore},
     metrics::{
         CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
         COLLECTION_OPERATION_COUNTER,
@@ -84,6 +84,7 @@ impl ReadSide {
 
     pub async fn search(
         &self,
+        read_api_key: ApiKey,
         collection_id: CollectionId,
         mut search_params: SearchParams,
     ) -> Result<SearchResult> {
@@ -95,6 +96,8 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
         let token_scores = collection.search(search_params).await?;
 
         let facets = collection.calculate_facets(&token_scores, facets).await?;
@@ -138,13 +141,13 @@ impl ReadSide {
 
         let (offset, op) = op;
         match op {
-            WriteOperation::CreateCollection { id } => {
+            WriteOperation::CreateCollection { id, read_api_key } => {
                 COLLECTION_ADDED_COUNTER
                     .create(CollectionAddedLabels {
                         collection: id.0.clone(),
                     })
                     .increment_by_one();
-                self.collections.create_collection(offset, id).await?;
+                self.collections.create_collection(offset, id, read_api_key).await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
                 COLLECTION_OPERATION_COUNTER

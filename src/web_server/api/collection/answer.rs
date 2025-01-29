@@ -1,9 +1,10 @@
 use crate::ai::LlmType;
 use crate::collection_manager::dto::{
-    HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
+    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult
 };
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
+use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
 use axum::routing::post;
@@ -120,14 +121,27 @@ async fn planned_answer_v0(
     )
 }
 
+#[derive(Deserialize)]
+struct AnswerQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+}
+
 // @todo: this function needs some cleaning. It works but it's not well structured.
 async fn answer_v0(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
+    Query(query): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId(id);
     let read_side = read_side.clone();
+
+    // This api key should be used to access the read side
+    // We should check it before doing anything
+    // For now, we just use it to access the read side
+    // TODO: implement the check as soon as possible
+    let read_api_key = query.api_key;
 
     let query = interaction.query;
     let conversation = interaction.messages;
@@ -172,6 +186,7 @@ async fn answer_v0(
 
         let search_results = read_side
             .search(
+                read_api_key,
                 collection_id,
                 SearchParams {
                     mode: SearchMode::Hybrid(HybridMode {

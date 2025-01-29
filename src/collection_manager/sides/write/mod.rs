@@ -29,7 +29,7 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{CollectionDTO, CreateCollection},
+    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection},
     file_utils::BufferedFile,
     metrics::{
         AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
@@ -55,7 +55,7 @@ pub struct CollectionsWriterConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct WriteSideConfig {
-    pub master_api_key: Secret<String>,
+    pub master_api_key: ApiKey,
     pub output: SideChannelType,
     pub config: CollectionsWriterConfig,
 }
@@ -71,7 +71,7 @@ pub struct WriteSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
-    master_api_key: Secret<String>,
+    master_api_key: ApiKey,
 }
 
 impl WriteSide {
@@ -164,7 +164,7 @@ impl WriteSide {
 
     pub async fn create_collection(
         &self,
-        master_api_key: Secret<String>,
+        master_api_key: ApiKey,
         option: CreateCollection,
     ) -> Result<()> {
         if self.master_api_key != master_api_key {
@@ -180,6 +180,7 @@ impl WriteSide {
 
     pub async fn write(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         document_list: DocumentList,
     ) -> Result<()> {
@@ -200,6 +201,8 @@ impl WriteSide {
             .get_collection(collection_id.clone())
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
 
         let sender = self.sender.clone();
 

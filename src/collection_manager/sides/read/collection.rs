@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use dashmap::DashMap;
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::join;
 use tracing::{debug, error, info, instrument, trace};
@@ -17,8 +18,7 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties,
-            SearchMode, SearchParams, TypedField,
+            ApiKey, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode, SearchParams, TypedField
         },
         sides::{
             CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
@@ -45,6 +45,7 @@ use super::IndexesConfig;
 #[derive(Debug)]
 pub struct CollectionReader {
     id: CollectionId,
+    read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
 
@@ -68,6 +69,7 @@ pub struct CollectionReader {
 impl CollectionReader {
     pub fn try_new(
         id: CollectionId,
+        read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         _: IndexesConfig,
@@ -84,6 +86,7 @@ impl CollectionReader {
 
         Ok(Self {
             id,
+            read_api_key,
             ai_service,
             nlp_service,
 
@@ -103,6 +106,13 @@ impl CollectionReader {
 
             offset_storage: Default::default(),
         })
+    }
+
+    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
+        if api_key != self.read_api_key {
+            return Err(anyhow!("Invalid read api key"))
+        }
+        Ok(())
     }
 
     #[inline]
@@ -147,6 +157,8 @@ impl CollectionReader {
             .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
 
         let dump::CollectionInfo::V1(dump) = dump;
+
+        self.read_api_key = ApiKey(Secret::new(dump.read_api_key));
 
         for (field_name, (field_id, field_type)) in dump.fields {
             let typed_field: TypedField = match field_type {
@@ -237,6 +249,7 @@ impl CollectionReader {
         trace!("Committing collection info");
         let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
             id: self.id.clone(),
+            read_api_key: self.read_api_key.0.expose_secret().clone(),
             fields: self
                 .fields
                 .iter()
@@ -764,6 +777,7 @@ mod dump {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct CollectionInfoV1 {
         pub id: CollectionId,
+        pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
     }

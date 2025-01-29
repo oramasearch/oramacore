@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use axum_openapi3::utoipa::ToSchema;
+use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use axum_openapi3::utoipa::{self, IntoParams};
+use redact::Secret;
 use serde::{de, Deserialize, Serialize};
 
 use crate::ai::OramaModel;
@@ -72,10 +73,39 @@ pub struct CreateCollectionEmbeddings {
     pub document_fields: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiKey(pub Secret<String>);
+
+impl<'de> Deserialize<'de> for ApiKey {
+    fn deserialize<D>(deserializer: D) -> Result<ApiKey, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+
+        if s.is_empty() {
+            return Err(serde::de::Error::custom("API key cannot be empty"));
+        }
+
+        Ok(ApiKey(Secret::new(s)))
+    }
+}
+
+impl PartialSchema for ApiKey {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        String::schema()
+    }
+}
+impl ToSchema for ApiKey {}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
+
+    pub read_api_key: ApiKey,
+    pub write_api_key: ApiKey,
+
     #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]

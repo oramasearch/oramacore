@@ -8,7 +8,7 @@ use crate::metrics::{Empty, OPERATION_GAUGE};
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
 use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
-use crate::collection_manager::dto::TypedField;
+use crate::collection_manager::dto::{ApiKey, TypedField};
 
 #[derive(Debug, Clone)]
 pub enum GenericWriteOperation {
@@ -60,6 +60,7 @@ pub enum CollectionWriteOperation {
 pub enum WriteOperation {
     CreateCollection {
         id: CollectionId,
+        read_api_key: ApiKey,
         // Params here... but which ones?
         // TODO: add params
     },

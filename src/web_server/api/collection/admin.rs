@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, CreateCollection},
+        dto::{ApiKey, CollectionDTO, CreateCollection},
         sides::WriteSide,
     },
     types::{CollectionId, DocumentList},
@@ -82,6 +82,8 @@ async fn get_collection_by_id(
     }
 }
 
+type AuthorizationBearerHeader = TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
+
 #[endpoint(
     method = "POST",
     path = "/v0/collections",
@@ -89,10 +91,10 @@ async fn get_collection_by_id(
 )]
 async fn create_collection(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): TypedHeader<headers::Authorization<headers::authorization::Bearer>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
     Json(json): Json<CreateCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let master_api_key = Secret::new(auth.0.token().to_string());
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side.create_collection(master_api_key, json).await {
         Ok(collection_id) => collection_id,
@@ -121,12 +123,15 @@ async fn create_collection(
 async fn add_documents(
     Path(id): Path<String>,
     write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
 
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
     info!("Adding documents to collection {:?}", collection_id);
-    match write_side.write(collection_id, json).await {
+    match write_side.write(write_api_key, collection_id, json).await {
         Ok(_) => {
             info!("Documents added to collection");
         }
