@@ -57,6 +57,7 @@ pub struct CollectionReader {
 
     uncommitted_collection: RwLock<UncommittedCollection>,
     committed_collection: RwLock<CommittedCollection>,
+    uncommitted_deleted_documents: RwLock<HashSet<DocumentId>>,
 
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
@@ -84,6 +85,7 @@ impl CollectionReader {
 
             uncommitted_collection: RwLock::new(UncommittedCollection::new()),
             committed_collection: RwLock::new(CommittedCollection::new()),
+            uncommitted_deleted_documents: RwLock::new(HashSet::new()),
 
             offset_storage: Default::default(),
             commit_insert_mutex: Default::default(),
@@ -112,8 +114,10 @@ impl CollectionReader {
     }
 
     pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
+        info!("Loading collection from {:?}", data_dir);
+
         let collection_info_path = data_dir.join("info.info");
-        let previous_offset: Offset = match BufferedFile::open(collection_info_path.clone())
+        let current_offset: Offset = match BufferedFile::open(collection_info_path.clone())
             .context("Cannot open previous collection info")?
             .read_json_data()
         {
@@ -124,7 +128,11 @@ impl CollectionReader {
             }
         };
 
-        let collection_info_path = data_dir.join(format!("info-offset-{}.info", previous_offset.0));
+        info!("Current offset: {:?}", current_offset);
+        assert!(current_offset.0 > 0);
+        println!("Loaded offset: {:?}", current_offset);
+
+        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
         let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
             .context("Cannot open previous collection info")?
             .read_json_data()
@@ -170,7 +178,7 @@ impl CollectionReader {
         Ok(())
     }
 
-    #[instrument(skip(self, data_dir), fields(self.id = ?self.id))]
+    #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         info!("Committing collection");
 
@@ -178,6 +186,8 @@ impl CollectionReader {
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
         let offset = self.offset_storage.get_offset();
+        assert!(offset.0 > 0);
+        println!("Committing with offset: {:?}", offset);
 
         let collection_info_path = data_dir.join("info.info");
         let previous_offset: Option<Offset> = match BufferedFile::open(collection_info_path.clone())
@@ -220,27 +230,46 @@ impl CollectionReader {
         let committed = self.committed_collection.read().await;
         let uncommitted = self.uncommitted_collection.read().await;
 
-        let uncommitted_infos = uncommitted.get_infos();
+        let mut uncommitted_infos = uncommitted.get_infos();
+
+        let uncommitted_document_deletions = self.uncommitted_deleted_documents.read().await;
+        let uncommitted_document_deletions = if !uncommitted_document_deletions.is_empty() {
+            let uncommitted_document_deletions = uncommitted_document_deletions.clone();
+            let info = committed.get_infos();
+
+            uncommitted_infos.bool_fields.extend(info.bool_fields);
+            uncommitted_infos.number_fields.extend(info.number_fields);
+            uncommitted_infos.string_fields.extend(info.string_fields);
+            uncommitted_infos.vector_fields.extend(info.vector_fields);
+
+            uncommitted_document_deletions
+        } else {
+            HashSet::new()
+        };
 
         info!("Merging fields {:?}", uncommitted_infos);
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
         for field_id in uncommitted_infos.number_fields {
-            let uncommitted_number_index = uncommitted.number_index.get(&field_id).unwrap();
+            let uncommitted_number_index = uncommitted.number_index.get(&field_id);
             let committed_number_index = committed.number_index.get(&field_id);
 
             let field_dir = number_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
-            let new_committed_number_index =
-                merge_number_field(uncommitted_number_index, committed_number_index, field_dir)
-                    .with_context(|| {
-                        format!(
-                            "Cannot merge {:?} field for collection {:?}",
-                            field_id, self.id
-                        )
-                    })?;
+            let new_committed_number_index = merge_number_field(
+                uncommitted_number_index,
+                committed_number_index,
+                field_dir,
+                &uncommitted_document_deletions,
+            )
+            .with_context(|| {
+                format!(
+                    "Cannot merge {:?} field for collection {:?}",
+                    field_id, self.id
+                )
+            })?;
             let field_info = new_committed_number_index.get_field_info();
             current_collection_info
                 .number_field_infos
@@ -282,20 +311,24 @@ impl CollectionReader {
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
         for field_id in uncommitted_infos.string_fields {
-            let uncommitted_string_index = uncommitted.string_index.get(&field_id).unwrap();
+            let uncommitted_string_index = uncommitted.string_index.get(&field_id);
             let committed_string_index = committed.string_index.get(&field_id);
 
             let field_dir = string_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
-            let new_committed_string_index =
-                merge_string_field(uncommitted_string_index, committed_string_index, field_dir)
-                    .with_context(|| {
-                        format!(
-                            "Cannot merge {:?} field for collection {:?}",
-                            field_id, self.id
-                        )
-                    })?;
+            let new_committed_string_index = merge_string_field(
+                uncommitted_string_index,
+                committed_string_index,
+                field_dir,
+                &uncommitted_document_deletions,
+            )
+            .with_context(|| {
+                format!(
+                    "Cannot merge {:?} field for collection {:?}",
+                    field_id, self.id
+                )
+            })?;
             let field_info = new_committed_string_index.get_field_info();
             string_fields.insert(field_id, new_committed_string_index);
             current_collection_info
@@ -341,20 +374,24 @@ impl CollectionReader {
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
         for field_id in uncommitted_infos.bool_fields {
-            let uncommitted_bool_index = uncommitted.bool_index.get(&field_id).unwrap();
+            let uncommitted_bool_index = uncommitted.bool_index.get(&field_id);
             let committed_bool_index = committed.bool_index.get(&field_id);
 
             let field_dir = bool_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
-            let new_committed_bool_index =
-                merge_bool_field(uncommitted_bool_index, committed_bool_index, field_dir)
-                    .with_context(|| {
-                        format!(
-                            "Cannot merge {:?} field for collection {:?}",
-                            field_id, self.id
-                        )
-                    })?;
+            let new_committed_bool_index = merge_bool_field(
+                uncommitted_bool_index,
+                committed_bool_index,
+                field_dir,
+                &uncommitted_document_deletions,
+            )
+            .with_context(|| {
+                format!(
+                    "Cannot merge {:?} field for collection {:?}",
+                    field_id, self.id
+                )
+            })?;
             let field_info = new_committed_bool_index.get_field_info();
             bool_fields.insert(field_id, new_committed_bool_index);
             current_collection_info
@@ -395,20 +432,24 @@ impl CollectionReader {
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
         for field_id in uncommitted_infos.vector_fields {
-            let uncommitted_vector_index = uncommitted.vector_index.get(&field_id).unwrap();
+            let uncommitted_vector_index = uncommitted.vector_index.get(&field_id);
             let committed_vector_index = committed.vector_index.get(&field_id);
 
             let field_dir = vector_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
-            let new_committed_vector_index =
-                merge_vector_field(uncommitted_vector_index, committed_vector_index, field_dir)
-                    .with_context(|| {
-                        format!(
-                            "Cannot merge {:?} field for collection {:?}",
-                            field_id, self.id
-                        )
-                    })?;
+            let new_committed_vector_index = merge_vector_field(
+                uncommitted_vector_index,
+                committed_vector_index,
+                field_dir,
+                &uncommitted_document_deletions,
+            )
+            .with_context(|| {
+                format!(
+                    "Cannot merge {:?} field for collection {:?}",
+                    field_id, self.id
+                )
+            })?;
             let field_info = new_committed_vector_index.get_field_info();
             vector_fields.insert(field_id, new_committed_vector_index);
             current_collection_info
@@ -520,6 +561,13 @@ impl CollectionReader {
             CollectionWriteOperation::InsertDocument { .. } => {
                 unreachable!("InsertDocument is not managed by the collection");
             }
+            CollectionWriteOperation::DeleteDocuments { doc_ids } => {
+                self.offset_storage.set_offset(offset);
+                let mut uncommitted_deleted_documents =
+                    self.uncommitted_deleted_documents.write().await;
+                uncommitted_deleted_documents.extend(doc_ids);
+                info!("Document deleted: {:?}", uncommitted_deleted_documents);
+            }
             CollectionWriteOperation::CreateField {
                 field_id,
                 field_name,
@@ -594,7 +642,12 @@ impl CollectionReader {
             ..
         } = search_params;
 
-        let filtered_doc_ids = self.calculate_filtered_doc_ids(where_filter).await?;
+        let uncommitted_deleted_documents = self.uncommitted_deleted_documents.read().await;
+        let uncommitted_deleted_documents = uncommitted_deleted_documents.clone();
+
+        let filtered_doc_ids = self
+            .calculate_filtered_doc_ids(where_filter, &uncommitted_deleted_documents)
+            .await?;
         let boost = self.calculate_boost(boost);
 
         let token_scores = match mode {
@@ -605,23 +658,35 @@ impl CollectionReader {
                     properties,
                     boost,
                     filtered_doc_ids.as_ref(),
+                    &uncommitted_deleted_documents,
                 )
                 .await?
             }
             SearchMode::Vector(search_params) => {
-                self.search_vector(&search_params.term, filtered_doc_ids.as_ref(), &limit)
-                    .await?
+                self.search_vector(
+                    &search_params.term,
+                    filtered_doc_ids.as_ref(),
+                    &limit,
+                    &uncommitted_deleted_documents,
+                )
+                .await?
             }
             SearchMode::Hybrid(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
 
                 let (vector, fulltext) = join!(
-                    self.search_vector(&search_params.term, filtered_doc_ids.as_ref(), &limit),
+                    self.search_vector(
+                        &search_params.term,
+                        filtered_doc_ids.as_ref(),
+                        &limit,
+                        &uncommitted_deleted_documents
+                    ),
                     self.search_full_text(
                         &search_params.term,
                         properties,
                         boost,
-                        filtered_doc_ids.as_ref()
+                        filtered_doc_ids.as_ref(),
+                        &uncommitted_deleted_documents,
                     )
                 );
                 let vector = vector?;
@@ -676,6 +741,7 @@ impl CollectionReader {
     async fn calculate_filtered_doc_ids(
         &self,
         where_filter: HashMap<String, Filter>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<Option<HashSet<DocumentId>>> {
         if where_filter.is_empty() {
             return Ok(None);
@@ -712,11 +778,25 @@ impl CollectionReader {
             field_name, field_type, filter
         );
 
-        let mut doc_ids =
-            get_filtered_document(self, field_name, field_id, &field_type, filter).await?;
+        let mut doc_ids = get_filtered_document(
+            self,
+            field_name,
+            field_id,
+            &field_type,
+            filter,
+            uncommitted_deleted_documents,
+        )
+        .await?;
         for (field_name, field_id, field_type, filter) in filters {
-            let doc_ids_for_field =
-                get_filtered_document(self, field_name, field_id, &field_type, filter).await?;
+            let doc_ids_for_field = get_filtered_document(
+                self,
+                field_name,
+                field_id,
+                &field_type,
+                filter,
+                uncommitted_deleted_documents,
+            )
+            .await?;
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
@@ -770,6 +850,7 @@ impl CollectionReader {
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
 
@@ -801,6 +882,7 @@ impl CollectionReader {
                 filtered_doc_ids,
                 &mut scorer,
                 &global_info,
+                uncommitted_deleted_documents,
             )?;
             uncommitted_lock.fulltext_search(
                 tokens,
@@ -809,6 +891,7 @@ impl CollectionReader {
                 filtered_doc_ids,
                 &mut scorer,
                 &global_info,
+                uncommitted_deleted_documents,
             )?;
         }
 
@@ -820,6 +903,7 @@ impl CollectionReader {
         term: &str,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: &Limit,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut output: HashMap<DocumentId, f32> = HashMap::new();
 
@@ -840,8 +924,21 @@ impl CollectionReader {
                 .await?;
 
             for k in e {
-                committed_lock.vector_search(&k, fields, filtered_doc_ids, limit.0, &mut output)?;
-                uncommitted_lock.vector_search(&k, fields, filtered_doc_ids, &mut output)?;
+                committed_lock.vector_search(
+                    &k,
+                    fields,
+                    filtered_doc_ids,
+                    limit.0,
+                    &mut output,
+                    uncommitted_deleted_documents,
+                )?;
+                uncommitted_lock.vector_search(
+                    &k,
+                    fields,
+                    filtered_doc_ids,
+                    &mut output,
+                    uncommitted_deleted_documents,
+                )?;
             }
         }
 
@@ -1025,6 +1122,7 @@ async fn get_bool_filtered_document(
     reader: &CollectionReader,
     field_id: FieldId,
     filter_bool: bool,
+    uncommitted_deleted_documents: &HashSet<DocumentId>,
 ) -> Result<HashSet<DocumentId>> {
     let lock = reader.uncommitted_collection.read().await;
     let uncommitted_output = lock.calculate_bool_filter(field_id, filter_bool)?;
@@ -1033,11 +1131,16 @@ async fn get_bool_filtered_document(
     let committed_output = lock.calculate_bool_filter(field_id, filter_bool)?;
 
     let result = match (uncommitted_output, committed_output) {
-        (Some(uncommitted_output), Some(committed_output)) => {
-            committed_output.chain(uncommitted_output).collect()
-        }
-        (Some(uncommitted_output), None) => uncommitted_output.collect(),
-        (None, Some(committed_output)) => committed_output.collect(),
+        (Some(uncommitted_output), Some(committed_output)) => committed_output
+            .chain(uncommitted_output)
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (Some(uncommitted_output), None) => uncommitted_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (None, Some(committed_output)) => committed_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
         // This case probable means the field is not a number indexed
         (None, None) => HashSet::new(),
     };
@@ -1049,6 +1152,7 @@ async fn get_number_filtered_document(
     reader: &CollectionReader,
     field_id: FieldId,
     filter_number: NumberFilter,
+    uncommitted_deleted_documents: &HashSet<DocumentId>,
 ) -> Result<HashSet<DocumentId>> {
     let lock = reader.uncommitted_collection.read().await;
     let uncommitted_output = lock
@@ -1061,11 +1165,16 @@ async fn get_number_filtered_document(
         .context("Cannot calculate committed filter")?;
 
     let result = match (uncommitted_output, committed_output) {
-        (Some(uncommitted_output), Some(committed_output)) => {
-            committed_output.chain(uncommitted_output).collect()
-        }
-        (Some(uncommitted_output), None) => uncommitted_output.collect(),
-        (None, Some(committed_output)) => committed_output.collect(),
+        (Some(uncommitted_output), Some(committed_output)) => committed_output
+            .chain(uncommitted_output)
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (Some(uncommitted_output), None) => uncommitted_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (None, Some(committed_output)) => committed_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
         // This case probable means the field is not a number indexed
         (None, None) => HashSet::new(),
     };
@@ -1079,13 +1188,21 @@ async fn get_filtered_document(
     field_id: FieldId,
     field_type: &TypedField,
     filter: Filter,
+    uncommitted_deleted_documents: &HashSet<DocumentId>,
 ) -> Result<HashSet<DocumentId>> {
     match (&field_type, filter) {
         (TypedField::Number, Filter::Number(filter_number)) => {
-            get_number_filtered_document(reader, field_id, filter_number).await
+            get_number_filtered_document(
+                reader,
+                field_id,
+                filter_number,
+                uncommitted_deleted_documents,
+            )
+            .await
         }
         (TypedField::Bool, Filter::Bool(filter_bool)) => {
-            get_bool_filtered_document(reader, field_id, filter_bool).await
+            get_bool_filtered_document(reader, field_id, filter_bool, uncommitted_deleted_documents)
+                .await
         }
         _ => {
             error!(

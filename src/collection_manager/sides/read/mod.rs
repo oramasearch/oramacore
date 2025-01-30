@@ -159,6 +159,13 @@ impl ReadSide {
                     .await
                     .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
+                if let CollectionWriteOperation::DeleteDocuments { doc_ids } = &collection_operation
+                {
+                    for doc_id in doc_ids {
+                        self.document_storage.delete_document(doc_id).await?;
+                    }
+                }
+
                 if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
                     collection_operation
                 {

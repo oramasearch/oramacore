@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use hora::{
     core::{
         ann_index::{ANNIndex, SerializableIndex},
@@ -15,7 +15,10 @@ use hora::{
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::{file_utils::create_if_not_exists, types::DocumentId};
+use crate::{
+    file_utils::{create_if_not_exists, BufferedFile},
+    types::DocumentId,
+};
 
 #[derive(
     Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
@@ -26,18 +29,23 @@ impl IdxType for IdxID {}
 #[derive(Debug)]
 pub struct VectorField {
     inner: HNSWIndex<f32, IdxID>,
-    file_path: PathBuf,
+    data_dir: PathBuf,
+    deleted_documents: HashSet<DocumentId>,
 }
 
 impl VectorField {
-    pub fn from_iter<I>(iter: I, dimension: usize, file_path: PathBuf) -> Result<Self>
+    pub fn from_iter<I>(iter: I, dimension: usize, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
         let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
         let inner = HNSWIndex::new(dimension, &params);
 
-        let mut s = Self { inner, file_path };
+        let mut s = Self {
+            inner,
+            data_dir,
+            deleted_documents: HashSet::new(),
+        };
 
         s.add_and_dump(iter)?;
 
@@ -45,25 +53,37 @@ impl VectorField {
     }
 
     pub fn from_dump_and_iter(
-        file_path: PathBuf,
+        data_dir: PathBuf,
         iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
     ) -> Result<Self> {
+        let dump_file_path = data_dir.join("index.hnsw");
+
         let inner = HNSWIndex::load(
-            file_path
+            dump_file_path
                 .to_str()
                 .ok_or_else(|| anyhow!("Cannot convert path to string"))?,
         )
-        .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
+        .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", dump_file_path, e))?;
 
-        let mut s = Self { inner, file_path };
+        let mut s = Self {
+            inner,
+            data_dir,
+            deleted_documents: uncommitted_document_deletions.clone(),
+        };
 
-        s.add_and_dump(iter)?;
+        s.add_and_dump(
+            iter.filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
+        )?;
 
         Ok(s)
     }
 
     pub fn load(info: VectorFieldInfo) -> Result<Self> {
-        let file_path_str = match info.file_path.to_str() {
+        let dump_file_path = info.data_dir.join("index.hnsw");
+        let deleted_documents_file_path = info.data_dir.join("deleted_documents.bin");
+
+        let file_path_str = match dump_file_path.to_str() {
             Some(file_path_str) => file_path_str,
             None => {
                 return Err(anyhow!("Cannot convert path to string"));
@@ -71,7 +91,12 @@ impl VectorField {
         };
 
         let inner = HNSWIndex::load(file_path_str)
-            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", info.file_path, e))?;
+            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", dump_file_path, e))?;
+
+        let deleted_documents = BufferedFile::open(deleted_documents_file_path)
+            .map_err(|e| anyhow!("Cannot open deleted documents file: {}", e))?
+            .read_bincode_data()
+            .map_err(|e| anyhow!("Cannot read deleted documents file: {}", e))?;
 
         if inner.dimension() != info.dimension {
             return Err(anyhow!(
@@ -83,14 +108,15 @@ impl VectorField {
 
         Ok(Self {
             inner,
-            file_path: info.file_path,
+            data_dir: info.data_dir,
+            deleted_documents,
         })
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
         VectorFieldInfo {
             dimension: self.inner.dimension(),
-            file_path: self.file_path.clone(),
+            data_dir: self.data_dir.clone(),
         }
     }
 
@@ -100,6 +126,7 @@ impl VectorField {
         limit: usize,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         let search_output = self.inner.search_nodes(target, limit);
         if search_output.is_empty() {
@@ -125,6 +152,9 @@ impl VectorField {
             if filtered_doc_ids.map_or(false, |ids| !ids.contains(&doc_id)) {
                 continue;
             }
+            if uncommitted_deleted_documents.contains(&doc_id) {
+                continue;
+            }
 
             // `hora` returns the score as Euclidean distance.
             // That means 0.0 is the best score and the larger the score, the worse.
@@ -148,13 +178,12 @@ impl VectorField {
     ) -> Result<()> {
         self.add(iter)?;
 
-        create_if_not_exists(
-            self.file_path
-                .parent()
-                .expect("Parent folder should be calculated"),
-        )?;
+        create_if_not_exists(&self.data_dir)?;
 
-        let file_path_str = match self.file_path.to_str() {
+        let dump_file_path = self.data_dir.join("index.hnsw");
+        let deleted_documents_file_path = self.data_dir.join("deleted_documents.bin");
+
+        let file_path_str = match dump_file_path.to_str() {
             Some(file_path_str) => file_path_str,
             None => {
                 return Err(anyhow!("Cannot convert path to string"));
@@ -164,11 +193,30 @@ impl VectorField {
             .dump(file_path_str)
             .map_err(|e| anyhow!("Cannot dump index to file: {}", e))?;
 
+        BufferedFile::create_or_overwrite(deleted_documents_file_path)
+            .context("Cannot create deleted documents file")?
+            .write_bincode_data(&self.deleted_documents)
+            .context("Cannot serialize deleted documents file")?;
+
         Ok(())
     }
 
-    pub fn file_path(&self) -> PathBuf {
-        self.file_path.clone()
+    pub fn clone_to(&self, data_dir: &PathBuf) -> Result<()> {
+        let new_dump_file_path = data_dir.join("index.hnsw");
+        let new_deleted_documents_file_path = data_dir.join("deleted_documents.bin");
+
+        let old_dump_file_path = self.data_dir.join("index.hnsw");
+        let old_deleted_documents_file_path = self.data_dir.join("deleted_documents.bin");
+
+        std::fs::copy(
+            old_deleted_documents_file_path,
+            new_deleted_documents_file_path,
+        )
+        .map_err(|e| anyhow!("Cannot copy deleted documents file: {}", e))?;
+        std::fs::copy(old_dump_file_path, new_dump_file_path)
+            .map_err(|e| anyhow!("Cannot copy hnsw file: {}", e))?;
+
+        Ok(())
     }
 
     fn add(&mut self, iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>) -> Result<()> {
@@ -191,5 +239,5 @@ impl VectorField {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VectorFieldInfo {
     pub dimension: usize,
-    pub file_path: PathBuf,
+    pub data_dir: PathBuf,
 }

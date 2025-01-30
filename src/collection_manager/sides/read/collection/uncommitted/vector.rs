@@ -29,11 +29,15 @@ impl VectorField {
         target: &[f32],
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         let magnetude = calculate_magnetude(target);
 
         for (id, vectors) in &self.data {
             if filtered_doc_ids.map_or(false, |ids| !ids.contains(id)) {
+                continue;
+            }
+            if uncommitted_deleted_documents.contains(id) {
                 continue;
             }
 

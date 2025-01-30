@@ -77,6 +77,15 @@ impl CommittedCollection {
             .unwrap_or_default()
     }
 
+    pub fn get_infos(&self) -> CommittedInfo {
+        CommittedInfo {
+            number_fields: self.number_index.keys().copied().collect(),
+            string_fields: self.string_index.keys().copied().collect(),
+            bool_fields: self.bool_index.keys().copied().collect(),
+            vector_fields: self.vector_index.keys().copied().collect(),
+        }
+    }
+
     pub fn vector_search(
         &self,
         target: &[f32],
@@ -84,6 +93,7 @@ impl CommittedCollection {
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: usize,
         output: &mut HashMap<DocumentId, f32>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         for field_id in properties {
             let vector_field = match self.vector_index.get(field_id) {
@@ -94,7 +104,13 @@ impl CommittedCollection {
                 // - is not yet committed
                 None => continue,
             };
-            vector_field.search(target, limit, filtered_doc_ids, output)?;
+            vector_field.search(
+                target,
+                limit,
+                filtered_doc_ids,
+                output,
+                uncommitted_deleted_documents,
+            )?;
         }
 
         Ok(())
@@ -108,6 +124,7 @@ impl CommittedCollection {
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         scorer: &mut BM25Scorer<DocumentId>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         for field_id in properties {
             let index = match self.string_index.get(&field_id) {
@@ -121,7 +138,14 @@ impl CommittedCollection {
 
             let field_boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            index.search(tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
+            index.search(
+                tokens,
+                field_boost,
+                scorer,
+                filtered_doc_ids,
+                global_info,
+                uncommitted_deleted_documents,
+            )?;
         }
 
         Ok(())
@@ -157,4 +181,12 @@ impl CommittedCollection {
         };
         bool_index.filter(filter_bool).map(Some)
     }
+}
+
+#[derive(Debug)]
+pub struct CommittedInfo {
+    pub number_fields: HashSet<FieldId>,
+    pub string_fields: HashSet<FieldId>,
+    pub bool_fields: HashSet<FieldId>,
+    pub vector_fields: HashSet<FieldId>,
 }
