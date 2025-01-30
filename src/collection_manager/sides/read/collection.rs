@@ -194,6 +194,7 @@ impl CollectionReader {
         let mut current_collection_info = if let Some(previous_offset_collection_info_path) =
             previous_offset_collection_info_path
         {
+            debug!("Previous collection info found. We will merge it with the current one");
             let previous_collection_info: CollectionInfo =
                 BufferedFile::open(previous_offset_collection_info_path)
                     .context("Cannot open previous collection info")?
@@ -204,6 +205,7 @@ impl CollectionReader {
                 CollectionInfo::V1(info) => info,
             }
         } else {
+            debug!("No previous collection info found, creating a new one");
             CollectionInfoV1 {
                 fields: Default::default(),
                 id: self.id.clone(),
@@ -218,11 +220,15 @@ impl CollectionReader {
         let committed = self.committed_collection.read().await;
         let uncommitted = self.uncommitted_collection.read().await;
 
+        let uncommitted_infos = uncommitted.get_infos();
+
+        info!("Merging fields {:?}", uncommitted_infos);
+
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
-        for field_id in uncommitted.get_number_fields() {
-            let uncommitted_number_index = uncommitted.number_index.get(field_id).unwrap();
-            let committed_number_index = committed.number_index.get(field_id);
+        for field_id in uncommitted_infos.number_fields {
+            let uncommitted_number_index = uncommitted.number_index.get(&field_id).unwrap();
+            let committed_number_index = committed.number_index.get(&field_id);
 
             let field_dir = number_dir
                 .join(format!("field-{}", field_id.0))
@@ -238,12 +244,12 @@ impl CollectionReader {
             let field_info = new_committed_number_index.get_field_info();
             current_collection_info
                 .number_field_infos
-                .retain(|(k, _)| k != field_id);
+                .retain(|(k, _)| k != &field_id);
             current_collection_info
                 .number_field_infos
-                .push((*field_id, field_info));
+                .push((field_id, field_info));
 
-            number_fields.insert(*field_id, new_committed_number_index);
+            number_fields.insert(field_id, new_committed_number_index);
 
             let field = current_collection_info
                 .fields
@@ -263,21 +269,21 @@ impl CollectionReader {
                     let field_name = self
                         .fields
                         .iter()
-                        .find(|e| e.0 == *field_id)
+                        .find(|e| e.0 == field_id)
                         .context("Number field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
                         .fields
-                        .push((field_name, (*field_id, dump::TypedField::Number)));
+                        .push((field_name, (field_id, dump::TypedField::Number)));
                 }
             }
         }
 
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
-        for field_id in uncommitted.get_string_fields() {
-            let uncommitted_string_index = uncommitted.string_index.get(field_id).unwrap();
-            let committed_string_index = committed.string_index.get(field_id);
+        for field_id in uncommitted_infos.string_fields {
+            let uncommitted_string_index = uncommitted.string_index.get(&field_id).unwrap();
+            let committed_string_index = committed.string_index.get(&field_id);
 
             let field_dir = string_dir
                 .join(format!("field-{}", field_id.0))
@@ -291,23 +297,23 @@ impl CollectionReader {
                         )
                     })?;
             let field_info = new_committed_string_index.get_field_info();
-            string_fields.insert(*field_id, new_committed_string_index);
+            string_fields.insert(field_id, new_committed_string_index);
             current_collection_info
                 .string_field_infos
-                .retain(|(k, _)| k != field_id);
+                .retain(|(k, _)| k != &field_id);
             current_collection_info
                 .string_field_infos
-                .push((*field_id, field_info));
+                .push((field_id, field_info));
 
             let field_locale = self
                 .text_parser_per_field
-                .get(field_id)
+                .get(&field_id)
                 .map(|e| e.0)
                 .context("String field not registered")?;
             let field = current_collection_info
                 .fields
                 .iter_mut()
-                .find(|(_, (f, _))| f == field_id);
+                .find(|(_, (f, _))| f == &field_id);
             match field {
                 Some((_, (_, typed_field))) => {
                     if typed_field != &mut dump::TypedField::Text(field_locale) {
@@ -322,22 +328,21 @@ impl CollectionReader {
                     let field_name = self
                         .fields
                         .iter()
-                        .find(|e| e.0 == *field_id)
+                        .find(|e| e.0 == field_id)
                         .context("String field not registered")?;
                     let field_name = field_name.key().to_string();
-                    current_collection_info.fields.push((
-                        field_name,
-                        (*field_id, dump::TypedField::Text(field_locale)),
-                    ));
+                    current_collection_info
+                        .fields
+                        .push((field_name, (field_id, dump::TypedField::Text(field_locale))));
                 }
             }
         }
 
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
-        for field_id in uncommitted.get_bool_fields() {
-            let uncommitted_bool_index = uncommitted.bool_index.get(field_id).unwrap();
-            let committed_bool_index = committed.bool_index.get(field_id);
+        for field_id in uncommitted_infos.bool_fields {
+            let uncommitted_bool_index = uncommitted.bool_index.get(&field_id).unwrap();
+            let committed_bool_index = committed.bool_index.get(&field_id);
 
             let field_dir = bool_dir
                 .join(format!("field-{}", field_id.0))
@@ -351,18 +356,18 @@ impl CollectionReader {
                         )
                     })?;
             let field_info = new_committed_bool_index.get_field_info();
-            bool_fields.insert(*field_id, new_committed_bool_index);
+            bool_fields.insert(field_id, new_committed_bool_index);
             current_collection_info
                 .bool_field_infos
-                .retain(|(k, _)| k != field_id);
+                .retain(|(k, _)| k != &field_id);
             current_collection_info
                 .bool_field_infos
-                .push((*field_id, field_info));
+                .push((field_id, field_info));
 
             let field = current_collection_info
                 .fields
                 .iter_mut()
-                .find(|(_, (f, _))| f == field_id);
+                .find(|(_, (f, _))| f == &field_id);
             match field {
                 Some((_, (_, typed_field))) => {
                     if typed_field != &mut dump::TypedField::Bool {
@@ -377,21 +382,21 @@ impl CollectionReader {
                     let field_name = self
                         .fields
                         .iter()
-                        .find(|e| e.0 == *field_id)
+                        .find(|e| e.0 == field_id)
                         .context("Bool field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
                         .fields
-                        .push((field_name, (*field_id, dump::TypedField::Bool)));
+                        .push((field_name, (field_id, dump::TypedField::Bool)));
                 }
             }
         }
 
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
-        for field_id in uncommitted.get_vector_fields() {
-            let uncommitted_vector_index = uncommitted.vector_index.get(field_id).unwrap();
-            let committed_vector_index = committed.vector_index.get(field_id);
+        for field_id in uncommitted_infos.vector_fields {
+            let uncommitted_vector_index = uncommitted.vector_index.get(&field_id).unwrap();
+            let committed_vector_index = committed.vector_index.get(&field_id);
 
             let field_dir = vector_dir
                 .join(format!("field-{}", field_id.0))
@@ -405,19 +410,18 @@ impl CollectionReader {
                         )
                     })?;
             let field_info = new_committed_vector_index.get_field_info();
-            vector_fields.insert(*field_id, new_committed_vector_index);
+            vector_fields.insert(field_id, new_committed_vector_index);
             current_collection_info
                 .vector_field_infos
-                .retain(|(k, _)| k != field_id);
+                .retain(|(k, _)| k != &field_id);
             current_collection_info
                 .vector_field_infos
-                .push((*field_id, field_info));
+                .push((field_id, field_info));
 
             let field = current_collection_info
                 .fields
                 .iter_mut()
-                .find(|(_, (f, _))| f == field_id);
-            info!("----Field {:?}", field);
+                .find(|(_, (f, _))| f == &field_id);
             match field {
                 Some((_, (_, _))) => {
                     // TODO: check if the field is changing type
@@ -426,14 +430,14 @@ impl CollectionReader {
                     let field_name = self
                         .fields
                         .iter()
-                        .find(|e| e.0 == *field_id)
+                        .find(|e| e.0 == field_id)
                         .context("Vector field not registered - 1")?;
                     let field_name = field_name.key().to_string();
 
                     let item = self
                         .fields_per_model
                         .iter()
-                        .find(|e| e.value().contains(field_id))
+                        .find(|e| e.value().contains(&field_id))
                         .context("Vector field not registered - 2")?;
                     let orama_model = item.key();
 
@@ -443,17 +447,17 @@ impl CollectionReader {
                         .iter_mut()
                         .find(|e| e.0 == serializable_orama_model);
                     if let Some(el) = el {
-                        el.1.push(*field_id);
+                        el.1.push(field_id);
                     } else {
                         current_collection_info
                             .used_models
-                            .push((serializable_orama_model.clone(), vec![*field_id]));
+                            .push((serializable_orama_model.clone(), vec![field_id]));
                     }
 
                     current_collection_info.fields.push((
                         field_name,
                         (
-                            *field_id,
+                            field_id,
                             dump::TypedField::Embedding(dump::EmbeddingTypedField {
                                 model: serializable_orama_model,
                             }),

@@ -20,6 +20,10 @@ impl NumberField {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn insert(&mut self, doc_id: DocumentId, value: Number) {
         self.inner.entry(value).or_default().insert(doc_id);
     }

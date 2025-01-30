@@ -1394,7 +1394,7 @@ where
 
     write_side.write(collection_id, document_list).await?;
 
-    sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(1_000)).await;
 
     Ok(())
 }

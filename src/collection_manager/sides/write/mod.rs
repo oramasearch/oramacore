@@ -177,6 +177,7 @@ impl WriteSide {
         let sender = self.sender.clone();
 
         for mut doc in document_list {
+            info!("Insert doc");
             let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
                 collection: collection_id.0.clone(),
             });
@@ -205,12 +206,16 @@ impl WriteSide {
             }
 
             let doc_id = DocumentId(doc_id);
+            info!(?doc_id, "Inserting document");
             collection
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
                 .context("Cannot process document")?;
+            info!("Document inserted");
 
             drop(m);
+
+            info!("Doc inserted");
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -251,7 +256,10 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
-        collection.set_embedding_hook(name);
+        collection
+            .set_embedding_hook(name)
+            .await
+            .context("Cannot set embedding hook")?;
 
         Ok(())
     }
@@ -262,7 +270,7 @@ impl WriteSide {
 
     pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get_collection(collection_id).await?;
-        Some(collection.as_dto())
+        Some(collection.as_dto().await)
     }
 
     pub fn get_javascript_hook(

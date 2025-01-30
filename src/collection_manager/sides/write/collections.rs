@@ -115,7 +115,11 @@ impl CollectionsWriter {
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
 
-        collections.iter().map(|(_, coll)| coll.as_dto()).collect()
+        let mut r = vec![];
+        for collection in collections.values() {
+            r.push(collection.as_dto().await);
+        }
+        r
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -127,7 +131,7 @@ impl CollectionsWriter {
 
         for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
-            collection.commit(collection_dir)?;
+            collection.commit(collection_dir).await?;
         }
 
         // Now it is safe to drop the lock

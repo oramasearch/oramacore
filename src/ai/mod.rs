@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
 use tonic::{transport::Channel, Request, Response, Streaming};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::collection_manager::dto::InteractionMessage;
 
@@ -64,11 +64,13 @@ impl AIService {
             intent: intent.into(),
         });
 
+        debug!("Requesting embeddings");
         let v = conn
             .get_embedding(request)
             .await
             .map(|response| response.into_inner())
             .context("Cannot get embeddings")?;
+        debug!("Received embeddings");
 
         let v = v
             .embeddings_result

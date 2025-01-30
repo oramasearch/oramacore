@@ -54,6 +54,35 @@ impl UncommittedCollection {
             .unwrap_or_default()
     }
 
+    pub fn get_infos(&self) -> UncommittedInfo {
+        UncommittedInfo {
+            number_fields: self
+                .number_index
+                .iter()
+                .filter(|(_, v)| v.len() > 0)
+                .map(|(k, _)| *k)
+                .collect(),
+            string_fields: self
+                .string_index
+                .iter()
+                .filter(|(_, v)| v.len() > 0)
+                .map(|(k, _)| *k)
+                .collect(),
+            bool_fields: self
+                .bool_index
+                .iter()
+                .filter(|(_, v)| v.len() > 0)
+                .map(|(k, _)| *k)
+                .collect(),
+            vector_fields: self
+                .vector_index
+                .iter()
+                .filter(|(_, v)| v.len() > 0)
+                .map(|(k, _)| *k)
+                .collect(),
+        }
+    }
+
     pub fn vector_search(
         &self,
         target: &[f32],
@@ -171,20 +200,12 @@ impl UncommittedCollection {
 
         Ok(())
     }
+}
 
-    pub fn get_number_fields(&self) -> impl Iterator<Item = &FieldId> {
-        self.number_index.keys()
-    }
-
-    pub fn get_string_fields(&self) -> impl Iterator<Item = &FieldId> {
-        self.string_index.keys()
-    }
-
-    pub fn get_bool_fields(&self) -> impl Iterator<Item = &FieldId> {
-        self.bool_index.keys()
-    }
-
-    pub fn get_vector_fields(&self) -> impl Iterator<Item = &FieldId> {
-        self.vector_index.keys()
-    }
+#[derive(Debug)]
+pub struct UncommittedInfo {
+    pub number_fields: HashSet<FieldId>,
+    pub string_fields: HashSet<FieldId>,
+    pub bool_fields: HashSet<FieldId>,
+    pub vector_fields: HashSet<FieldId>,
 }

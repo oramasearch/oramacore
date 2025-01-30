@@ -14,6 +14,10 @@ impl BoolField {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.0.len() + self.inner.1.len()
+    }
+
     pub fn insert(&mut self, id: DocumentId, value: bool) {
         if value {
             self.inner.0.insert(id);

@@ -76,6 +76,10 @@ impl StringField {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.document_ids.len()
+    }
+
     pub fn insert(&mut self, document_id: DocumentId, field_length: u16, terms: InsertStringTerms) {
         self.document_ids.insert(document_id);
 
