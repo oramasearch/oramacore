@@ -4,9 +4,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::{Deserialize, Serialize};
 
+use crate::collection_manager::dto::{FieldId, Number};
 use crate::metrics::{Empty, OPERATION_GAUGE};
 use crate::types::{CollectionId, DocumentId, RawJSONDocument};
-use crate::{collection_manager::dto::FieldId, indexes::number::Number};
 
 use crate::collection_manager::dto::{ApiKey, TypedField};
 
@@ -47,6 +47,9 @@ pub enum CollectionWriteOperation {
     InsertDocument {
         doc_id: DocumentId,
         doc: RawJSONDocument,
+    },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
     },
     CreateField {
         field_id: FieldId,

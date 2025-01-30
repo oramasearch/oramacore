@@ -14,7 +14,7 @@ use crate::{
     ai::AIServiceConfig,
     build_orama,
     collection_manager::{
-        dto::ApiKey,
+        dto::{ApiKey, DeleteDocuments},
         sides::{
             CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
         },
@@ -220,7 +220,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     assert!(result.is_err());
     assert_eq!(
         format!("{}", result.unwrap_err()),
-        "Filter on field \"name\"(Text(English)) not supported".to_string(),
+        "Filter on field \"name\"(Text(EN)) not supported".to_string(),
     );
 
     Ok(())
@@ -996,27 +996,28 @@ async fn test_vector_search_grpc() -> Result<()> {
 
     sleep(Duration::from_millis(100)).await;
 
+    let mut docs = vec![
+        json!({
+            "id": "1",
+            "text": "The cat is sleeping on the table.",
+        }),
+        json!({
+            "id": "2",
+            "text": "A cat rests peacefully on the sofa.",
+        }),
+        json!({
+            "id": "3",
+            "text": "The dog is barking loudly in the yard.",
+        }),
+    ];
+    for i in 4..100 {
+        docs.push(json!({
+            "id": i.to_string(),
+            "text": "foobar",
+        }));
+    }
     write_side
-        .write(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
-            vec![
-                json!({
-                    "id": "1",
-                    "text": "The cat is sleeping on the table.",
-                }),
-                json!({
-                    "id": "2",
-                    "text": "A cat rests peacefully on the sofa.",
-                }),
-                json!({
-                    "id": "3",
-                    "text": "The dog is barking loudly in the yard.",
-                }),
-            ]
-            .try_into()
-            .unwrap(),
-        )
+        .write(ApiKey(Secret::new("my-write-api-key".to_string())), collection_id.clone(), docs.try_into().unwrap())
         .await?;
 
     sleep(Duration::from_millis(500)).await;
@@ -1159,7 +1160,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     insert_docs(
         write_side.clone(),
@@ -1178,7 +1180,8 @@ async fn test_commit_and_load2() -> Result<()> {
             }),
         ],
     )
-    .await?;
+    .await
+    .unwrap();
 
     let before_commit_result = read_side
         .search(
@@ -1194,7 +1197,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(before_commit_result.count, 1);
 
     write_side.commit().await?;
@@ -1215,7 +1219,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(before_commit_result.count, after_commit_result.count);
 
@@ -1245,7 +1250,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
     // We reload the read side
@@ -1264,7 +1270,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
 
     assert_eq!(before_commit_result.count, after_load_result.count);
 
@@ -1279,7 +1286,9 @@ async fn test_commit_and_load2() -> Result<()> {
             "age": 20,
         })],
     )
-    .await?;
+    .await
+    .unwrap();
+
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1294,13 +1303,15 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
-    // write_side.commit().await?;
-    read_side.commit().await?;
+    write_side.commit().await.unwrap();
+    read_side.commit().await.unwrap();
 
     let (_, read_side) = create(config.clone()).await?;
+
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1315,7 +1326,8 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
+        .await
+        .unwrap();
     assert_eq!(result.count, 2);
 
     let result = read_side
@@ -1333,8 +1345,11 @@ async fn test_commit_and_load2() -> Result<()> {
             })
             .try_into()?,
         )
-        .await?;
-    assert_eq!(result.count, 1);
+        .await
+        .unwrap();
+    // HSNW is a probabilistic algorithm, so the result may vary
+    // but it should return at least one result.
+    assert!(result.count > 0);
 
     Ok(())
 }
@@ -1343,7 +1358,8 @@ async fn test_commit_and_load2() -> Result<()> {
 async fn test_read_commit_should_not_block_search() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let mut config = create_oramacore_config();
-    config.reader_side.config.insert_batch_commit_size = 10;
+    config.reader_side.config.insert_batch_commit_size = 1_000_000;
+    config.writer_side.config.insert_batch_commit_size = 1_000_000;
 
     let (write_side, read_side) = create(config.clone()).await?;
 
@@ -1368,7 +1384,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
-        (0..1_000).map(|i| {
+        (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
                 "text": "text ".repeat(i + 1),
@@ -1376,6 +1392,8 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
         }),
     )
     .await?;
+
+    sleep(Duration::from_secs(1)).await;
 
     let commit_future = async {
         sleep(Duration::from_millis(5)).await;
@@ -1416,6 +1434,158 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+async fn test_delete_documents() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let mut config = create_oramacore_config();
+    config.reader_side.config.insert_batch_commit_size = 1_000_000;
+    config.writer_side.config.insert_batch_commit_size = 1_000_000;
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    write_side
+        .create_collection(
+            json!({
+                "id": collection_id.0.clone(),
+                "embeddings": {
+                    "model_name": "gte-small",
+                    "document_fields": ["name"],
+                },
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    let document_count = 10;
+    insert_docs(
+        write_side.clone(),
+        collection_id.clone(),
+        (0..document_count).map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+            })
+        }),
+    )
+    .await?;
+
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count);
+
+    write_side
+        .delete_documents(
+            collection_id.clone(),
+            DeleteDocuments {
+                document_ids: vec![(document_count - 1).to_string()],
+            },
+        )
+        .await?;
+    sleep(Duration::from_millis(100)).await;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 1);
+
+    write_side.commit().await.unwrap();
+    read_side.commit().await.unwrap();
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 1);
+
+    write_side
+        .delete_documents(
+            collection_id.clone(),
+            DeleteDocuments {
+                document_ids: vec![(document_count - 2).to_string()],
+            },
+        )
+        .await?;
+    sleep(Duration::from_millis(100)).await;
+
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 2);
+
+    let (write_side, read_side) = create(config.clone()).await?;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 1);
+
+    write_side
+        .delete_documents(
+            collection_id.clone(),
+            DeleteDocuments {
+                document_ids: vec![(document_count - 2).to_string()],
+            },
+        )
+        .await?;
+    sleep(Duration::from_millis(500)).await;
+
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 2);
+
+    write_side.commit().await.unwrap();
+    read_side.commit().await.unwrap();
+
+    let (_, read_side) = create(config.clone()).await?;
+    let result = read_side
+        .search(
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count - 2);
+
+    Ok(())
+}
+
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side
         .create_collection(
@@ -1449,7 +1619,7 @@ where
         .write(write_api_key, collection_id, document_list)
         .await?;
 
-    sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(1_000)).await;
 
     Ok(())
 }

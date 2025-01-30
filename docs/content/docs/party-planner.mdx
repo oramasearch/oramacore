@@ -1,0 +1,230 @@
+---
+title: Party Planner
+description: A deep dive into the heart of the OramaCore Answer Engine.
+---
+
+<Callout
+    type='info'
+>
+    **Status:** under active development.
+</Callout>
+
+**Party Planner** is one of the central components of OramaCore. It is responsible for managing the user request and come up with an execution plan that takes in consideration:
+
+1. **Chain of thoughts**. OramaCore is capable of understanding the user's intent and context, and it can decide that OramaCore will need to think about the various operations required to fulfill the user's request.
+2. **Chain of actions**. Party Planner can decide that in order to fullfill the user's request, OramaCore will need to perform a series of actions, such as (but not limited to, as we'll see later):
+    - **Querying the database** to retrieve the information required to fulfill the user's request.
+    - **Calling external services** to retrieve the information required to fulfill the user's request.
+    - **Performing calculations** to determine the best course of action.
+    - **Sending notifications** to the user or other systems.
+3. **Agents Calling**. You can define your own agents in JavaScript, and Party Planner can decide that OramaCore will need to call these agents in order to fulfill the user's request.
+4. **RAG**. Party Planner can determine that the information requested by the user can be found in the database, and it can optimize the user input into one or more queries that will be executed against the vector database or search engine.
+5. **Summarization**. Party Planner can decide that the information retrieved from the various sources needs to be summarized in order to provide a more concise and clear answer to the user.
+
+## Action Planning
+
+When Party Planner receives a user request, it will determine the best course of actions to fulfill the user's request. This course of action is called the **execution chain**.
+
+For example, let's say we installed OramaCore on a tech blog. If a user asks:
+
+```
+I just installed a Ryzen 9 9900X CPU but I fear I bent some pins, as the PC doesn't turn on. What should I do?
+```
+
+Party Planner could determine that in order to fulfill the user's request, it'll need to:
+
+1. Split the query into multiple, optimized queries (e.g., `"Ryzen 9 9900X bent pins"`, `"AMD CPUs bent pins troubleshooting"`)
+2. Run these queries on OramaCore or external services (Google or other APIs)
+3. Summarize the findings
+4. Provide the response
+
+This process ensures relevant, high-quality output to the user.
+
+## Default Actions
+
+OramaCore ships with a set of default actions that Party Planner can use to fulfill the user's request. These actions are:
+
+### `DESCRIBE_INPUT_CODE`
+
+If the user is sharing some code, errors, or logs, Party Planner can describe the input code in natural language, allowing the next steps in the execution chain to better understand the context of the user's request.
+
+For example, if the user makes the following inquiry:
+
+````
+The following code breaks on Node.js 22.0:
+
+```
+import data from "data.json" with { type: "json" }
+^^^^^^
+
+Uncaught:
+SyntaxError: Cannot use import statement inside the Node.js REPL, alternatively use dynamic import: const { default: data } = await import("data.json");
+```
+
+What can I do?
+````
+
+Party Planner can determine that in order to resolve the user problem, it'll need to describe the input code, for example by saying:
+
+```python
+"The user is trying to import a JSON file inside of the Node.js REPL. Node.js is suggesting to use dynamic imports instead."
+```
+
+This could be either enough to solve the user's problem or could be the first step in a series of operations that Party Planner will need to perform.
+
+If Party Planner thinks that the solution to the user problem can be found by just describing the input code, it can stop the execution chain and provide the answer to the user. Otherwise, it'll describe the input code and provide this description as context to the next action(s) in the execution chain.
+
+---
+
+### `PERFORM_ORAMA_SEARCH`
+
+If the user is asking a question that can be answered by querying the vector database or the search engine, Party Planner can determine that in order to fulfill the user's request, it'll need to perform a search on the vector database.
+
+For example, on an fashion e-commerce website, if the user asks:
+
+```
+I just started playing golf, and I need some shoes for under $100. Can you help me find some?
+```
+
+OramaCore will determine that the user is looking for golf shoes under $100, and it'll perform a search on the vector database to find the best matches.
+
+Before doing that, it can also determine that it needs to split the user input into [multiple queries](#generate_queries) or [optimizing](#optimize_query) the user input in order to provide the best results.
+
+---
+
+### `GENERATE_QUERIES`
+
+If the user input is rich of information, Party Planner can determine that in order to fulfill the user's request, it'll need to split the user input into multiple queries.
+
+For example, if the user asks:
+
+```
+I just installed a Ryzen 9 9900X CPU but I fear I bent some pins, as the PC doesn't turn on. What should I do?
+```
+
+Party Planner can determine that it needs to split the user input into multiple queries, such as:
+
+1. `"Ryzen 9 9900X bent pins"`
+2. `"AMD CPUs bent pins troubleshooting"`
+
+By running two queries, Party Planner can provide the user with more accurate and relevant results.
+
+---
+
+### `OPTIMIZE_QUERY`
+
+When the user is asking for a specific piece of information, Party Planner can determine that in order to fulfill the user's request, it'll need to optimize the user input.
+
+For example, if the user asks:
+
+```
+I just started playing golf, and I need some shoes for under $100. Can you help me find some?
+```
+
+Party Planner can determine that it needs to optimize the user input by removing unnecessary words, such as "I just started playing golf" and "Can you help me find some?", and keep only the relevant information, such as "shoes for under $100".
+
+Also, it'll understand that in order to find the best matches, it'll need to perform a search on full-text search engine rather than the vector database, so the optimized query may look like this:
+
+```json
+{
+    "term": "Golf Shoes",
+    "mode": "fulltext",
+    "where": {
+        "price": {
+            "lt": 100
+        }
+    }
+}
+```
+
+---
+
+### `IMPROVE_INPUT`
+
+Sometimes the user could ask OramaCore to help them improve their input code, grammar, or writing. Party Planner can determine that in order to fulfill the user's request, it'll need to improve the user's input.
+
+For example, if the user makes the following inquiry:
+
+````
+Can you help me improve this code? It says I should use `"with"` instead of `"assert"`.
+
+```javascript
+import data from "data.json" assert { type: "json" }
+```
+````
+
+OramaCore will determine that the user is trying to import a JSON file and is using the wrong syntax. Party Planner can improve the user's input by suggesting the correct syntax:
+
+```python
+"The correct syntax is `import data from 'data.json' with { type: 'json' }`."
+```
+
+This execution step can also correct the user vocabulary, grammar, or writing style in different languages, and perform other similar operations.
+
+---
+
+### `CREATE_CODE`
+
+If the user asks OramaCore to generate some code, Party Planner can determine that in order to fulfill the user's request, it'll need to generate the code.
+
+For example, let's say the user is installing OramaCore on Orama's documentation, and they ask:
+
+```
+Can you generate the code to install OramaCore on my computer?
+```
+
+Party Planner will determine that first, it'll likely need to search through the documentation to perform **RAG**, and once it finds the installation instructions, it'll generate the code for the user:
+
+````
+Sure! Here's the code to install OramaCore on your computer:
+
+```bash
+docker pull oramasearch/oramacore:latest
+```
+````
+
+---
+
+### `SUMMARIZE_FINDINGS`
+
+Most of the time, Party Planner will go through a series of three to five steps, which will drastically enrich the context of the user's request. Once all the steps are completed, Party Planner can summarize the findings and provide the answer to the user.
+
+---
+
+### `ASK_FOLLOWUP`
+
+If the user inquiry is not clear or if Party Planner needs more information to fulfill the user's request, it can ask the user for more information.
+
+For example, if the user asks:
+
+```python
+"Can you help me with this code?"
+```
+
+But no code is present, Party Planner will ask the user for more information:
+
+```python
+"Sure! Can you share the code you need help with?"
+```
+
+---
+
+### `GIVE_REPLY`
+
+Once all the steps in the execution chain are completed, Party Planner can provide the answer to the user.
+
+--- 
+
+## In the Next Versions of OramaCore
+
+We're working on extending Party Planner capabilities by making it faster, more intelligent, and cutsomizable.
+
+### Writing Custom Actions
+
+In the future versions of OramaCore, you'll be able to write your own actions in JavaScript. These actions will be executed by OramaCore on **Deno**, a secure, Rust-based JavaScript runtime.
+
+### Execution Graph
+
+At the current stage, Party Planner is executing the actions in a linear way. In the future versions of OramaCore, Party Planner will be able to execute the actions in a graph, where the nodes are the actions and the edges are the dependencies between the actions.
+
+This will allow Party Planner to execute the actions in parallel, making the execution chain faster and more efficient.

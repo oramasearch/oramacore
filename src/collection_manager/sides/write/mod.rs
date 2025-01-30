@@ -28,7 +28,7 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection},
+    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{
         AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
@@ -206,6 +206,7 @@ impl WriteSide {
         let sender = self.sender.clone();
 
         for mut doc in document_list {
+            info!("Insert doc");
             let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
                 collection: collection_id.0.clone(),
             });
@@ -234,12 +235,16 @@ impl WriteSide {
             }
 
             let doc_id = DocumentId(doc_id);
+            info!(?doc_id, "Inserting document");
             collection
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
                 .context("Cannot process document")?;
+            info!("Document inserted");
 
             drop(m);
+
+            info!("Doc inserted");
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -264,6 +269,24 @@ impl WriteSide {
         Ok(())
     }
 
+    pub async fn delete_documents(
+        &self,
+        collection_id: CollectionId,
+        delete_documents: DeleteDocuments,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .context("Collection not found")?;
+
+        collection
+            .delete_documents(delete_documents.document_ids, self.sender.clone())
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn insert_javascript_hook(
         &self,
         collection_id: CollectionId,
@@ -280,7 +303,10 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
-        collection.set_embedding_hook(name);
+        collection
+            .set_embedding_hook(name)
+            .await
+            .context("Cannot set embedding hook")?;
 
         Ok(())
     }
@@ -291,7 +317,7 @@ impl WriteSide {
 
     pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
         let collection = self.collections.get_collection(collection_id).await?;
-        Some(collection.as_dto())
+        Some(collection.as_dto().await)
     }
 
     pub fn get_javascript_hook(

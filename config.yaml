@@ -20,20 +20,20 @@ writer_side:
         # NB: the elements are in memory, so be careful with this value
         embedding_queue_limit: 50
         # The number of the document insertions after the write side will commit the changes
-        insert_batch_commit_size: 5000
+        insert_batch_commit_size: 50000000
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
         default_embedding_model: MultilingualE5Small
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
-        javascript_queue_limit: 50
+        javascript_queue_limit: 500
 
 reader_side:
     input: in-memory
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
-        insert_batch_commit_size: 3000
+        insert_batch_commit_size: 50000000
 
 ai_server:
     scheme: http

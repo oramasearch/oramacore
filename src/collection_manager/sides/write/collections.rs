@@ -8,6 +8,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
+use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::nlp::NLPService;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
@@ -88,7 +89,7 @@ impl CollectionsWriter {
                 model,
                 document_fields,
             });
-            HashMap::from_iter([("___orama_auto_embedding".to_string(), typed_field)])
+            HashMap::from_iter([(DEFAULT_EMBEDDING_FIELD_NAME.to_string(), typed_field)])
         } else {
             HashMap::new()
         };
@@ -122,7 +123,11 @@ impl CollectionsWriter {
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
 
-        collections.iter().map(|(_, coll)| coll.as_dto()).collect()
+        let mut r = vec![];
+        for collection in collections.values() {
+            r.push(collection.as_dto().await);
+        }
+        r
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -134,7 +139,7 @@ impl CollectionsWriter {
 
         for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
-            collection.commit(collection_dir)?;
+            collection.commit(collection_dir).await?;
         }
 
         // Now it is safe to drop the lock

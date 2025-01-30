@@ -7,13 +7,19 @@ use serde::{de, Deserialize, Serialize};
 
 use crate::ai::OramaModel;
 use crate::{
-    indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
 };
 
+mod bm25;
+mod global_info;
+mod number;
+
 use super::sides::hooks::HookName;
 use super::sides::OramaModelSerializable;
+pub use bm25::*;
+pub use global_info::*;
+pub use number::*;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
@@ -24,7 +30,7 @@ pub struct TokenScore {
     pub score: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema, PartialEq, Eq)]
 pub enum LanguageDTO {
     English,
 }
@@ -45,7 +51,7 @@ impl From<Locale> for LanguageDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
@@ -61,7 +67,7 @@ pub struct EmbeddingTypedField {
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
-    Text(LanguageDTO),
+    Text(Locale),
     Embedding(EmbeddingTypedField),
     Number,
     Bool,
@@ -120,6 +126,10 @@ impl TryFrom<serde_json::Value> for CreateCollection {
         let v = serde_json::from_value(value)?;
         Ok(v)
     }
+}
+
+pub struct DeleteDocuments {
+    pub document_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]

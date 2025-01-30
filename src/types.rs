@@ -182,6 +182,12 @@ impl IntoIterator for Schema {
     }
 }
 
+impl Schema {
+    pub fn inner(&self) -> &HashMap<String, ValueType> {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FlattenDocument(Map<String, Value>);
 

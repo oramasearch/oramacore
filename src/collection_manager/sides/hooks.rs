@@ -175,8 +175,11 @@ impl HooksRuntime {
             HookName::SelectEmbeddingsProperties => Operation::SelectEmbeddingsProperties,
         };
 
-        let result = self.javascript_runtime.eval(operation, hook.code, input);
+        let result = self
+            .javascript_runtime
+            .eval(operation, hook.code, input)
+            .await;
 
-        Some(result.await)
+        Some(result)
     }
 }

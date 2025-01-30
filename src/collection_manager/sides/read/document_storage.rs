@@ -1,5 +1,9 @@
 use serde::{de::Unexpected, Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    path::PathBuf,
+};
 use tracing::{debug, trace, warn};
 
 use anyhow::{anyhow, Context, Ok, Result};
@@ -115,6 +119,7 @@ pub struct DocumentStorageConfig {
 pub struct DocumentStorage {
     uncommitted: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>>,
     committed: CommittedDiskDocumentStorage,
+    uncommitted_document_deletions: tokio::sync::RwLock<HashSet<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -124,6 +129,7 @@ impl DocumentStorage {
         Ok(Self {
             uncommitted: Default::default(),
             committed: CommittedDiskDocumentStorage::new(config.data_dir),
+            uncommitted_document_deletions: Default::default(),
         })
     }
 
@@ -135,11 +141,21 @@ impl DocumentStorage {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
+    pub async fn delete_document(&self, doc_id: &DocumentId) -> Result<()> {
+        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
+        uncommitted_document_deletions.insert(*doc_id);
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self, doc_ids))]
     pub async fn get_documents_by_ids(
         &self,
-        doc_ids: Vec<DocumentId>,
+        mut doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<RawJSONDocument>>> {
+        let uncommitted_document_deletions = self.uncommitted_document_deletions.read().await;
+        doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+
         debug!("Get from committed documents");
         let committed = self.committed.get_documents_by_ids(&doc_ids).await?;
 
@@ -192,6 +208,16 @@ impl DocumentStorage {
             .await
             .context("Cannot commit documents")?;
         drop(m);
+
+        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
+        for doc_id in uncommitted_document_deletions.drain() {
+            let doc_path = self.committed.path.join(format!("{}", doc_id.0));
+            tokio::fs::remove_file(doc_path)
+                .await
+                .context("Cannot remove document")?;
+        }
+        uncommitted_document_deletions.clear();
+        drop(uncommitted_document_deletions);
 
         Ok(())
     }

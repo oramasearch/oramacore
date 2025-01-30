@@ -68,7 +68,6 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
         while let Some(op) = receiver.recv().await {
             let r = collections_reader2.update(op).await;
             if let Err(e) = r {
-                println!("--------");
                 eprintln!("Error: {:?}", e);
             }
         }
