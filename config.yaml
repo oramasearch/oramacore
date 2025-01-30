@@ -23,7 +23,7 @@ writer_side:
         default_embedding_model: MultilingualE5Small
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
-        javascript_queue_limit: 50
+        javascript_queue_limit: 500
 
 reader_side:
     input: in-memory
