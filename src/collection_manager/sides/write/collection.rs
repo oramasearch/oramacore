@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Ok, Result};
+use doc_id_storage::DocIdStorage;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};
@@ -30,6 +31,8 @@ use super::{
     OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
+mod doc_id_storage;
+
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 pub struct CollectionWriter {
@@ -44,6 +47,8 @@ pub struct CollectionWriter {
     field_id_by_name: RwLock<HashMap<String, FieldId>>,
 
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+
+    doc_id_storage: RwLock<DocIdStorage>,
 }
 
 impl CollectionWriter {
@@ -62,6 +67,7 @@ impl CollectionWriter {
             field_id_by_name: Default::default(),
             field_id_generator: Default::default(),
             embedding_sender,
+            doc_id_storage: Default::default(),
         }
     }
 
@@ -120,6 +126,18 @@ impl CollectionWriter {
             ))
             .await
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
+
+        // Those `?` is never triggered, but it's here to make the compiler happy
+        // TODO: do this better
+        let doc_id_str = doc
+            .inner
+            .get("id")
+            .context("Document does not have an id")?
+            .as_str()
+            .context("Document id is not a string")?;
+        let mut doc_id_storage = self.doc_id_storage.write().await;
+        doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id);
+        drop(doc_id_storage);
 
         let fields_to_index = self
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
@@ -350,6 +368,28 @@ impl CollectionWriter {
         Ok(field_ids)
     }
 
+    pub async fn delete_documents(
+        &self,
+        doc_ids: Vec<String>,
+        sender: OperationSender,
+    ) -> Result<()> {
+        let doc_ids = self
+            .doc_id_storage
+            .write()
+            .await
+            .remove_document_id(doc_ids);
+        info!(coll_id= ?self.id, ?doc_ids, "Deleting documents");
+
+        sender
+            .send(WriteOperation::Collection(
+                self.id.clone(),
+                CollectionWriteOperation::DeleteDocuments { doc_ids },
+            ))
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn commit(&self, path: PathBuf) -> Result<()> {
         info!(coll_id= ?self.id, "Committing collection");
 
@@ -372,6 +412,13 @@ impl CollectionWriter {
             .map(|(k, v)| (k.clone(), *v))
             .collect();
 
+        let doc_id_storage_path = path.join("doc_id_storage");
+        self.doc_id_storage
+            .read()
+            .await
+            .commit(doc_id_storage_path.clone())
+            .context("Cannot commit doc_id_storage")?;
+
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
@@ -384,6 +431,7 @@ impl CollectionWriter {
                 .field_id_generator
                 .load(std::sync::atomic::Ordering::Relaxed),
             field_id_by_name,
+            doc_id_storage_path,
         });
 
         BufferedFile::create_or_overwrite(path.join("info.json"))
@@ -413,6 +461,7 @@ impl CollectionWriter {
         self.description = dump.description;
         self.default_language = dump.default_language;
         self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
+        self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
 
         for (field_name, serialized) in dump.fields {
             let field_id_by_name = self.field_id_by_name.read().await;
@@ -484,4 +533,5 @@ struct CollectionDumpV1 {
     document_count: u64,
     field_id_generator: u16,
     field_id_by_name: Vec<(String, FieldId)>,
+    doc_id_storage_path: PathBuf,
 }

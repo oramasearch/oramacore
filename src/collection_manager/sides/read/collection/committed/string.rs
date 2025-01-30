@@ -38,8 +38,9 @@ impl StringField {
                 ),
             ),
         >,
-        length_per_documents: HashMap<DocumentId, u32>,
+        mut length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
     ) -> Result<Self> {
         let mut posting_id_generator = 0;
 
@@ -56,11 +57,16 @@ impl StringField {
                 value
                     .1
                     .into_iter()
+                    .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
                     .map(|(doc_id, positions)| (doc_id, positions.0))
                     .collect(),
             );
 
             (key, new_posting_list_id)
+        });
+
+        uncommitted_document_deletions.iter().for_each(|doc_id| {
+            length_per_documents.remove(doc_id);
         });
 
         let posting_id_storage_file_path = data_dir.join("posting_id_storage.map");
@@ -95,6 +101,7 @@ impl StringField {
         committed: &Self,
         length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
     ) -> Result<Self> {
         create_if_not_exists(&data_dir)
             .context("Cannot create data directory for committed string field")?;
@@ -127,6 +134,7 @@ impl StringField {
                     new_posting_list_id,
                     positions_per_document_id
                         .into_iter()
+                        .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
                         .map(|(doc_id, positions)| (doc_id, positions.0))
                         .collect(),
                 );
@@ -140,6 +148,7 @@ impl StringField {
                     positions_per_document_id
                         .into_iter()
                         .map(|(doc_id, positions)| (doc_id, positions.0)),
+                    uncommitted_document_deletions,
                 );
 
                 committed_posting_id
@@ -164,7 +173,62 @@ impl StringField {
             document_lengths_per_document.insert(k, v);
         }
 
-        let posting_storage = posting_storage.into_inner();
+        let mut posting_storage = posting_storage.into_inner();
+
+        posting_storage.remove_doc_ids(uncommitted_document_deletions);
+        document_lengths_per_document.remove_doc_ids(uncommitted_document_deletions);
+
+        posting_storage.commit()?;
+        document_lengths_per_document.commit()?;
+
+        Ok(Self {
+            index,
+            posting_storage,
+            document_lengths_per_document,
+        })
+    }
+
+    pub fn from_committed(
+        committed: &Self,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+    ) -> Result<Self> {
+        create_if_not_exists(&data_dir)
+            .context("Cannot create data directory for committed string field")?;
+
+        let new_posting_storage_file = data_dir.join("posting_id_storage.map");
+        let old_posting_storage_file = committed.posting_storage.get_backed_file();
+
+        debug_assert_ne!(old_posting_storage_file, new_posting_storage_file);
+        std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(|| {
+            format!(
+                "Cannot copy posting storage file: old {:?} -> new {:?}",
+                old_posting_storage_file, new_posting_storage_file
+            )
+        })?;
+        let mut posting_storage = PostingIdStorage::load(new_posting_storage_file)
+            .context("Cannot load posting storage")?;
+
+        let committed_iter = committed.index.iter();
+        let fst_file_path = data_dir.join("fst.map");
+        let index =
+            FSTIndex::from_iter(committed_iter, fst_file_path).context("Cannot commit fst")?;
+
+        let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
+        let old_document_lengths_per_document_file =
+            committed.document_lengths_per_document.get_backed_file();
+        std::fs::copy(
+            old_document_lengths_per_document_file,
+            &new_document_lengths_per_document_file,
+        )
+        .context("Cannot copy posting storage file")?;
+        let mut document_lengths_per_document =
+            DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
+                .context("Cannot load document lengths per document")?;
+
+        document_lengths_per_document.remove_doc_ids(uncommitted_document_deletions);
+        posting_storage.remove_doc_ids(uncommitted_document_deletions);
+
         posting_storage.commit()?;
         document_lengths_per_document.commit()?;
 
@@ -208,15 +272,30 @@ impl StringField {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         if tokens.is_empty() {
             return Ok(());
         }
 
         if tokens.len() == 1 {
-            self.search_without_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+            self.search_without_phrase_match(
+                tokens,
+                boost,
+                scorer,
+                filtered_doc_ids,
+                global_info,
+                uncommitted_deleted_documents,
+            )
         } else {
-            self.search_with_phrase_match(tokens, boost, scorer, filtered_doc_ids, global_info)
+            self.search_with_phrase_match(
+                tokens,
+                boost,
+                scorer,
+                filtered_doc_ids,
+                global_info,
+                uncommitted_deleted_documents,
+            )
         }
     }
 
@@ -227,15 +306,11 @@ impl StringField {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         let total_field_length = global_info.total_document_length as f32;
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
-
-        info!("---- tokens {:?}", tokens);
-        info!("---- index {:?}", self.index);
-        info!("---- posting {:?}", self.posting_storage);
-        info!("---- doc len {:?}", self.document_lengths_per_document);
 
         for token in tokens {
             let matches = self
@@ -251,6 +326,7 @@ impl StringField {
                             filtered_doc_ids
                                 .map_or(true, |filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
+                        .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
                         .map(move |(doc_id, positions)| {
                             let field_length =
                                 self.document_lengths_per_document.get_length(doc_id);
@@ -271,8 +347,6 @@ impl StringField {
                 total_documents_with_term_in_field,
             ) in matches
             {
-                println!("------ {:?}", doc_id);
-
                 scorer.add(
                     *doc_id,
                     term_occurrence_in_field,
@@ -297,6 +371,7 @@ impl StringField {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         let total_field_length = global_info.total_document_length as f32;
         let total_documents_with_field = global_info.total_documents as f32;
@@ -322,6 +397,7 @@ impl StringField {
                             filtered_doc_ids
                                 .map_or(true, |filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
+                        .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
                         .map(move |(doc_id, positions)| {
                             let field_lenght =
                                 self.document_lengths_per_document.get_length(doc_id);
@@ -438,8 +514,18 @@ impl PostingIdStorage {
         self.inner.insert(posting_id, posting);
     }
 
-    fn merge(&mut self, posting_id: u64, posting: impl Iterator<Item = (DocumentId, Vec<usize>)>) {
-        self.inner.merge(posting_id, posting);
+    fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
+        self.inner.remove_inner_keys(doc_ids);
+    }
+
+    fn merge(
+        &mut self,
+        posting_id: u64,
+        posting: impl Iterator<Item = (DocumentId, Vec<usize>)>,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+    ) {
+        self.inner
+            .merge(posting_id, posting, uncommitted_document_deletions);
     }
 }
 
@@ -476,6 +562,15 @@ impl DocumentLengthsPerDocument {
 
     fn get_backed_file(&self) -> PathBuf {
         self.inner.file_path()
+    }
+
+    fn remove_doc_ids(&mut self, doc_ids: &HashSet<DocumentId>) {
+        for doc_id in doc_ids {
+            self.global_info.total_documents -= 1;
+            if let Some(a) = self.inner.remove(doc_id) {
+                self.global_info.total_document_length -= a as usize;
+            }
+        }
     }
 
     fn insert(&mut self, doc_id: DocumentId, len: u32) {

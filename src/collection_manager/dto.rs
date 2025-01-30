@@ -98,6 +98,10 @@ impl TryFrom<serde_json::Value> for CreateCollection {
     }
 }
 
+pub struct DeleteDocuments {
+    pub document_ids: Vec<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct CollectionDTO {
     #[schema(inline)]

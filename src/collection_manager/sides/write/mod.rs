@@ -28,7 +28,7 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{CollectionDTO, CreateCollection},
+    collection_manager::dto::{CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{
         AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
@@ -236,6 +236,24 @@ impl WriteSide {
         }
 
         info!("Batch of documents inserted");
+
+        Ok(())
+    }
+
+    pub async fn delete_documents(
+        &self,
+        collection_id: CollectionId,
+        delete_documents: DeleteDocuments,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .context("Collection not found")?;
+
+        collection
+            .delete_documents(delete_documents.document_ids, self.sender.clone())
+            .await?;
 
         Ok(())
     }

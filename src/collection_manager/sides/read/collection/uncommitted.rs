@@ -89,6 +89,7 @@ impl UncommittedCollection {
         properties: &[FieldId],
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         for vector_field in properties {
             let vector_field = match self.vector_index.get(vector_field) {
@@ -98,12 +99,18 @@ impl UncommittedCollection {
                     continue;
                 }
             };
-            vector_field.search(target, filtered_doc_ids, output)?;
+            vector_field.search(
+                target,
+                filtered_doc_ids,
+                output,
+                uncommitted_deleted_documents,
+            )?;
         }
 
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn fulltext_search(
         &self,
         tokens: &[String],
@@ -112,6 +119,7 @@ impl UncommittedCollection {
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         scorer: &mut BM25Scorer<DocumentId>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         for field_id in properties {
             let index = match self.string_index.get(&field_id) {
@@ -125,7 +133,14 @@ impl UncommittedCollection {
 
             let field_boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            index.search(tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
+            index.search(
+                tokens,
+                field_boost,
+                scorer,
+                filtered_doc_ids,
+                global_info,
+                uncommitted_deleted_documents,
+            )?;
         }
 
         Ok(())

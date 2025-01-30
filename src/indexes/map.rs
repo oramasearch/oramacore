@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
@@ -84,6 +89,9 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
     pub fn insert(&mut self, key: Key, value: Value) {
         self.inner.insert(key, value);
     }
+    pub fn remove(&mut self, key: &Key) -> Option<Value> {
+        self.inner.remove(key)
+    }
 }
 
 impl<Key: Ord, Value> Map<Key, Value> {
@@ -92,9 +100,31 @@ impl<Key: Ord, Value> Map<Key, Value> {
     }
 }
 
-impl<Key: Debug + Eq + Hash, Value: Debug> Map<Key, Vec<Value>> {
-    pub fn merge(&mut self, key: Key, iter: impl Iterator<Item = Value>) {
+impl<Key: Debug + Eq + Hash + Clone, InnerKey: Eq + Hash, Value: Debug>
+    Map<Key, Vec<(InnerKey, Value)>>
+{
+    pub fn merge(
+        &mut self,
+        key: Key,
+        iter: impl Iterator<Item = (InnerKey, Value)>,
+        uncommitted_document_deletions: &HashSet<InnerKey>,
+    ) {
         let entry = self.inner.entry(key).or_default();
         entry.extend(iter);
+        entry.retain(|x| !uncommitted_document_deletions.contains(&x.0));
+    }
+
+    pub fn remove_inner_keys(&mut self, inner_keys: &HashSet<InnerKey>) {
+        let mut keys_to_remove = vec![];
+        for (key, entry) in self.inner.iter_mut() {
+            entry.retain(|x| !inner_keys.contains(&x.0));
+            if entry.is_empty() {
+                keys_to_remove.push(key.clone());
+            }
+        }
+
+        for key in keys_to_remove {
+            self.inner.remove(&key);
+        }
     }
 }

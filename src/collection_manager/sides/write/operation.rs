@@ -48,6 +48,9 @@ pub enum CollectionWriteOperation {
         doc_id: DocumentId,
         doc: RawJSONDocument,
     },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
+    },
     CreateField {
         field_id: FieldId,
         field_name: String,

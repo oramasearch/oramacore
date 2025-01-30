@@ -116,15 +116,7 @@ impl CollectionsReader {
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
-
-        create_if_not_exists_async(data_dir)
-            .await
-            .context("Cannot create data directory")?;
-
         let collections_dir = data_dir.join("collections");
-        create_if_not_exists_async(&collections_dir)
-            .await
-            .context("Cannot create 'collections' directory")?;
 
         let col = self.collections.read().await;
         let col = &*col;

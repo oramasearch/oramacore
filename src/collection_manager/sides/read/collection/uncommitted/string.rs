@@ -128,6 +128,7 @@ impl StringField {
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         global_info: &GlobalInfo,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
         let total_field_length = global_info.total_document_length as f32;
         let total_documents_with_field = global_info.total_documents as f32;
@@ -146,6 +147,9 @@ impl StringField {
                         if !filtered_doc_ids.contains(doc_id) {
                             continue;
                         }
+                    }
+                    if uncommitted_deleted_documents.contains(doc_id) {
+                        continue;
                     }
 
                     let field_length = match self.field_length_per_doc.get(doc_id) {
