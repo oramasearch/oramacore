@@ -380,12 +380,17 @@ impl CollectionWriter {
             .remove_document_id(doc_ids);
         info!(coll_id= ?self.id, ?doc_ids, "Deleting documents");
 
+        let doc_ids_len = doc_ids.len();
+
         sender
             .send(WriteOperation::Collection(
                 self.id.clone(),
                 CollectionWriteOperation::DeleteDocuments { doc_ids },
             ))
             .await?;
+
+        self.collection_document_count
+            .fetch_sub(doc_ids_len as u64, std::sync::atomic::Ordering::Relaxed);
 
         Ok(())
     }

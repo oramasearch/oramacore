@@ -6,6 +6,8 @@ use tracing::error;
 
 use crate::file_utils::BufferedFile;
 
+const BOUND_FILE_NAME: &str = "bounds.bin";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Item<Key, Value: Eq + Hash> {
     pub key: Key,
@@ -229,7 +231,7 @@ impl<
         pages[0].min = Key::min_value();
         bounds[0].0 = Key::min_value();
 
-        let bounds_file = data_dir.join("bounds.json");
+        let bounds_file = data_dir.join(BOUND_FILE_NAME);
         BufferedFile::create(bounds_file.clone())
             .context("Cannot create bounds file")?
             .write_bincode_data(&bounds)
@@ -241,7 +243,7 @@ impl<
     }
 
     pub fn load(data_dir: PathBuf) -> Result<Self> {
-        let bounds_file = data_dir.join("bounds.json");
+        let bounds_file = data_dir.join(BOUND_FILE_NAME);
         let bounds: Vec<(Key, Key)> = BufferedFile::open(bounds_file.clone())
             .context("Cannot create bounds file")?
             .read_bincode_data()
