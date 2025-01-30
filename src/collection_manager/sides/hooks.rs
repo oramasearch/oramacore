@@ -8,6 +8,7 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 
@@ -175,8 +176,9 @@ impl HooksRuntime {
             HookName::SelectEmbeddingsProperties => Operation::SelectEmbeddingsProperties,
         };
 
-        let result = self.javascript_runtime.eval(operation, hook.code, input);
+        let result = self.javascript_runtime.eval(operation, hook.code, input)
+            .await;
 
-        Some(result.await)
+        Some(result)
     }
 }

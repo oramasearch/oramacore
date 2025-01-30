@@ -3,6 +3,7 @@ use anyhow::{Context, Error};
 use deno_core::{JsRuntime, RuntimeOptions};
 use strum_macros::Display;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{info, warn};
 
 use crate::metrics::{Empty, JAVASCRIPT_REQUEST_GAUDGE};
 
@@ -10,13 +11,14 @@ pub struct JavaScript {
     sender: mpsc::Sender<Job>,
 }
 
-#[derive(Display)]
+#[derive(Debug, Display)]
 pub enum Operation {
     Anonymous,
     SelectEmbeddingsProperties,
     DynamicDocumentRanking,
 }
 
+#[derive(Debug)]
 struct Job {
     code: String,
     input: serde_json::Value,
@@ -26,20 +28,24 @@ struct Job {
 
 impl JavaScript {
     pub async fn new(channel_limit: usize) -> Self {
-        // @todo: use crossbeam to create a thread pool (multi-consumer, multi-producer)
         let (sender, mut receiver) = mpsc::channel::<Job>(channel_limit);
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-
             let mut runtime = JsRuntime::new(RuntimeOptions::default());
 
-            let local = tokio::task::LocalSet::new();
-            let local = local.spawn_local(async move {
-                while let Some(job) = receiver.recv().await {
+            let mut buff = Vec::with_capacity(channel_limit);
+            
+            loop {
+                info!("Waiting for jobs...");
+                // recv_many returns 0 if the channel is closed
+                let count = receiver.blocking_recv_many(&mut buff, channel_limit);
+                if count == 0 {
+                    break;
+                }
+
+                info!("Received job {:?}", count);
+
+                for job in buff.drain(..count) {
                     // @todo: based on the `Operation`, we can perform custom checks and custom script
                     // operations on the incoming data.
                     let full_script = format!(
@@ -58,6 +64,7 @@ impl JavaScript {
                     let b = Box::into_raw(Box::new(script_name));
                     let c: &'static str = unsafe { &*b };
 
+                    info!("Running script in Deno: {}", full_script);
                     let result = runtime
                         .execute_script(c, full_script)
                         .with_context(|| {
@@ -76,15 +83,15 @@ impl JavaScript {
                             }
                         })
                         .map_err(|err| Error::msg(format!("JavaScript error: {:?}", err)));
+                    info!("Deno result: {:?}", result);
 
-                    let _ = unsafe { Box::from_raw(b) };
+                    // let _ = unsafe { Box::from_raw(b) };
                     let _ = job.response.send(result);
 
                     JAVASCRIPT_REQUEST_GAUDGE.create(Empty {}).decrement_by(1);
                 }
-            });
-
-            rt.block_on(local).unwrap();
+            }
+            warn!("JS runtime thread finished");
         });
 
         Self { sender }
@@ -107,11 +114,13 @@ impl JavaScript {
             response: response_tx,
         };
 
+        info!("Sending job to JavaScript runtime... {:?}", job);
         self.sender
             .send(job)
             .await
             .map_err(|_| Error::msg("Runtime thread disconnected"))?;
         let res = response_rx.await??;
+        info!("Received response from JavaScript runtime {}", res);
 
         serde_json::from_str(&res).context("Unable to deserialize string into valid data structure")
     }

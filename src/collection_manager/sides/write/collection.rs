@@ -8,10 +8,9 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Ok, Result};
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, instrument, trace, warn};
+use tracing::{debug, field::debug, info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
@@ -31,6 +30,8 @@ use super::{
     OperationSender, SerializedFieldIndexer, WriteOperation,
 };
 
+pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
+
 pub struct CollectionWriter {
     id: CollectionId,
     description: Option<String>,
@@ -40,7 +41,7 @@ pub struct CollectionWriter {
     collection_document_count: AtomicU64,
 
     field_id_generator: AtomicU16,
-    field_id_by_name: DashMap<String, FieldId>,
+    field_id_by_name: RwLock<HashMap<String, FieldId>>,
 
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
@@ -58,8 +59,8 @@ impl CollectionWriter {
             default_language,
             collection_document_count: Default::default(),
             fields: Default::default(),
-            field_id_by_name: DashMap::new(),
-            field_id_generator: AtomicU16::new(0),
+            field_id_by_name: Default::default(),
+            field_id_generator: Default::default(),
             embedding_sender,
         }
     }
@@ -82,15 +83,16 @@ impl CollectionWriter {
     }
 
     pub async fn set_embedding_hook(&self, hook_name: HookName) -> Result<()> {
-        let field_id = self
-            .field_id_by_name
-            .get("___orama_auto_embedding")
-            .context("Field ___orama_auto_embedding not found")?;
+        let field_id_by_name = self.field_id_by_name.read().await;
+        let field_id = field_id_by_name
+            .get(DEFAULT_EMBEDDING_FIELD_NAME)
+            .cloned()
+            .context("Field for embedding not found")?;
+        drop(field_id_by_name);
 
         let mut w = self.fields.write().await;
-
         let field = match w.get_mut(&field_id) {
-            None => bail!("Field ___orama_auto_embedding not found"),
+            None => bail!("Field for embedding not found"),
             Some((_, _, field)) => field,
         };
         field.set_embedding_hook(hook_name);
@@ -123,7 +125,6 @@ impl CollectionWriter {
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
             .await
             .context("Cannot get fields to index")?;
-
         trace!("Fields to index: {:?}", fields_to_index);
 
         let flatten = doc.clone().into_flatten();
@@ -138,10 +139,12 @@ impl CollectionWriter {
                 Some(v) => v,
             };
 
+            info!("QUIQUIQUI {:?}", field_name);
             field
                 .get_write_operations(doc_id, &flatten, sender.clone())
                 .await
                 .with_context(|| format!("Cannot index field {}", field_name))?;
+            info!("QUAQUAQUA");
         }
 
         trace!("Document field indexed");
@@ -179,8 +182,7 @@ impl CollectionWriter {
                 field_name, field_type
             );
 
-            let field_id = self.field_id_by_name.get(&field_name).map(|e| *e);
-
+            let field_id = self.field_id_by_name.read().await.get(&field_name).map(|e| *e);
             // Avoid creating fields that already exists
             if field_id.is_some() {
                 continue;
@@ -190,7 +192,9 @@ impl CollectionWriter {
                 .field_id_generator
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let field_id = FieldId(field_id);
-            self.field_id_by_name.insert(field_name.clone(), field_id);
+            let mut field_id_by_name = self.field_id_by_name.write().await;
+            field_id_by_name.insert(field_name.clone(), field_id);
+            drop(field_id_by_name);
 
             self.create_field(
                 field_id,
@@ -291,6 +295,7 @@ impl CollectionWriter {
         Ok(())
     }
 
+    #[instrument(skip(self, doc, sender, hooks_runtime))]
     async fn get_fields_to_index(
         &self,
         doc: Document,
@@ -301,14 +306,20 @@ impl CollectionWriter {
         let schema = flatten.get_field_schema();
 
         let mut field_ids = vec![];
-        if let Some(field_id) = self.field_id_by_name.get("___orama_auto_embedding") {
-            field_ids.push(field_id.value().clone());
+        let field_id_by_name = self.field_id_by_name.read().await;
+        if let Some(field_id) = field_id_by_name.get(DEFAULT_EMBEDDING_FIELD_NAME) {
+            field_ids.push(field_id.clone());
         }
+        drop(field_id_by_name);
 
         for (field_name, value_type) in schema {
-            let field_id = self.field_id_by_name.get(&field_name).map(|e| *e);
+            info!("1");
+            let field_id_by_name = self.field_id_by_name.read().await;
+            let field_id = field_id_by_name.get(&field_name).cloned();
+            drop(field_id_by_name);
 
             if let Some(field_id) = field_id {
+                info!("3");
                 field_ids.push(field_id);
                 continue;
             }
@@ -317,12 +328,17 @@ impl CollectionWriter {
                 .field_id_generator
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let field_id = FieldId(field_id);
-            self.field_id_by_name.insert(field_name.clone(), field_id);
+            info!("2");
+            let mut field_id_by_name = self.field_id_by_name.write().await;
+            field_id_by_name.insert(field_name.clone(), field_id);
+            drop(field_id_by_name);
+            info!("2222");
 
             field_ids.push(field_id);
 
             // @todo: add support to other types
             if let Some(typed_field) = self.value_to_typed_field(value_type.clone()) {
+                info!("4");
                 self.create_field(
                     field_id,
                     field_name,
@@ -336,7 +352,11 @@ impl CollectionWriter {
             } else {
                 warn!("Field type not supported: {:?}", value_type);
             }
+
+            info!("5");
         }
+
+        trace!("field_ids: {:?}", field_ids);
 
         Ok(field_ids)
     }
@@ -357,6 +377,9 @@ impl CollectionWriter {
             .map(|(_, (k, _, indexer))| (k.clone(), indexer.serialized()))
             .collect();
 
+        let field_id_by_name = self.field_id_by_name.read().await;
+        let field_id_by_name: Vec<_> = field_id_by_name.iter().map(|(k, v)| (k.clone(), *v)).collect();
+
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
@@ -368,11 +391,7 @@ impl CollectionWriter {
             field_id_generator: self
                 .field_id_generator
                 .load(std::sync::atomic::Ordering::Relaxed),
-            field_id_by_name: self
-                .field_id_by_name
-                .iter()
-                .map(|e| (e.key().clone(), *e.value()))
-                .collect(),
+            field_id_by_name,
         });
 
         BufferedFile::create_or_overwrite(path.join("info.json"))
@@ -401,10 +420,11 @@ impl CollectionWriter {
         self.id = dump.id;
         self.description = dump.description;
         self.default_language = dump.default_language;
-        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
+        self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
 
         for (field_name, serialized) in dump.fields {
-            let field_id = match self.field_id_by_name.get(&field_name) {
+            let field_id_by_name = self.field_id_by_name.read().await;
+            let field_id = match field_id_by_name.get(&field_name) {
                 None => {
                     return Err(anyhow!(
                         "Field {} not found in field_id_by_name",
@@ -413,6 +433,8 @@ impl CollectionWriter {
                 }
                 Some(field_id) => *field_id,
             };
+            drop(field_id_by_name);
+
             let (value_type, collection_field): (ValueType, CollectionField) = match serialized {
                 SerializedFieldIndexer::String(locale) => (
                     ValueType::Scalar(ScalarType::String),

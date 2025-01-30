@@ -8,6 +8,7 @@ use anyhow::Result;
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::{
     ai::OramaModel,
@@ -464,6 +465,7 @@ impl EmbeddingField {
         PENDING_EMBEDDING_REQUEST_GAUDGE
             .create(Empty {})
             .increment_by_one();
+        info!("Sending embedding calculation request");
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
                 model: self.model,
