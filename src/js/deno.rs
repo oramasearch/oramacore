@@ -34,7 +34,7 @@ impl JavaScript {
             let mut runtime = JsRuntime::new(RuntimeOptions::default());
 
             let mut buff = Vec::with_capacity(channel_limit);
-            
+
             loop {
                 info!("Waiting for jobs...");
                 // recv_many returns 0 if the channel is closed

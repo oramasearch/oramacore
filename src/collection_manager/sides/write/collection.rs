@@ -182,7 +182,12 @@ impl CollectionWriter {
                 field_name, field_type
             );
 
-            let field_id = self.field_id_by_name.read().await.get(&field_name).map(|e| *e);
+            let field_id = self
+                .field_id_by_name
+                .read()
+                .await
+                .get(&field_name)
+                .map(|e| *e);
             // Avoid creating fields that already exists
             if field_id.is_some() {
                 continue;
@@ -378,7 +383,10 @@ impl CollectionWriter {
             .collect();
 
         let field_id_by_name = self.field_id_by_name.read().await;
-        let field_id_by_name: Vec<_> = field_id_by_name.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let field_id_by_name: Vec<_> = field_id_by_name
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
 
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
