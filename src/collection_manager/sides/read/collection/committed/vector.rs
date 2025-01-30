@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -201,7 +201,7 @@ impl VectorField {
         Ok(())
     }
 
-    pub fn clone_to(&self, data_dir: &PathBuf) -> Result<()> {
+    pub fn clone_to(&self, data_dir: &Path) -> Result<()> {
         let new_dump_file_path = data_dir.join("index.hnsw");
         let new_deleted_documents_file_path = data_dir.join("deleted_documents.bin");
 

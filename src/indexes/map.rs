@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rayon::vec;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::file_utils::{create_if_not_exists, BufferedFile};

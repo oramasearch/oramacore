@@ -116,6 +116,7 @@ impl CommittedCollection {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn fulltext_search(
         &self,
         tokens: &[String],
