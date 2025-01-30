@@ -24,7 +24,7 @@ mod merger;
 mod n;
 mod uncommitted;
 
-pub use n::Number;
+pub use n::{Number, SerializableNumber};
 
 pub struct NumberIndexConfig {}
 
