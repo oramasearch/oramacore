@@ -1,12 +1,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use tracing::info;
 
 use crate::indexes::number::SerializableNumber;
 use crate::merger::MergedIterator;
-
-use super::{committed::CommittedCollection, uncommitted::UncommittedCollection};
 
 use super::committed::fields as committed_fields;
 use super::uncommitted::fields as uncommitted_fields;
@@ -107,6 +104,33 @@ pub fn merge_string_field(
                 data_dir,
             )
             .context("Failed to merge string field")?
+        }
+    };
+
+    Ok(new_committed_field)
+}
+
+pub fn merge_vector_field(
+    uncommitted: &uncommitted_fields::VectorField,
+    committed: Option<&committed_fields::VectorField>,
+    data_dir: PathBuf,
+) -> Result<committed_fields::VectorField> {
+    let file_path = data_dir.join("data.hnsw");
+    let new_committed_field = match committed {
+        None => committed_fields::VectorField::from_iter(
+            uncommitted.iter(),
+            uncommitted.dimension(),
+            file_path,
+        )?,
+        Some(committed) => {
+            std::fs::copy(committed.file_path(), &file_path).context("Failed to copy hnsw file")?;
+
+            let mut vector_index = committed_fields::VectorField::load(file_path)?;
+            vector_index
+                .add_and_dump(uncommitted.iter())
+                .context("Cannot add new element to vector index")?;
+
+            vector_index
         }
     };
 

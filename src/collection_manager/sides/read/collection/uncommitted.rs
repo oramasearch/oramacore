@@ -161,8 +161,8 @@ impl UncommittedCollection {
             DocumentFieldIndexOperation::IndexEmbedding { value } => {
                 self.vector_index
                     .entry(field_id)
-                    .or_insert_with(VectorField::empty)
-                    .insert(doc_id, vec![value]);
+                    .or_insert_with(|| VectorField::empty(value.len()))
+                    .insert(doc_id, vec![value])?;
             }
         };
 
@@ -179,5 +179,9 @@ impl UncommittedCollection {
 
     pub fn get_bool_fields(&self) -> impl Iterator<Item = &FieldId> {
         self.bool_index.keys()
+    }
+
+    pub fn get_vector_fields(&self) -> impl Iterator<Item = &FieldId> {
+        self.vector_index.keys()
     }
 }

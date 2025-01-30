@@ -78,7 +78,6 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
     pub fn values(&self) -> impl Iterator<Item = &Value> {
         self.inner.values()
     }
-
     pub fn insert(&mut self, key: Key, value: Value) {
         self.inner.insert(key, value);
     }

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use http::uri::Scheme;
 use serde_json::json;
 use tokio::time::sleep;
+use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
@@ -1227,6 +1228,7 @@ async fn test_commit_and_load2() -> Result<()> {
     )
     .await
     .unwrap();
+
     let result = read_side
         .search(
             collection_id.clone(),
@@ -1248,6 +1250,7 @@ async fn test_commit_and_load2() -> Result<()> {
     read_side.commit().await.unwrap();
 
     let (_, read_side) = create(config.clone()).await?;
+
     let result = read_side
         .search(
             collection_id.clone(),

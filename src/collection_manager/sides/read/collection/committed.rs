@@ -30,7 +30,7 @@ pub mod fields {
     pub use super::bool::{BoolField, BoolFieldInfo};
     pub use super::number::{NumberField, NumberFieldInfo};
     pub use super::string::{StringField, StringFieldInfo};
-    pub use super::vector::VectorField;
+    pub use super::vector::{VectorField, VectorFieldInfo};
 
     pub use super::bool::BoolWrapper;
 }

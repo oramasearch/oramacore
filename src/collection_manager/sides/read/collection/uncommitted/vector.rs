@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::types::DocumentId;
 
@@ -9,11 +9,15 @@ type VectorWithMagnetude = (f32, Vec<f32>);
 #[derive(Debug)]
 pub struct VectorField {
     pub data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
+    pub dimension: usize,
 }
 
 impl VectorField {
-    pub fn empty() -> Self {
-        Self { data: Vec::new() }
+    pub fn empty(dimension: usize) -> Self {
+        Self {
+            data: Vec::new(),
+            dimension,
+        }
     }
 
     pub fn search(
@@ -46,7 +50,12 @@ impl VectorField {
         Ok(())
     }
 
-    pub fn insert(&mut self, doc_id: DocumentId, vectors: Vec<Vec<f32>>) {
+    pub fn insert(&mut self, doc_id: DocumentId, vectors: Vec<Vec<f32>>) -> Result<()> {
+        let is_different = vectors.iter().any(|v| v.len() != self.dimension);
+        if is_different {
+            bail!("Vector dimension is different from the field dimension");
+        }
+
         let vectors = vectors
             .into_iter()
             .map(|vector| {
@@ -56,6 +65,18 @@ impl VectorField {
             .collect();
 
         self.data.push((doc_id, vectors));
+
+        Ok(())
+    }
+
+    pub fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)> + '_ {
+        self.data
+            .iter()
+            .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
     }
 }
 

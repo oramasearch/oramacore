@@ -99,12 +99,13 @@ impl StringField {
         length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
     ) -> Result<Self> {
+        create_if_not_exists(&data_dir)
+            .context("Cannot create data directory for committed string field")?;
+
         let new_posting_storage_file = data_dir.join("posting_id_storage.map");
         let old_posting_storage_file = committed.posting_storage.get_backed_file();
 
-        let d = std::fs::File::open(&old_posting_storage_file).expect("AAAA");
-        println!("{:?}", d.metadata().expect("AAAA"));
-
+        debug_assert_ne!(old_posting_storage_file, new_posting_storage_file);
         std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(|| {
             format!(
                 "Cannot copy posting storage file: old {:?} -> new {:?}",
@@ -147,6 +148,9 @@ impl StringField {
                 committed_posting_id
             },
         );
+        let fst_file_path = data_dir.join("fst.map");
+        let index =
+            FSTIndex::from_iter(merged_iterator, fst_file_path).context("Cannot commit fst")?;
 
         let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
         let old_document_lengths_per_document_file =
@@ -163,12 +167,13 @@ impl StringField {
             document_lengths_per_document.insert(k, v);
         }
 
-        let fst_file_path = data_dir.join("fst.map");
-        let index =
-            FSTIndex::from_iter(merged_iterator, fst_file_path).context("Cannot commit fst")?;
+        let posting_storage = posting_storage.into_inner();
+        posting_storage.commit()?;
+        document_lengths_per_document.commit()?;
+
         Ok(Self {
             index,
-            posting_storage: posting_storage.into_inner(),
+            posting_storage,
             document_lengths_per_document,
         })
     }
@@ -230,6 +235,11 @@ impl StringField {
         let total_documents_with_field = global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
+        info!("---- tokens {:?}", tokens);
+        info!("---- index {:?}", self.index);
+        info!("---- posting {:?}", self.posting_storage);
+        info!("---- doc len {:?}", self.document_lengths_per_document);
+
         for token in tokens {
             let matches = self
                 .index
@@ -264,6 +274,8 @@ impl StringField {
                 total_documents_with_term_in_field,
             ) in matches
             {
+                println!("------ {:?}", doc_id);
+
                 scorer.add(
                     *doc_id,
                     term_occurrence_in_field,
@@ -409,6 +421,10 @@ impl PostingIdStorage {
         })
     }
 
+    fn commit(&self) -> Result<()> {
+        self.inner.commit()
+    }
+
     fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, Vec<usize>)>> {
         self.inner.get(posting_id)
     }
@@ -451,6 +467,10 @@ impl DocumentLengthsPerDocument {
     fn load(file_path: PathBuf) -> Result<Self> {
         let inner = Map::load(file_path)?;
         Ok(Self::from_map(inner))
+    }
+
+    fn commit(&self) -> Result<()> {
+        self.inner.commit()
     }
 
     fn get_length(&self, doc_id: &DocumentId) -> u32 {

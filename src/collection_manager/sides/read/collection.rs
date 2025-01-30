@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use committed::CommittedCollection;
 use dashmap::DashMap;
 use dump::{CollectionInfo, CollectionInfoV1};
-use merge::{merge_bool_field, merge_number_field, merge_string_field};
+use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
 use serde::{Deserialize, Serialize};
 use tokio::{
     join,
@@ -28,10 +28,10 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties,
-            SearchMode, SearchParams, TypedField,
+            self, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit,
+            Properties, SearchMode, SearchParams,
         },
-        sides::{CollectionWriteOperation, Offset},
+        sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
     },
     file_utils::BufferedFile,
     indexes::{number::NumberFilter, string::BM25Scorer},
@@ -59,12 +59,6 @@ pub struct CollectionReader {
     uncommitted_collection: RwLock<UncommittedCollection>,
     committed_collection: RwLock<CommittedCollection>,
 
-    // indexes
-    // vector_index: VectorIndex,
-    // string_index: StringIndex,
-
-    // number_index: NumberIndex,
-    // bool_index: BoolIndex,
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
@@ -142,12 +136,7 @@ impl CollectionReader {
         for (field_name, (field_id, field_type)) in collection_info.fields {
             let typed_field: TypedField = match field_type {
                 dump::TypedField::Text(locale) => TypedField::Text(locale),
-                dump::TypedField::Embedding(embedding) => {
-                    TypedField::Embedding(EmbeddingTypedField {
-                        document_fields: embedding.document_fields,
-                        model: embedding.model.0,
-                    })
-                }
+                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
                 dump::TypedField::Number => TypedField::Number,
                 dump::TypedField::Bool => TypedField::Bool,
             };
@@ -277,6 +266,7 @@ impl CollectionReader {
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
                 bool_field_infos: Default::default(),
+                vector_field_infos: Default::default(),
             }
         };
 
@@ -454,6 +444,70 @@ impl CollectionReader {
                     current_collection_info
                         .fields
                         .push((field_name, (*field_id, dump::TypedField::Bool)));
+                }
+            }
+        }
+
+        let mut vector_fields = HashMap::new();
+        let vector_dir = data_dir.join("vectors");
+        for field_id in uncommitted.get_vector_fields() {
+            let uncommitted_vector_index = uncommitted.vector_index.get(&field_id).unwrap();
+            let committed_vector_index = committed.vector_index.get(&field_id);
+
+            let field_dir = bool_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let new_committed_vector_index =
+                merge_vector_field(uncommitted_vector_index, committed_vector_index, field_dir)
+                    .with_context(|| {
+                        format!(
+                            "Cannot merge {:?} field for collection {:?}",
+                            field_id, self.id
+                        )
+                    })?;
+            let field_info = new_committed_vector_index.get_field_info();
+            vector_fields.insert(*field_id, new_committed_vector_index);
+            current_collection_info.vector_field_infos = current_collection_info
+                .vector_field_infos
+                .into_iter()
+                .filter(|(k, _)| k != field_id)
+                .collect();
+            current_collection_info
+                .vector_field_infos
+                .push((*field_id, field_info));
+
+            let field = current_collection_info
+                .fields
+                .iter_mut()
+                .find(|(_, (f, _))| f == field_id);
+            match field {
+                Some((_, (_, typed_field))) => {
+                    // TODO: check if the field is changing type
+                }
+                None => {
+                    let field_name = self
+                        .fields
+                        .iter()
+                        .find(|e| e.0 == *field_id)
+                        .context("Field not registered")?;
+                    let field_name = field_name.key().to_string();
+
+                    let item = self
+                        .fields_per_model
+                        .iter()
+                        .find(|e| e.value().contains(field_id))
+                        .context("Field not registered")?;
+                    let orama_model = item.key();
+
+                    current_collection_info.fields.push((
+                        field_name,
+                        (
+                            *field_id,
+                            dump::TypedField::Embedding(dump::EmbeddingTypedField {
+                                model: OramaModelSerializable(*orama_model),
+                            }),
+                        ),
+                    ));
                 }
             }
         }
@@ -648,18 +702,20 @@ impl CollectionReader {
             } => {
                 trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
 
+                let typed_field = match typed_field {
+                    dto::TypedField::Embedding(model) => TypedField::Embedding(model.model),
+                    dto::TypedField::Text(locale) => TypedField::Text(locale),
+                    dto::TypedField::Number => TypedField::Number,
+                    dto::TypedField::Bool => TypedField::Bool,
+                };
+
                 self.fields
                     .insert(field_name.clone(), (field_id, typed_field.clone()));
 
                 self.offset_storage.set_offset(offset);
 
                 match typed_field {
-                    TypedField::Embedding(embedding) => {
-                        let model = embedding.model;
-
-                        // self.vector_index
-                        //     .add_field(offset, field_id, model.dimensions())?;
-
+                    TypedField::Embedding(model) => {
                         self.fields_per_model
                             .entry(model)
                             .or_default()
@@ -695,11 +751,12 @@ impl CollectionReader {
         Ok(())
     }
 
-    #[instrument(skip(self), level="debug", fields(self.id = ?self.id))]
+    #[instrument(skip(self, search_params), level="debug", fields(coll_id = ?self.id))]
     pub async fn search(
         &self,
         search_params: SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
+        info!(search_params = ?search_params, "Searching");
         let metric = SEARCH_METRIC.create(SearchLabels {
             collection: self.id.0.to_string(),
         });
@@ -1092,12 +1149,12 @@ mod dump {
         pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,
         pub string_field_infos: Vec<(FieldId, committed::fields::StringFieldInfo)>,
         pub bool_field_infos: Vec<(FieldId, committed::fields::BoolFieldInfo)>,
+        pub vector_field_infos: Vec<(FieldId, committed::fields::VectorFieldInfo)>,
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
     pub struct EmbeddingTypedField {
         pub model: OramaModelSerializable,
-        pub document_fields: DocumentFields,
     }
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1187,4 +1244,12 @@ async fn get_filtered_document(
             )
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum TypedField {
+    Text(Locale),
+    Embedding(OramaModel),
+    Number,
+    Bool,
 }

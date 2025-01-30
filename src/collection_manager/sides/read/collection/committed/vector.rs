@@ -1,14 +1,21 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use hora::{
-    core::{ann_index::ANNIndex, node::IdxType},
-    index::hnsw_idx::HNSWIndex,
+    core::{
+        ann_index::{ANNIndex, SerializableIndex},
+        metrics::Metric,
+        node::IdxType,
+    },
+    index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams},
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::types::DocumentId;
+use crate::{file_utils::create_if_not_exists, types::DocumentId};
 
 #[derive(
     Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
@@ -19,9 +26,44 @@ impl IdxType for IdxID {}
 #[derive(Debug)]
 pub struct VectorField {
     inner: HNSWIndex<f32, IdxID>,
+    file_path: PathBuf,
 }
 
 impl VectorField {
+    pub fn from_iter<I>(iter: I, dimension: usize, file_path: PathBuf) -> Result<Self>
+    where
+        I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+    {
+        let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
+        let inner = HNSWIndex::new(dimension, &params);
+
+        let mut s = Self { inner, file_path };
+
+        s.add_and_dump(iter)?;
+
+        Ok(s)
+    }
+
+    pub fn load(file_path: PathBuf) -> Result<Self> {
+        let file_path_str = match file_path.to_str() {
+            Some(file_path_str) => file_path_str,
+            None => {
+                return Err(anyhow!("Cannot convert path to string"));
+            }
+        };
+
+        let inner = HNSWIndex::load(file_path_str)
+            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
+        Ok(Self { inner, file_path })
+    }
+
+    pub fn get_field_info(&self) -> VectorFieldInfo {
+        VectorFieldInfo {
+            dimension: self.inner.dimension(),
+            file_path: self.file_path.clone(),
+        }
+    }
+
     pub fn search(
         &self,
         target: &[f32],
@@ -69,4 +111,51 @@ impl VectorField {
 
         Ok(())
     }
+
+    pub fn add_and_dump(
+        &mut self,
+        iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+    ) -> Result<()> {
+        self.add(iter)?;
+
+        create_if_not_exists(self.file_path.parent().expect("Parent folder should be calculated"))?;
+
+        let file_path_str = match self.file_path.to_str() {
+            Some(file_path_str) => file_path_str,
+            None => {
+                return Err(anyhow!("Cannot convert path to string"));
+            }
+        };
+        self.inner
+            .dump(file_path_str)
+            .map_err(|e| anyhow!("Cannot dump index to file: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn file_path(&self) -> PathBuf {
+        self.file_path.clone()
+    }
+
+    fn add(&mut self, iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>) -> Result<()> {
+        for (doc_id, vectors) in iter {
+            for vector in vectors {
+                self.inner
+                    .add(&vector, IdxID(Some(doc_id)))
+                    .map_err(|e| anyhow!("Cannot add vector to index: {}", e))?;
+            }
+        }
+
+        self.inner
+            .build(Metric::Manhattan)
+            .map_err(|e| anyhow!("Cannot build index: {}", e))?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VectorFieldInfo {
+    pub dimension: usize,
+    pub file_path: PathBuf,
 }
