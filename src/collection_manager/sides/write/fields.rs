@@ -465,7 +465,6 @@ impl EmbeddingField {
         PENDING_EMBEDDING_REQUEST_GAUDGE
             .create(Empty {})
             .increment_by_one();
-        info!("Sending embedding calculation request");
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
                 model: self.model,

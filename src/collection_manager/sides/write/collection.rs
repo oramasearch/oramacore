@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, bail, Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
@@ -139,12 +139,10 @@ impl CollectionWriter {
                 Some(v) => v,
             };
 
-            info!("QUIQUIQUI {:?}", field_name);
             field
                 .get_write_operations(doc_id, &flatten, sender.clone())
                 .await
                 .with_context(|| format!("Cannot index field {}", field_name))?;
-            info!("QUAQUAQUA");
         }
 
         trace!("Document field indexed");
@@ -177,7 +175,7 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
-            info!(
+            debug!(
                 "Registering field {} with type {:?}",
                 field_name, field_type
             );
@@ -353,7 +351,7 @@ impl CollectionWriter {
     }
 
     pub async fn commit(&self, path: PathBuf) -> Result<()> {
-        info!("Committing collection {}", self.id.0);
+        info!(coll_id= ?self.id, "Committing collection");
 
         let m = COMMIT_METRIC.create(CommitLabels {
             side: "write",

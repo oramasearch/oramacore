@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     collection_manager::{
@@ -183,7 +183,7 @@ impl StringField {
             }
         }
 
-        info!(total_matches = total_matches, "Uncommitted total matches");
+        debug!(total_matches = total_matches, "Uncommitted total matches");
 
         Ok(())
     }

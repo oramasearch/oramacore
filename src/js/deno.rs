@@ -3,7 +3,7 @@ use anyhow::{Context, Error};
 use deno_core::{JsRuntime, RuntimeOptions};
 use strum_macros::Display;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::metrics::{Empty, JAVASCRIPT_REQUEST_GAUDGE};
 
@@ -26,6 +26,50 @@ struct Job {
     operation: Operation,
 }
 
+fn process_job(job: Job, runtime: &mut JsRuntime) {
+    // @todo: based on the `Operation`, we can perform custom checks and custom script
+    // operations on the incoming data.
+    let full_script = format!(
+        r#"
+            (() => {{
+                const input = {};
+                const func = {};
+                const output = func(input);
+                return JSON.stringify(output);
+            }})()
+        "#,
+        job.input, job.code
+    );
+
+    let script_name = format!("{}_script.js", job.operation);
+    let b = Box::into_raw(Box::new(script_name));
+    let c: &'static str = unsafe { &*b };
+
+    debug!("Running script in Deno: {}", full_script);
+    let result = runtime
+        .execute_script(c, full_script)
+        .with_context(|| {
+            format!(
+                "Failed to run script in Deno in operation '{}'",
+                job.operation
+            )
+        })
+        .and_then(|value| {
+            let scope = &mut runtime.handle_scope();
+            let local = value.open(scope);
+            if let Some(js_string) = local.to_string(scope) {
+                Ok(js_string.to_rust_string_lossy(scope))
+            } else {
+                Err(Error::msg("Failed to convert JavaScript value to string"))
+            }
+        })
+        .map_err(|err| Error::msg(format!("JavaScript error: {:?}", err)));
+    trace!("Deno result: {:?}", result);
+
+    // let _ = unsafe { Box::from_raw(b) };
+    let _ = job.response.send(result);
+}
+
 impl JavaScript {
     pub async fn new(channel_limit: usize) -> Self {
         let (sender, mut receiver) = mpsc::channel::<Job>(channel_limit);
@@ -43,51 +87,10 @@ impl JavaScript {
                     break;
                 }
 
-                info!("Received job {:?}", count);
+                info!("Received {count} jobs");
 
                 for job in buff.drain(..count) {
-                    // @todo: based on the `Operation`, we can perform custom checks and custom script
-                    // operations on the incoming data.
-                    let full_script = format!(
-                        r#"
-                            (() => {{
-                                const input = {};
-                                const func = {};
-                                const output = func(input);
-                                return JSON.stringify(output);
-                            }})()
-                        "#,
-                        job.input, job.code
-                    );
-
-                    let script_name = format!("{}_script.js", job.operation);
-                    let b = Box::into_raw(Box::new(script_name));
-                    let c: &'static str = unsafe { &*b };
-
-                    info!("Running script in Deno: {}", full_script);
-                    let result = runtime
-                        .execute_script(c, full_script)
-                        .with_context(|| {
-                            format!(
-                                "Failed to run script in Deno in operation '{}'",
-                                job.operation
-                            )
-                        })
-                        .and_then(|value| {
-                            let scope = &mut runtime.handle_scope();
-                            let local = value.open(scope);
-                            if let Some(js_string) = local.to_string(scope) {
-                                Ok(js_string.to_rust_string_lossy(scope))
-                            } else {
-                                Err(Error::msg("Failed to convert JavaScript value to string"))
-                            }
-                        })
-                        .map_err(|err| Error::msg(format!("JavaScript error: {:?}", err)));
-                    info!("Deno result: {:?}", result);
-
-                    // let _ = unsafe { Box::from_raw(b) };
-                    let _ = job.response.send(result);
-
+                    process_job(job, &mut runtime);
                     JAVASCRIPT_REQUEST_GAUDGE.create(Empty {}).decrement_by(1);
                 }
             }
@@ -114,13 +117,13 @@ impl JavaScript {
             response: response_tx,
         };
 
-        info!("Sending job to JavaScript runtime... {:?}", job);
+        trace!("Sending job to JavaScript runtime... {:?}", job);
         self.sender
             .send(job)
             .await
             .map_err(|_| Error::msg("Runtime thread disconnected"))?;
         let res = response_rx.await??;
-        info!("Received response from JavaScript runtime {}", res);
+        trace!("Received response from JavaScript runtime {}", res);
 
         serde_json::from_str(&res).context("Unable to deserialize string into valid data structure")
     }
