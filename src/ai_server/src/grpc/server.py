@@ -18,14 +18,18 @@ from service_pb2 import (
     LLMType,
     PlannedAnswerResponse,
 )
+from src.utils import OramaAIConfig
 from src.prompts.party_planner import PartyPlannerActions
+from src.actions.party_planner import PartyPlanner
 
 
 class LLMService(service_pb2_grpc.LLMServiceServicer):
-    def __init__(self, embeddings_service, models_manager):
+    def __init__(self, embeddings_service, models_manager, config: OramaAIConfig):
+        self.config = config
         self.embeddings_service = embeddings_service
         self.models_manager = models_manager
         self.party_planner_actions = PartyPlannerActions()
+        self.party_planner = PartyPlanner(config, self.models_manager)
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -91,14 +95,24 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
     def PlannedAnswer(self, request, context):
         try:
             model_name = "party_planner"
-            history = []
-            response = self.models_manager.chat(
-                model_id=model_name.lower(),
-                history=history,
-                prompt=request.input,
-                context=self.party_planner_actions.get_actions(),
+            history = (
+                [
+                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    for message in request.conversation.messages
+                ]
+                if request.conversation.messages
+                else []
             )
-            return PlannedAnswerResponse(plan=repair_json(response))
+
+            for message in self.party_planner.run(request.collection_id, request.input):
+                yield PlannedAnswerResponse(data=message)
+
+            # response = self.models_manager.chat(
+            #     model_id=model_name.lower(),
+            #     history=history,
+            #     prompt=request.input,
+            #     context=self.party_planner_actions.get_actions(),
+            # )
 
         except Exception as e:
             logging.error(f"Error in PlannedAnswer: {e}", exc_info=True)
@@ -113,7 +127,7 @@ def serve(config, embeddings_service, models_manager):
     server = grpc.server(ThreadPoolExecutor(max_workers=10))
     logger.info("gRPC server created")
 
-    llm_service = LLMService(embeddings_service, models_manager)
+    llm_service = LLMService(embeddings_service, models_manager, config)
     service_pb2_grpc.add_LLMServiceServicer_to_server(llm_service, server)
 
     SERVICE_NAMES = (

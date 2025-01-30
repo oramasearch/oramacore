@@ -1,3 +1,4 @@
+import json
 import logging
 import requests
 from typing import Dict
@@ -12,8 +13,9 @@ class Actions:
         self.config = config
 
     def call_oramacore_search(self, collection_id: str, query: Dict) -> any:
-        url = f"http://localhost:8080/v0/{collection_id}/actions/execute"  # @todo: take base url and port from config
+        body = json.dumps(query)
+        url = f"http://{self.config.rust_server_host}:{self.config.rust_server_port}/v0/{collection_id}/actions/execute"
         headers = {"Content-Type": "application/json; charset=utf-8"}
-        resp = requests.post(url=url, json=query, headers=headers)
+        resp = requests.post(url=url, json={"context": body, "name": "search"}, headers=headers)
 
         resp.json()

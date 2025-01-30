@@ -12,7 +12,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS = [
     },
     {
         "step": "PERFORM_ORAMA_SEARCH",
-        "description": "Perform full-text, vector, or hybrid search on your index to get quality results that are relevant to the inquiry.",
+        "description": "Perform full-text, vector, or hybrid search on your index to get quality results that are relevant to the inquiry. Always run this after GENERATE_QUERIES or OPTIMIZE_QUERY.",
     },
     {
         "step": "DESCRIBE_INPUT_CODE",
@@ -20,7 +20,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS = [
     },
     {
         "step": "IMPROVE_INPUT",
-        "description": "If the user requires it, improve the input provided by the user. Correct wording, phrasing, or anything else you find necessary.",
+        "description": "If the user requires it, improve the input provided by the user. Correct wording, phrasing, code, or anything else you find necessary. But you should only do this when the user is asking for it specifically.",
     },
     {
         "step": "CREATE_CODE",

@@ -30,6 +30,12 @@ class EmbeddingsConfig:
 
 
 @dataclass
+class RustServerConfig:
+    host: Optional[str] = "0.0.0.0"
+    port: Optional[int] = 8080
+
+
+@dataclass
 class SamplingParams:
     temperature: float = 0.1
     top_p: float = 0.95
@@ -99,6 +105,9 @@ class OramaAIConfig:
     LLMs: Optional[LLMs] = field(default_factory=LLMs)  # type: ignore
     total_threads: Optional[int] = 12
 
+    rust_server_host: Optional[str] = "0.0.0.0"
+    rust_server_port: Optional[int] = 8080
+
     def __post_init__(self):
         if Path("../../config.yaml").exists():
             self.update_from_yaml()
@@ -107,6 +116,11 @@ class OramaAIConfig:
         with open(path) as f:
             config = yaml.safe_load(f)
             config = config.get("ai_server")
+            rust_server_config = config.get("http", {})
+
+            if rust_server_config:
+                self.rust_server_host = rust_server_config.get("host", self.rust_server_host)
+                self.rust_server_port = rust_server_config.get("port", self.rust_server_port)
 
             for k, v in config.items():
                 if hasattr(self, k):
