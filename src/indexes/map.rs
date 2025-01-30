@@ -75,6 +75,9 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
     pub fn values(&self) -> impl Iterator<Item = &Value> {
         self.inner.values()
     }

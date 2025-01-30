@@ -254,7 +254,7 @@ impl CollectionReader {
             let field = current_collection_info
                 .fields
                 .iter_mut()
-                .find(|(_, (field_id, _))| field_id == field_id);
+                .find(|(_, (f, _))| f == &field_id);
             match field {
                 Some((_, (_, typed_field))) => {
                     if typed_field != &mut dump::TypedField::Number {

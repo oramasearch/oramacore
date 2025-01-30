@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, bail, Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{debug, field::debug, info, instrument, trace, warn};
+use tracing::{info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
@@ -182,12 +182,7 @@ impl CollectionWriter {
                 field_name, field_type
             );
 
-            let field_id = self
-                .field_id_by_name
-                .read()
-                .await
-                .get(&field_name)
-                .map(|e| *e);
+            let field_id = self.field_id_by_name.read().await.get(&field_name).cloned();
             // Avoid creating fields that already exists
             if field_id.is_some() {
                 continue;
@@ -313,18 +308,16 @@ impl CollectionWriter {
         let mut field_ids = vec![];
         let field_id_by_name = self.field_id_by_name.read().await;
         if let Some(field_id) = field_id_by_name.get(DEFAULT_EMBEDDING_FIELD_NAME) {
-            field_ids.push(field_id.clone());
+            field_ids.push(*field_id);
         }
         drop(field_id_by_name);
 
         for (field_name, value_type) in schema {
-            info!("1");
             let field_id_by_name = self.field_id_by_name.read().await;
             let field_id = field_id_by_name.get(&field_name).cloned();
             drop(field_id_by_name);
 
             if let Some(field_id) = field_id {
-                info!("3");
                 field_ids.push(field_id);
                 continue;
             }
@@ -333,17 +326,14 @@ impl CollectionWriter {
                 .field_id_generator
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let field_id = FieldId(field_id);
-            info!("2");
             let mut field_id_by_name = self.field_id_by_name.write().await;
             field_id_by_name.insert(field_name.clone(), field_id);
             drop(field_id_by_name);
-            info!("2222");
 
             field_ids.push(field_id);
 
             // @todo: add support to other types
             if let Some(typed_field) = self.value_to_typed_field(value_type.clone()) {
-                info!("4");
                 self.create_field(
                     field_id,
                     field_name,
@@ -357,11 +347,7 @@ impl CollectionWriter {
             } else {
                 warn!("Field type not supported: {:?}", value_type);
             }
-
-            info!("5");
         }
-
-        trace!("field_ids: {:?}", field_ids);
 
         Ok(field_ids)
     }

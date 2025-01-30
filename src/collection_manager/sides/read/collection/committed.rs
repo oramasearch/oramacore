@@ -102,7 +102,7 @@ impl CommittedCollection {
 
     pub fn fulltext_search(
         &self,
-        tokens: &Vec<String>,
+        tokens: &[String],
         properties: Vec<FieldId>,
         boost: &HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,

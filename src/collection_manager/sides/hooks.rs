@@ -10,7 +10,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use tracing::info;
 
 use crate::js::deno::{JavaScript, Operation};
 use crate::types::CollectionId;
