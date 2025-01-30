@@ -35,8 +35,8 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{
-        SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
-        SEARCH_METRIC,
+        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
+        SEARCH_FILTER_METRIC, SEARCH_METRIC,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
@@ -252,6 +252,11 @@ impl CollectionReader {
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
         for field_id in uncommitted_infos.number_fields {
+            let m = COMMIT_METRIC.create(CommitLabels {
+                collection: self.id.0.to_string(),
+                index_type: "number",
+                side: "read",
+            });
             let uncommitted_number_index = uncommitted.number_index.get(&field_id);
             let committed_number_index = committed.number_index.get(&field_id);
 
@@ -306,11 +311,18 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Number)));
                 }
             }
+            drop(m);
         }
 
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
         for field_id in uncommitted_infos.string_fields {
+            let m = COMMIT_METRIC.create(CommitLabels {
+                collection: self.id.0.to_string(),
+                index_type: "string",
+                side: "read",
+            });
+
             let uncommitted_string_index = uncommitted.string_index.get(&field_id);
             let committed_string_index = committed.string_index.get(&field_id);
 
@@ -369,11 +381,17 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Text(field_locale))));
                 }
             }
+            drop(m);
         }
 
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
         for field_id in uncommitted_infos.bool_fields {
+            let m = COMMIT_METRIC.create(CommitLabels {
+                collection: self.id.0.to_string(),
+                index_type: "bool",
+                side: "read",
+            });
             let uncommitted_bool_index = uncommitted.bool_index.get(&field_id);
             let committed_bool_index = committed.bool_index.get(&field_id);
 
@@ -427,11 +445,17 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Bool)));
                 }
             }
+            drop(m);
         }
 
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
         for field_id in uncommitted_infos.vector_fields {
+            let m = COMMIT_METRIC.create(CommitLabels {
+                collection: self.id.0.to_string(),
+                index_type: "vector",
+                side: "read",
+            });
             let uncommitted_vector_index = uncommitted.vector_index.get(&field_id);
             let committed_vector_index = committed.vector_index.get(&field_id);
 
@@ -506,6 +530,7 @@ impl CollectionReader {
                     ));
                 }
             }
+            drop(m);
         }
 
         // Read lock ends
