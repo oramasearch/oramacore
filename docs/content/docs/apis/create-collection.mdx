@@ -1,0 +1,42 @@
+---
+title: "Create a new Collection"
+description: "APIs to create a new Collection in OramaCore."
+---
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Callout type='warn'>
+At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
+
+We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
+</Callout>
+
+We can think of collections as a way to group documents together.
+
+For example, if you want to index all the products in your e-commerce store, you might want to create a collection called `products`, where each document represents a single product.
+
+## APIs
+
+<Tabs groupId='package-manager' persist items={['JavaScript', 'cURL']}>
+
+```javascript tab="JavaScript"
+import { OramaCore } from '@orama/core';
+
+const orama = new OramaCore({
+  url: 'http://localhost:8080',
+  apiKey: '<api-key>'
+})
+
+const newCollection = orama.collections.create({
+  name: 'products'
+})
+```
+
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v0/collections \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <api-key>' \
+  -d '{ "name": "products" }'
+```
+
+</Tabs>
