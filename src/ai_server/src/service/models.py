@@ -57,6 +57,7 @@ class ModelsManager:
                     device_map="auto",
                     torch_dtype="auto",
                     trust_remote_code=True,
+                    attn_implementation="flash_attention_2",
                 )
 
             self._models[model_id] = {
