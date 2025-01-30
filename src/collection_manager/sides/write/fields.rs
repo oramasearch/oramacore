@@ -8,7 +8,6 @@ use anyhow::Result;
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::{
     ai::OramaModel,

@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
 use tonic::{transport::Channel, Request, Response, Streaming};
-use tracing::{debug, info, trace};
+use tracing::{info, trace};
 
 use crate::collection_manager::dto::InteractionMessage;
 

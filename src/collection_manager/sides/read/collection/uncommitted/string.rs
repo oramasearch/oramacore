@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     collection_manager::{
