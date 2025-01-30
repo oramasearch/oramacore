@@ -973,12 +973,7 @@ async fn test_vector_search_grpc() -> Result<()> {
         }));
     }
     write_side
-        .write(
-            collection_id.clone(),
-            docs
-            .try_into()
-            .unwrap(),
-        )
+        .write(collection_id.clone(), docs.try_into().unwrap())
         .await?;
 
     sleep(Duration::from_millis(500)).await;
