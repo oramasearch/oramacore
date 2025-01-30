@@ -116,8 +116,7 @@ pub fn merge_vector_field(
     committed: Option<&committed_fields::VectorField>,
     data_dir: PathBuf,
 ) -> Result<committed_fields::VectorField> {
-    create_if_not_exists(&data_dir)
-        .context("Failed to create data directory for vector field")?;
+    create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
     let file_path = data_dir.join("data.hnsw");
     let new_committed_field = match committed {
@@ -129,9 +128,7 @@ pub fn merge_vector_field(
         Some(committed) => {
             std::fs::copy(committed.file_path(), &file_path).context("Failed to copy hnsw file")?;
 
-            let vector_index = committed_fields::VectorField::from_dump_and_iter(file_path, uncommitted.iter())?;
-
-            vector_index
+            committed_fields::VectorField::from_dump_and_iter(file_path, uncommitted.iter())?
         }
     };
 

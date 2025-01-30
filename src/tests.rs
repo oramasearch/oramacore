@@ -4,11 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use http::uri::Scheme;
 use serde_json::json;
 use tokio::time::sleep;
-use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,

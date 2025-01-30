@@ -19,7 +19,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, warn};
-use tracing_subscriber::fmt::format;
 
 use super::{collection::CollectionReader, IndexesConfig};
 

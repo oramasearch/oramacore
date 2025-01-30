@@ -48,8 +48,12 @@ impl VectorField {
         file_path: PathBuf,
         iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     ) -> Result<Self> {
-        let inner = HNSWIndex::load(file_path.to_str().ok_or_else(|| anyhow!("Cannot convert path to string"))?)
-            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
+        let inner = HNSWIndex::load(
+            file_path
+                .to_str()
+                .ok_or_else(|| anyhow!("Cannot convert path to string"))?,
+        )
+        .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
 
         let mut s = Self { inner, file_path };
 
@@ -77,7 +81,10 @@ impl VectorField {
             ));
         }
 
-        Ok(Self { inner, file_path: info.file_path })
+        Ok(Self {
+            inner,
+            file_path: info.file_path,
+        })
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
@@ -141,7 +148,11 @@ impl VectorField {
     ) -> Result<()> {
         self.add(iter)?;
 
-        create_if_not_exists(self.file_path.parent().expect("Parent folder should be calculated"))?;
+        create_if_not_exists(
+            self.file_path
+                .parent()
+                .expect("Parent folder should be calculated"),
+        )?;
 
         let file_path_str = match self.file_path.to_str() {
             Some(file_path_str) => file_path_str,

@@ -327,7 +327,7 @@ impl StringField {
                         })
                         .map(move |(doc_id, positions)| {
                             let field_lenght =
-                                self.document_lengths_per_document.get_length(&doc_id);
+                                self.document_lengths_per_document.get_length(doc_id);
                             (
                                 doc_id,
                                 field_lenght,
@@ -434,7 +434,7 @@ impl PostingIdStorage {
     }
 
     fn get_max_posting_id(&self) -> u64 {
-        self.inner.get_max_key().map(|m| *m).unwrap_or(0)
+        self.inner.get_max_key().copied().unwrap_or(0)
     }
 
     fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, Vec<usize>)>) {

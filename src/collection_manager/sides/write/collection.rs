@@ -224,7 +224,7 @@ impl CollectionWriter {
                 );
             }
             TypedField::Text(locale) => {
-                let parser = self.get_text_parser(locale.clone());
+                let parser = self.get_text_parser(*locale);
                 self.fields.insert(
                     field_name.clone(),
                     (

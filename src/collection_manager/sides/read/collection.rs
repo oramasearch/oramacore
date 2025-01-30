@@ -28,8 +28,8 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            self, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit,
-            Properties, SearchMode, SearchParams,
+            self, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode,
+            SearchParams,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
     },
@@ -152,7 +152,7 @@ impl CollectionReader {
             .iter()
             .filter_map(|e| {
                 if let TypedField::Text(l) = e.1 {
-                    let locale = l.into();
+                    let locale = l;
                     Some((e.0, (locale, self.nlp_service.get(locale))))
                 } else {
                     None
@@ -222,8 +222,8 @@ impl CollectionReader {
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
         for field_id in uncommitted.get_number_fields() {
-            let uncommitted_number_index = uncommitted.number_index.get(&field_id).unwrap();
-            let committed_number_index = committed.number_index.get(&field_id);
+            let uncommitted_number_index = uncommitted.number_index.get(field_id).unwrap();
+            let committed_number_index = committed.number_index.get(field_id);
 
             let field_dir = number_dir
                 .join(format!("field-{}", field_id.0))
@@ -237,11 +237,9 @@ impl CollectionReader {
                         )
                     })?;
             let field_info = new_committed_number_index.get_field_info();
-            current_collection_info.number_field_infos = current_collection_info
+            current_collection_info
                 .number_field_infos
-                .into_iter()
-                .filter(|(k, _)| k != field_id)
-                .collect();
+                .retain(|(k, _)| k != field_id);
             current_collection_info
                 .number_field_infos
                 .push((*field_id, field_info));
@@ -279,8 +277,8 @@ impl CollectionReader {
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
         for field_id in uncommitted.get_string_fields() {
-            let uncommitted_string_index = uncommitted.string_index.get(&field_id).unwrap();
-            let committed_string_index = committed.string_index.get(&field_id);
+            let uncommitted_string_index = uncommitted.string_index.get(field_id).unwrap();
+            let committed_string_index = committed.string_index.get(field_id);
 
             let field_dir = string_dir
                 .join(format!("field-{}", field_id.0))
@@ -295,18 +293,16 @@ impl CollectionReader {
                     })?;
             let field_info = new_committed_string_index.get_field_info();
             string_fields.insert(*field_id, new_committed_string_index);
-            current_collection_info.string_field_infos = current_collection_info
+            current_collection_info
                 .string_field_infos
-                .into_iter()
-                .filter(|(k, _)| k != field_id)
-                .collect();
+                .retain(|(k, _)| k != field_id);
             current_collection_info
                 .string_field_infos
                 .push((*field_id, field_info));
 
             let field_locale = self
                 .text_parser_per_field
-                .get(&field_id)
+                .get(field_id)
                 .map(|e| e.0)
                 .context("String field not registered")?;
             let field = current_collection_info
@@ -341,8 +337,8 @@ impl CollectionReader {
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
         for field_id in uncommitted.get_bool_fields() {
-            let uncommitted_bool_index = uncommitted.bool_index.get(&field_id).unwrap();
-            let committed_bool_index = committed.bool_index.get(&field_id);
+            let uncommitted_bool_index = uncommitted.bool_index.get(field_id).unwrap();
+            let committed_bool_index = committed.bool_index.get(field_id);
 
             let field_dir = bool_dir
                 .join(format!("field-{}", field_id.0))
@@ -357,11 +353,9 @@ impl CollectionReader {
                     })?;
             let field_info = new_committed_bool_index.get_field_info();
             bool_fields.insert(*field_id, new_committed_bool_index);
-            current_collection_info.bool_field_infos = current_collection_info
+            current_collection_info
                 .bool_field_infos
-                .into_iter()
-                .filter(|(k, _)| k != field_id)
-                .collect();
+                .retain(|(k, _)| k != field_id);
             current_collection_info
                 .bool_field_infos
                 .push((*field_id, field_info));
@@ -397,8 +391,8 @@ impl CollectionReader {
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
         for field_id in uncommitted.get_vector_fields() {
-            let uncommitted_vector_index = uncommitted.vector_index.get(&field_id).unwrap();
-            let committed_vector_index = committed.vector_index.get(&field_id);
+            let uncommitted_vector_index = uncommitted.vector_index.get(field_id).unwrap();
+            let committed_vector_index = committed.vector_index.get(field_id);
 
             let field_dir = vector_dir
                 .join(format!("field-{}", field_id.0))
@@ -413,11 +407,9 @@ impl CollectionReader {
                     })?;
             let field_info = new_committed_vector_index.get_field_info();
             vector_fields.insert(*field_id, new_committed_vector_index);
-            current_collection_info.vector_field_infos = current_collection_info
+            current_collection_info
                 .vector_field_infos
-                .into_iter()
-                .filter(|(k, _)| k != field_id)
-                .collect();
+                .retain(|(k, _)| k != field_id);
             current_collection_info
                 .vector_field_infos
                 .push((*field_id, field_info));
@@ -447,15 +439,18 @@ impl CollectionReader {
                     let orama_model = item.key();
 
                     let serializable_orama_model = OramaModelSerializable(*orama_model);
-                    let el = current_collection_info.used_models.iter_mut().find(|e| e.0 == serializable_orama_model);
+                    let el = current_collection_info
+                        .used_models
+                        .iter_mut()
+                        .find(|e| e.0 == serializable_orama_model);
                     if let Some(el) = el {
                         el.1.push(*field_id);
                     } else {
-                        current_collection_info.used_models.push(
-                            (serializable_orama_model.clone(), vec![*field_id])
-                        );
+                        current_collection_info
+                            .used_models
+                            .push((serializable_orama_model.clone(), vec![*field_id]));
                     }
-                    
+
                     current_collection_info.fields.push((
                         field_name,
                         (
@@ -549,7 +544,7 @@ impl CollectionReader {
                             .push(field_id);
                     }
                     TypedField::Text(language) => {
-                        let locale = language.into();
+                        let locale = language;
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
                             .insert(field_id, (locale, text_parser));
@@ -715,10 +710,10 @@ impl CollectionReader {
         );
 
         let mut doc_ids =
-            get_filtered_document(&self, field_name, field_id, &field_type, filter).await?;
+            get_filtered_document(self, field_name, field_id, &field_type, filter).await?;
         for (field_name, field_id, field_type, filter) in filters {
             let doc_ids_for_field =
-                get_filtered_document(&self, field_name, field_id, &field_type, filter).await?;
+                get_filtered_document(self, field_name, field_id, &field_type, filter).await?;
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
@@ -842,14 +837,8 @@ impl CollectionReader {
                 .await?;
 
             for k in e {
-                committed_lock.vector_search(
-                    &k,
-                    &fields,
-                    filtered_doc_ids,
-                    limit.0,
-                    &mut output,
-                )?;
-                uncommitted_lock.vector_search(&k, &fields, filtered_doc_ids, &mut output)?;
+                committed_lock.vector_search(&k, fields, filtered_doc_ids, limit.0, &mut output)?;
+                uncommitted_lock.vector_search(&k, fields, filtered_doc_ids, &mut output)?;
             }
         }
 
@@ -955,10 +944,7 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{
-            dto::{DocumentFields, FieldId},
-            sides::OramaModelSerializable,
-        },
+        collection_manager::{dto::FieldId, sides::OramaModelSerializable},
         nlp::locales::Locale,
         types::CollectionId,
     };

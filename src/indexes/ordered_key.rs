@@ -274,7 +274,7 @@ impl<
         Ok((min_page_index..=max_page_index)
             .filter_map(|i| self.pages.get(i))
             .filter_map(|page| page.get_page_items().ok())
-            .map(move |items| {
+            .flat_map(move |items| {
                 let min = min.clone();
                 let max = max.clone();
 
@@ -282,8 +282,7 @@ impl<
                     .into_iter()
                     .skip_while(move |p| p.key < min)
                     .take_while(move |p| p.key <= max)
-            })
-            .flatten())
+            }))
     }
 
     fn find_page_index(&self, value: &Key) -> Result<usize> {
@@ -319,7 +318,7 @@ And this should not happen. Return the first page."#);
         Ok(page_index)
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (Key, HashSet<Value>)> + 's {
+    pub fn iter(&self) -> impl Iterator<Item = (Key, HashSet<Value>)> + '_ {
         self.pages
             .iter()
             .filter_map(|page| page.get_page_items().ok())

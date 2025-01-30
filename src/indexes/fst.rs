@@ -96,7 +96,7 @@ impl FSTIndex {
 pub struct FTSIter<'stream, 'input> {
     stream: Option<fst::map::Stream<'stream, StartsWith<fst::automaton::Str<'input>>>>,
 }
-impl<'s, 'input> Iterator for FTSIter<'s, 'input> {
+impl Iterator for FTSIter<'_, '_> {
     // The Item allocate memory, but we could avoid it by using a reference
     // TODO: resolve lifetime issue with reference here
     type Item = u64;
@@ -113,7 +113,7 @@ impl<'s, 'input> Iterator for FTSIter<'s, 'input> {
 pub struct FTSIterWithKey<'stream, 'input> {
     stream: Option<fst::map::Stream<'stream, StartsWith<fst::automaton::Str<'input>>>>,
 }
-impl<'s, 'input> Iterator for FTSIterWithKey<'s, 'input> {
+impl Iterator for FTSIterWithKey<'_, '_> {
     // The Item allocate memory, but we could avoid it by using a reference
     // TODO: resolve lifetime issue with reference here
     type Item = (Vec<u8>, u64);

@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bool::BoolField;
 use number::NumberField;
 use string::StringField;
-use tracing::{info, trace};
+use tracing::trace;
 use vector::VectorField;
 
 use crate::{
@@ -63,9 +63,7 @@ impl UncommittedCollection {
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         for vector_field in properties {
-            let vector_field = match self
-                .vector_index
-                .get(vector_field) {
+            let vector_field = match self.vector_index.get(vector_field) {
                 Some(vector_field) => vector_field,
                 None => {
                     trace!("Vector field not found");
@@ -78,13 +76,13 @@ impl UncommittedCollection {
         Ok(())
     }
 
-    pub fn fulltext_search<'s, 'boost, 'scorer>(
-        &'s self,
+    pub fn fulltext_search(
+        &self,
         tokens: &Vec<String>,
         properties: Vec<FieldId>,
-        boost: &'boost HashMap<FieldId, f32>,
+        boost: &HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
-        scorer: &'scorer mut BM25Scorer<DocumentId>,
+        scorer: &mut BM25Scorer<DocumentId>,
         global_info: &GlobalInfo,
     ) -> Result<()> {
         for field_id in properties {
@@ -99,7 +97,7 @@ impl UncommittedCollection {
 
             let field_boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            index.search(&tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
+            index.search(tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
         }
 
         Ok(())

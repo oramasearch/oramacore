@@ -21,10 +21,7 @@ impl NumberField {
     }
 
     pub fn insert(&mut self, doc_id: DocumentId, value: Number) {
-        self.inner
-            .entry(value)
-            .or_insert_with(HashSet::new)
-            .insert(doc_id);
+        self.inner.entry(value).or_default().insert(doc_id);
     }
 
     pub fn filter<'s, 'iter>(
@@ -55,7 +52,7 @@ where
     fn flat_doc<'tree>(
         (_, doc_ids): (&'tree Number, &'tree HashSet<DocumentId>),
     ) -> impl Iterator<Item = DocumentId> + 'tree {
-        doc_ids.iter().map(move |d| *d)
+        doc_ids.iter().copied()
     }
 
     match filter {

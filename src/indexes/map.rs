@@ -44,7 +44,7 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
     }
 
     pub fn commit(&self) -> Result<()> {
-        create_if_not_exists(&self.file_path.parent().expect("file_path has a parent"))
+        create_if_not_exists(self.file_path.parent().expect("file_path has a parent"))
             .context("Cannot create the base directory for the committed index")?;
         BufferedFile::create_or_overwrite(self.file_path.clone())
             .context("Cannot create file")?

@@ -1,10 +1,7 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
 
-use anyhow::{Context, Result};
-use bool::{BoolField, BoolFieldInfo, BoolWrapper};
+use anyhow::Result;
+use bool::{BoolField, BoolFieldInfo};
 use number::{NumberField, NumberFieldInfo};
 use string::{StringField, StringFieldInfo};
 use vector::{VectorField, VectorFieldInfo};
@@ -12,14 +9,11 @@ use vector::{VectorField, VectorFieldInfo};
 use crate::{
     collection_manager::dto::FieldId,
     indexes::{
-        number::{NumberFilter, SerializableNumber},
+        number::NumberFilter,
         string::{BM25Scorer, GlobalInfo},
     },
-    merger::MergedIterator,
     types::DocumentId,
 };
-
-use super::uncommitted::UncommittedCollection;
 
 mod bool;
 mod number;
@@ -96,7 +90,7 @@ impl CommittedCollection {
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         for field_id in properties {
-            let vector_field = match self.vector_index.get(&field_id) {
+            let vector_field = match self.vector_index.get(field_id) {
                 Some(index) => index,
                 // If the field is not indexed, we skip it
                 // This could be:
@@ -110,13 +104,13 @@ impl CommittedCollection {
         Ok(())
     }
 
-    pub fn fulltext_search<'s, 'boost, 'scorer>(
-        &'s self,
+    pub fn fulltext_search(
+        &self,
         tokens: &Vec<String>,
         properties: Vec<FieldId>,
-        boost: &'boost HashMap<FieldId, f32>,
+        boost: &HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
-        scorer: &'scorer mut BM25Scorer<DocumentId>,
+        scorer: &mut BM25Scorer<DocumentId>,
         global_info: &GlobalInfo,
     ) -> Result<()> {
         for field_id in properties {
@@ -131,7 +125,7 @@ impl CommittedCollection {
 
             let field_boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
-            index.search(&tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
+            index.search(tokens, field_boost, scorer, filtered_doc_ids, global_info)?;
         }
 
         Ok(())

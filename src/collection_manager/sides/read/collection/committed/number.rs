@@ -72,9 +72,7 @@ impl NumberField {
         Ok(items.flat_map(|item| item.values))
     }
 
-    pub fn iter<'s>(
-        &'s self,
-    ) -> impl Iterator<Item = (SerializableNumber, HashSet<DocumentId>)> + 's {
+    pub fn iter(&self) -> impl Iterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
         self.inner.iter()
     }
 }

@@ -6,6 +6,12 @@ pub struct RadixIndex<Value> {
     pub inner: Trie<u8, Value>,
 }
 
+impl<Value: Clone> Default for RadixIndex<Value> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Value: Clone> RadixIndex<Value> {
     pub fn new() -> Self {
         Self { inner: Trie::new() }
