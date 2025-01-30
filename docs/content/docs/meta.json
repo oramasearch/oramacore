@@ -1,10 +1,9 @@
 {
   "title": "OramaCore",
   "description": "OramaCore Documentation",
-  "icon": "Rocket",
   "root": true,
   "pages": [
-    "---Usage---",
+    "---Getting Started---",
     "index",
     "configuration",
     "running-oramacore",
