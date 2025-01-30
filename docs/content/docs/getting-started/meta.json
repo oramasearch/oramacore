@@ -1,9 +1,0 @@
-{
-    "title": "Getting Started",
-    "pages": [
-        "configuration",
-        "running-oramacore",
-        "text-embeddings",
-        "javascript-hooks"
-    ]
-}

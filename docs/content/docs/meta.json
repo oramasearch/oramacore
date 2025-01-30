@@ -5,7 +5,12 @@
   "root": true,
   "pages": [
     "---Usage---",
-    "getting-started",
+    "index",
+    "configuration",
+    "running-oramacore",
+    "---Customizations---",
+    "text-embeddings",
+    "javascript-hooks",
     "---Architecture---",
     "architecture",
     "party-planner"
