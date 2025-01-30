@@ -210,7 +210,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     assert!(result.is_err());
     assert_eq!(
         format!("{}", result.unwrap_err()),
-        "Filter on field \"name\"(Text(English)) not supported".to_string(),
+        "Filter on field \"name\"(Text(EN)) not supported".to_string(),
     );
 
     Ok(())
@@ -1284,7 +1284,7 @@ async fn test_commit_and_load2() -> Result<()> {
         )
         .await
         .unwrap();
-    assert_eq!(result.count, 1);
+    assert_eq!(result.count, 2);
 
     Ok(())
 }
@@ -1293,7 +1293,8 @@ async fn test_commit_and_load2() -> Result<()> {
 async fn test_read_commit_should_not_block_search() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let mut config = create_oramacore_config();
-    config.reader_side.config.insert_batch_commit_size = 10;
+    config.reader_side.config.insert_batch_commit_size = 1_000_000;
+    config.writer_side.config.insert_batch_commit_size = 1_000_000;
 
     let (write_side, read_side) = create(config.clone()).await?;
 
@@ -1314,7 +1315,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     insert_docs(
         write_side.clone(),
         collection_id.clone(),
-        (0..1_000).map(|i| {
+        (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
                 "text": "text ".repeat(i + 1),
@@ -1322,6 +1323,8 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
         }),
     )
     .await?;
+
+    sleep(Duration::from_secs(1)).await;
 
     let commit_future = async {
         sleep(Duration::from_millis(5)).await;

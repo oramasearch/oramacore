@@ -165,62 +165,8 @@ impl CollectionReader {
             collection_info.number_field_infos,
             collection_info.bool_field_infos,
             collection_info.string_field_infos,
+            collection_info.vector_field_infos,
         )?;
-
-        /*
-        self.string_index
-            .load(collection_data_dir.join("strings"))
-            .context("Cannot load string index")?;
-        self.number_index
-            .load(collection_data_dir.join("numbers"))
-            .context("Cannot load number index")?;
-        self.vector_index
-            .load(collection_data_dir.join("vectors"))
-            .context("Cannot load vectors index")?;
-        self.bool_index
-            .load(collection_data_dir.join("bools"))
-            .context("Cannot load bool index")?;
-
-        let coll_desc_file_path = collection_data_dir.join("info.json");
-        let dump: dump::CollectionInfo = BufferedFile::open(coll_desc_file_path)
-            .context("Cannot open collection file")?
-            .read_json_data()
-            .with_context(|| format!("Cannot deserialize collection info for {:?}", self.id))?;
-
-        let dump::CollectionInfo::V1(dump) = dump;
-
-        for (field_name, (field_id, field_type)) in dump.fields {
-            let typed_field: TypedField = match field_type {
-                dump::TypedField::Text(language) => TypedField::Text(language),
-                dump::TypedField::Embedding(embedding) => {
-                    TypedField::Embedding(EmbeddingTypedField {
-                        document_fields: embedding.document_fields,
-                        model: embedding.model.0,
-                    })
-                }
-                dump::TypedField::Number => TypedField::Number,
-                dump::TypedField::Bool => TypedField::Bool,
-            };
-            self.fields.insert(field_name, (field_id, typed_field));
-        }
-
-        for (orama_model, fields) in dump.used_models {
-            self.fields_per_model.insert(orama_model.0, fields);
-        }
-
-        self.text_parser_per_field = self
-            .fields
-            .iter()
-            .filter_map(|e| {
-                if let TypedField::Text(l) = e.1 {
-                    let locale = l.into();
-                    Some((e.0, (locale, self.nlp_service.get(locale))))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        */
 
         Ok(())
     }
@@ -321,7 +267,7 @@ impl CollectionReader {
                         .fields
                         .iter()
                         .find(|e| e.0 == *field_id)
-                        .context("Field not registered")?;
+                        .context("Number field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
                         .fields
@@ -382,7 +328,7 @@ impl CollectionReader {
                         .fields
                         .iter()
                         .find(|e| e.0 == *field_id)
-                        .context("Field not registered")?;
+                        .context("String field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info.fields.push((
                         field_name,
@@ -439,7 +385,7 @@ impl CollectionReader {
                         .fields
                         .iter()
                         .find(|e| e.0 == *field_id)
-                        .context("Field not registered")?;
+                        .context("Bool field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
                         .fields
@@ -454,7 +400,7 @@ impl CollectionReader {
             let uncommitted_vector_index = uncommitted.vector_index.get(&field_id).unwrap();
             let committed_vector_index = committed.vector_index.get(&field_id);
 
-            let field_dir = bool_dir
+            let field_dir = vector_dir
                 .join(format!("field-{}", field_id.0))
                 .join(format!("offset-{}", offset.0));
             let new_committed_vector_index =
@@ -480,8 +426,9 @@ impl CollectionReader {
                 .fields
                 .iter_mut()
                 .find(|(_, (f, _))| f == field_id);
+            info!("----Field {:?}", field);
             match field {
-                Some((_, (_, typed_field))) => {
+                Some((_, (_, _))) => {
                     // TODO: check if the field is changing type
                 }
                 None => {
@@ -489,22 +436,32 @@ impl CollectionReader {
                         .fields
                         .iter()
                         .find(|e| e.0 == *field_id)
-                        .context("Field not registered")?;
+                        .context("Vector field not registered - 1")?;
                     let field_name = field_name.key().to_string();
 
                     let item = self
                         .fields_per_model
                         .iter()
                         .find(|e| e.value().contains(field_id))
-                        .context("Field not registered")?;
+                        .context("Vector field not registered - 2")?;
                     let orama_model = item.key();
 
+                    let serializable_orama_model = OramaModelSerializable(*orama_model);
+                    let el = current_collection_info.used_models.iter_mut().find(|e| e.0 == serializable_orama_model);
+                    if let Some(el) = el {
+                        el.1.push(*field_id);
+                    } else {
+                        current_collection_info.used_models.push(
+                            (serializable_orama_model.clone(), vec![*field_id])
+                        );
+                    }
+                    
                     current_collection_info.fields.push((
                         field_name,
                         (
                             *field_id,
                             dump::TypedField::Embedding(dump::EmbeddingTypedField {
-                                model: OramaModelSerializable(*orama_model),
+                                model: serializable_orama_model,
                             }),
                         ),
                     ));
@@ -545,136 +502,6 @@ impl CollectionReader {
             .context("Cannot write previous collection info")?;
 
         drop(commit_insert_mutex_lock);
-
-        /*
-
-            let data_dir = data_dir.join("fields");
-
-        let number_dir = data_dir.join("numbers");
-        for (field_id, field) in &uncommitted.number_index {
-            let committed = committed.number_index.get(field_id);
-
-            let field_dir = number_dir.join(format!("field-{}", field_id.0));
-
-            let new_committed_field = merge_number_field(field, committed, field_dir)?;
-
-            committed.number_index.insert(*field_id, new_committed_field);
-        }
-
-        let bool_dir = data_dir.join("bools");
-        for (field_id, field) in &uncommitted.bool_index {
-            let committed = committed.bool_index.get(field_id);
-
-            let field_dir = bool_dir.join(format!("field-{}", field_id.0));
-
-            let new_committed_field = merge_bool_field(uncommitted, committed, field_dir)?;
-
-            committed.bool_index.insert(*field_id, new_committed_field);
-        }
-
-        let strings_dir = data_dir.join("strings");
-        for (field_id, field) in &uncommitted.string_index {
-            let committed = committed.string_index.get(field_id);
-
-            let field_dir = strings_dir.join(format!("field-{}", field_id.0));
-
-            let new_committed_field = merge_string_field(uncommitted, committed, field_dir)?;
-
-
-            committed.string_index.insert(*field_id, new_committed_field);
-        }
-
-        Ok(())
-
-             */
-
-        /*
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "read",
-            collection: self.id.0.to_string(),
-            index_type: "string",
-        });
-        let string_dir = data_dir.join("strings");
-        self.string_index
-            .commit(string_dir)
-            .await
-            .context("Cannot commit string index")?;
-        drop(m);
-
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "read",
-            collection: self.id.0.to_string(),
-            index_type: "number",
-        });
-        let number_dir = data_dir.join("numbers");
-        self.number_index
-            .commit(number_dir)
-            .await
-            .context("Cannot commit number index")?;
-        drop(m);
-
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "read",
-            collection: self.id.0.to_string(),
-            index_type: "vector",
-        });
-        let vector_dir = data_dir.join("vectors");
-        self.vector_index
-            .commit(vector_dir)
-            .context("Cannot commit vector index")?;
-        drop(m);
-
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "read",
-            collection: self.id.0.to_string(),
-            index_type: "bool",
-        });
-        let bool_dir = data_dir.join("bools");
-        self.bool_index
-            .commit(bool_dir)
-            .await
-            .context("Cannot commit bool index")?;
-        drop(m);
-
-        trace!("Committing collection info");
-        let dump = dump::CollectionInfo::V1(dump::CollectionInfoV1 {
-            id: self.id.clone(),
-            fields: self
-                .fields
-                .iter()
-                .map(|v| {
-                    let (field_name, (field_id, typed_field)) = v.pair();
-
-                    let typed_field = match typed_field {
-                        TypedField::Bool => dump::TypedField::Bool,
-                        TypedField::Number => dump::TypedField::Number,
-                        TypedField::Text(language) => dump::TypedField::Text(*language),
-                        TypedField::Embedding(embedding) => {
-                            dump::TypedField::Embedding(dump::EmbeddingTypedField {
-                                model: OramaModelSerializable(embedding.model),
-                                document_fields: embedding.document_fields.clone(),
-                            })
-                        }
-                    };
-
-                    (field_name.clone(), (*field_id, typed_field))
-                })
-                .collect(),
-            used_models: self
-                .fields_per_model
-                .iter()
-                .map(|v| {
-                    let (model, field_ids) = v.pair();
-                    (OramaModelSerializable(*model), field_ids.clone())
-                })
-                .collect(),
-        });
-        let coll_desc_file_path = data_dir.join("info.json");
-        create_or_overwrite(coll_desc_file_path, &dump)
-            .await
-            .context("Cannot create info.json file")?;
-        trace!("Collection info committed");
-        */
 
         Ok(())
     }
@@ -756,7 +583,7 @@ impl CollectionReader {
         &self,
         search_params: SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
-        info!(search_params = ?search_params, "Searching");
+        info!(search_params = ?search_params, "Start search");
         let metric = SEARCH_METRIC.create(SearchLabels {
             collection: self.id.0.to_string(),
         });
@@ -1001,9 +828,13 @@ impl CollectionReader {
         let committed_lock = self.committed_collection.read().await;
         let uncommitted_lock = self.uncommitted_collection.read().await;
 
+        info!("fields_per_model: {:?}", self.fields_per_model);
+
         for e in &self.fields_per_model {
             let model = e.key();
             let fields = e.value();
+
+            info!("Searching on model {:?} on fields {:?}", model, fields);
 
             let e = self
                 .ai_service

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use bool::BoolField;
 use number::NumberField;
 use string::StringField;
+use tracing::{info, trace};
 use vector::VectorField;
 
 use crate::{
@@ -62,10 +63,15 @@ impl UncommittedCollection {
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
         for vector_field in properties {
-            let vector_field = self
+            let vector_field = match self
                 .vector_index
-                .get(vector_field)
-                .context("Field is not a vector field")?;
+                .get(vector_field) {
+                Some(vector_field) => vector_field,
+                None => {
+                    trace!("Vector field not found");
+                    continue;
+                }
+            };
             vector_field.search(target, filtered_doc_ids, output)?;
         }
 

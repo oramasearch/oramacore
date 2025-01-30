@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::file_utils::create_if_not_exists;
 use crate::indexes::number::SerializableNumber;
 use crate::merger::MergedIterator;
 
@@ -115,6 +116,9 @@ pub fn merge_vector_field(
     committed: Option<&committed_fields::VectorField>,
     data_dir: PathBuf,
 ) -> Result<committed_fields::VectorField> {
+    create_if_not_exists(&data_dir)
+        .context("Failed to create data directory for vector field")?;
+
     let file_path = data_dir.join("data.hnsw");
     let new_committed_field = match committed {
         None => committed_fields::VectorField::from_iter(
@@ -125,10 +129,7 @@ pub fn merge_vector_field(
         Some(committed) => {
             std::fs::copy(committed.file_path(), &file_path).context("Failed to copy hnsw file")?;
 
-            let mut vector_index = committed_fields::VectorField::load(file_path)?;
-            vector_index
-                .add_and_dump(uncommitted.iter())
-                .context("Cannot add new element to vector index")?;
+            let vector_index = committed_fields::VectorField::from_dump_and_iter(file_path, uncommitted.iter())?;
 
             vector_index
         }

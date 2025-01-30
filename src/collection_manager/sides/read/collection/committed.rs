@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use bool::{BoolField, BoolFieldInfo, BoolWrapper};
 use number::{NumberField, NumberFieldInfo};
 use string::{StringField, StringFieldInfo};
-use vector::VectorField;
+use vector::{VectorField, VectorFieldInfo};
 
 use crate::{
     collection_manager::dto::FieldId,
@@ -58,6 +58,7 @@ impl CommittedCollection {
         number_field_infos: Vec<(FieldId, NumberFieldInfo)>,
         bool_field_infos: Vec<(FieldId, BoolFieldInfo)>,
         string_field_infos: Vec<(FieldId, StringFieldInfo)>,
+        vector_field_infos: Vec<(FieldId, VectorFieldInfo)>,
     ) -> Result<()> {
         for (field_id, info) in number_field_infos {
             let number_field = NumberField::load(info)?;
@@ -70,6 +71,10 @@ impl CommittedCollection {
         for (field_id, info) in string_field_infos {
             let string_field = StringField::load(info)?;
             self.string_index.insert(field_id, string_field);
+        }
+        for (field_id, info) in vector_field_infos {
+            let vector_field = VectorField::load(info)?;
+            self.vector_index.insert(field_id, vector_field);
         }
 
         Ok(())
@@ -90,11 +95,15 @@ impl CommittedCollection {
         limit: usize,
         output: &mut HashMap<DocumentId, f32>,
     ) -> Result<()> {
-        for vector_field in properties {
-            let vector_field = self
-                .vector_index
-                .get(vector_field)
-                .context("Field is not a vector field")?;
+        for field_id in properties {
+            let vector_field = match self.vector_index.get(&field_id) {
+                Some(index) => index,
+                // If the field is not indexed, we skip it
+                // This could be:
+                // - a field id is not a string field (this should not happen)
+                // - is not yet committed
+                None => continue,
+            };
             vector_field.search(target, limit, filtered_doc_ids, output)?;
         }
 

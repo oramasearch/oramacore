@@ -44,8 +44,22 @@ impl VectorField {
         Ok(s)
     }
 
-    pub fn load(file_path: PathBuf) -> Result<Self> {
-        let file_path_str = match file_path.to_str() {
+    pub fn from_dump_and_iter(
+        file_path: PathBuf,
+        iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+    ) -> Result<Self> {
+        let inner = HNSWIndex::load(file_path.to_str().ok_or_else(|| anyhow!("Cannot convert path to string"))?)
+            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
+
+        let mut s = Self { inner, file_path };
+
+        s.add_and_dump(iter)?;
+
+        Ok(s)
+    }
+
+    pub fn load(info: VectorFieldInfo) -> Result<Self> {
+        let file_path_str = match info.file_path.to_str() {
             Some(file_path_str) => file_path_str,
             None => {
                 return Err(anyhow!("Cannot convert path to string"));
@@ -53,8 +67,17 @@ impl VectorField {
         };
 
         let inner = HNSWIndex::load(file_path_str)
-            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", file_path, e))?;
-        Ok(Self { inner, file_path })
+            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", info.file_path, e))?;
+
+        if inner.dimension() != info.dimension {
+            return Err(anyhow!(
+                "Dimension mismatch: expected {}, got {}",
+                info.dimension,
+                inner.dimension()
+            ));
+        }
+
+        Ok(Self { inner, file_path: info.file_path })
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
@@ -112,7 +135,7 @@ impl VectorField {
         Ok(())
     }
 
-    pub fn add_and_dump(
+    fn add_and_dump(
         &mut self,
         iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     ) -> Result<()> {
