@@ -1,0 +1,13 @@
+{
+  "title": "OramaCore",
+  "description": "OramaCore Documentation",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "---Usage---",
+    "getting-started",
+    "---Architecture---",
+    "architecture",
+    "party-planner"
+  ]
+}
