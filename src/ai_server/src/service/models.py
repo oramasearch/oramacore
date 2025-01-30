@@ -1,11 +1,13 @@
 import torch
 import logging
 import threading
+from json_repair import repair_json
 from typing import Dict, Any, Set, List, Optional, Iterator
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 from src.utils import OramaAIConfig
 from src.prompts.main import PROMPT_TEMPLATES
+from src.prompts.party_planner_actions import DEFAULT_PARTY_PLANNER_ACTIONS_DATA, RETURN_TYPE_JSON, decode_action_result
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,7 @@ class ModelsManager:
                     device_map="auto",
                     torch_dtype="auto",
                     trust_remote_code=True,
+                    attn_implementation="flash_attention_2",
                 )
 
             self._models[model_id] = {
@@ -70,6 +73,54 @@ class ModelsManager:
             if model_id in self._models:
                 del self._models[model_id]
             raise
+
+    def action(
+        self, action: str, input: str, description: str, history: List[Any], stream: bool = False
+    ) -> Iterator[str]:
+        actual_model_id = self._model_refs.get("action")
+        model_config = self._models.get(actual_model_id)
+        model = model_config["model"]
+        tokenizer = model_config["tokenizer"]
+
+        action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
+
+        history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
+        history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
+
+        formatted_chat = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
+        tokenizer.pad_token = tokenizer.eos_token
+
+        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
+
+        if stream:
+            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
+
+            generation_kwargs = dict(
+                **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
+            )
+            thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+            thread.start()
+
+            p = None
+
+            for new_text in streamer:
+                old_text = p
+                p = new_text
+
+                if old_text:
+                    yield old_text
+
+            yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.
+
+        else:
+            outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
+            decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+
+            if action_data["returns"] == RETURN_TYPE_JSON:
+                return decode_action_result(action=action, result=repair_json(decoded_output))
+
+            return decoded_output
 
     def chat(self, model_id: str, history: List[Any], prompt: str, context: Optional[str] = None) -> str:
         actual_model_id = self._model_refs.get(model_id)

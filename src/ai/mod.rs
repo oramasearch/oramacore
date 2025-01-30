@@ -151,9 +151,17 @@ impl AIService {
     pub async fn planned_answer_stream(
         &self,
         input: String,
+        collection_id: String,
+        conversation: Option<Vec<InteractionMessage>>,
     ) -> Result<Streaming<PlannedAnswerResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
-        let request = Request::new(PlannedAnswerRequest { input });
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(PlannedAnswerRequest {
+            input,
+            collection_id,
+            conversation: Some(conversation),
+        });
 
         let response: Response<Streaming<PlannedAnswerResponse>> = conn
             .planned_answer(request)

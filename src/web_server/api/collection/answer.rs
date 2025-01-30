@@ -59,7 +59,7 @@ async fn planned_answer_v0(
     read_side: State<Arc<ReadSide>>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId(id).0;
     let read_side = read_side.clone();
 
     let query = interaction.query;
@@ -80,7 +80,10 @@ async fn planned_answer_v0(
             )))
             .await;
 
-        let mut stream = ai_service.planned_answer_stream(query).await.unwrap();
+        let mut stream = ai_service
+            .planned_answer_stream(query, collection_id, Some(conversation))
+            .await
+            .unwrap();
 
         while let Some(chunk) = stream.next().await {
             match chunk {
