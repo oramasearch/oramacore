@@ -1,0 +1,44 @@
+---
+title: "Introduction"
+description: "Learn how to use JavaScript hooks to customize OramaCore"
+---
+
+Orama ❤️ JavaScript. Since day zero, we've been working on JavaScript solutions and we're excited to bring this love to OramaCore.
+
+We believe that JavaScript is the _**lingua franca**_ of the web, and we want to make it easy for developers to use JavaScript to customize OramaCore.
+
+## What are JavaScript Hooks?
+
+JavaScript hooks are a way to customize OramaCore using JavaScript. You can use JavaScript hooks to:
+
+- Customize text extraction and transformation
+- Implement custom business logic
+- Integrate with third-party services
+- Write your own agents and actions
+- And much more!
+
+At the time of writing, we're working on a set of JavaScript hooks that you can use to customize OramaCore. We're planning to release the first version of JavaScript hooks in **v1.0.0**.
+
+## Creating a Hooks
+
+Once you have created a collection, you can create a JavaScript hook by sending a POST request to the `/v0/hooks` endpoint.
+
+Here's an example of how to create a JavaScript hook:
+
+```bash
+
+curl -X POST http://localhost:8080/{COLLECTION_ID}/v0/hooks/add \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "selectEmbeddingProperties",
+    "code": "function selectEmbeddingProperties(document) { return document.title; }"
+  }'
+```
+
+Before inserting the hook, OramaCore will validate the JavaScript code to ensure it's safe to run. If the code is invalid, OramaCore will return an error.
+
+## Available Hooks
+
+Right now, OramaCore supports only one JavaScript hook (with the plan of adding dozens in the near future).
+
+The hook is called [`selectEmbeddingProperties`](/docs/javascript-hooks/selectEmbeddingProperties) and allows you to customize the text extraction and transformation process for each document.

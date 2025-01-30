@@ -18,7 +18,7 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
@@ -130,7 +130,7 @@ impl CollectionsReader {
         let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
         for (id, reader) in col {
-            info!("Committing collection {:?}", id);
+            debug!("Committing collection {:?}", id);
 
             let collection_dir = collections_dir.join(&id.0);
 
@@ -138,9 +138,12 @@ impl CollectionsReader {
                 .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
-            reader.commit(collection_dir).await?;
+            reader
+                .commit(collection_dir)
+                .await
+                .with_context(|| format!("Cannot commit collection {:?}", reader.get_id()))?;
 
-            info!("Collection {:?} committed", id);
+            info!(coll_id=?id, "Collection committed");
         }
 
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {

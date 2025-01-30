@@ -1,0 +1,153 @@
+---
+title: "selectEmbeddingProperties"
+description: "Customize the text extraction process for each document."
+---
+
+The `selectEmbeddingProperties` hook allows you to customize the text extraction and transformation process.
+
+You can use this hook to select the properties of the document that will be used to generate the embeddings.
+
+This hook receives a single document as input and must return one of the following:
+
+- `string[]`: An array of strings with the properties to use
+- `string`: A single string with the concatenated properties
+- `string`: A single string with the text to use for embeddings
+
+Given that OramaCore is schemaless, this hook is particularly useful to customize the text extraction process depending on the document structure, which can vary from document to document.
+
+Let's take the following documents as an example:
+
+```json title="document1.json"
+{
+  "productName": "Wireless Headphones",
+  "description": "The best wireless headphones for music lovers",
+  "price": 99.99,
+  "brand": "Sony"
+}
+```
+
+```json title="document2.json"
+{
+  "title": "Extra Bass Wireless Portable Speaker",
+  "description": "The best portable speaker for music lovers. Enjoy the extra bass!",
+  "price": 149.99,
+}
+```
+
+As you can see, the structure of the documents is different. With the `selectEmbeddingProperties` hook, you can customize the text extraction process for each document.
+
+#### Returning a single string
+
+You could write a JavaScript function like this:
+
+```javascript title="selectEmbeddingProperties.js"
+function selectEmbeddingProperties(document) {
+  if (document.productName && document.description && document.brand) {
+    return [document.productName, document.description, document.brand].join(". ");
+  }
+
+  if (document.title && document.description) {
+    return [document.title, document.description].join(". ");
+  }
+
+  return document.title || document.description || document.productName || document.brand;
+}
+```
+
+Which will return the following strings for the documents:
+
+- For `document1.json`:
+
+  ```javascript
+  "Wireless Headphones. The best wireless headphones for music lovers Sony"
+  ```
+
+- For `document2.json`:
+
+  ```javascript
+  "Extra Bass Wireless. Portable Speaker The best portable speaker for music lovers. Enjoy the extra bass!"
+  ```
+
+This way, you can easily produce highly optimized embeddings for each document.
+
+#### Returning a single markdown string
+
+Another approach is to return a single markdown string that will be used for embeddings:
+
+````javascript title="selectEmbeddingProperties.js"
+function selectEmbeddingProperties(document) {
+  const isDocumentType1 = document.productName && document.description && document.brand;
+
+  if (isDocumentType1) {
+    return ```
+      ## Title
+      ${document.productName}
+      ## Description
+      ${document.description}
+      ## Brand
+      ${document.brand}
+    ```
+  }
+
+  return ```
+    ## Title
+    ${document.title}
+    ## Description
+    ${document.description}
+  ```
+}
+````
+
+This will produce the following outputs for the two documents:
+
+- For `document1.json`:
+
+  ```plaintext
+  ## Title
+  Wireless Headphones
+  ## Description
+  The best wireless headphones for music lovers
+  ## Brand
+  Sony
+  ```
+
+- For `document2.json`:
+
+  ```plaintext
+  ## Title
+  Extra Bass Wireless Portable Speaker
+  ## Description
+  The best portable speaker for music lovers. Enjoy the extra bass!
+  ```
+
+This approach allows you to generate complete markdown documents rich in information that can be used for embeddings.
+
+#### Returning an array of strings
+
+Finally, you can return an array of strings with the properties name to use for each document. OramaCore will then concatenate the values of these properties to generate the embeddings.
+
+```javascript title="selectEmbeddingProperties.js"
+function selectEmbeddingProperties(document) {
+  if (document.productName && document.description && document.brand) {
+    return ["productName", "description", "brand"];
+  }
+
+  return ["title", "description"];
+}
+```
+
+This will produce the following outputs for the two documents:
+
+- For `document1.json`:
+
+  ```json
+  ["productName", "description", "brand"]
+  ```
+
+- For `document2.json`:
+
+  ```json
+  ["title", "description"]
+  ```
+
+There is no right or wrong way to use the `selectEmbeddingProperties` hook. You can use it in the way that best fits your needs and the structure of your documents.

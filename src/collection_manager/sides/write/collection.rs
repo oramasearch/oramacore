@@ -7,10 +7,10 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
+use anyhow::{anyhow, bail, Context, Ok, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{info, instrument};
+use tokio::sync::RwLock;
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
@@ -26,20 +26,22 @@ use crate::{
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
-    embedding::EmbeddingCalculationRequest, fields::FieldsToIndex, CollectionField,
-    CollectionWriteOperation, OperationSender, SerializedFieldIndexer, WriteOperation,
+    embedding::EmbeddingCalculationRequest, CollectionField, CollectionWriteOperation,
+    OperationSender, SerializedFieldIndexer, WriteOperation,
 };
+
+pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 pub struct CollectionWriter {
     id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
-    fields: DashMap<String, (ValueType, CollectionField)>,
+    fields: RwLock<HashMap<FieldId, (String, ValueType, CollectionField)>>,
 
     collection_document_count: AtomicU64,
 
     field_id_generator: AtomicU16,
-    field_id_by_name: DashMap<String, FieldId>,
+    field_id_by_name: RwLock<HashMap<String, FieldId>>,
 
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 }
@@ -57,34 +59,45 @@ impl CollectionWriter {
             default_language,
             collection_document_count: Default::default(),
             fields: Default::default(),
-            field_id_by_name: DashMap::new(),
-            field_id_generator: AtomicU16::new(0),
+            field_id_by_name: Default::default(),
+            field_id_generator: Default::default(),
             embedding_sender,
         }
     }
 
-    pub fn as_dto(&self) -> CollectionDTO {
+    pub async fn as_dto(&self) -> CollectionDTO {
+        let fields = self.fields.read().await;
+        let fields = fields
+            .iter()
+            .map(|(_, (key, v, _))| (key.clone(), v.clone()))
+            .collect();
+
         CollectionDTO {
             id: self.id.clone(),
             description: self.description.clone(),
             document_count: self
                 .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
-            fields: self
-                .fields
-                .iter()
-                .map(|e| (e.key().clone(), e.value().0.clone()))
-                .collect(),
+            fields,
         }
     }
 
-    pub fn set_embedding_hook(&self, hook_name: HookName) {
-        let mut field = match self.fields.get_mut("___orama_auto_embedding") {
-            None => return,
-            Some(field) => field,
-        };
+    pub async fn set_embedding_hook(&self, hook_name: HookName) -> Result<()> {
+        let field_id_by_name = self.field_id_by_name.read().await;
+        let field_id = field_id_by_name
+            .get(DEFAULT_EMBEDDING_FIELD_NAME)
+            .cloned()
+            .context("Field for embedding not found")?;
+        drop(field_id_by_name);
 
-        field.1.set_embedding_hook(hook_name);
+        let mut w = self.fields.write().await;
+        let field = match w.get_mut(&field_id) {
+            None => bail!("Field for embedding not found"),
+            Some((_, _, field)) => field,
+        };
+        field.set_embedding_hook(hook_name);
+
+        Ok(())
     }
 
     pub async fn process_new_document(
@@ -112,59 +125,45 @@ impl CollectionWriter {
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
             .await
             .context("Cannot get fields to index")?;
+        trace!("Fields to index: {:?}", fields_to_index);
 
         let flatten = doc.clone().into_flatten();
 
-        for entry in fields_to_index {
-            let (_, field) = entry.value();
+        let r = self.fields.read().await;
+        for field_id in fields_to_index {
+            let (field_name, _, field) = match r.get(&field_id) {
+                None => {
+                    info!("Field not indexed");
+                    continue;
+                }
+                Some(v) => v,
+            };
 
             field
                 .get_write_operations(doc_id, &flatten, sender.clone())
-                .await?;
+                .await
+                .with_context(|| format!("Cannot index field {}", field_name))?;
         }
+
+        trace!("Document field indexed");
 
         Ok(())
     }
 
-    fn get_field_id_by_name(&self, name: &str) -> FieldId {
-        use dashmap::Entry;
-
-        let v = self.field_id_by_name.get(name);
-        // Fast path
-        if let Some(v) = v {
-            return *v;
-        }
-        let entry = self.field_id_by_name.entry(name.to_string());
-        match entry {
-            // This is odd, but concurrently,
-            // we can have the first `get` None and have the entry occupied
-            Entry::Occupied(e) => *e.get(),
-            Entry::Vacant(e) => {
-                // Vacant entry locks the map, so we can safely insert the field_id
-                let field_id = self
-                    .field_id_generator
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let field_id = FieldId(field_id);
-                e.insert(field_id);
-
-                info!("Field created {} -> {:?}", name, field_id);
-
-                field_id
-            }
-        }
-    }
-
     fn value_to_typed_field(&self, value_type: ValueType) -> Option<TypedField> {
         match value_type {
-            ValueType::Scalar(ScalarType::String) => Some(TypedField::Text(self.default_language)),
+            ValueType::Scalar(ScalarType::String) => {
+                Some(TypedField::Text(self.default_language.into()))
+            }
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
             _ => None, // @todo: support other types
         }
     }
 
-    fn get_text_parser(&self, language: LanguageDTO) -> Arc<TextParser> {
-        let locale: Locale = language.into();
+    fn get_text_parser(&self, locale: Locale) -> Arc<TextParser> {
+        // TextParser is expensive to create, so we cache it
+        // TODO: add a cache
         let parser = TextParser::from_locale(locale);
         Arc::new(parser)
     }
@@ -176,7 +175,24 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
-            let field_id = self.get_field_id_by_name(&field_name);
+            debug!(
+                "Registering field {} with type {:?}",
+                field_name, field_type
+            );
+
+            let field_id = self.field_id_by_name.read().await.get(&field_name).cloned();
+            // Avoid creating fields that already exists
+            if field_id.is_some() {
+                continue;
+            }
+
+            let field_id = self
+                .field_id_generator
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let field_id = FieldId(field_id);
+            let mut field_id_by_name = self.field_id_by_name.write().await;
+            field_id_by_name.insert(field_name.clone(), field_id);
+            drop(field_id_by_name);
 
             self.create_field(
                 field_id,
@@ -193,7 +209,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    #[instrument(skip(self, sender, embedding_sender))]
+    #[instrument(skip(self, field_id, sender, embedding_sender, hooks_runtime))]
     async fn create_field(
         &self,
         field_id: FieldId,
@@ -203,11 +219,13 @@ impl CollectionWriter {
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
+        let mut w = self.fields.write().await;
         match &typed_field {
             TypedField::Embedding(embedding_field) => {
-                self.fields.insert(
-                    field_name.clone(),
+                w.insert(
+                    field_id,
                     (
+                        field_name.clone(),
                         ValueType::Complex(ComplexType::Embedding),
                         CollectionField::new_embedding(
                             embedding_field.model,
@@ -220,11 +238,12 @@ impl CollectionWriter {
                     ),
                 );
             }
-            TypedField::Text(language) => {
-                let parser = self.get_text_parser(*language);
-                self.fields.insert(
-                    field_name.clone(),
+            TypedField::Text(locale) => {
+                let parser = self.get_text_parser(*locale);
+                w.insert(
+                    field_id,
                     (
+                        field_name.clone(),
                         ValueType::Scalar(ScalarType::String),
                         CollectionField::new_string(
                             parser,
@@ -236,24 +255,27 @@ impl CollectionWriter {
                 );
             }
             TypedField::Number => {
-                self.fields.insert(
-                    field_name.clone(),
+                w.insert(
+                    field_id,
                     (
+                        field_name.clone(),
                         ValueType::Scalar(ScalarType::Number),
                         CollectionField::new_number(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
             TypedField::Bool => {
-                self.fields.insert(
-                    field_name.clone(),
+                w.insert(
+                    field_id,
                     (
+                        field_name.clone(),
                         ValueType::Scalar(ScalarType::Boolean),
                         CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }
         }
+        drop(w);
 
         sender
             .send(WriteOperation::Collection(
@@ -271,24 +293,45 @@ impl CollectionWriter {
         Ok(())
     }
 
+    #[instrument(skip(self, doc, sender, hooks_runtime))]
     async fn get_fields_to_index(
         &self,
         doc: Document,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
-    ) -> Result<&FieldsToIndex> {
+    ) -> Result<Vec<FieldId>> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
 
+        let mut field_ids = vec![];
+        let field_id_by_name = self.field_id_by_name.read().await;
+        if let Some(field_id) = field_id_by_name.get(DEFAULT_EMBEDDING_FIELD_NAME) {
+            field_ids.push(*field_id);
+        }
+        drop(field_id_by_name);
+
         for (field_name, value_type) in schema {
-            if self.fields.contains_key(&field_name) {
+            let field_id_by_name = self.field_id_by_name.read().await;
+            let field_id = field_id_by_name.get(&field_name).cloned();
+            drop(field_id_by_name);
+
+            if let Some(field_id) = field_id {
+                field_ids.push(field_id);
                 continue;
             }
 
-            let field_id = self.get_field_id_by_name(&field_name);
+            let field_id = self
+                .field_id_generator
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let field_id = FieldId(field_id);
+            let mut field_id_by_name = self.field_id_by_name.write().await;
+            field_id_by_name.insert(field_name.clone(), field_id);
+            drop(field_id_by_name);
+
+            field_ids.push(field_id);
 
             // @todo: add support to other types
-            if let Some(typed_field) = self.value_to_typed_field(value_type) {
+            if let Some(typed_field) = self.value_to_typed_field(value_type.clone()) {
                 self.create_field(
                     field_id,
                     field_name,
@@ -299,14 +342,16 @@ impl CollectionWriter {
                 )
                 .await
                 .context("Cannot create field")?;
+            } else {
+                warn!("Field type not supported: {:?}", value_type);
             }
         }
 
-        Ok(&self.fields)
+        Ok(field_ids)
     }
 
-    pub fn commit(&self, path: PathBuf) -> Result<()> {
-        info!("Committing collection {}", self.id.0);
+    pub async fn commit(&self, path: PathBuf) -> Result<()> {
+        info!(coll_id= ?self.id, "Committing collection");
 
         let m = COMMIT_METRIC.create(CommitLabels {
             side: "write",
@@ -314,30 +359,31 @@ impl CollectionWriter {
             index_type: "info",
         });
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
+
+        let fields = self.fields.read().await;
+        let fields = fields
+            .iter()
+            .map(|(_, (k, _, indexer))| (k.clone(), indexer.serialized()))
+            .collect();
+
+        let field_id_by_name = self.field_id_by_name.read().await;
+        let field_id_by_name: Vec<_> = field_id_by_name
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
             default_language: self.default_language,
-            fields: self
-                .fields
-                .iter()
-                .map(|e| {
-                    let k = e.key().clone();
-                    let (_, indexer) = e.value();
-                    (k, indexer.serialized())
-                })
-                .collect(),
+            fields,
             document_count: self
                 .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             field_id_generator: self
                 .field_id_generator
                 .load(std::sync::atomic::Ordering::Relaxed),
-            field_id_by_name: self
-                .field_id_by_name
-                .iter()
-                .map(|e| (e.key().clone(), *e.value()))
-                .collect(),
+            field_id_by_name,
         });
 
         BufferedFile::create_or_overwrite(path.join("info.json"))
@@ -366,10 +412,11 @@ impl CollectionWriter {
         self.id = dump.id;
         self.description = dump.description;
         self.default_language = dump.default_language;
-        self.field_id_by_name = dump.field_id_by_name.into_iter().collect();
+        self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
 
         for (field_name, serialized) in dump.fields {
-            let field_id = match self.field_id_by_name.get(&field_name) {
+            let field_id_by_name = self.field_id_by_name.read().await;
+            let field_id = match field_id_by_name.get(&field_name) {
                 None => {
                     return Err(anyhow!(
                         "Field {} not found in field_id_by_name",
@@ -378,6 +425,8 @@ impl CollectionWriter {
                 }
                 Some(field_id) => *field_id,
             };
+            drop(field_id_by_name);
+
             let (value_type, collection_field): (ValueType, CollectionField) = match serialized {
                 SerializedFieldIndexer::String(locale) => (
                     ValueType::Scalar(ScalarType::String),
@@ -408,8 +457,8 @@ impl CollectionWriter {
                     ),
                 ),
             };
-            self.fields
-                .insert(field_name, (value_type, collection_field));
+            let mut w = self.fields.write().await;
+            w.insert(field_id, (field_name, value_type, collection_field));
         }
         self.collection_document_count
             .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
