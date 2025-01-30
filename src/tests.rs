@@ -328,6 +328,8 @@ async fn test_collection_id_already_exists() -> Result<()> {
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -984,7 +986,9 @@ async fn test_vector_search_grpc() -> Result<()> {
                 "embeddings": {
                     "model": "BGESmall",
                     "document_fields": ["text"],
-                }
+                },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )

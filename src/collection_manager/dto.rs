@@ -435,7 +435,9 @@ mod test {
                     "model_name": "gte-small",
                     "document_fields": ["text"],
                 }
-            }
+            },
+            "read_api_key": "foo",
+            "write_api_key": "bar",
         })
         .try_into()
         .unwrap();
