@@ -28,13 +28,12 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            self, FacetDefinition, FacetResult, FieldId, Filter, Limit, Properties, SearchMode,
-            SearchParams,
+            self, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
+            Properties, SearchMode, SearchParams,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
     },
     file_utils::BufferedFile,
-    indexes::{number::NumberFilter, string::BM25Scorer},
     metrics::{
         SearchFilterLabels, SearchLabels, SEARCH_FILTER_HISTOGRAM, SEARCH_FILTER_METRIC,
         SEARCH_METRIC,
@@ -850,88 +849,123 @@ impl CollectionReader {
         token_scores: &HashMap<DocumentId, f32>,
         facets: HashMap<String, FacetDefinition>,
     ) -> Result<Option<HashMap<String, FacetResult>>> {
-        Ok(None)
-        /*
         if facets.is_empty() {
-            Ok(None)
-        } else {
-            info!("Computing facets on {:?}", facets.keys());
+            return Ok(None);
+        }
 
-            let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
-            for (field_name, facet) in facets {
-                let field_id = self.get_field_id(field_name.clone())?;
+        info!("Computing facets on {:?}", facets.keys());
 
-                // This calculation is not efficient
-                // we have the doc_ids that matches:
-                // - filters
-                // - search
-                // We should use them to calculate the facets
-                // Instead here we are building an hashset and
-                // iter again on it to filter the doc_ids.
-                // We could create a dedicated method in the indexes that
-                // accepts the matching doc_ids + facet definition and returns the count
-                // TODO: do it
-                match facet {
-                    FacetDefinition::Number(facet) => {
-                        let mut values = HashMap::new();
+        let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
+        for (field_name, facet) in facets {
+            let field_id = self.get_field_id(field_name.clone())?;
 
-                        for range in facet.ranges {
-                            let facet: HashSet<_> = self
-                                .number_index
-                                .filter(field_id, NumberFilter::Between((range.from, range.to)))
-                                .await?
-                                .into_iter()
+            // This calculation is not efficient
+            // we have the doc_ids that matches:
+            // - filters
+            // - search
+            // We should use them to calculate the facets
+            // Instead here we are building an hashset and
+            // iter again on it to filter the doc_ids.
+            // We could create a dedicated method in the indexes that
+            // accepts the matching doc_ids + facet definition and returns the count
+            // TODO: do it
+            match facet {
+                FacetDefinition::Number(facet) => {
+                    let mut values = HashMap::new();
+
+                    let committed = self.committed_collection.read().await;
+                    let uncommitted = self.uncommitted_collection.read().await;
+                    for range in facet.ranges {
+                        let filter = NumberFilter::Between((range.from, range.to));
+                        let committed_output =
+                            committed.calculate_number_filter(field_id, &filter)?;
+                        let uncommitted_output =
+                            uncommitted.calculate_number_filter(field_id, &filter)?;
+
+                        let facet = match (committed_output, uncommitted_output) {
+                            (Some(committed_output), Some(uncommitted_output)) => committed_output
+                                .chain(uncommitted_output)
                                 .filter(|doc_id| token_scores.contains_key(doc_id))
-                                .collect();
+                                .collect(),
+                            (Some(committed_output), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, None) => HashSet::new(),
+                        };
 
-                            values.insert(format!("{}-{}", range.from, range.to), facet.len());
-                        }
-
-                        res_facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: values.len(),
-                                values,
-                            },
-                        );
+                        values.insert(format!("{}-{}", range.from, range.to), facet.len());
                     }
-                    FacetDefinition::Bool(facets) => {
-                        let mut values = HashMap::new();
 
-                        if facets.r#true {
-                            let true_facet: HashSet<DocumentId> = self
-                                .bool_index
-                                .filter(field_id, true)
-                                .await?
-                                .into_iter()
-                                .filter(|doc_id| token_scores.contains_key(doc_id))
-                                .collect();
-                            values.insert("true".to_string(), true_facet.len());
-                        }
-                        if facets.r#false {
-                            let false_facet: HashSet<DocumentId> = self
-                                .bool_index
-                                .filter(field_id, false)
-                                .await?
-                                .into_iter()
-                                .filter(|doc_id| token_scores.contains_key(doc_id))
-                                .collect();
-                            values.insert("false".to_string(), false_facet.len());
-                        }
+                    res_facets.insert(
+                        field_name,
+                        FacetResult {
+                            count: values.len(),
+                            values,
+                        },
+                    );
+                }
+                FacetDefinition::Bool(facets) => {
+                    let mut values = HashMap::new();
 
-                        res_facets.insert(
-                            field_name,
-                            FacetResult {
-                                count: values.len(),
-                                values,
-                            },
-                        );
+                    let committed = self.committed_collection.read().await;
+                    let uncommitted = self.uncommitted_collection.read().await;
+
+                    if facets.r#true {
+                        let committed_output = committed.calculate_bool_filter(field_id, true)?;
+                        let uncommitted_output =
+                            uncommitted.calculate_bool_filter(field_id, true)?;
+                        let true_facet = match (committed_output, uncommitted_output) {
+                            (Some(committed_output), Some(uncommitted_output)) => committed_output
+                                .chain(uncommitted_output)
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(committed_output), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, None) => HashSet::new(),
+                        };
+
+                        values.insert("true".to_string(), true_facet.len());
                     }
+                    if facets.r#false {
+                        let committed_output = committed.calculate_bool_filter(field_id, false)?;
+                        let uncommitted_output =
+                            uncommitted.calculate_bool_filter(field_id, false)?;
+                        let false_facet = match (committed_output, uncommitted_output) {
+                            (Some(committed_output), Some(uncommitted_output)) => committed_output
+                                .chain(uncommitted_output)
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(committed_output), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (None, None) => HashSet::new(),
+                        };
+
+                        values.insert("false".to_string(), false_facet.len());
+                    }
+
+                    res_facets.insert(
+                        field_name,
+                        FacetResult {
+                            count: values.len(),
+                            values,
+                        },
+                    );
                 }
             }
-            Ok(Some(res_facets))
         }
-        */
+
+        Ok(Some(res_facets))
     }
 }
 

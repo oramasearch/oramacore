@@ -6,8 +6,6 @@ use memmap::Mmap;
 
 use crate::file_utils::BufferedFile;
 
-const FILE_NAME: &str = "index.fst";
-
 pub struct FSTIndex {
     inner: Map<Mmap>,
     file_path: PathBuf,

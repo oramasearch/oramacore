@@ -7,11 +7,7 @@ use string::{StringField, StringFieldInfo};
 use vector::{VectorField, VectorFieldInfo};
 
 use crate::{
-    collection_manager::dto::FieldId,
-    indexes::{
-        number::NumberFilter,
-        string::{BM25Scorer, GlobalInfo},
-    },
+    collection_manager::dto::{BM25Scorer, FieldId, GlobalInfo, NumberFilter},
     types::DocumentId,
 };
 

@@ -3,7 +3,6 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     pin::Pin,
-    sync::Arc,
     time::Duration,
 };
 
@@ -15,28 +14,13 @@ use tokio::time::sleep;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Response, Status};
 
-use crate::{
-    collection_manager::{
-        dto::{FieldId, LanguageDTO, TypedField},
-        sides::{
-            channel, CollectionWriteOperation, DocumentFieldIndexOperation, StringField,
-            WriteOperation,
-        },
-    },
-    indexes::string::{
-        CommittedStringFieldIndex, StringIndex, StringIndexConfig, UncommittedStringFieldIndex,
-    },
-    nlp::TextParser,
-    types::{CollectionId, Document, DocumentId},
-};
-
 pub fn generate_new_path() -> PathBuf {
     let tmp_dir = TempDir::new("test").expect("Cannot create temp dir");
     let dir = tmp_dir.path().to_path_buf();
     fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
 }
-
+/*
 pub async fn create_string_index(
     fields: Vec<(FieldId, String)>,
     documents: Vec<Document>,
@@ -200,6 +184,7 @@ pub async fn create_committed_string_field_index(
 
     Ok(index.remove_committed_field(FieldId(1)))
 }
+*/
 
 pub mod grpc_def {
     tonic::include_proto!("orama_ai_service");

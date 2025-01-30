@@ -12,10 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ai::OramaModel,
     collection_manager::{
-        dto::{DocumentFields, FieldId},
+        dto::{DocumentFields, FieldId, Number},
         sides::hooks::{HookName, HooksRuntime},
     },
-    indexes::number::Number,
     metrics::{
         Empty, StringCalculationLabels, EMBEDDING_REQUEST_GAUDGE, PENDING_EMBEDDING_REQUEST_GAUDGE,
         STRING_CALCULATION_METRIC,

@@ -8,10 +8,9 @@ use tracing::trace;
 use vector::VectorField;
 
 use crate::{
-    collection_manager::{dto::FieldId, sides::DocumentFieldIndexOperation},
-    indexes::{
-        number::NumberFilter,
-        string::{BM25Scorer, GlobalInfo},
+    collection_manager::{
+        dto::{BM25Scorer, FieldId, GlobalInfo, NumberFilter},
+        sides::DocumentFieldIndexOperation,
     },
     types::DocumentId,
 };

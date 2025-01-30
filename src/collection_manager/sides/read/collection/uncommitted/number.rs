@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    indexes::number::{Number, NumberFilter},
+    collection_manager::dto::{Number, NumberFilter},
     types::DocumentId,
 };
 

@@ -9,15 +9,12 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::read::collection::uncommitted::{
-        Positions, TotalDocumentsWithTermInField,
+    collection_manager::{
+        dto::{BM25Scorer, GlobalInfo},
+        sides::read::collection::uncommitted::{Positions, TotalDocumentsWithTermInField},
     },
     file_utils::create_if_not_exists,
-    indexes::{
-        fst::FSTIndex,
-        map::Map,
-        string::{BM25Scorer, GlobalInfo},
-    },
+    indexes::{fst::FSTIndex, map::Map},
     merger::MergedIterator,
     types::DocumentId,
 };

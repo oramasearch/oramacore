@@ -4,11 +4,11 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::{InsertStringTerms, TermStringField},
-    indexes::{
-        radix::RadixIndex,
-        string::{BM25Scorer, GlobalInfo},
+    collection_manager::{
+        dto::{BM25Scorer, GlobalInfo},
+        sides::{InsertStringTerms, TermStringField},
     },
+    indexes::radix::RadixIndex,
     types::DocumentId,
 };
 

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::collection_manager::dto::SerializableNumber;
 use crate::file_utils::create_if_not_exists;
-use crate::indexes::number::SerializableNumber;
 use crate::merger::MergedIterator;
 
 use super::committed::fields as committed_fields;

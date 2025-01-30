@@ -6,13 +6,19 @@ use serde::{de, Deserialize, Serialize};
 
 use crate::ai::OramaModel;
 use crate::{
-    indexes::number::{Number, NumberFilter},
     nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
 };
 
+mod bm25;
+mod global_info;
+mod number;
+
 use super::sides::hooks::HookName;
 use super::sides::OramaModelSerializable;
+pub use bm25::*;
+pub use global_info::*;
+pub use number::*;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);

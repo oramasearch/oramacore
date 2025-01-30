@@ -226,6 +226,9 @@ impl<
             max: current_page.max,
         });
 
+        pages[0].min = Key::min_value();
+        bounds[0].0 = Key::min_value();
+
         let bounds_file = data_dir.join("bounds.json");
         BufferedFile::create(bounds_file.clone())
             .context("Cannot create bounds file")?
@@ -329,7 +332,7 @@ And this should not happen. Return the first page."#);
 #[cfg(test)]
 mod tests {
     use crate::{
-        indexes::number::{Number, SerializableNumber},
+        collection_manager::dto::{Number, SerializableNumber},
         test_utils::generate_new_path,
         types::DocumentId,
     };
