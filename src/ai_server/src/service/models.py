@@ -1,12 +1,13 @@
 import torch
 import logging
 import threading
+from json_repair import repair_json
 from typing import Dict, Any, Set, List, Optional, Iterator
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 from src.utils import OramaAIConfig
 from src.prompts.main import PROMPT_TEMPLATES
-from src.prompts.party_planner_actions import DEFAULT_PARTY_PLANNER_ACTIONS_DATA
+from src.prompts.party_planner_actions import DEFAULT_PARTY_PLANNER_ACTIONS_DATA, RETURN_TYPE_JSON, decode_action_result
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,10 @@ class ModelsManager:
 
         else:
             outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
-
             decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+
+            if action_data["returns"] == RETURN_TYPE_JSON:
+                return decode_action_result(action=action, result=repair_json(decoded_output))
 
             return decoded_output
 

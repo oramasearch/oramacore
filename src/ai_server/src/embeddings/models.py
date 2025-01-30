@@ -54,8 +54,6 @@ class EmbeddingsModels:
                 f"Model {model_name} is not supported:\n Supported models {', '.join(self.selected_model_names)}"
             )
 
-        print(f"Calculating embeddings for model {model_name} with intent {intent}")
-
         input_strings = (
             [f"{intent}: {s}" for s in input_array]
             if (model_name in self.models_with_intent_prefix and intent)

@@ -1,3 +1,4 @@
+import json
 from textwrap import dedent
 
 RETURN_TYPE_TEXT = "TEXT"
@@ -15,6 +16,20 @@ COMMON_USER_PROMPT = lambda input, description: dedent(
             {description}
             """
 )
+
+
+def decode_action_result(action: str, result: object):
+    as_json = json.loads(result)
+
+    if action == "OPTIMIZE_QUERY":
+        return json.dumps(as_json["query"])
+    elif action == "GENERATE_QUERIES":
+        return json.dumps(as_json["queries"])
+    elif action == "CREATE_CODE":
+        return json.dumps(as_json["code"])
+    else:
+        return ""
+
 
 DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
     "OPTIMIZE_QUERY": {

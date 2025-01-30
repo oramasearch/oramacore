@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Iterator, List
+from typing import Iterator, List, Dict, Any
 from json_repair import repair_json
 
 from src.utils import OramaAIConfig
@@ -9,7 +9,7 @@ from src.service.models import ModelsManager
 from src.prompts.party_planner import DEFAULT_PARTY_PLANNER_ACTIONS
 from src.prompts.party_planner_actions import (
     DEFAULT_PARTY_PLANNER_ACTIONS_DATA,
-    RETURN_TYPE_TEXT,
+    RETURN_TYPE_JSON,
     EXECUTION_SIDE_ORAMACORE,
 )
 
@@ -23,82 +23,100 @@ class Message:
         return json.dumps({"action": self.action, "result": self.result})
 
 
+@dataclass
+class Step:
+    name: str
+    description: str
+    is_orama_step: bool
+    returns_json: bool
+    should_stream: bool
+
+
 class PartyPlanner:
     def __init__(self, config: OramaAIConfig, models_service: ModelsManager):
         self.config = config
         self.models_service = models_service
         self.act = Actions(config)
+        self.executed_steps: List[Message] = []
 
-    def run(self, collection_id: str, input: str, history: List[any]) -> Iterator[str]:
-        action_plan = self.models_service.chat("party_planner", history, input, DEFAULT_PARTY_PLANNER_ACTIONS)
-        action_plan_json = json.loads(repair_json(action_plan))
+    def _get_action_plan(self, history: List[Any], input: str) -> List[Dict[str, Any]]:
+        """Generate and parse the action plan."""
+        action_plan = self.models_service.chat("party_planner", [], input, DEFAULT_PARTY_PLANNER_ACTIONS)
+        return json.loads(repair_json(action_plan))["actions"]
 
-        yield Message("ACTION_PLAN", json.dumps(action_plan_json)).to_json()
+    def _create_step(self, action: Dict[str, str]) -> Step:
+        """Create a Step object from an action dictionary."""
+        step_name = action["step"]
+        step_config = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[step_name]
+        return Step(
+            name=step_name,
+            description=action["description"],
+            is_orama_step=step_config["side"] == EXECUTION_SIDE_ORAMACORE,
+            returns_json=step_config["returns"] == RETURN_TYPE_JSON,
+            should_stream=step_config["stream"],
+        )
 
-        actions = action_plan_json["actions"]
-        history = []
-        steps = {}
+    def _handle_orama_step(self, step: Step, collection_id: str, input: str) -> str:
+        """Handle Orama-specific steps."""
+        if step.name == "PERFORM_ORAMA_SEARCH":
+            try:
+                result = self.act.call_oramacore_search(collection_id, {"term": input, "mode": "hybrid"})
+                return json.dumps(result) if isinstance(result, dict) else str(result)
+            except Exception as e:
+                return json.dumps({"error": str(e)})
+        return json.dumps({"message": f"Skipping action {step.name} as it requires a missing OramaCore integration"})
 
-        for action in actions:
-            step_name = action["step"]
-            step = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[step_name]
-            is_orama_step = step["side"] == EXECUTION_SIDE_ORAMACORE
-            returns_json = step["returns"] == RETURN_TYPE_TEXT
-            should_stream = step["stream"]
+    def _handle_non_streaming_step(self, step: Step, input: str, history: List[Any]) -> tuple[str, List[Any]]:
+        """Handle non-streaming model steps."""
+        result = self.models_service.action(
+            action=step.name, input=input, description=step.description, history=[], stream=False
+        )
 
-            if not is_orama_step:
-                steps[step_name] = "" if should_stream else None
+        history.append({"role": "assistant", "content": result})
+        return result, history
 
-                if not should_stream:
-                    result = self.models_service.action(
-                        action=step_name,
-                        input=input,
-                        description=action["description"],
-                        history=history,
-                        stream=should_stream,
-                    )
+    def _handle_streaming_step(self, step: Step, input: str, history: List[Any]) -> Iterator[tuple[str, List[Any]]]:
+        """Handle streaming model steps."""
+        accumulated_result = ""
+        for chunk in self.models_service.action(
+            action=step.name, input=input, description=step.description, history=[], stream=True
+        ):
+            yield chunk, history
 
-                    if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
-                        result = "".join(result)
+        history.append({"role": "assistant", "content": accumulated_result})
+        yield accumulated_result, history
 
-                    steps[step_name] = result
-                    history.append({"role": "assistant", "content": result})
+    def run(self, collection_id: str, input: str, history: List[Any]) -> Iterator[str]:
+        action_plan = self._get_action_plan(history, input)
+        message = Message("ACTION_PLAN", action_plan)
+        self.executed_steps.append(message)
+        yield message.to_json()
 
-                    if returns_json:
-                        try:
-                            json.loads(result)
-                            yield Message(step_name, result).to_json()
-                        except json.JSONDecodeError:
-                            yield Message(step_name, json.dumps({"error": "Invalid JSON generated"})).to_json()
-                    else:
-                        yield Message(step_name, result).to_json()
+        for action in action_plan:
+            step = self._create_step(action)
+            if step.is_orama_step:
+                result = self._handle_orama_step(step, collection_id, input)
+                message = Message(step.name, result)
+                self.executed_steps.append(message)
+                yield message.to_json()
+                continue
 
-                else:
-                    for chunk in self.models_service.action(
-                        action=step_name,
-                        input=input,
-                        description=action["description"],
-                        history=history,
-                        stream=should_stream,
-                    ):
-                        steps[step_name] += chunk
-                        yield Message(step_name, steps[step_name]).to_json()
+            if not step.should_stream:
+                result, history = self._handle_non_streaming_step(step, input, [])
 
-                    history.append({"role": "assistant", "content": steps[step_name]})
+                print("\n\n")
+                print(result)
+                print("\n\n")
 
+                message = Message(step.name, result)
+                self.executed_steps.append(message)
+                yield message.to_json()
             else:
-                if step_name == "PERFORM_ORAMA_SEARCH":
-                    try:
-                        result = self.act.call_oramacore_search(collection_id, {"term": input, "mode": "vector"})
-                        result_str = json.dumps(result) if isinstance(result, dict) else str(result)
-                        steps[step_name] = result_str
-                        yield Message(step_name, result_str).to_json()
-                    except Exception as e:
-                        yield Message(step_name, json.dumps({"error": str(e)})).to_json()
-                else:
-                    yield Message(
-                        step_name,
-                        json.dumps(
-                            {"message": f"Skipping action {step_name} as it requires a missing OramaCore integration"}
-                        ),
-                    ).to_json()
+                step_result_acc = Message(step.name, "")
+                for result, updated_history in self._handle_streaming_step(step, input, []):
+                    history = updated_history
+                    message = Message(step.name, result)
+                    c_m = step_result_acc.result + result
+                    step_result_acc = Message(step.name, c_m)
+                    yield message.to_json()
+                self.executed_steps.append(step_result_acc)
