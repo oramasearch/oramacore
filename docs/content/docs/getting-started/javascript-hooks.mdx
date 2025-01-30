@@ -76,7 +76,7 @@ Let's take the following documents as an example:
 
 As you can see, the structure of the documents is different. With the `selectEmbeddingProperties` hook, you can customize the text extraction process for each document.
 
-### Returning a single string
+#### Returning a single string
 
 You could write a JavaScript function like this:
 
@@ -110,7 +110,7 @@ Which will return the following strings for the documents:
 
 This way, you can easily produce highly optimized embeddings for each document.
 
-### Returning a single markdown string
+#### Returning a single markdown string
 
 Another approach is to return a single markdown string that will be used for embeddings:
 
@@ -162,7 +162,7 @@ This will produce the following outputs for the two documents:
 
 This approach allows you to generate complete markdown documents rich in information that can be used for embeddings.
 
-### Returning an array of strings
+#### Returning an array of strings
 
 Finally, you can return an array of strings with the properties name to use for each document. OramaCore will then concatenate the values of these properties to generate the embeddings.
 
