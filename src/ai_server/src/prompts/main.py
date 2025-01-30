@@ -94,8 +94,8 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
 
         ```
         Input: "Can you give me an example of how my data has to look when using the standard getExpandedRowModel() function?"
-        Actions: ["OPTIMIZE_QUERY", "PERFORM_ORAMA_SEARCH", "CREATE_CODE", "SUMMARIZE_FINDINGS", "GIVE_REPLY"]
-        Output: {"actions":[{ "step": "OPTIMIZE_QUERY", "description": "Optimize query into a more search-friendly query" }, { "step": "PERFORM_SEARCH", "description": "Use optimized query to perform search in the index" }, { "step": "CREATE_CODE", "description": "Craft code examples about using getExpandedRowModel() function" }, { "step": "SUMMARIZE_FINDINGS", "description": "Summarize the findings from the research and code generation" }]}
+        Actions: ["OPTIMIZE_QUERY", "PERFORM_ORAMA_SEARCH", "CREATE_CODE", "GIVE_REPLY"]
+        Output: {"actions":[{ "step": "OPTIMIZE_QUERY", "description": "Optimize query into a more search-friendly query" }, { "step": "PERFORM_SEARCH", "description": "Use optimized query to perform search in the index" }, { "step": "CREATE_CODE", "description": "Craft code examples about using getExpandedRowModel() function" }]}
         ```
 
         Remember, each step will produce the input for the next one. So you must only combine actions that can work one after another.

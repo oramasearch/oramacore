@@ -94,7 +94,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
     def PlannedAnswer(self, request, context):
         try:
-            model_name = "party_planner"
             history = (
                 [
                     {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
@@ -104,15 +103,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            for message in self.party_planner.run(request.collection_id, request.input):
-                yield PlannedAnswerResponse(data=message)
+            for message in self.party_planner.run(request.collection_id, request.input, history):
+                yield PlannedAnswerResponse(data=message, finished=False)
 
-            # response = self.models_manager.chat(
-            #     model_id=model_name.lower(),
-            #     history=history,
-            #     prompt=request.input,
-            #     context=self.party_planner_actions.get_actions(),
-            # )
+            yield PlannedAnswerResponse(data="", finished=True)
 
         except Exception as e:
             logging.error(f"Error in PlannedAnswer: {e}", exc_info=True)

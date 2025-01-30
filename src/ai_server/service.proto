@@ -73,6 +73,7 @@ message PlannedAnswerRequest {
 
 message PlannedAnswerResponse {
     string data = 1;
+    bool finished = 2; 
 }
 
 // Request message for LLM calls

@@ -43,6 +43,10 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
             These queries must be optimized for searching on search engines like Google or similar.
             You'll be given an input (### Input) and a description of what you have to achieve (### Description) when creating optimized queries.
 
+            Make sure to generate at most three queries. No more than that. Also, these queries must be somewhat different from each other.
+
+            Generate the minimum number of queries you think it's worth generating.
+
             Reply with a valid JSON that includes optimized queries. It must respect the following format:
 
             { "queries": ["<optimized-query>", "<optimized-query>"] }
@@ -109,18 +113,6 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
-    },
-    "SUMMARIZE_FINDINGS": {
-        "side": EXECUTION_SIDE_PYTHON,
-        "prompt:system": dedent(
-            """
-            You're an AI assistant. Your job is to summarize the findings you'll be given (### Input) following a description (### Description) that will give your direction on how to summarize them.
-
-            Be brief but exhaustive. Reply in plain text.
-            """
-        ),
-        "prompt:user": COMMON_USER_PROMPT,
-        "returns": RETURN_TYPE_TEXT,
     },
     "ASK_FOLLOWUP": {
         "side": EXECUTION_SIDE_PYTHON,

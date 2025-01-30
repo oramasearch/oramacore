@@ -1,6 +1,6 @@
 import json
-import time
-from typing import Iterator
+from dataclasses import dataclass
+from typing import Iterator, List
 from json_repair import repair_json
 
 from src.utils import OramaAIConfig
@@ -14,17 +14,26 @@ from src.prompts.party_planner_actions import (
 )
 
 
+@dataclass
+class Message:
+    action: str
+    result: str
+
+    def to_json(self) -> str:
+        return json.dumps({"action": self.action, "result": self.result})
+
+
 class PartyPlanner:
     def __init__(self, config: OramaAIConfig, models_service: ModelsManager):
         self.config = config
         self.models_service = models_service
         self.act = Actions(config)
 
-    def run(self, collection_id: str, input: str) -> Iterator[str]:
-        action_plan = self.models_service.chat("party_planner", [], input, DEFAULT_PARTY_PLANNER_ACTIONS)
+    def run(self, collection_id: str, input: str, history: List[any]) -> Iterator[str]:
+        action_plan = self.models_service.chat("party_planner", history, input, DEFAULT_PARTY_PLANNER_ACTIONS)
         action_plan_json = json.loads(repair_json(action_plan))
 
-        yield repair_json(action_plan)
+        yield Message("ACTION_PLAN", repair_json(action_plan)).to_json()
 
         actions = action_plan_json["actions"]
 
@@ -39,18 +48,18 @@ class PartyPlanner:
             if not is_orama_step:
                 result = self.models_service.action(step_name, input, action["description"], history)
 
-                if returns_json:
-                    result = json.dumps(result)
-
                 steps[step_name] = result
                 history.append({"role": "assistant", "content": result})
-                yield result
+
+                yield Message(step_name, result).to_json()
 
             else:
                 if step_name == "PERFORM_ORAMA_SEARCH":
-                    result = self.act.call_oramacore_search(collection_id, {"term": "foo"})
+                    result = self.act.call_oramacore_search(collection_id, {"term": "shoes", "mode": "vector"})
                     steps[step_name] = result
-                    yield result
+                    yield Message(step_name, result).to_json()
 
                 else:
-                    yield f"Skipping action {step_name} as it requires a missing OramaCore integration"
+                    yield Message(
+                        step_name, f"Skipping action {step_name} as it requires a missing OramaCore integration"
+                    ).to_json()

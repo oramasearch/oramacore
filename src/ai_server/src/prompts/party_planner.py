@@ -27,10 +27,6 @@ DEFAULT_PARTY_PLANNER_ACTIONS = [
         "description": "Create a code snippet. It can be a solution to a problem, a code example, or a code snippet to test a library.",
     },
     {
-        "step": "SUMMARIZE_FINDINGS",
-        "description": 'Summarize the findings from the research. Usually this is done as a last step before "GIVE_REPLY".',
-    },
-    {
         "step": "ASK_FOLLOWUP",
         "description": "Ask follow-up questions to clarify the inquiry or gather more information. To be used when the user question is not clear.",
     },
