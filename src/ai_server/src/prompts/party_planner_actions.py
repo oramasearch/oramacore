@@ -34,6 +34,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
+        "stream": False,
     },
     "GENERATE_QUERIES": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -56,8 +57,9 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
+        "stream": False,
     },
-    "PERFORM_ORAMA_SEARCH": {"side": EXECUTION_SIDE_ORAMACORE, "returns": RETURN_TYPE_JSON},
+    "PERFORM_ORAMA_SEARCH": {"side": EXECUTION_SIDE_ORAMACORE, "returns": RETURN_TYPE_JSON, "stream": False},
     "DESCRIBE_INPUT_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
@@ -81,6 +83,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
+        "stream": False,
     },
     "IMPROVE_INPUT": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -95,6 +98,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_TEXT,
+        "stream": False,
     },
     "CREATE_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -113,6 +117,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
+        "stream": False,
     },
     "ASK_FOLLOWUP": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -124,6 +129,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_TEXT,
+        "stream": True,
     },
     "GIVE_REPLY": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -152,5 +158,6 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": lambda input, context: f"### Question\n{input}\n\n### Context\n{context}",
         "returns": RETURN_TYPE_TEXT,
+        "stream": True,
     },
 }

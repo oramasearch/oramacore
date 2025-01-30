@@ -72,7 +72,9 @@ class ModelsManager:
                 del self._models[model_id]
             raise
 
-    def action(self, action: str, input: str, description: str, history: List[Any]) -> Iterator[str]:
+    def action(
+        self, action: str, input: str, description: str, history: List[Any], stream: bool = False
+    ) -> Iterator[str]:
         actual_model_id = self._model_refs.get("action")
         model_config = self._models.get(actual_model_id)
         model = model_config["model"]
@@ -89,11 +91,32 @@ class ModelsManager:
         inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
-        outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
+        if stream:
+            streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
 
-        decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+            generation_kwargs = dict(
+                **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
+            )
+            thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+            thread.start()
 
-        return decoded_output
+            p = None
+
+            for new_text in streamer:
+                old_text = p
+                p = new_text
+
+                if old_text:
+                    yield old_text
+
+            yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.
+
+        else:
+            outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
+
+            decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+
+            return decoded_output
 
     def chat(self, model_id: str, history: List[Any], prompt: str, context: Optional[str] = None) -> str:
         actual_model_id = self._model_refs.get(model_id)
