@@ -1,0 +1,119 @@
+---
+title: OramaCore Architecture
+description: A deep dive into the OramaCore architecture.
+---
+
+As we saw in the introduction, OramaCore enables you to create complex, interaction-rich, and highly customizable AI and discovery experiences with remarkable simplicity.
+
+In this section, we will compare it to a typical production-ready architecture, addressing all the key components required to build scalable, production-grade solutions.
+
+
+## High-Level Architecture
+
+At a very high-level, we can identify the following components as the core of OramaCore:
+
+![High-Level OramaCore Architecture](/docs/architecture/high-level.png)
+
+Let's see the components in a bit more detail.
+
+## Frontend
+
+The OramaCore application communicates with the outside world via an API layer. We call this API layer **application frontend**.
+
+### Rust Webserver
+
+The front-facing webserver. Like ~90% of OramaCore, we choose Rust for its performance, rialability, an quite honestly, type system.
+
+Powered by [Axum](https://github.com/tokio-rs/axum), all the communications between OramaCore and the outside world passes from this webserver.
+
+## Application Layer
+
+The application layer is the core of all the operations performed by OramaCore. It holds data, performs CRUD operations, persists everything on disk, and mode. It only communicates with the outside world via the **frontend layer**. 
+
+### Full-text Search Engine
+
+Our expertise in search allowed us to build a very performant and scalable full-text search engine that allows the user to perform fast lookups and filtering on the data.
+
+It's based on a **FST** (Finite State Transducer), a space-efficient, automaton-based data structure that maps input terms (words, prefixes, or n-grams) to output values (such as document IDs, term frequencies, or other metadata), enabling fast prefix searches, fuzzy matching, and efficient storage of large lexicons.
+
+Sometimes, the user can ask for very broad questions, like:
+
+```
+"I just started playing golf, I'd need a pair of shoes that costs less than $100".
+```
+
+Orama will automatically translate this into an optimized full-text search query in order to retrieve exactly what the user is asking for:
+
+```json
+{
+    "term": "Golf Shoes",
+    "where": {
+        "price": {
+            "lt": 100
+        }
+    }
+}
+```
+
+This will give the absolute fastest and more accurate results you can get.
+
+### Vector Database
+
+When building modern, large-scale applications, vector databases are also a key component that become quite popular lately. And for good reasons.
+
+We've implemented a fully-fledged vector database, powered by a **HNSW** (Hierarcically Navigable Small Worlds) graph, a powerful and extremely scalable data structure that allows vector similarity search through billions of vectors in just a few milliseconds.
+
+While there are other great vector databases that allows you to choose the index type (HNSW, IVF_FLAT, LSH, and more), we took the decision of providing one single, simple, yet extremely powerful index type.
+
+We'll take care and optimize it for you, so you can focus on building the applications you want to build.
+
+### Answer Engine
+
+SearchGPT, Perplexity, and all these products are showing how people is more and more using search in different ways.
+
+OramaCore provides a single, simple API to achieve the same result, on your data, allowing you to create SearchGPT or Perplexity-like experiences on your data.
+
+It pushes data to the client using **SSEs** (server-side events).
+
+## AI Layer
+
+The **AI Layer** is the set of OramaCore components that are responsible for providing AI capabilities and features to Orama, such as embeddings generation, LLMs integrations, and more.
+
+This entire layer, for now, is managed by Python and communicates with the **Application Layer** via a local gRPC server.
+
+Future versions of OramaCore will move away from this approach by either integrating the Python interpreter inside of the Rust **Application Layer** (via [PyO3](https://github.com/PyO3/pyo3)) or by using the ONNX runtime via Rust directly.
+
+### Embeddings generation
+
+OramaCore will automatically generate embeddings for your data. You can configure which models to use via the [configuration](/docs/getting-started/configuration).
+
+Current benchmarks highlights how this implementation is capable of generating up to 1200 embeddings per second on a RTX 4080 Super. This seems a bit optimistic and we'll release some reproducible benchmarks as soon as possible.
+
+### Party Planner
+
+The [Answer Engine](#answer-engine) can work in two modes: it can just perform classic RAG, or plan a series of operations to take before giving an answer.
+
+Party Planner is the component responsible for planning and orchestrating all the various operations the **Answer Engine** has to go through before giving an answer.
+
+For example, if a user asks:
+
+```python
+"I just installed a Ryzen 9 9900X CPU but I fear I bent some pins, as the PC doesn't turn on. What should I do?" # Taken from a true story
+```
+
+Party Planner could decide that in order to give the most accurate answer possible, it'll have to perform the following operations:
+
+1. Split the query into multiple, small, optimized queries (for example: `["Ryzen 9 9900X bent pins", "AMD CPUs bent pins troubleshooting"]`)
+2. Run these queries on OramaCore or on external services (Google, or other APIs)
+3. Summarize the findings
+4. Give the reply
+
+This ensures a high-quality output.
+
+### Fine-tuned LLMs
+
+OramaCore uses a few fine-tuned LLMs to power **Party Planner** and its actions (like splitting input into multiple queries, etc.). These models allows OramaCore to perform quick, high quality inference sessions and give the final user the best quality and performance possible.
+
+## Runtime Layer
+
+The runtime layer is the deepest layer of OramaCore.
