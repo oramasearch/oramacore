@@ -213,6 +213,18 @@ But no code is present, Party Planner will ask the user for more information:
 
 Once all the steps in the execution chain are completed, Party Planner can provide the answer to the user.
 
-## Writing Custom Actions
+--- 
+
+## In the Next Versions of OramaCore
+
+We're working on extending Party Planner capabilities by making it faster, more intelligent, and cutsomizable.
+
+### Writing Custom Actions
 
 In the future versions of OramaCore, you'll be able to write your own actions in JavaScript. These actions will be executed by OramaCore on **Deno**, a secure, Rust-based JavaScript runtime.
+
+### Execution Graph
+
+At the current stage, Party Planner is executing the actions in a linear way. In the future versions of OramaCore, Party Planner will be able to execute the actions in a graph, where the nodes are the actions and the edges are the dependencies between the actions.
+
+This will allow Party Planner to execute the actions in parallel, making the execution chain faster and more efficient.
