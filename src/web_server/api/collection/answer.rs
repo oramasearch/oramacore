@@ -91,7 +91,7 @@ async fn planned_answer_v0(
                     if tx
                         .send(Ok(Event::default().data(
                             serde_json::to_string(&SseMessage::Acknowledge {
-                                message: response.plan,
+                                message: response.data,
                             })
                             .unwrap(),
                         )))
