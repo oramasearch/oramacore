@@ -115,7 +115,11 @@ impl CollectionsWriter {
     pub async fn list(&self) -> Vec<CollectionDTO> {
         let collections = self.collections.read().await;
 
-        collections.iter().map(|(_, coll)| coll.as_dto()).collect()
+        let mut r = vec![];
+        for collection in collections.values() {
+            r.push(collection.as_dto().await);
+        }
+        r
     }
 
     pub async fn commit(&self) -> Result<()> {
