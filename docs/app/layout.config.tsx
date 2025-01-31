@@ -1,5 +1,14 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 
+function Logo() {
+  return (
+    <div className='flex items-center text-base'>
+      <img src={`/logo/orama-logo.svg`} className='h-6 mr-2' alt='OramaSearch Inc. Logo' />
+      OramaCore
+    </div>
+  )
+}
+
 /**
  * Shared layout configurations
  *
@@ -9,7 +18,10 @@ import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
  */
 export const baseOptions: BaseLayoutProps = {
   nav: {
-    title: 'OramaCore',
+    transparentMode: "always",
+    title: (
+      <Logo />
+    )
   },
   links: [
     {
