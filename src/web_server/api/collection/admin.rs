@@ -27,64 +27,74 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(create_collection())
         .add(add_documents())
         .add(delete_documents())
-        .add(dump_all())
         .with_state(write_side)
 }
 
+type AuthorizationBearerHeader =
+    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
+
 #[endpoint(
-    method = "POST",
-    path = "/v0/writer/dump_all",
+    method = "GET",
+    path = "/v1/collections",
     description = "List all collections"
 )]
-async fn dump_all(write_side: State<Arc<WriteSide>>) -> impl IntoResponse {
-    match write_side.commit().await {
-        Ok(_) => {}
+async fn get_collections(
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+) -> Result<Json<Vec<CollectionDTO>>, (StatusCode, impl IntoResponse)> {
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    let collections = match write_side.list_collections(master_api_key).await {
+        Ok(collections) => collections,
         Err(e) => {
-            error!("Error dumping all collections: {}", e);
+            error!("Error listing collections: {}", e);
             e.chain()
                 .skip(1)
                 .for_each(|cause| error!("because: {}", cause));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ));
         }
-    }
-    // writer.commit(data_dir)
-
-    // Json(collections)
-    Json(())
+    };
+    Ok(Json(collections))
 }
 
 #[endpoint(
     method = "GET",
-    path = "/v0/collections",
-    description = "List all collections"
-)]
-async fn get_collections(write_side: State<Arc<WriteSide>>) -> Json<Vec<CollectionDTO>> {
-    let collections = write_side.list_collections().await;
-    Json(collections)
-}
-
-#[endpoint(
-    method = "GET",
-    path = "/v0/collections/{id}",
+    path = "/v1/collections/{id}",
     description = "Get a collection by id"
 )]
 async fn get_collection_by_id(
     Path(id): Path<String>,
     write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
     let collection_id = CollectionId(id);
-    let collection_dto = write_side.get_collection_dto(collection_id).await;
+    let collection_dto = write_side
+        .get_collection_dto(master_api_key, collection_id)
+        .await;
 
     match collection_dto {
-        Some(collection_dto) => Ok(Json(collection_dto)),
-        None => Err((
+        Ok(Some(collection_dto)) => Ok(Json(collection_dto)),
+        Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "collection not found" })),
         )),
+        Err(e) => {
+            error!("Error get collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
-
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[endpoint(
     method = "POST",

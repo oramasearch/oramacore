@@ -18,7 +18,8 @@ Authorization: Bearer my-master-api-key
 }
 HTTP 201
 
-GET {{base_url}}/v0/collections/{{collection_id}}
+GET {{base_url}}/v1/collections/{{collection_id}}
+Authorization: Bearer my-master-api-key
 HTTP 200
 [Asserts]
 jsonpath "$.document_count" == 0
@@ -42,7 +43,8 @@ Authorization: Bearer my-write-api-key
 ]
 HTTP 200
 
-GET {{base_url}}/v0/collections/{{collection_id}}
+GET {{base_url}}/v1/collections/{{collection_id}}
+Authorization: Bearer my-master-api-key
 HTTP 200
 [Asserts]
 jsonpath "$.document_count" == 2

@@ -14,7 +14,7 @@ class Actions:
 
     def call_oramacore_search(self, collection_id: str, query: Dict) -> any:
         body = json.dumps(query)
-        url = f"http://{self.config.rust_server_host}:{self.config.rust_server_port}/v0/{collection_id}/actions/execute"
+        url = f"http://{self.config.rust_server_host}:{self.config.rust_server_port}/v1/{collection_id}/actions/execute"
 
         headers = {"Content-Type": "application/json; charset=utf-8"}
         resp = requests.post(url=url, json={"context": body, "name": "search"}, headers=headers)

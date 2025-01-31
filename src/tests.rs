@@ -263,7 +263,9 @@ async fn test_commit_and_load() -> Result<()> {
         )
         .await?;
 
-    let before_commit_collection_lists = write_side.list_collections().await;
+    let before_commit_collection_lists = write_side
+        .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
+        .await?;
 
     write_side.commit().await?;
     read_side.commit().await?;
@@ -289,7 +291,9 @@ async fn test_commit_and_load() -> Result<()> {
         after_commit_result.hits[0].id
     );
 
-    let after_commit_collection_lists = write_side.list_collections().await;
+    let after_commit_collection_lists = write_side
+        .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
+        .await?;
 
     assert_eq!(
         before_commit_collection_lists,
@@ -311,7 +315,9 @@ async fn test_commit_and_load() -> Result<()> {
 
     assert_eq!(after_commit_result, after_load_result);
 
-    let after_load_collection_lists = write_side.list_collections().await;
+    let after_load_collection_lists = write_side
+        .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
+        .await?;
 
     assert_eq!(after_commit_collection_lists, after_load_collection_lists);
 
@@ -356,7 +362,9 @@ async fn test_get_collections() -> Result<()> {
         create_collection(write_side.clone(), CollectionId(id.clone())).await?;
     }
 
-    let collections = write_side.list_collections().await;
+    let collections = write_side
+        .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
+        .await?;
 
     assert_eq!(collections.len(), 3);
 

@@ -23,24 +23,8 @@ use crate::{
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(search())
-        .add(dump_all())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
         .with_state(read_side)
-}
-
-#[endpoint(method = "POST", path = "/v0/reader/dump_all", description = "Dump")]
-async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
-    match read_side.commit().await {
-        Ok(_) => {}
-        Err(e) => {
-            error!("Error dumping all collections: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
-        }
-    }
-
-    axum::Json(())
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -67,10 +51,16 @@ async fn search(
 
     match output {
         Ok(data) => Ok((StatusCode::OK, Json(data))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            error!("Error deleting documents to collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
