@@ -158,13 +158,17 @@ Since OramaCore is schemaless, concatenating all string fields is a simple and e
 To customize text extraction, you can specify the fields to use and the model to generate embeddings when creating a collection:
 
 ```bash title="Creating a collection"
-curl -X POST http://localhost:8080/v0/collections \
+curl -X POST \
+  http://localhost:8080/v0/collections \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <master-api-key>' \
   -d '{
     "id": "products",
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key",
     "embeddings": {
       "model": "BGESmall",
-      "typed_fields": ["productName", "description", "brand"]
+      "document_fields": ["productName", "description", "brand"]
     }
   }'
 ```

@@ -55,6 +55,26 @@ impl UncommittedCollection {
     }
 
     pub fn get_infos(&self) -> UncommittedInfo {
+        trace!(
+            "Getting uncommitted info. vector: {:?}, number {:?}, string {:?}, bool {:?}",
+            self.vector_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.number_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.string_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.bool_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+        );
+
         UncommittedInfo {
             number_fields: self
                 .number_index
@@ -223,4 +243,13 @@ pub struct UncommittedInfo {
     pub string_fields: HashSet<FieldId>,
     pub bool_fields: HashSet<FieldId>,
     pub vector_fields: HashSet<FieldId>,
+}
+
+impl UncommittedInfo {
+    pub fn is_empty(&self) -> bool {
+        self.number_fields.is_empty()
+            && self.string_fields.is_empty()
+            && self.bool_fields.is_empty()
+            && self.vector_fields.is_empty()
+    }
 }

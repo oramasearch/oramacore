@@ -12,7 +12,7 @@ writer_side:
     output: in-memory
 
     # Replace the following value with your own API key
-    master_api_key: foobar
+    master_api_key: my-master-api-key
     config:
         data_dir: ./.data/writer
         # The maximum number of embeddings that can be stored in the queue
@@ -27,6 +27,8 @@ writer_side:
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
         javascript_queue_limit: 500000
+        # Set interval for commiting the changes to the disk
+        commit_interval: 1m
 
 reader_side:
     input: in-memory
@@ -34,6 +36,8 @@ reader_side:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
         insert_batch_commit_size: 50000000
+        # Set interval for commiting the changes to the disk
+        commit_interval: 1m
 
 ai_server:
     scheme: http

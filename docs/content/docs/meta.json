@@ -5,6 +5,7 @@
   "pages": [
     "---Getting Started---",
     "index",
+    "api-key",
     "configuration",
     "running-oramacore",
     "apis",

@@ -199,7 +199,7 @@ impl CollectionReader {
 
         let offset = self.offset_storage.get_offset();
         assert!(offset.0 > 0);
-        println!("Committing with offset: {:?}", offset);
+        debug!("Committing with offset: {:?}", offset);
 
         let collection_info_path = data_dir.join("info.info");
         let previous_offset: Option<Offset> = match BufferedFile::open(collection_info_path.clone())
@@ -216,7 +216,7 @@ impl CollectionReader {
         let mut current_collection_info = if let Some(previous_offset_collection_info_path) =
             previous_offset_collection_info_path
         {
-            debug!("Previous collection info found. We will merge it with the current one");
+            debug!("We will merge it with the current one");
             let previous_collection_info: CollectionInfo =
                 BufferedFile::open(previous_offset_collection_info_path)
                     .context("Cannot open previous collection info")?
@@ -244,9 +244,12 @@ impl CollectionReader {
         let uncommitted = self.uncommitted_collection.read().await;
 
         let mut uncommitted_infos = uncommitted.get_infos();
+        debug!("Uncommitted info {:?}", uncommitted_infos);
 
         let uncommitted_document_deletions = self.uncommitted_deleted_documents.read().await;
         let uncommitted_document_deletions = if !uncommitted_document_deletions.is_empty() {
+            info!("Uncommitted document deletion: commit every fields");
+
             let uncommitted_document_deletions = uncommitted_document_deletions.clone();
             let info = committed.get_infos();
 
@@ -260,7 +263,12 @@ impl CollectionReader {
             HashSet::new()
         };
 
-        info!("Merging fields {:?}", uncommitted_infos);
+        if uncommitted_infos.is_empty() {
+            info!("No uncommitted data to commit");
+            return Ok(());
+        }
+
+        debug!("Merging fields {:?}", uncommitted_infos);
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
@@ -550,7 +558,7 @@ impl CollectionReader {
         drop(committed);
         drop(uncommitted);
 
-        // The following loop should be fast, so the read lock is not held for a long time
+        // The following loop should fast, so the read lock is not held for a long time
         let (mut committed, mut uncommitted) = join!(
             self.committed_collection.write(),
             self.uncommitted_collection.write()
@@ -562,6 +570,14 @@ impl CollectionReader {
         for (field_id, field) in string_fields {
             uncommitted.string_index.remove(&field_id);
             committed.string_index.insert(field_id, field);
+        }
+        for (field_id, field) in bool_fields {
+            uncommitted.bool_index.remove(&field_id);
+            committed.bool_index.insert(field_id, field);
+        }
+        for (field_id, field) in vector_fields {
+            uncommitted.vector_index.remove(&field_id);
+            committed.vector_index.insert(field_id, field);
         }
         drop(committed);
         drop(uncommitted);
@@ -579,6 +595,8 @@ impl CollectionReader {
             .context("Cannot write previous collection info")?;
 
         drop(commit_insert_mutex_lock);
+
+        info!("Collection committed");
 
         Ok(())
     }

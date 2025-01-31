@@ -13,6 +13,10 @@ We will make these APIs stable in the v1.0.0 release, planned for February 28th,
 
 ## APIs
 
+<Callout>
+API Key type: **`write_api_key`**.
+</Callout>
+
 To insert a new document, you first need to create a new [collection](/docs/apis/create-collection).
 
 Once you have a collection, you can start inserting documents using the following API:
@@ -22,7 +26,7 @@ Once you have a collection, you can start inserting documents using the followin
 curl -X PATCH \
   http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <api-key>' \
+  -H 'Authorization: Bearer <write_api_key>' \
   -d '{
     "title": "My first document",
     "content": "This is the content of my first document."

@@ -16,19 +16,70 @@ For example, if you want to index all the products in your e-commerce store, you
 
 ## APIs
 
+<Callout>
+API Key type: **master**.
+</Callout>
+
 Creating a new collection is as simple as:
 
 <Tabs groupId='create' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v0/collections \
+  -H 'Authorization: Bearer <master-api-key>' \
+  -d '{
+    "id": "products",
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key"
+  }'
+```
+</Tabs>
 
+A more complete example, with all the optional fields:
+
+<Tabs groupId='create' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
   http://localhost:8080/v0/collections \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <api-key>' \
-  -d '{ "name": "products" }'
+  -H 'Authorization: Bearer <master-api-key>' \
+  -d '{
+    "id": "products",
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key",
+    "description": "My optional description about this collection of products",
+    "language": "english",
+    "embeddings": {
+      "model": "BGESmall",
+      "document_fields": ["title", "description"]
+    }
+  }'
 ```
-
 </Tabs>
+
+In the next sections, we'll explain each of the parameters in detail.
+
+### Parameters
+
+| Name           | Type     | Description | Required | Default |
+| -------------- | -------- | ----------- | -------- | ------- |
+| `id`         | `string`   | The id of the collection. | Yes | - |
+| `write_api_key` | `string`   | The write API key for this collection. | Yes | - |
+| `read_api_key`  | `string`   | The read API key for this collection. | Yes | - |
+| `description`   | `string`   | A description for this collection. | No | - |
+| `language`      | `string`   | The language of the documents in this collection. | No | `english` |
+| `embeddings`    | `object`   | The configuration for text embeddings. | No | - |
+
+The `embeddings` object is the parameter used by OramaCore to configure text embeddings generation for the documents in this collection.
+
+The `embeddings` object has the following parameters:
+
+| Name             | Type     | Description | Required | Default |
+| ---------------- | -------- | ----------- | -------- | ------- |
+| `model`          | `string`   | The model to use for text embeddings generation. | No | `MultilingualE5Small` |
+| `document_fields` | `string[]` | The fields to use for text embeddings generation. If not specified, OramaCore will use all the string fields found in the documents. | No | - |
+
+Read more about text embeddings and their configurations [here](/docs/text-embeddings).
 
 ## Hooks
 

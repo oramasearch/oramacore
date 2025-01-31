@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
@@ -118,6 +118,8 @@ impl CollectionsReader {
 
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
+        info!("Committing collections");
+
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
@@ -125,8 +127,6 @@ impl CollectionsReader {
         let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
         for (id, reader) in col {
-            debug!("Committing collection {:?}", id);
-
             let collection_dir = collections_dir.join(&id.0);
 
             create_if_not_exists_async(&collection_dir)
@@ -137,8 +137,6 @@ impl CollectionsReader {
                 .commit(collection_dir)
                 .await
                 .with_context(|| format!("Cannot commit collection {:?}", reader.get_id()))?;
-
-            info!(coll_id=?id, "Collection committed");
         }
 
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
@@ -148,6 +146,8 @@ impl CollectionsReader {
         create_or_overwrite(data_dir.join("info.json"), &collections_info)
             .await
             .context("Cannot create info.json file")?;
+
+        info!("Collections committed");
 
         Ok(())
     }
