@@ -8,10 +8,12 @@ use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
 use oramacore::ai::{AIServiceConfig, OramaModel};
 use oramacore::collection_manager::dto::ApiKey;
-use oramacore::collection_manager::sides::{CollectionsWriterConfig, OramaModelSerializable};
+use oramacore::collection_manager::sides::{
+    CollectionsWriterConfig, OramaModelSerializable, ReadSideConfig,
+};
 use oramacore::collection_manager::sides::{IndexesConfig, WriteSideConfig};
 use oramacore::test_utils::create_grpc_server;
-use oramacore::{build_orama, OramacoreConfig, ReadSideConfig};
+use oramacore::{build_orama, OramacoreConfig};
 use redact::Secret;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -80,6 +82,7 @@ async fn start_server() {
                 default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
                 insert_batch_commit_size: 10,
                 javascript_queue_limit: 10_000,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
         reader_side: ReadSideConfig {
@@ -87,6 +90,7 @@ async fn start_server() {
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 10,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
     })

@@ -99,6 +99,7 @@ cuid2 = "0.1.4"
 
 mobc = "0.8"
 redact = { version = "0.1", features = ["serde"] }
+duration-str = "0.12.0"
 
 [build-dependencies]
 cc = "1"

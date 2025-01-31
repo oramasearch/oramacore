@@ -11,12 +11,15 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use super::hooks::{HookName, HooksRuntime};
+
 use anyhow::{Context, Result};
+use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time::MissedTickBehavior};
 use tracing::{info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
@@ -50,6 +53,8 @@ pub struct CollectionsWriterConfig {
     pub insert_batch_commit_size: u64,
     #[serde(default = "javascript_queue_limit_default")]
     pub javascript_queue_limit: u32,
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub commit_interval: Duration,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -71,6 +76,8 @@ pub struct WriteSide {
     insert_batch_commit_size: u64,
 
     master_api_key: ApiKey,
+
+    commit_interval: Duration,
 }
 
 impl WriteSide {
@@ -97,6 +104,8 @@ impl WriteSide {
             collections_writer_config.embedding_queue_limit,
         );
 
+        let commit_interval = collections_writer_config.commit_interval;
+
         WriteSide {
             sender,
             collections: CollectionsWriter::new(collections_writer_config, sx),
@@ -109,10 +118,12 @@ impl WriteSide {
             insert_batch_commit_size,
 
             master_api_key,
+
+            commit_interval,
         }
     }
 
-    pub async fn load(&mut self) -> Result<()> {
+    pub async fn load(mut self) -> Result<Arc<Self>> {
         self.collections
             .load(self.hook_runtime.clone(), self.nlp_service.clone())
             .await?;
@@ -124,7 +135,11 @@ impl WriteSide {
             Ok(info) => info,
             Err(err) => {
                 warn!("Cannot read info file: {}. Skip loading", err);
-                return Ok(());
+                let s = Arc::new(self);
+
+                s.clone().start_commit_loop(s.commit_interval);
+
+                return Ok(s);
             }
         };
         let WriteSideInfo::V1(info) = info;
@@ -133,7 +148,34 @@ impl WriteSide {
             .store(info.document_count, Ordering::Relaxed);
         self.sender.set_offset(info.offset);
 
-        Ok(())
+        let s = Arc::new(self);
+
+        s.clone().start_commit_loop(s.commit_interval);
+
+        Ok(s)
+    }
+
+    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
+        tokio::task::spawn(async move {
+            let mut interval = tokio::time::interval(insert_batch_commit_size);
+
+            // If for some reason we miss a tick, we skip it.
+            // In fact, the commit is blocked only by `update` method.
+            // If the collection is under heavy load,
+            // the commit will be run due to the `insert_batch_commit_size` config.
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+                info!(
+                    "{:?} time reached. Committing write side",
+                    insert_batch_commit_size.clone()
+                );
+                if let Err(e) = self.commit().await {
+                    tracing::error!(?e, "Cannot commit write side");
+                }
+            }
+        });
     }
 
     #[instrument(skip(self))]

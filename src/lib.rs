@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    channel, hooks::HooksRuntime, IndexesConfig, OperationReceiver, ReadSide, WriteSide,
+    channel, hooks::HooksRuntime, OperationReceiver, ReadSide, ReadSideConfig, WriteSide,
     WriteSideConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -46,12 +46,6 @@ pub mod test_utils;
 pub enum SideChannelType {
     #[serde(rename = "in-memory")]
     InMemory,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ReadSideConfig {
-    pub input: SideChannelType,
-    pub config: IndexesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -143,25 +137,24 @@ pub async fn build_orama(
     let nlp_service = Arc::new(NLPService::new());
 
     info!("Building write_side");
-    let mut write_side = WriteSide::new(
+    let write_side = WriteSide::new(
         sender.clone(),
         writer_side,
         ai_service.clone(),
         hooks_runtime,
         nlp_service.clone(),
     );
-    write_side.load().await.context("Cannot load write side")?;
+    let write_side = write_side.load().await.context("Cannot load write side")?;
 
     info!("Building read_side");
-    let mut read_side = ReadSide::try_new(ai_service, nlp_service, reader_side.config)
+    let read_side = ReadSide::try_new(ai_service, nlp_service, reader_side)
         .context("Cannot create read side")?;
-    read_side
+    let read_side = read_side
         .load()
         .await
         .context("Cannot load collection reader")?;
 
-    let write_side = Some(Arc::new(write_side));
-    let collections_reader = Some(Arc::new(read_side));
+    let write_side = Some(write_side);
 
-    Ok((write_side, collections_reader, receiver))
+    Ok((write_side, Some(read_side), receiver))
 }
