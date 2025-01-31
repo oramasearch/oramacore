@@ -1,0 +1,49 @@
+---
+title: "Insert Documents"
+description: "APIs to insert documents into an OramaCore collection."
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Callout type='warn'>
+At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
+
+We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
+</Callout>
+
+## APIs
+
+To insert a new document, you first need to create a new [collection](/docs/apis/create-collection).
+
+Once you have a collection, you can start inserting documents using the following API:
+
+<Tabs groupId='insert' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X PATCH \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <api-key>' \
+  -d '{
+    "title": "My first document",
+    "content": "This is the content of my first document."
+  }'
+```
+</Tabs>
+
+OramaCore will [automatically generate generate text embeddings](/docs/text-embeddings) for the document in real-time, allowing you to perform full-text, hybrid, and vector search immediately.
+
+## Optimizations
+
+After inserting a document, OramaCore will perform a number of optimizations.
+
+Since OramaCore uses two immutable data structures (**FST** for full-text search and **HNSW** for vector search), inserting a new document won't automatically guarantee that it will be stored in such structures immediately.
+
+OramaCore will insert all the new documents into a buffer, and once the buffer reaches a certain size, it will be flushed to the immutable data structures.
+
+The buffer size is configurable via the [`insert_batch_commit_size`](/docs/configuration#writer_side) configuration in the `config.yaml` file.
+
+By default, OramaCore will commit (so will push the buffer to the immutable data structures) every 5000 documents. You can change this value to better suit your use case.
+
+One thing to note is that OramaCore will be able to search for the document immediately after inserting it, even if it's not yet in the immutable data structures. This is because OramaCore will also store the document in a mutable data structure, allowing you to search for it immediately.
+
+And since the buffer size is tipically small (we recommend < 100k elements), you won't notice any performance degradation.

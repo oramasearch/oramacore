@@ -2,6 +2,8 @@
   "title": "APIs",
   "pages": [
     "introduction",
-    "create-collection"
+    "create-collection",
+    "insert-documents",
+    "search-documents"
   ]
 }

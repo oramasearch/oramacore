@@ -1,0 +1,92 @@
+---
+title: "Search Documents"
+description: "APIs to search documents in a Collection in OramaCore."
+---
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Callout type='warn'>
+At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
+
+We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
+</Callout>
+
+## APIs
+
+To search for documents in a collection, you can use the following API:
+
+<Tabs groupId='search' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/search \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <api-key>' \
+  -d '{ "term": "The quick brown fox" }'
+```
+</Tabs>
+
+The API will return a list of documents that match the search term. The documents will be sorted by relevance, with the most relevant documents appearing first.
+
+## Search Parameters
+
+When performing search, you can use a number of parameters to customize the search results:
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `term` | The search term. | - |
+| `mode` | The search mode. Can be `fulltext`, `vector`, or `hybrid`. | `fulltext` |
+| `limit` | The maximum number of documents to return. | `10` |
+| `offset` | The number of documents to skip. | `0` |
+| `properties` | The properties to search in. <br />Should be an array of strings (for example: `["title", "description", "author.name"]`) | All properties |
+| `where` | A filter to apply to the search results. Read more [here](#where-filters) | - |
+
+### Where Filters
+
+At index time, OramaCore will index different datatypes in different ways. For example, a `string` will be indexed differently than a `number` or a `boolean`.
+
+When performing a search, you can use the `where` parameter to filter the search results based on the datatype of the property.
+
+#### Filtering Numbers
+
+To filter numbers, you can use the following operators:
+
+| Operator | Description | Example |
+| --- | --- | --- |
+| `eq` | Equal to | `{"where": {"age": {"eq": 25}}}` |
+| `lt` | Less than | `{"where": {"age": {"lt": 25}}}` |
+| `lte` | Less than or equal to | `{"where": {"age": {"lte": 25}}}` |
+| `gt` | Greater than | `{"where": {"age": {"gt": 25}}}` |
+| `gte` | Greater than or equal to | `{"where": {"age": {"gte": 25}}}` |
+| `between` | Between two values | `{"where": {"age": {"between": [20, 30]}}}` |
+
+So a full query complete with a `where` filter might look like this:
+
+```json
+{
+  "term": "John Doe",
+  "where": {
+    "age": {
+      "gte": 25
+    }
+  }
+}
+```
+
+#### Filtering Booleans
+
+To filter booleans, you can use the following operators:
+
+| Operator | Description | Example |
+| --- | --- | --- |
+| `true` | True | `{"where": {"is_active": true}}` |
+| `false` | False | `{"where": {"is_active": false}}` |
+
+So a full query complete with a `where` filter might look like this:
+
+```json
+{
+  "term": "John Doe",
+  "where": {
+    "is_active": true
+  }
+}
+```
