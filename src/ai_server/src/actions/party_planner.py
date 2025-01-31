@@ -56,11 +56,31 @@ class PartyPlanner:
             should_stream=step_config["stream"],
         )
 
+    def _execute_orama_search(self, collection_id: str, input: str):
+        for step in self.executed_steps:
+            if step.action == "OPTIMIZE_QUERY":
+                return self.act.call_oramacore_search(
+                    collection_id, {"term": step.result, "mode": "hybrid", "limit": 5}
+                )
+
+            elif step.action == "GENERATE_QUERIES":
+                results = []
+
+                for query in step.result:
+                    res = self.act.call_oramacore_search(collection_id, {"term": query, "mode": "hybrid", "limit": 3})
+                    results.append(res)
+
+                return results
+
+            else:
+                return self.act.call_oramacore_search(collection_id, {"term": input, "mode": "hybrid", "limit": 5})
+
     def _handle_orama_step(self, step: Step, collection_id: str, input: str) -> str:
         """Handle Orama-specific steps."""
         if step.name == "PERFORM_ORAMA_SEARCH":
             try:
-                result = self.act.call_oramacore_search(collection_id, {"term": input, "mode": "hybrid"})
+                result = self._execute_orama_search(collection_id, input)
+
                 return json.dumps(result) if isinstance(result, dict) else str(result)
             except Exception as e:
                 return json.dumps({"error": str(e)})
@@ -94,6 +114,7 @@ class PartyPlanner:
 
         for action in action_plan:
             step = self._create_step(action)
+
             if step.is_orama_step:
                 result = self._handle_orama_step(step, collection_id, input)
                 message = Message(step.name, result)
@@ -103,10 +124,6 @@ class PartyPlanner:
 
             if not step.should_stream:
                 result, history = self._handle_non_streaming_step(step, input, [])
-
-                print("\n\n")
-                print(result)
-                print("\n\n")
 
                 message = Message(step.name, result)
                 self.executed_steps.append(message)
