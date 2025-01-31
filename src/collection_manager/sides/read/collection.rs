@@ -12,6 +12,7 @@ use committed::CommittedCollection;
 use dashmap::DashMap;
 use dump::{CollectionInfo, CollectionInfoV1};
 use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{
     join,
@@ -28,8 +29,8 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            self, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
-            Properties, SearchMode, SearchParams,
+            self, ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit,
+            NumberFilter, Properties, SearchMode, SearchParams,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
     },
@@ -48,6 +49,7 @@ use super::IndexesConfig;
 #[derive(Debug)]
 pub struct CollectionReader {
     id: CollectionId,
+    read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
 
@@ -70,12 +72,14 @@ pub struct CollectionReader {
 impl CollectionReader {
     pub fn try_new(
         id: CollectionId,
+        read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         _: IndexesConfig,
     ) -> Result<Self> {
         Ok(Self {
             id,
+            read_api_key,
             ai_service,
             nlp_service,
             document_count: AtomicU64::new(0),
@@ -90,6 +94,13 @@ impl CollectionReader {
             offset_storage: Default::default(),
             commit_insert_mutex: Default::default(),
         })
+    }
+
+    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
+        if api_key != self.read_api_key {
+            return Err(anyhow!("Invalid read api key"));
+        }
+        Ok(())
     }
 
     #[inline]
@@ -139,6 +150,7 @@ impl CollectionReader {
             .context("Cannot read previous collection info")?;
 
         let dump::CollectionInfo::V1(collection_info) = collection_info;
+        self.read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
 
         for (field_name, (field_id, field_type)) in collection_info.fields {
             let typed_field: TypedField = match field_type {
@@ -218,6 +230,7 @@ impl CollectionReader {
             debug!("No previous collection info found, creating a new one");
             CollectionInfoV1 {
                 fields: Default::default(),
+                read_api_key: self.read_api_key.0.expose_secret().clone(),
                 id: self.id.clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
@@ -1121,6 +1134,7 @@ mod dump {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct CollectionInfoV1 {
         pub id: CollectionId,
+        pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
         pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,

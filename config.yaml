@@ -10,6 +10,9 @@ log:
 
 writer_side:
     output: in-memory
+
+    # Replace the following value with your own API key
+    master_api_key: foobar
     config:
         data_dir: ./.data/writer
         # The maximum number of embeddings that can be stored in the queue

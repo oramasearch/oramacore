@@ -28,7 +28,7 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{CollectionDTO, CreateCollection, DeleteDocuments},
+    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{
         AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
@@ -36,6 +36,7 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
+    SideChannelType,
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -51,6 +52,13 @@ pub struct CollectionsWriterConfig {
     pub javascript_queue_limit: u32,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct WriteSideConfig {
+    pub master_api_key: ApiKey,
+    pub output: SideChannelType,
+    pub config: CollectionsWriterConfig,
+}
+
 pub struct WriteSide {
     sender: OperationSender,
     collections: CollectionsWriter,
@@ -61,29 +69,37 @@ pub struct WriteSide {
 
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
+
+    master_api_key: ApiKey,
 }
 
 impl WriteSide {
     pub fn new(
         sender: OperationSender,
-        config: CollectionsWriterConfig,
+        config: WriteSideConfig,
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
     ) -> WriteSide {
-        let data_dir = config.data_dir.clone();
+        let master_api_key = config.master_api_key;
+        let collections_writer_config = config.config;
+        let data_dir = collections_writer_config.data_dir.clone();
 
-        let insert_batch_commit_size = config.insert_batch_commit_size;
+        let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
 
         let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
-            config.embedding_queue_limit as usize,
+            collections_writer_config.embedding_queue_limit as usize,
         );
 
-        start_calculate_embedding_loop(ai_service, rx, config.embedding_queue_limit);
+        start_calculate_embedding_loop(
+            ai_service,
+            rx,
+            collections_writer_config.embedding_queue_limit,
+        );
 
         WriteSide {
             sender,
-            collections: CollectionsWriter::new(config, sx),
+            collections: CollectionsWriter::new(collections_writer_config, sx),
             document_count: AtomicU64::new(0),
             data_dir,
             hook_runtime,
@@ -91,6 +107,8 @@ impl WriteSide {
 
             operation_counter: Default::default(),
             insert_batch_commit_size,
+
+            master_api_key,
         }
     }
 
@@ -143,7 +161,15 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn create_collection(&self, option: CreateCollection) -> Result<()> {
+    pub async fn create_collection(
+        &self,
+        master_api_key: ApiKey,
+        option: CreateCollection,
+    ) -> Result<()> {
+        if self.master_api_key != master_api_key {
+            return Err(anyhow::anyhow!("Invalid master api key"));
+        }
+
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
@@ -153,6 +179,7 @@ impl WriteSide {
 
     pub async fn write(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         document_list: DocumentList,
     ) -> Result<()> {
@@ -173,6 +200,8 @@ impl WriteSide {
             .get_collection(collection_id.clone())
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
 
         let sender = self.sender.clone();
 
@@ -242,6 +271,7 @@ impl WriteSide {
 
     pub async fn delete_documents(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         delete_documents: DeleteDocuments,
     ) -> Result<()> {
@@ -250,6 +280,8 @@ impl WriteSide {
             .get_collection(collection_id.clone())
             .await
             .context("Collection not found")?;
+
+        collection.check_write_api_key(write_api_key)?;
 
         collection
             .delete_documents(delete_documents.document_ids, self.sender.clone())

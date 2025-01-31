@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     ai::AIService,
-    collection_manager::sides::Offset,
+    collection_manager::{dto::ApiKey, sides::Offset},
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
@@ -16,6 +16,7 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, info, instrument, warn};
@@ -92,8 +93,10 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
+            // We will replace the following values inside `load` method
             let mut collection = CollectionReader::try_new(
                 collection_id.clone(),
+                ApiKey(Secret::new("".to_string())),
                 self.ai_service.clone(),
                 self.nlp_service.clone(),
                 self.indexes_config.clone(),
@@ -149,11 +152,17 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub async fn create_collection(&self, offset: Offset, id: CollectionId) -> Result<()> {
+    pub async fn create_collection(
+        &self,
+        offset: Offset,
+        id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<()> {
         info!(collection_id=?id, "Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(
             id.clone(),
+            read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
             self.indexes_config.clone(),

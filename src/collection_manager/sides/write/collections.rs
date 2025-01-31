@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
+use redact::Secret;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument};
 
@@ -14,7 +15,7 @@ use crate::{
 };
 
 use crate::collection_manager::dto::{
-    CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
+    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
@@ -60,6 +61,8 @@ impl CollectionsWriter {
             description,
             language,
             embeddings,
+            write_api_key,
+            read_api_key,
         } = collection_option;
 
         info!("Creating collection {:?}", id);
@@ -67,6 +70,7 @@ impl CollectionsWriter {
         let collection = CollectionWriter::new(
             id.clone(),
             description,
+            write_api_key,
             language.unwrap_or(LanguageDTO::English),
             self.embedding_sender.clone(),
         );
@@ -99,7 +103,10 @@ impl CollectionsWriter {
 
         // Send event & Register field should be inside the lock transaction
         sender
-            .send(WriteOperation::CreateCollection { id: id.clone() })
+            .send(WriteOperation::CreateCollection {
+                id: id.clone(),
+                read_api_key,
+            })
             .await
             .context("Cannot send create collection")?;
         collection
@@ -176,9 +183,11 @@ impl CollectionsWriter {
 
             let collection_id = CollectionId(file_name);
 
+            // All those values are replaced inside `load` method
             let mut collection = CollectionWriter::new(
                 collection_id.clone(),
                 None,
+                ApiKey(Secret::new("".to_string())),
                 LanguageDTO::English,
                 self.embedding_sender.clone(),
             );

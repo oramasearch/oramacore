@@ -1,14 +1,15 @@
 use anyhow::Result;
 use http::uri::Scheme;
 use oramacore::ai::{AIServiceConfig, OramaModel};
-use oramacore::collection_manager::dto::{CreateCollection, SearchParams};
+use oramacore::collection_manager::dto::{ApiKey, CreateCollection, SearchParams};
 use oramacore::collection_manager::sides::{
-    CollectionsWriterConfig, OramaModelSerializable, WriteSide,
+    CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig,
 };
 use oramacore::collection_manager::sides::{IndexesConfig, ReadSide};
 use oramacore::test_utils::create_grpc_server;
 use oramacore::types::{CollectionId, DocumentList};
-use oramacore::{build_orama, OramacoreConfig, ReadSideConfig, WriteSideConfig};
+use oramacore::{build_orama, OramacoreConfig, ReadSideConfig};
+use redact::Secret;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
             max_connections: 1,
         },
         writer_side: WriteSideConfig {
+            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
             output: oramacore::SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
@@ -98,17 +100,26 @@ async fn run_tests() {
     let collection_id = CollectionId("collection-test".to_string());
 
     writer
-        .create_collection(CreateCollection {
-            id: collection_id.clone(),
-            description: None,
-            language: None,
-            embeddings: None,
-        })
+        .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
+            CreateCollection {
+                id: collection_id.clone(),
+                description: None,
+                language: None,
+                embeddings: None,
+                read_api_key: ApiKey(Secret::new("my-read-api-key".to_string())),
+                write_api_key: ApiKey(Secret::new("my-write-api-key".to_string())),
+            },
+        )
         .await
         .unwrap();
 
     writer
-        .write(collection_id.clone(), generate_test_data())
+        .write(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            generate_test_data(),
+        )
         .await
         .unwrap();
 
@@ -121,7 +132,11 @@ async fn run_tests() {
     .unwrap();
     for _ in 0..10_000 {
         reader
-            .search(collection_id.clone(), param.clone())
+            .search(
+                ApiKey(Secret::new("my-read-api-key".to_string())),
+                collection_id.clone(),
+                param.clone(),
+            )
             .await
             .unwrap();
     }

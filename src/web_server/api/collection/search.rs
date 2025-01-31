@@ -1,17 +1,22 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json, Router,
 };
 use axum_openapi3::*;
+use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
+use utoipa::IntoParams;
 
 use crate::{
-    collection_manager::{dto::SearchParams, sides::ReadSide},
+    collection_manager::{
+        dto::{ApiKey, SearchParams},
+        sides::ReadSide,
+    },
     types::CollectionId,
 };
 
@@ -38,20 +43,27 @@ async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
     axum::Json(())
 }
 
+#[derive(Deserialize, IntoParams)]
+struct SearchQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+}
+
 #[endpoint(
     method = "POST",
     path = "/v0/collections/{id}/search",
     description = "Search Endpoint"
 )]
-#[axum::debug_handler]
 async fn search(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
+    Query(query): Query<SearchQueryParams>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = CollectionId(id);
+    let read_api_key = query.api_key;
 
-    let output = read_side.search(collection_id, json).await;
+    let output = read_side.search(read_api_key, collection_id, json).await;
 
     match output {
         Ok(data) => Ok((StatusCode::OK, Json(data))),

@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Result;
 use http::uri::Scheme;
+use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -13,7 +14,7 @@ use crate::{
     ai::AIServiceConfig,
     build_orama,
     collection_manager::{
-        dto::DeleteDocuments,
+        dto::{ApiKey, DeleteDocuments},
         sides::{
             CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
         },
@@ -42,6 +43,7 @@ fn create_oramacore_config() -> OramacoreConfig {
             scheme: Scheme::HTTP,
         },
         writer_side: WriteSideConfig {
+            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
             output: SideChannelType::InMemory,
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
@@ -92,6 +94,7 @@ async fn test_simple_text_search() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -108,6 +111,7 @@ async fn test_simple_text_search() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -124,6 +128,7 @@ async fn test_simple_text_search() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "John Doe",
@@ -152,6 +157,7 @@ async fn test_filter_on_unknown_field() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -181,6 +187,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -197,6 +204,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -227,6 +235,7 @@ async fn test_commit_and_load() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -243,6 +252,7 @@ async fn test_commit_and_load() -> Result<()> {
 
     let before_commit_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -258,6 +268,7 @@ async fn test_commit_and_load() -> Result<()> {
 
     let after_commit_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -287,6 +298,7 @@ async fn test_commit_and_load() -> Result<()> {
 
     let after_load_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -313,8 +325,11 @@ async fn test_collection_id_already_exists() -> Result<()> {
 
     let output = write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -357,6 +372,7 @@ async fn test_search_documents_order() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -373,6 +389,7 @@ async fn test_search_documents_order() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -399,6 +416,7 @@ async fn test_search_documents_limit() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -411,6 +429,7 @@ async fn test_search_documents_limit() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -445,6 +464,7 @@ async fn test_filter_number() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -460,6 +480,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -481,6 +502,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -501,6 +523,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -521,6 +544,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -541,6 +565,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -561,6 +586,7 @@ async fn test_filter_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -588,6 +614,7 @@ async fn test_facets_number() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -601,6 +628,7 @@ async fn test_facets_number() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -675,6 +703,7 @@ async fn test_filter_bool() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -688,6 +717,7 @@ async fn test_filter_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -708,6 +738,7 @@ async fn test_filter_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -737,6 +768,7 @@ async fn test_facets_bool() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -750,6 +782,7 @@ async fn test_facets_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -788,6 +821,7 @@ async fn test_facets_should_based_on_term() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -816,6 +850,7 @@ async fn test_facets_should_based_on_term() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "term": "text",
@@ -875,6 +910,7 @@ async fn test_empty_term() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -898,6 +934,7 @@ async fn test_empty_term() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "doc",
@@ -912,6 +949,7 @@ async fn test_empty_term() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "",
@@ -942,12 +980,15 @@ async fn test_vector_search_grpc() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
                     "model": "BGESmall",
                     "document_fields": ["text"],
-                }
+                },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -976,13 +1017,18 @@ async fn test_vector_search_grpc() -> Result<()> {
         }));
     }
     write_side
-        .write(collection_id.clone(), docs.try_into().unwrap())
+        .write(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            docs.try_into().unwrap(),
+        )
         .await?;
 
     sleep(Duration::from_millis(500)).await;
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id,
             json!({
                 "mode": "vector",
@@ -1014,6 +1060,7 @@ async fn test_handle_bool() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -1042,6 +1089,7 @@ async fn test_handle_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "doc",
@@ -1059,6 +1107,7 @@ async fn test_handle_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "doc",
@@ -1076,6 +1125,7 @@ async fn test_handle_bool() -> Result<()> {
 
     let output = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "doc",
@@ -1102,12 +1152,15 @@ async fn test_commit_and_load2() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
                 },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -1116,6 +1169,7 @@ async fn test_commit_and_load2() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![
             json!({
@@ -1135,6 +1189,7 @@ async fn test_commit_and_load2() -> Result<()> {
 
     let before_commit_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1156,6 +1211,7 @@ async fn test_commit_and_load2() -> Result<()> {
     // After the commit, the result should be the same
     let after_commit_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1175,6 +1231,7 @@ async fn test_commit_and_load2() -> Result<()> {
     // After the commit, we can insert and search for new documents
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![json!({
             "id": "3",
@@ -1185,6 +1242,7 @@ async fn test_commit_and_load2() -> Result<()> {
     .await?;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1204,6 +1262,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
     let after_load_result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1223,6 +1282,7 @@ async fn test_commit_and_load2() -> Result<()> {
     // After the load we can insert and search for new documents
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         vec![json!({
             "id": "3",
@@ -1235,6 +1295,7 @@ async fn test_commit_and_load2() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1257,6 +1318,7 @@ async fn test_commit_and_load2() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1274,6 +1336,7 @@ async fn test_commit_and_load2() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "Doe",
@@ -1307,12 +1370,15 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
                 },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -1320,6 +1386,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..100).map(|i| {
             json!({
@@ -1344,6 +1411,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
         let search_start = Instant::now();
         read_side
             .search(
+                ApiKey(Secret::new("my-read-api-key".to_string())),
                 collection_id.clone(),
                 json!({
                     "term": "text",
@@ -1382,12 +1450,15 @@ async fn test_delete_documents() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
                 },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -1396,6 +1467,7 @@ async fn test_delete_documents() -> Result<()> {
     let document_count = 10;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..document_count).map(|i| {
             json!({
@@ -1408,6 +1480,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1419,6 +1492,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 1).to_string()],
@@ -1428,6 +1502,7 @@ async fn test_delete_documents() -> Result<()> {
     sleep(Duration::from_millis(100)).await;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1441,6 +1516,7 @@ async fn test_delete_documents() -> Result<()> {
     read_side.commit().await.unwrap();
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1452,6 +1528,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 2).to_string()],
@@ -1462,6 +1539,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1474,6 +1552,7 @@ async fn test_delete_documents() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1485,6 +1564,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 2).to_string()],
@@ -1495,6 +1575,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1510,6 +1591,7 @@ async fn test_delete_documents() -> Result<()> {
     let (_, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1525,8 +1607,11 @@ async fn test_delete_documents() -> Result<()> {
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -1538,6 +1623,7 @@ async fn create_collection(write_side: Arc<WriteSide>, collection_id: Collection
 
 async fn insert_docs<I>(
     write_side: Arc<WriteSide>,
+    write_api_key: ApiKey,
     collection_id: CollectionId,
     docs: I,
 ) -> Result<()>
@@ -1547,7 +1633,9 @@ where
     let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
     let document_list: DocumentList = document_list.try_into()?;
 
-    write_side.write(collection_id, document_list).await?;
+    write_side
+        .write(write_api_key, collection_id, document_list)
+        .await?;
 
     sleep(Duration::from_millis(1_000)).await;
 

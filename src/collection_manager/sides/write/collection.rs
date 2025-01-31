@@ -9,13 +9,14 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Ok, Result};
 use doc_id_storage::DocIdStorage;
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
-        dto::{CollectionDTO, FieldId},
+        dto::{ApiKey, CollectionDTO, FieldId},
         sides::hooks::{HookName, HooksRuntime},
     },
     file_utils::BufferedFile,
@@ -40,7 +41,7 @@ pub struct CollectionWriter {
     description: Option<String>,
     default_language: LanguageDTO,
     fields: RwLock<HashMap<FieldId, (String, ValueType, CollectionField)>>,
-
+    write_api_key: ApiKey,
     collection_document_count: AtomicU64,
 
     field_id_generator: AtomicU16,
@@ -55,12 +56,14 @@ impl CollectionWriter {
     pub fn new(
         id: CollectionId,
         description: Option<String>,
+        write_api_key: ApiKey,
         default_language: LanguageDTO,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> Self {
         Self {
             id: id.clone(),
             description,
+            write_api_key,
             default_language,
             collection_document_count: Default::default(),
             fields: Default::default(),
@@ -68,6 +71,14 @@ impl CollectionWriter {
             field_id_generator: Default::default(),
             embedding_sender,
             doc_id_storage: Default::default(),
+        }
+    }
+
+    pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<()> {
+        if self.write_api_key == api_key {
+            Ok(())
+        } else {
+            Err(anyhow!("Invalid write api key"))
         }
     }
 
@@ -427,6 +438,7 @@ impl CollectionWriter {
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id.clone(),
             description: self.description.clone(),
+            write_api_key: self.write_api_key.0.expose_secret().clone(),
             default_language: self.default_language,
             fields,
             document_count: self
@@ -464,6 +476,7 @@ impl CollectionWriter {
 
         self.id = dump.id;
         self.description = dump.description;
+        self.write_api_key = ApiKey(Secret::new(dump.write_api_key));
         self.default_language = dump.default_language;
         self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
         self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
@@ -533,6 +546,7 @@ enum CollectionDump {
 struct CollectionDumpV1 {
     id: CollectionId,
     description: Option<String>,
+    write_api_key: String,
     default_language: LanguageDTO,
     fields: Vec<(String, SerializedFieldIndexer)>,
     document_count: u64,
