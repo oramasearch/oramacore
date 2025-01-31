@@ -16,20 +16,9 @@ For example, if you want to index all the products in your e-commerce store, you
 
 ## APIs
 
-<Tabs groupId='package-manager' persist items={['JavaScript', 'cURL']}>
+Creating a new collection is as simple as:
 
-```javascript tab="JavaScript"
-import { OramaCore } from '@orama/core';
-
-const orama = new OramaCore({
-  url: 'http://localhost:8080',
-  apiKey: '<api-key>'
-})
-
-const newCollection = orama.collections.create({
-  name: 'products'
-})
-```
+<Tabs groupId='create' persist items={['cURL']}>
 
 ```bash tab="cURL"
 curl -X POST \
@@ -40,3 +29,25 @@ curl -X POST \
 ```
 
 </Tabs>
+
+## Hooks
+
+After creating a collection, you can start using some hooks. If you're not familiar with hooks, you can read more about them in the [Hooks](/docs/javascript-hooks/introduction) section.
+
+
+At the time of writing, we have the following hooks available:
+
+- `selectEmbeddingProperties`: Allows you to programmatically select properties for text extraction during text embeddings generation.
+
+  <Tabs groupId='hooks' persist items={['cURL']}>
+  ```bash tab="cURL"
+  curl -X POST http://localhost:8080/{COLLECTION_ID}/v0/hooks/add \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "id": "selectEmbeddingProperties",
+      "code": "function selectEmbeddingProperties(document) { return document.title; }"
+    }'
+  ```
+  </Tabs>
+
+  Read more about this hook [here](/docs/javascript-hooks/selectEmbeddingProperties).
