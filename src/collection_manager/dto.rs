@@ -393,7 +393,7 @@ pub struct DeleteHookParams {
     pub name: HookName,
 }
 
-#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+#[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub struct ExecuteActionPayload {
     pub name: String, // we're not using an enum here since users will be able to define their own actions
     pub context: String,

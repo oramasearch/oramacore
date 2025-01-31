@@ -4,13 +4,13 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
     Json, Router,
 };
 use axum_openapi3::*;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
+use utoipa::IntoParams;
 
 use crate::{
     collection_manager::{
@@ -22,7 +22,7 @@ use crate::{
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(("/v0/collections/{id}/search", post(search)))
+        .add(search())
         .add(dump_all())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
         .with_state(read_side)
@@ -43,18 +43,17 @@ async fn dump_all(read_side: State<Arc<ReadSide>>) -> impl IntoResponse {
     axum::Json(())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
 struct SearchQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
-// #[endpoint(
-//     method = "POST",
-//     path = "/v0/collections/{id}/search",
-//     description = "Search Endpoint"
-// )]
-#[axum::debug_handler]
+#[endpoint(
+    method = "POST",
+    path = "/v0/collections/{id}/search",
+    description = "Search Endpoint"
+)]
 async fn search(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
