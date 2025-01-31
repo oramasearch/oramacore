@@ -273,7 +273,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        delete_documents: DeleteDocuments,
+        document_ids_to_delete: DeleteDocuments,
     ) -> Result<()> {
         let collection = self
             .collections
@@ -284,7 +284,7 @@ impl WriteSide {
         collection.check_write_api_key(write_api_key)?;
 
         collection
-            .delete_documents(delete_documents.document_ids, self.sender.clone())
+            .delete_documents(document_ids_to_delete, self.sender.clone())
             .await?;
 
         Ok(())

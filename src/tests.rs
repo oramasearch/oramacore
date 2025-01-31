@@ -14,7 +14,7 @@ use crate::{
     ai::AIServiceConfig,
     build_orama,
     collection_manager::{
-        dto::{ApiKey, DeleteDocuments},
+        dto::ApiKey,
         sides::{
             CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
         },
@@ -1494,9 +1494,7 @@ async fn test_delete_documents() -> Result<()> {
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
-            DeleteDocuments {
-                document_ids: vec![(document_count - 1).to_string()],
-            },
+            vec![(document_count - 1).to_string()],
         )
         .await?;
     sleep(Duration::from_millis(100)).await;
@@ -1530,9 +1528,7 @@ async fn test_delete_documents() -> Result<()> {
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
-            DeleteDocuments {
-                document_ids: vec![(document_count - 2).to_string()],
-            },
+            vec![(document_count - 2).to_string()],
         )
         .await?;
     sleep(Duration::from_millis(100)).await;
@@ -1566,9 +1562,7 @@ async fn test_delete_documents() -> Result<()> {
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
-            DeleteDocuments {
-                document_ids: vec![(document_count - 2).to_string()],
-            },
+            vec![(document_count - 2).to_string()],
         )
         .await?;
     sleep(Duration::from_millis(500)).await;

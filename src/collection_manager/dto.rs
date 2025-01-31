@@ -128,10 +128,7 @@ impl TryFrom<serde_json::Value> for CreateCollection {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct DeleteDocuments {
-    pub document_ids: Vec<String>,
-}
+pub type DeleteDocuments = Vec<String>;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct CollectionDTO {

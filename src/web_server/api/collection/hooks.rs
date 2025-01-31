@@ -27,7 +27,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "POST",
-    path = "/v0/{collection_id}/hooks/add",
+    path = "/v1/collections/{id}/hooks/create",
     description = "Add a new JavaScript hook"
 )]
 async fn add_hook_v0(

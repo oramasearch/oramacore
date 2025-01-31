@@ -88,7 +88,7 @@ type AuthorizationBearerHeader =
 
 #[endpoint(
     method = "POST",
-    path = "/v0/collections",
+    path = "/v1/collections/create",
     description = "Create a collection"
 )]
 async fn create_collection(
@@ -118,8 +118,8 @@ async fn create_collection(
 }
 
 #[endpoint(
-    method = "PATCH",
-    path = "/v0/collections/{id}/documents",
+    method = "POST",
+    path = "/v1/collections/{id}/insert",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
@@ -157,7 +157,7 @@ async fn add_documents(
 
 #[endpoint(
     method = "POST",
-    path = "/v0/collections/{id}/delete-documents",
+    path = "/v1/collections/{id}/delete",
     description = "Delete documents from a collection"
 )]
 async fn delete_documents(

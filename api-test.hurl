@@ -9,7 +9,7 @@ HTTP 200
 [Captures]
 collection_id: jsonpath "$[0]"
 
-POST {{base_url}}/v0/collections
+POST {{base_url}}/v1/collections/create
 Authorization: Bearer my-master-api-key
 {
     "id": "{{collection_id}}",
@@ -23,7 +23,8 @@ HTTP 200
 [Asserts]
 jsonpath "$.document_count" == 0
 
-PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
+
+POST {{base_url}}/v1/collections/{{collection_id}}/insert
 Authorization: Bearer my-write-api-key
 [
     {
@@ -46,7 +47,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.document_count" == 2
 
-POST {{base_url}}/v0/collections/{{collection_id}}/search?api-key=my-read-api-key
+POST {{base_url}}/v1/collections/{{collection_id}}/search?api-key=my-read-api-key
 [Options]
 retry: 10
 retry-interval: 500ms

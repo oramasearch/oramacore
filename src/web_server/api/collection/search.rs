@@ -51,7 +51,7 @@ struct SearchQueryParams {
 
 #[endpoint(
     method = "POST",
-    path = "/v0/collections/{id}/search",
+    path = "/v1/collections/{id}/search",
     description = "Search Endpoint"
 )]
 async fn search(
