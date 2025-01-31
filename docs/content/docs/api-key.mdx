@@ -1,0 +1,120 @@
+---
+title: "API Keys"
+description: "API keys are used to authenticate requests to the OramaCore API"
+---
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+[As explained in the introduction](/docs#write-side-read-side), OramaCore is split in two sides: the **reader side** and the **writer side**.
+
+Therefore, depending on the operation you want to perform, you will need to use different API keys.
+
+In total, OramaCore will give you access to three different kinds API keys:
+
+## Master API Key
+
+<Callout type='warn'>
+**Not safe to share**. Never share the master API key publicly. Treat it as a password.
+</Callout>
+
+The **master API key** is an essential key that allows you to configure the OramaCore instance and create or delete new collections.
+
+It's configurable via the [`config.yaml`](/docs/configuration) file under the `writer_side` section:
+
+```yaml
+# ...
+writer_side:
+    master_api_key: foobar
+# ...
+```
+
+You will need this API key to:
+
+- Create a new collection
+- Delete a collection
+- Update the configuration of a collection
+
+In all the cases above, you will need to pass the master API key in the `Authorization` header of the request as a `Bearer` token.
+
+Example:
+
+<Tabs groupId='create' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v0/collections \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <master-api-key>' \
+  -d '{ 
+    "id": "products",
+    "read_api_key": "my-read-api-key",
+    "write_api_key": "my-write-api-key"
+  }'
+```
+</Tabs>
+
+As you can see, when creating a new collection, you will need to create the `read_api_key` and `write_api_key` as well. You will them use them to perform read and write operations on the collection.
+
+## Write API Key
+
+<Callout type='warn'>
+**Not safe to share**. Never share the write API key publicly. Treat it as a password.
+</Callout>
+
+The **write API key** is used to insert, update, or delete documents in a collection, as well as creating new [hooks](/docs/javascript-hooks/introduction) and [actions](/docs/party-planner#writing-custom-actions).
+
+Every collection has its own write API key, which is generated when you create the collection.
+
+You will need this API key to:
+
+- Insert one or more documents into a collection
+- Update one or more documents in a collection
+- Delete one or more documents from a collection
+- Create a new hook or action
+
+In all the cases above, you will need to pass the write API key in the `Authorization` header of the request as a `Bearer` token.
+
+Example:
+
+<Tabs groupId='insert' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X PATCH \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write-api-key>' \
+  -d '[
+    {
+      "title": "My first document",
+      "content": "This is the content of my first document."
+    }
+  ]'
+```
+</Tabs>
+
+## Read API Key
+
+<Callout type='info'>
+**Safe to share**. This API key performs read operations only. You can share it publicly.
+</Callout>
+
+The **read API key** is used to perform read operations on a collection.
+
+Every collection has its own read API key, which is generated when you create the collection.
+
+You will need this API key to:
+
+- Perform full-text, hybrid, or vector search
+- Read the documents in a collection
+- Perform answer sessions
+
+In all the cases above, you will need to pass the read API key as a query parameter in the request.
+
+Example:
+
+<Tabs groupId='search' persist items={['cURL']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api_key=<read-api-key> \
+  -H 'Content-Type: application/json' \
+  -d '{ "term": "How to insert documents in OramaCore?" }'
+```
+</Tabs>
+
