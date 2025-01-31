@@ -90,3 +90,45 @@ So a full query complete with a `where` filter might look like this:
   }
 }
 ```
+
+### Facets
+
+OramaCore supports faceted search. You can use the `facets` parameter to get a list of facets for a given property.
+
+### Numeric Facets
+
+The `facets` parameter can be used to get numeric facets. For example, to get a histogram of the `price` property, you can use the following query:
+
+```json
+{
+  "term": "Bluetooth Airbuds",
+  "facets": {
+    "price": {
+      "ranges": [
+        { "from": 0, "to": 50 },
+        { "from": 50, "to": 100 },
+        { "from": 100, "to": 200 },
+        { "from": 200, "to": 500 },
+        { "from": 500, "to": 1000 },
+        { "from": 1000 }
+      ]
+    }
+  }
+}
+```
+
+### Boolean Facets
+
+The `facets` parameter can also be used to get boolean facets. For example, to get a list of `available` values, you can use the following query:
+
+```json
+{
+  "term": "Bluetooth Airbuds",
+  "facets": {
+    "available": {
+      "true": true,
+      "false": false
+    }
+  }
+}
+```
