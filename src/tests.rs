@@ -53,6 +53,7 @@ fn create_oramacore_config() -> OramacoreConfig {
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
                 javascript_queue_limit: 10_000,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
         reader_side: ReadSideConfig {
@@ -62,6 +63,7 @@ fn create_oramacore_config() -> OramacoreConfig {
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
     }

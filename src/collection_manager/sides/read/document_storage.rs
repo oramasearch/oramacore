@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     path::PathBuf,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use anyhow::{anyhow, Context, Ok, Result};
 
@@ -187,7 +187,7 @@ impl DocumentStorage {
     }
 
     pub async fn commit(&self) -> Result<()> {
-        trace!("Commit documents");
+        info!("Commit documents");
         // This implementation is wrong:
         // in the mean time we "dran" + "collection" + "write on FS"
         // The documents aren't reachable. So the search output will not contain them.
@@ -218,6 +218,8 @@ impl DocumentStorage {
         }
         uncommitted_document_deletions.clear();
         drop(uncommitted_document_deletions);
+
+        info!("Documents committed");
 
         Ok(())
     }

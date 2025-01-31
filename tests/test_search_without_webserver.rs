@@ -3,16 +3,17 @@ use http::uri::Scheme;
 use oramacore::ai::{AIServiceConfig, OramaModel};
 use oramacore::collection_manager::dto::{ApiKey, CreateCollection, SearchParams};
 use oramacore::collection_manager::sides::{
-    CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig,
+    CollectionsWriterConfig, OramaModelSerializable, ReadSideConfig, WriteSide, WriteSideConfig,
 };
 use oramacore::collection_manager::sides::{IndexesConfig, ReadSide};
 use oramacore::test_utils::create_grpc_server;
 use oramacore::types::{CollectionId, DocumentList};
-use oramacore::{build_orama, OramacoreConfig, ReadSideConfig};
+use oramacore::{build_orama, OramacoreConfig};
 use redact::Secret;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tempdir::TempDir;
 
 use oramacore::web_server::HttpConfig;
@@ -49,6 +50,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
                 default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
                 insert_batch_commit_size: 10_000,
                 javascript_queue_limit: 10_000,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
         reader_side: ReadSideConfig {
@@ -56,6 +58,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 10_000,
+                commit_interval: Duration::from_secs(3_000),
             },
         },
     })

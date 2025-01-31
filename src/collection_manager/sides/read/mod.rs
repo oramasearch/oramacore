@@ -2,7 +2,10 @@ mod collection;
 mod collections;
 mod document_storage;
 
+use duration_str::deserialize_duration;
+use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use tokio::time::MissedTickBehavior;
 
 use anyhow::{Context, Result};
 use collections::CollectionsReader;
@@ -22,15 +25,24 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId},
+    SideChannelType,
 };
 
 use super::{CollectionWriteOperation, Offset, WriteOperation};
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ReadSideConfig {
+    pub input: SideChannelType,
+    pub config: IndexesConfig,
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IndexesConfig {
     pub data_dir: PathBuf,
     #[serde(default = "default_insert_batch_commit_size")]
     pub insert_batch_commit_size: u64,
+    #[serde(deserialize_with = "deserialize_duration")]
+    pub commit_interval: Duration,
 }
 
 pub struct ReadSide {
@@ -38,37 +50,67 @@ pub struct ReadSide {
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
+    commit_interval: Duration,
 }
 
 impl ReadSide {
     pub fn try_new(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        indexes_config: IndexesConfig,
+        config: ReadSideConfig,
     ) -> Result<Self> {
         let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
-            data_dir: indexes_config.data_dir.join("docs"),
+            data_dir: config.config.data_dir.join("docs"),
         })
         .context("Cannot create document storage")?;
 
-        let insert_batch_commit_size = indexes_config.insert_batch_commit_size;
+        let insert_batch_commit_size = config.config.insert_batch_commit_size;
+        let commit_interval = config.config.commit_interval;
 
         Ok(Self {
-            collections: CollectionsReader::try_new(ai_service, nlp_service, indexes_config)?,
+            collections: CollectionsReader::try_new(ai_service, nlp_service, config.config)?,
             document_storage,
             operation_counter: Default::default(),
             insert_batch_commit_size,
+            commit_interval,
         })
     }
 
-    pub async fn load(&mut self) -> Result<()> {
+    pub async fn load(mut self) -> Result<Arc<Self>> {
         self.collections.load().await?;
 
         self.document_storage
             .load()
             .context("Cannot load document storage")?;
 
-        Ok(())
+        let s = Arc::new(self);
+
+        s.clone().start_commit_loop(s.commit_interval);
+
+        Ok(s)
+    }
+
+    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
+        tokio::task::spawn(async move {
+            let mut interval = tokio::time::interval(insert_batch_commit_size.clone());
+
+            // If for some reason we miss a tick, we skip it.
+            // In fact, the commit is blocked only by `update` method.
+            // If the collection is under heavy load,
+            // the commit will be run due to the `insert_batch_commit_size` config.
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+                info!(
+                    "{:?} time reached. Committing write side",
+                    insert_batch_commit_size.clone()
+                );
+                if let Err(e) = self.commit().await {
+                    tracing::error!(?e, "Cannot commit read side");
+                }
+            }
+        });
     }
 
     pub async fn commit(&self) -> Result<()> {
