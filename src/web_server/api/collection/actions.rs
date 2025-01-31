@@ -31,7 +31,7 @@ struct ActionQueryParams {
 
 #[endpoint(
     method = "POST",
-    path = "/v0/{collection_id}/actions/execute",
+    path = "/v1/{collection_id}/actions/execute",
     description = "Execute an action. Typically used by the Python server to perform actions that requires access to OramaCore components."
 )]
 #[axum::debug_handler]

@@ -16,7 +16,7 @@ use std::{
 
 use super::hooks::{HookName, HooksRuntime};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::MissedTickBehavior};
@@ -208,9 +208,7 @@ impl WriteSide {
         master_api_key: ApiKey,
         option: CreateCollection,
     ) -> Result<()> {
-        if self.master_api_key != master_api_key {
-            return Err(anyhow::anyhow!("Invalid master api key"));
-        }
+        self.check_master_api_key(master_api_key)?;
 
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
@@ -315,7 +313,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        delete_documents: DeleteDocuments,
+        document_ids_to_delete: DeleteDocuments,
     ) -> Result<()> {
         let collection = self
             .collections
@@ -326,7 +324,7 @@ impl WriteSide {
         collection.check_write_api_key(write_api_key)?;
 
         collection
-            .delete_documents(delete_documents.document_ids, self.sender.clone())
+            .delete_documents(document_ids_to_delete, self.sender.clone())
             .await?;
 
         Ok(())
@@ -334,6 +332,7 @@ impl WriteSide {
 
     pub async fn insert_javascript_hook(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         name: HookName,
         code: String,
@@ -348,6 +347,8 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
+        collection.check_write_api_key(write_api_key)?;
+
         collection
             .set_embedding_hook(name)
             .await
@@ -356,39 +357,86 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn list_collections(&self) -> Vec<CollectionDTO> {
-        self.collections.list().await
+    pub async fn list_collections(&self, master_api_key: ApiKey) -> Result<Vec<CollectionDTO>> {
+        self.check_master_api_key(master_api_key)?;
+
+        Ok(self.collections.list().await)
     }
 
-    pub async fn get_collection_dto(&self, collection_id: CollectionId) -> Option<CollectionDTO> {
-        let collection = self.collections.get_collection(collection_id).await?;
-        Some(collection.as_dto().await)
-    }
-
-    pub fn get_javascript_hook(
+    pub async fn get_collection_dto(
         &self,
+        master_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Option<CollectionDTO>> {
+        self.check_master_api_key(master_api_key)?;
+        let collection = match self.collections.get_collection(collection_id).await {
+            Some(collection) => collection,
+            None => return Ok(None),
+        };
+        Ok(Some(collection.as_dto().await))
+    }
+
+    pub async fn get_javascript_hook(
+        &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         name: HookName,
-    ) -> Option<String> {
-        self.hook_runtime
+    ) -> Result<Option<String>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(self
+            .hook_runtime
             .get_hook(collection_id, name)
-            .map(|hook| hook.code)
+            .map(|hook| hook.code))
     }
 
-    pub fn delete_javascript_hook(
+    pub async fn delete_javascript_hook(
         &self,
-        _collection_id: CollectionId,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
         _name: HookName,
-    ) -> Option<String> {
-        None // @todo: implement delete hook in HooksRuntime and CollectionsWriter
+    ) -> Result<Option<String>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        bail!("Not implemented yet.") // @todo: implement delete hook in HooksRuntime and CollectionsWriter
     }
 
-    pub fn list_javascript_hooks(&self, collection_id: CollectionId) -> HashMap<HookName, String> {
-        self.hook_runtime
+    pub async fn list_javascript_hooks(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<HashMap<HookName, String>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(self
+            .hook_runtime
             .list_hooks(collection_id)
             .into_iter()
             .map(|(name, hook)| (name, hook.code))
-            .collect()
+            .collect())
+    }
+
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
+        if self.master_api_key != master_api_key {
+            return Err(anyhow::anyhow!("Invalid master api key"));
+        }
+
+        Ok(())
     }
 }
 

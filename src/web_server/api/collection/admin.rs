@@ -27,68 +27,78 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(create_collection())
         .add(add_documents())
         .add(delete_documents())
-        .add(dump_all())
         .with_state(write_side)
-}
-
-#[endpoint(
-    method = "POST",
-    path = "/v0/writer/dump_all",
-    description = "List all collections"
-)]
-async fn dump_all(write_side: State<Arc<WriteSide>>) -> impl IntoResponse {
-    match write_side.commit().await {
-        Ok(_) => {}
-        Err(e) => {
-            error!("Error dumping all collections: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
-        }
-    }
-    // writer.commit(data_dir)
-
-    // Json(collections)
-    Json(())
-}
-
-#[endpoint(
-    method = "GET",
-    path = "/v0/collections",
-    description = "List all collections"
-)]
-async fn get_collections(write_side: State<Arc<WriteSide>>) -> Json<Vec<CollectionDTO>> {
-    let collections = write_side.list_collections().await;
-    Json(collections)
-}
-
-#[endpoint(
-    method = "GET",
-    path = "/v0/collections/{id}",
-    description = "Get a collection by id"
-)]
-async fn get_collection_by_id(
-    Path(id): Path<String>,
-    write_side: State<Arc<WriteSide>>,
-) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
-    let collection_dto = write_side.get_collection_dto(collection_id).await;
-
-    match collection_dto {
-        Some(collection_dto) => Ok(Json(collection_dto)),
-        None => Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "collection not found" })),
-        )),
-    }
 }
 
 type AuthorizationBearerHeader =
     TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[endpoint(
+    method = "GET",
+    path = "/v1/collections",
+    description = "List all collections"
+)]
+async fn get_collections(
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+) -> Result<Json<Vec<CollectionDTO>>, (StatusCode, impl IntoResponse)> {
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    let collections = match write_side.list_collections(master_api_key).await {
+        Ok(collections) => collections,
+        Err(e) => {
+            error!("Error listing collections: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ));
+        }
+    };
+    Ok(Json(collections))
+}
+
+#[endpoint(
+    method = "GET",
+    path = "/v1/collections/{id}",
+    description = "Get a collection by id"
+)]
+async fn get_collection_by_id(
+    Path(id): Path<String>,
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    let collection_id = CollectionId(id);
+    let collection_dto = write_side
+        .get_collection_dto(master_api_key, collection_id)
+        .await;
+
+    match collection_dto {
+        Ok(Some(collection_dto)) => Ok(Json(collection_dto)),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "collection not found" })),
+        )),
+        Err(e) => {
+            error!("Error get collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
     method = "POST",
-    path = "/v0/collections",
+    path = "/v1/collections/create",
     description = "Create a collection"
 )]
 async fn create_collection(
@@ -118,8 +128,8 @@ async fn create_collection(
 }
 
 #[endpoint(
-    method = "PATCH",
-    path = "/v0/collections/{id}/documents",
+    method = "POST",
+    path = "/v1/collections/{id}/insert",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
@@ -157,7 +167,7 @@ async fn add_documents(
 
 #[endpoint(
     method = "POST",
-    path = "/v0/collections/{id}/delete-documents",
+    path = "/v1/collections/{id}/delete",
     description = "Delete documents from a collection"
 )]
 async fn delete_documents(
