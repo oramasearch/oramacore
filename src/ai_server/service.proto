@@ -67,10 +67,13 @@ message Embedding {
 // Request message for a planned answer
 message PlannedAnswerRequest {
     string input = 1; // The user input
+    string collection_id = 2; // ID of the collection
+    Conversation conversation = 3; // All past messages
 }
 
 message PlannedAnswerResponse {
-    string plan = 1;
+    string data = 1;
+    bool finished = 2; 
 }
 
 // Request message for LLM calls

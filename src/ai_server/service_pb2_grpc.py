@@ -59,7 +59,7 @@ class LLMServiceStub(object):
             response_deserializer=service__pb2.ChatStreamResponse.FromString,
             _registered_method=True,
         )
-        self.PlannedAnswer = channel.unary_unary(
+        self.PlannedAnswer = channel.unary_stream(
             "/orama_ai_service.LLMService/PlannedAnswer",
             request_serializer=service__pb2.PlannedAnswerRequest.SerializeToString,
             response_deserializer=service__pb2.PlannedAnswerResponse.FromString,
@@ -123,7 +123,7 @@ def add_LLMServiceServicer_to_server(servicer, server):
             request_deserializer=service__pb2.ChatRequest.FromString,
             response_serializer=service__pb2.ChatStreamResponse.SerializeToString,
         ),
-        "PlannedAnswer": grpc.unary_unary_rpc_method_handler(
+        "PlannedAnswer": grpc.unary_stream_rpc_method_handler(
             servicer.PlannedAnswer,
             request_deserializer=service__pb2.PlannedAnswerRequest.FromString,
             response_serializer=service__pb2.PlannedAnswerResponse.SerializeToString,
@@ -271,7 +271,7 @@ class LLMService(object):
         timeout=None,
         metadata=None,
     ):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             "/orama_ai_service.LLMService/PlannedAnswer",

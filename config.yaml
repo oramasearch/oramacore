@@ -18,7 +18,7 @@ writer_side:
         # The maximum number of embeddings that can be stored in the queue
         # before the writer starts to be blocked
         # NB: the elements are in memory, so be careful with this value
-        embedding_queue_limit: 50
+        embedding_queue_limit: 50000
         # The number of the document insertions after the write side will commit the changes
         insert_batch_commit_size: 50000000
         # The default embedding model used to calculate the embeddings
@@ -26,7 +26,7 @@ writer_side:
         default_embedding_model: MultilingualE5Small
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
-        javascript_queue_limit: 500
+        javascript_queue_limit: 500000
 
 reader_side:
     input: in-memory
@@ -47,7 +47,7 @@ ai_server:
         default_model_group: small
         dynamically_load_models: false
         execution_providers:
-            # - CUDAExecutionProvider
+            - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
     LLMs:
