@@ -21,7 +21,7 @@ To search for documents in a collection, you can use the following API:
 <Tabs groupId='search' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api_key=<read_api_key> \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
   -H 'Content-Type: application/json' \
   -d '{ "term": "The quick brown fox" }'
 ```
