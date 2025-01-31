@@ -29,6 +29,7 @@ Here's an example of how to create a JavaScript hook:
 
 curl -X POST http://localhost:8080/{COLLECTION_ID}/v0/hooks/add \
   -H 'Content-Type: application/json' \
+  -H 'Authorization Bearer <write-api-key>' \
   -d '{
     "id": "selectEmbeddingProperties",
     "code": "function selectEmbeddingProperties(document) { return document.title; }"

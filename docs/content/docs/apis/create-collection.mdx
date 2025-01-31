@@ -16,13 +16,17 @@ For example, if you want to index all the products in your e-commerce store, you
 
 ## APIs
 
+<Callout>
+API Key type: **master**.
+</Callout>
+
 Creating a new collection is as simple as:
 
 <Tabs groupId='create' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
   http://localhost:8080/v0/collections \
-  -H 'Authorization: Bearer <api-key>' \
+  -H 'Authorization: Bearer <master-api-key>' \
   -d '{
     "id": "products",
     "write_api_key": "my-write-api-key",
@@ -38,7 +42,7 @@ A more complete example, with all the optional fields:
 curl -X POST \
   http://localhost:8080/v0/collections \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <api-key>' \
+  -H 'Authorization: Bearer <master-api-key>' \
   -d '{
     "id": "products",
     "write_api_key": "my-write-api-key",

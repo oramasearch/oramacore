@@ -12,14 +12,17 @@ We will make these APIs stable in the v1.0.0 release, planned for February 28th,
 
 ## APIs
 
+<Callout>
+API Key type: **`read_api_key`**.
+</Callout>
+
 To search for documents in a collection, you can use the following API:
 
 <Tabs groupId='search' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/search \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api_key=<read_api_key> \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <api-key>' \
   -d '{ "term": "The quick brown fox" }'
 ```
 </Tabs>
