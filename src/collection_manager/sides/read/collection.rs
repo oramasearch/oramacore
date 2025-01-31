@@ -8,7 +8,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use axum_openapi3::utoipa::openapi::info;
 use committed::CommittedCollection;
 use dashmap::DashMap;
 use dump::{CollectionInfo, CollectionInfoV1};

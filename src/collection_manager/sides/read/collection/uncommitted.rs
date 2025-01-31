@@ -55,27 +55,24 @@ impl UncommittedCollection {
     }
 
     pub fn get_infos(&self) -> UncommittedInfo {
-        trace!("Getting uncommitted info. vector: {:?}, number {:?}, string {:?}, bool {:?}",
-        self
-            .vector_index
-            .iter()
-            .map(|(k, v)| (k, v.len()))
-            .collect::<Vec<_>>(),
-        self
-            .number_index
-            .iter()
-            .map(|(k, v)| (k, v.len()))
-            .collect::<Vec<_>>(),
-        self
-            .string_index
-            .iter()
-            .map(|(k, v)| (k, v.len()))
-            .collect::<Vec<_>>(),
-        self
-            .bool_index
-            .iter()
-            .map(|(k, v)| (k, v.len()))
-            .collect::<Vec<_>>(),
+        trace!(
+            "Getting uncommitted info. vector: {:?}, number {:?}, string {:?}, bool {:?}",
+            self.vector_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.number_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.string_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
+            self.bool_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
         );
 
         UncommittedInfo {

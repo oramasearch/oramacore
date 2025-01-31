@@ -92,7 +92,7 @@ impl ReadSide {
 
     fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
         tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size.clone());
+            let mut interval = tokio::time::interval(insert_batch_commit_size);
 
             // If for some reason we miss a tick, we skip it.
             // In fact, the commit is blocked only by `update` method.

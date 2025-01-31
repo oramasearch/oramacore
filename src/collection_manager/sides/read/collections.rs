@@ -16,11 +16,10 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use axum_openapi3::utoipa::openapi::info;
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
