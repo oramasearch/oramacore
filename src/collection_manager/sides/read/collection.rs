@@ -10,9 +10,9 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedCollection;
 use dashmap::DashMap;
-use redact::Secret;
 use dump::{CollectionInfo, CollectionInfoV1};
 use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{
     join,
@@ -29,13 +29,8 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            ApiKey, EmbeddingTypedField, FacetDefinition, FacetResult, FieldId, Filter, Limit,
-            Properties, SearchMode, SearchParams, TypedField,
-        },
-        sides::{
-            CollectionWriteOperation, DocumentFieldIndexOperation, Offset, OramaModelSerializable,
-            self, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
-            Properties, SearchMode, SearchParams,
+            self, ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit,
+            NumberFilter, Properties, SearchMode, SearchParams,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
     },
@@ -155,7 +150,7 @@ impl CollectionReader {
             .context("Cannot read previous collection info")?;
 
         let dump::CollectionInfo::V1(collection_info) = collection_info;
-        self.read_api_key = ApiKey(Secret::new(dump.read_api_key));
+        self.read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
 
         for (field_name, (field_id, field_type)) in collection_info.fields {
             let typed_field: TypedField = match field_type {

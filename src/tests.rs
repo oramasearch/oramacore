@@ -1017,7 +1017,11 @@ async fn test_vector_search_grpc() -> Result<()> {
         }));
     }
     write_side
-        .write(ApiKey(Secret::new("my-write-api-key".to_string())), collection_id.clone(), docs.try_into().unwrap())
+        .write(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            docs.try_into().unwrap(),
+        )
         .await?;
 
     sleep(Duration::from_millis(500)).await;
@@ -1446,12 +1450,15 @@ async fn test_delete_documents() -> Result<()> {
     let collection_id = CollectionId("test-collection".to_string());
     write_side
         .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
                 "id": collection_id.0.clone(),
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
                 },
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
             })
             .try_into()?,
         )
@@ -1460,6 +1467,7 @@ async fn test_delete_documents() -> Result<()> {
     let document_count = 10;
     insert_docs(
         write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
         (0..document_count).map(|i| {
             json!({
@@ -1472,6 +1480,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1483,6 +1492,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 1).to_string()],
@@ -1492,6 +1502,7 @@ async fn test_delete_documents() -> Result<()> {
     sleep(Duration::from_millis(100)).await;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1505,6 +1516,7 @@ async fn test_delete_documents() -> Result<()> {
     read_side.commit().await.unwrap();
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1516,6 +1528,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 2).to_string()],
@@ -1526,6 +1539,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1538,6 +1552,7 @@ async fn test_delete_documents() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1549,6 +1564,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id.clone(),
             DeleteDocuments {
                 document_ids: vec![(document_count - 2).to_string()],
@@ -1559,6 +1575,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",
@@ -1574,6 +1591,7 @@ async fn test_delete_documents() -> Result<()> {
     let (_, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
             json!({
                 "term": "text",

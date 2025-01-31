@@ -10,16 +10,20 @@ HTTP 200
 collection_id: jsonpath "$[0]"
 
 POST {{base_url}}/v0/collections
+Authorization: Bearer my-master-api-key
 {
     "id": "{{collection_id}}",
     "embeddings": {
         "model_name": "BGESmall",
         "document_fields": ["content"]
-    }
+    },
+    "read_api_key": "my-read-api-key",
+    "write_api_key": "my-write-api-key"
 }
 HTTP 201
 
 PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
+Authorization: Bearer my-write-api-key
 [
     {
         "id": "1",
@@ -37,7 +41,8 @@ PATCH {{base_url}}/v0/collections/{{collection_id}}/documents
 HTTP 200
 
 
-POST {{base_url}}/v0/collections/{{collection_id}}/search
+POST {{base_url}}/v0/collections/{{collection_id}}/search?api-key=my-read-api-key
+Authorization: Bearer my-read-api-key
 [Options]
 retry: 10
 retry-interval: 500ms

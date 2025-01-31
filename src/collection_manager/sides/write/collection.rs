@@ -7,11 +7,9 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
-use redact::Secret;
 use anyhow::{anyhow, bail, Context, Ok, Result};
 use doc_id_storage::DocIdStorage;
+use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};

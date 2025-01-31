@@ -271,6 +271,7 @@ impl WriteSide {
 
     pub async fn delete_documents(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         delete_documents: DeleteDocuments,
     ) -> Result<()> {
@@ -279,6 +280,8 @@ impl WriteSide {
             .get_collection(collection_id.clone())
             .await
             .context("Collection not found")?;
+
+        collection.check_write_api_key(write_api_key)?;
 
         collection
             .delete_documents(delete_documents.document_ids, self.sender.clone())
