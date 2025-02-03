@@ -1608,6 +1608,92 @@ async fn test_delete_documents() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+async fn test_array_types() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let mut config = create_oramacore_config();
+    config.reader_side.config.insert_batch_commit_size = 1_000_000;
+    config.writer_side.config.insert_batch_commit_size = 1_000_000;
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    write_side
+        .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
+            json!({
+                "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
+            })
+            .try_into()?,
+        )
+        .await?;
+
+    let document_count = 10;
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        (0..document_count).map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": vec!["text ".repeat(i + 1)],
+                "number": vec![i],
+                "bool": vec![i % 2 == 0],
+            })
+        }),
+    )
+    .await?;
+    sleep(Duration::from_millis(500)).await;
+
+    let result = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "text",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, document_count);
+
+    let result = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "eq": 5,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 1);
+
+    let result = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "text",
+                "where": {
+                    "bool": true,
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 5);
+
+    Ok(())
+}
+
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side
         .create_collection(
