@@ -22,8 +22,14 @@ impl DocIdStorage {
             .collect()
     }
 
-    pub fn insert_document_id(&mut self, doc_id: String, document_id: DocumentId) {
-        self.document_id.insert(doc_id, document_id);
+    #[must_use]
+    pub fn insert_document_id(&mut self, doc_id: String, document_id: DocumentId) -> bool {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.document_id.entry(doc_id) {
+            e.insert(document_id);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
