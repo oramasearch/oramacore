@@ -56,34 +56,32 @@ class PartyPlanner:
             should_stream=step_config["stream"],
         )
 
-    def _execute_orama_search(self, collection_id: str, input: str):
-
-        print(json.dumps(self.executed_steps, indent=2))
+    def _execute_orama_search(self, collection_id: str, input: str, api_key: str) -> List[Dict[str, Any]]:
+        queries = []
 
         for step in self.executed_steps:
-
-            if step.action == "OPTIMIZE_QUERY":
-                return self.act.call_oramacore_search(
-                    collection_id, {"term": step.result, "mode": "hybrid", "limit": 5}
-                )
-
-            elif step.action == "GENERATE_QUERIES":
-                results = []
-
-                for query in step.result:
-                    res = self.act.call_oramacore_search(collection_id, {"term": query, "mode": "hybrid", "limit": 3})
-                    results.append(res)
-
-                return results
-
+            if step.action == "GENERATE_QUERIES":
+                queries = step.result
+            elif step.action == "OPTIMIZE_QUERY":
+                queries = [step.result]
             else:
-                return self.act.call_oramacore_search(collection_id, {"term": input, "mode": "hybrid", "limit": 5})
+                queries = [input]
 
-    def _handle_orama_step(self, step: Step, collection_id: str, input: str) -> str:
+        results = []
+        limit = 3 if len(queries) > 1 else 5
+
+        for query in queries:
+            full_query = {"term": query, "mode": "hybrid", "limit": limit}
+            res = self.act.call_oramacore_search(collection_id=collection_id, query=full_query, api_key=api_key)
+            results.append(res)
+
+        return results
+
+    def _handle_orama_step(self, step: Step, collection_id: str, input: str, api_key: str) -> str:
         """Handle Orama-specific steps."""
         if step.name == "PERFORM_ORAMA_SEARCH":
             try:
-                result = self._execute_orama_search(collection_id, input)
+                result = self._execute_orama_search(collection_id=collection_id, input=input, api_key=api_key)
 
                 return json.dumps(result) if isinstance(result, dict) else str(result)
             except Exception as e:
@@ -107,7 +105,7 @@ class PartyPlanner:
         history.append({"role": "assistant", "content": accumulated_result})
         yield accumulated_result, history
 
-    def run(self, collection_id: str, input: str, history: List[Any]) -> Iterator[str]:
+    def run(self, collection_id: str, input: str, history: List[Any], api_key: str) -> Iterator[str]:
         action_plan = self._get_action_plan(history, input)
         message = Message("ACTION_PLAN", action_plan)
         self.executed_steps.append(message)
@@ -117,13 +115,15 @@ class PartyPlanner:
         for action in action_plan:
             step = self._create_step(action)
 
+            # Handle Orama-specific steps first
             if step.is_orama_step:
-                result = self._handle_orama_step(step, collection_id, input)
+                result = self._handle_orama_step(step=step, collection_id=collection_id, input=input, api_key=api_key)
                 message = Message(step.name, result)
                 self.executed_steps.append(message)
                 yield message.to_json()
                 continue
 
+            # Handle non-streaming and streaming steps
             if not step.should_stream:
                 result, history = self._handle_non_streaming_step(step, input, [])
 
@@ -131,6 +131,8 @@ class PartyPlanner:
                 self.executed_steps.append(message)
 
                 yield message.to_json()
+
+            # Handle streaming steps
             else:
                 step_result_acc = Message(step.name, "")
                 for result, updated_history in self._handle_streaming_step(step, input, []):
