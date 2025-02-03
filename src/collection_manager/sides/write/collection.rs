@@ -124,6 +124,27 @@ impl CollectionWriter {
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
+        // Those `?` is never triggered, but it's here to make the compiler happy:
+        // The "id" property is always present in the document.
+        // TODO: do this better
+        let doc_id_str = doc
+            .inner
+            .get("id")
+            .context("Document does not have an id")?
+            .as_str()
+            .context("Document id is not a string")?;
+        let mut doc_id_storage = self.doc_id_storage.write().await;
+        if !doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id) {
+            // The document is already indexed.
+            // If the document id is there, it will be difficul to remove it.
+            // So, we decided to just ignore it.
+            // We could at least return a warning to the user.
+            // TODO: return a warning
+            warn!("Document '{}' already indexed", doc_id_str);
+            return Ok(());
+        }
+        drop(doc_id_storage);
+
         // We send the document to index *before* indexing it, so we can
         // guarantee that the document is there during the search.
         // Otherwise, we could find the document without having it yet.
@@ -137,18 +158,6 @@ impl CollectionWriter {
             ))
             .await
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
-
-        // Those `?` is never triggered, but it's here to make the compiler happy
-        // TODO: do this better
-        let doc_id_str = doc
-            .inner
-            .get("id")
-            .context("Document does not have an id")?
-            .as_str()
-            .context("Document id is not a string")?;
-        let mut doc_id_storage = self.doc_id_storage.write().await;
-        doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id);
-        drop(doc_id_storage);
 
         let fields_to_index = self
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
