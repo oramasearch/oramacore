@@ -57,7 +57,11 @@ class PartyPlanner:
         )
 
     def _execute_orama_search(self, collection_id: str, input: str):
+
+        print(json.dumps(self.executed_steps, indent=2))
+
         for step in self.executed_steps:
+
             if step.action == "OPTIMIZE_QUERY":
                 return self.act.call_oramacore_search(
                     collection_id, {"term": step.result, "mode": "hybrid", "limit": 5}
@@ -88,18 +92,15 @@ class PartyPlanner:
 
     def _handle_non_streaming_step(self, step: Step, input: str, history: List[Any]) -> tuple[str, List[Any]]:
         """Handle non-streaming model steps."""
-        result = self.models_service.action(
-            action=step.name, input=input, description=step.description, history=[], stream=False
-        )
-
+        result = self.models_service.action(action=step.name, input=input, description=step.description, history=[])
         history.append({"role": "assistant", "content": result})
         return result, history
 
     def _handle_streaming_step(self, step: Step, input: str, history: List[Any]) -> Iterator[tuple[str, List[Any]]]:
         """Handle streaming model steps."""
         accumulated_result = ""
-        for chunk in self.models_service.action(
-            action=step.name, input=input, description=step.description, history=[], stream=True
+        for chunk in self.models_service.action_stream(
+            action=step.name, input=input, description=step.description, history=[]
         ):
             yield chunk, history
 
@@ -110,6 +111,7 @@ class PartyPlanner:
         action_plan = self._get_action_plan(history, input)
         message = Message("ACTION_PLAN", action_plan)
         self.executed_steps.append(message)
+
         yield message.to_json()
 
         for action in action_plan:
@@ -127,6 +129,7 @@ class PartyPlanner:
 
                 message = Message(step.name, result)
                 self.executed_steps.append(message)
+
                 yield message.to_json()
             else:
                 step_result_acc = Message(step.name, "")
