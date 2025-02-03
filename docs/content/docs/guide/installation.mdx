@@ -1,12 +1,13 @@
 ---
-title: Running OramaCore
-description: "Downloading, building, and running OramaCore on your machine or in production. "
-icon: Play
+title: Install OramaCore
+description: "Downloading, building, and running OramaCore on your machine or in production."
 ---
 
+<Callout type='warn'>
 OramaCore is currently under active development. Our goal is to release the first Beta version (**v0.1.0**) on **Jan 31st, 2025**, and the first stable version (**v1.0.0**) on **Feb 28th, 2025**.
 
 While the system is already quite stable, please note that APIs will undergo changes in **v0.1.0** and **v1.0.0**.
+</Callout>
 
 ## Using Docker
 
@@ -16,7 +17,7 @@ The simplest way to get started is by pulling the official Docker image from Doc
 docker pull oramasearch/oramacore:latest
 ```
 
-Create a [config.yaml configuration file](/docs/getting-started/configuration) and then run the Docker image:
+Create a [config.yaml configuration file](/docs/guide/configuration) and then run the Docker image:
 
 ```sh
 docker run \
@@ -91,7 +92,7 @@ Then, install the dependencies:
 pip install -r requirements.txt # or pip install -r requirements-cpu.txt
 ```
 
-When you run the server, OramaCore will automatically download the required models specified in the [configuration file](/docs/getting-started/configuration).
+When you run the server, OramaCore will automatically download the required models specified in the [configuration file](/docs/guide/configuration).
 
 The download time will depend on your internet connection.
 

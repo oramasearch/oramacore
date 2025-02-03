@@ -1,21 +1,14 @@
 ---
-title: Introduction
-description: An introduction to OramaCore - a complex AI architecture made easy and open-source.
-icon: Album
+title: Getting Started
+description: Getting started with OramaCore - a complex AI architecture made easy and open-source.
 ---
 import { File, Folder, Files } from 'fumadocs-ui/components/files';
 import { SearchIcon, DatabaseIcon, WholeWordIcon, FileJson } from 'lucide-react';
 
-Building search engines, copilots, answer systems, or pretty much any AI project is harder than it should be.
 
-Even in the simplest cases, you'll need a vector database, a connection to an LLM for generating embeddings, a solid chunking mechanism, and another LLM to generate answers.
-And that's without even considering your specific needs, where all these pieces need to work together in a way that's unique to your use case.
+Building AI projects like search engines or copilots **is harder than it should be**, requiring vector databases, LLMs, chunking, and seamless integration while handling network slowdowns and performance issues. OramaCore simplifies this with a unified, opinionated server for easier development and customization.
 
-On top of that, you're likely forced to add multiple layers of network-based communication, deal with third-party slowdowns beyond your control, and address all the typical challenges we consider when building high-performance, high-quality applications.
-
-OramaCore simplifies the chaos of setting up and maintaining a complex architecture. It gives you a single, easy-to-use, opinionated server that's designed to help you create tailored solutions for your own unique challenges.
-
-## Why OramaCore
+## Quick Start
 
 OramaCore gives you everything you need **in a single Dockerfile**.
 
@@ -45,48 +38,95 @@ You're getting acces to:
     </Card>
 </Cards>
 
-All from a single, self-contained image.
+All from a single, self-contained image. 
 
-## On being opinionated
+To run the image, you can use the following command:
 
-When building OramaCore, we made a deliberate choice to create an opinionated system. We offer strong, general-purpose default configurations while still giving you the flexibility to customize them as needed.
+```sh
+docker run \
+  -p 8080:8080 \
+  -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
+  -v ./config.yaml:/app/config.yaml \
+  --gpus all \
+  oramacore
+```
+
+### Configuration
+
+To get started with OramaCore, you can use the default configuration. But if you want to customize it, you can do so by editing the `config.toml` file.
+You can customize the system to fit your specific needs. Check out the [configuration](/docs/guide/configuration) guide to learn more.
+
+### Create a collection
+
+To import data into OramaCore, you need to create a collection. A collection is a group of documents that you can search and interact with. You can create a collection by sending a POST request to the `/collections` endpoint with the collection name and the API Keys to secure it.
+The request should include an Authorization header with the master API key. Learn more about [API Keys](/docs/guide/api-keys).
+
+```sh
+curl -X POST \
+  http://localhost:8080/v0/collections \
+  -H 'Authorization: Bearer <master-api-key>' \
+  -d '{
+    "id": "products",
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key"
+  }'
+```
+
+### Add documents
+
+Once you have created a collection, you can add documents to it. A document is a JSON object that contains the data you want to search. You can add a document by sending a POST request to the `/collections/:collection_id/documents` endpoint with the document data.
+
+```sh
+curl -X PATCH \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write_api_key>' \
+  -d '{
+    "id": "1",
+    "title": "My first document",
+    "content": "The quick brown fox jumps over the lazy dog."
+  }'
+```
+You can explore more about [documents](/docs/apis/insert-documents) and how to insert documents into a collection.
+
+### Search
+
+Now that you have added documents to your collection, you can perform your first search query using the `/search` endpoint. You can send a POST request to the `/search` endpoint with the search query and the collection ID to get the results.
+
+```sh
+curl -X POST \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
+  -H 'Content-Type: application/json' \
+  -d '{ "term": "The quick brown fox" }'
+```
+
+You can now perform unlimited, fast searches on your data using OramaCore! Check out the supported [Search Parameters](/docs/apis/search-documents#search-parameters) to learn more about how to customize your search queries results.
+
+Out of the box, OramaCore is ready to go with a powerful search engine, featuring Full Text search, Vector Search and Hybrid Search. You can start building your AI projects right away! 🚀
+
+## Why OramaCore?
+
+Building search engines, copilots, answer systems, or pretty much any AI project is pretty challenging.
+Even in the simplest cases, you'll need a vector database, a connection to an LLM for generating embeddings, a solid chunking mechanism, and another LLM to generate answers.
+And that's without even considering your specific needs, where all these pieces need to work together in a way that's unique to your use case.
+
+On top of that, you're likely forced to add multiple layers of network-based communication, deal with third-party slowdowns beyond your control, and address all the typical challenges we consider when building high-performance, high-quality applications.
+
+OramaCore simplifies the chaos of setting up and maintaining a complex architecture. It gives you a single, easy-to-use, opinionated server that's designed to help you create tailored solutions for your own unique challenges.
+
+### Philosophy
+
+When building OramaCore, we made a deliberate choice to create **an opinionated system**. We offer strong, general-purpose default configurations while still giving you the flexibility to customize them as needed.
 
 There are plenty of great vector databases and full-text search engines out there. But most of them don't work seamlessly together out of the box—they often require extensive fine-tuning to arrive at a functional solution.
 
 Our goal is to provide you with a platform that's ready to go the moment you pull a single Docker file.
 
-## Write Side, Read Side
+### OramaCore APIs
 
-OramaCore is a modular system. We allow it to run as a monolith - where all the components are running in a single process - or as a distributed system, where you can scale each component independently.
+The one imperative we have when designing the OramaCore APIs is to make them as simple as possible. We want to make it easy for developers to get started with OramaCore, and to make it easy for them to build applications that use OramaCore.
 
-To allow this, we split the system into two distinct sides: the **write side** and the **read side**.
+Any additional steps, any additional complexity, any additional boilerplate, is a failure on our part. We want to make it as easy as possible for you to use OramaCore.
 
-If you're running OramaCore in a single node, you won't notice the difference. But if you're running it in a distributed system, you can scale the write side independently from the read side.
+If you think we should improve on this front, please let us know at [info@orama.com](mailto:info@orama.com). We are always looking for feedback.
 
-### Write Side
-
-The write side is responsible for ingesting data, generating embeddings, and storing them in the vector database. It's also responsible for generating the full-text search index.
-
-It's the part of the system that requires the most GPU power and memory, as it need to generate a lot of content, embeddings, and indexes.
-
-In detail, the write side is responsible for:
-
-- **Ingesting data**. It creates a buffer of documents and flushes them to the vector database and the full-text search index, rebuilding the immutable data structures used for search.
-- **Generating embeddings**. It generates text embeddings for large datasets without interfering with the search performance.
-- **Expanding content (coming soon)**. It is capable of reading images, code blocks, and other types of content, and generating descriptions and metadata for them.
-
-Every insertion, deletion, or update of a document will be handled by the write side.
-
-### Read Side
-
-The read side is responsible for handling queries, searching for documents, and returning the results to the user.
-
-It's also the home of the Answer Engine, which is responsible for generating answers to questions and performing chain of actions based on the user's input.
-
-In detail, the read side is responsible for:
-
-- **Handling queries**. It receives the user's query, translates it into a query that the vector database can understand, and returns the results.
-- **Searching for documents**. It searches for documents in the full-text search index and the vector database.
-- **Answer Engine**. It generates answers to questions, performs chain of actions, and runs custom agents.
-
-Every query, question, or action will be handled by the read side.
