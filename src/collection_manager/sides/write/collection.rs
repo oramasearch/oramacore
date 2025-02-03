@@ -189,6 +189,7 @@ impl CollectionWriter {
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
             ValueType::Complex(ComplexType::Array(ScalarType::String)) => Some(TypedField::ArrayText(self.default_language.into())),
+            ValueType::Complex(ComplexType::Array(ScalarType::Number)) => Some(TypedField::ArrayNumber),
             _ => None, // @todo: support other types
         }
     }
@@ -319,6 +320,16 @@ impl CollectionWriter {
                             field_id,
                             field_name.clone(),
                         ),
+                    ),
+                );
+            }
+            TypedField::ArrayNumber => {
+                w.insert(
+                    field_id,
+                    (
+                        field_name.clone(),
+                        ValueType::Scalar(ScalarType::Number),
+                        CollectionField::new_arr_number(self.id.clone(), field_id, field_name.clone()),
                     ),
                 );
             }

@@ -39,7 +39,11 @@ pub enum CollectionField {
 }
 impl CollectionField {
     pub fn new_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
-        CollectionField::Number(NumberField::new(collection_id, field_id, field_name))
+        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, false))
+    }
+
+    pub fn new_arr_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, true))
     }
 
     pub fn new_bool(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
@@ -176,14 +180,16 @@ pub struct NumberField {
     collection_id: CollectionId,
     field_id: FieldId,
     field_name: String,
+    is_array: bool,
 }
 
 impl NumberField {
-    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String, is_array: bool) -> Self {
         Self {
             collection_id,
             field_id,
             field_name,
+            is_array,
         }
     }
 }
@@ -195,25 +201,43 @@ impl NumberField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let value = doc
-            .get(&self.field_name)
-            .and_then(|v| Number::try_from(v).ok());
-
-        let value = match value {
+        let value = doc.get(&self.field_name);
+        let data: Vec<Number> = match value {
             None => return Ok(()),
-            Some(value) => value,
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => {
+                            value.iter().filter_map(|v| {
+                                Number::try_from(v).ok()
+                            }).collect()
+                        }
+                    }
+                } else {
+                    if let Ok(v) = Number::try_from(value) {
+                        vec![v]
+                    } else {
+                        return Ok(());
+                    }
+                }
+            }
         };
+        if data.is_empty() {
+            return Ok(());
+        }
 
-        let op = WriteOperation::Collection(
-            self.collection_id.clone(),
-            CollectionWriteOperation::Index(
-                doc_id,
-                self.field_id,
-                DocumentFieldIndexOperation::IndexNumber { value },
-            ),
-        );
-
-        sender.send(op).await?;
+        for value in data {
+            let op = WriteOperation::Collection(
+                self.collection_id.clone(),
+                CollectionWriteOperation::Index(
+                    doc_id,
+                    self.field_id,
+                    DocumentFieldIndexOperation::IndexNumber { value },
+                ),
+            );
+            sender.send(op).await?;
+        }
 
         Ok(())
     }
@@ -315,7 +339,6 @@ impl StringField {
         });
 
         let value = doc.get(&self.field_name);
-
         let data = match value {
             None => return Ok(()),
             Some(value) => {

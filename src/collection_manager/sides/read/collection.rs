@@ -637,6 +637,7 @@ impl CollectionReader {
                     dto::TypedField::Number => TypedField::Number,
                     dto::TypedField::Bool => TypedField::Bool,
                     dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
+                    dto::TypedField::ArrayNumber => TypedField::ArrayNumber,
                 };
 
                 self.fields
@@ -1248,7 +1249,7 @@ async fn get_filtered_document(
     uncommitted_deleted_documents: &HashSet<DocumentId>,
 ) -> Result<HashSet<DocumentId>> {
     match (&field_type, filter) {
-        (TypedField::Number, Filter::Number(filter_number)) => {
+        (TypedField::Number | TypedField::ArrayNumber, Filter::Number(filter_number)) => {
             get_number_filtered_document(
                 reader,
                 field_id,
@@ -1282,4 +1283,5 @@ pub enum TypedField {
     Number,
     Bool,
     ArrayText(Locale),
+    ArrayNumber,
 }

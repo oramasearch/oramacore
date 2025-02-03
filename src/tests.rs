@@ -1659,6 +1659,23 @@ async fn test_array_types() -> Result<()> {
         .await?;
     assert_eq!(result.count, document_count);
 
+    let result = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "text",
+                "where": {
+                    "number": {
+                        "eq": 5,
+                    },
+                }
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(result.count, 1);
+
     Ok(())
 }
 

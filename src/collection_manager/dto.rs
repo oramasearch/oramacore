@@ -72,6 +72,7 @@ pub enum TypedField {
     Number,
     Bool,
     ArrayText(Locale),
+    ArrayNumber,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
