@@ -638,6 +638,7 @@ impl CollectionReader {
                     dto::TypedField::Bool => TypedField::Bool,
                     dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
                     dto::TypedField::ArrayNumber => TypedField::ArrayNumber,
+                    dto::TypedField::ArrayBoolean => TypedField::ArrayBoolean,
                 };
 
                 self.fields
@@ -1258,7 +1259,7 @@ async fn get_filtered_document(
             )
             .await
         }
-        (TypedField::Bool, Filter::Bool(filter_bool)) => {
+        (TypedField::Bool | TypedField::ArrayBoolean, Filter::Bool(filter_bool)) => {
             get_bool_filtered_document(reader, field_id, filter_bool, uncommitted_deleted_documents)
                 .await
         }
@@ -1284,4 +1285,5 @@ pub enum TypedField {
     Bool,
     ArrayText(Locale),
     ArrayNumber,
+    ArrayBoolean,
 }
