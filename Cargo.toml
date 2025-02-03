@@ -35,22 +35,21 @@ invocation-counter = "0.1.0"
 
 
 rust-stemmers = "1.2.0"
-text-splitter = { version = "0.21", features = [
+text-splitter = { version = "0.22", features = [
     "tiktoken-rs",
     "markdown",
     "code",
 ] }
 tiktoken-rs = "0.6.0"
-tree-sitter = "0.24.7"
+tree-sitter = "0.24"
 tree-sitter-html = "0.23.2"
 tree-sitter-javascript = "0.23.1"
 tree-sitter-typescript = "0.23.2"
 
 async-trait = "0.1.85"
 
-
 fst = "0.4.7"
-rand = "0.8.5"
+rand = "0.9"
 
 ordered-float = "4"
 num-traits = "0.2"
@@ -58,6 +57,8 @@ num-traits = "0.2"
 futures = "0.3.31"
 
 itertools = "0.14"
+duration-string = "0.5.2"
+chrono = "0.4.39"
 
 # Webserver
 axum = { version = "0.8.1", features = ["macros"] }
@@ -66,27 +67,20 @@ tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 http = "1.2.0"
 axum-openapi3 = { version = "0.2", features = ["derive"] }
 
-# Embeddings
 hora = { version = "0.1.1" }
-fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
-strum = { version = "0.26", features = ["derive"] }
+fastembed = { version = "4.4.0", features = ["ort-download-binaries"], optional = true }
 strum_macros = "0.26.4"
-ndarray = "=0.15.6"
-reductive = "0.9.0"
-rand_chacha = "0.3.1"
-reqwest = { version = "0.12.12", features = ["blocking", "json"] }
-quick-js = "0.4.1"
 
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-duration-string = "0.5.2"
+
+# JS
 deno_core = "0.330.0"
 serde_v8 = "0.239.0"
 oxc_parser = "0.47.1"
 oxc_allocator = "0.47.1"
 oxc_span = "0.47.1"
-chrono = "0.4.39"
 
 # prometheus
 metrics-exporter-prometheus = "0.16.1"
@@ -113,8 +107,9 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 http-body-util = "0.1.2"
 mime = "0.3.17"
 tower = { version = "0.5.2", features = ["util"] }
-rand = "0.8.5"
 assert_approx_eq = "1.1.0"
+fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
+reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 
 [[bin]]
 name = "oramacore"
@@ -129,7 +124,7 @@ path = "src/bin/embeddings/embeddings.rs"
 
 [features]
 default = ["benchmarking"]
-benchmarking = ["tempdir"]
+benchmarking = ["tempdir", "fastembed"]
 no_auto_embedding_field_on_creation = []
 
 [workspace]

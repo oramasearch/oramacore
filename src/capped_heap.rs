@@ -64,7 +64,7 @@ impl<K: std::cmp::Ord, V: std::cmp::Ord> CappedHeap<K, V> {
 #[cfg(test)]
 mod tests {
     use rand::prelude::SliceRandom;
-    use rand::thread_rng;
+    use rand::rng;
 
     use super::*;
 
@@ -118,7 +118,7 @@ mod tests {
         for _ in 0..100 {
             let mut heap = CappedHeap::new(3);
 
-            data.shuffle(&mut thread_rng());
+            data.shuffle(&mut rng());
             for (key, value) in &data {
                 heap.insert(*key, *value);
             }
