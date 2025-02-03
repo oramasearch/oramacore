@@ -57,6 +57,22 @@ impl CollectionField {
             collection_id,
             field_id,
             field_name,
+            false,
+        ))
+    }
+
+    pub fn new_arr_string(
+        parser: Arc<TextParser>,
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionField::String(StringField::new(
+            parser,
+            collection_id,
+            field_id,
+            field_name,
+            true,
         ))
     }
 
@@ -268,6 +284,7 @@ pub struct StringField {
     field_id: FieldId,
     field_name: String,
     parser: Arc<TextParser>,
+    is_array: bool,
 }
 impl StringField {
     pub fn new(
@@ -275,12 +292,14 @@ impl StringField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        is_array: bool,
     ) -> Self {
         Self {
             parser,
             collection_id,
             field_id,
             field_name,
+            is_array,
         }
     }
 
@@ -299,10 +318,27 @@ impl StringField {
 
         let data = match value {
             None => return Ok(()),
-            Some(value) => match value.as_str() {
-                None => return Ok(()),
-                Some(value) => self.parser.tokenize_and_stem(value),
-            },
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => {
+                            let mut data = Vec::new();
+                            for value in value {
+                                if let Some(value) = value.as_str() {
+                                    data.extend(self.parser.tokenize_and_stem(value));
+                                }
+                            }
+                            data
+                        }
+                    }
+                } else {
+                    match value.as_str() {
+                        None => return Ok(()),
+                        Some(value) => self.parser.tokenize_and_stem(value),
+                    }
+                }
+            }
         };
 
         let field_length = data.len().min(u16::MAX as usize - 1) as u16;

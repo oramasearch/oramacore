@@ -636,6 +636,7 @@ impl CollectionReader {
                     dto::TypedField::Text(locale) => TypedField::Text(locale),
                     dto::TypedField::Number => TypedField::Number,
                     dto::TypedField::Bool => TypedField::Bool,
+                    dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
                 };
 
                 self.fields
@@ -650,8 +651,7 @@ impl CollectionReader {
                             .or_default()
                             .push(field_id);
                     }
-                    TypedField::Text(language) => {
-                        let locale = language;
+                    TypedField::Text(locale) | TypedField::ArrayText(locale) => {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
                             .insert(field_id, (locale, text_parser));
@@ -888,7 +888,7 @@ impl CollectionReader {
             Properties::None | Properties::Star => {
                 let mut r = Vec::with_capacity(self.fields.len());
                 for field in &self.fields {
-                    if !matches!(field.1, TypedField::Text(_)) {
+                    if !matches!(field.1, TypedField::Text(_) | TypedField::ArrayText(_)) {
                         continue;
                     }
                     r.push(field.0);
@@ -1281,4 +1281,5 @@ pub enum TypedField {
     Embedding(OramaModel),
     Number,
     Bool,
+    ArrayText(Locale),
 }

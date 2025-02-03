@@ -124,9 +124,9 @@ impl CollectionWriter {
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
-        self.collection_document_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
+        // We send the document to index *before* indexing it, so we can
+        // guarantee that the document is there during the search.
+        // Otherwise, we could find the document without having it yet.
         sender
             .send(WriteOperation::Collection(
                 self.id.clone(),
@@ -174,6 +174,8 @@ impl CollectionWriter {
                 .with_context(|| format!("Cannot index field {}", field_name))?;
         }
 
+        self.collection_document_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         trace!("Document field indexed");
 
         Ok(())
@@ -186,6 +188,7 @@ impl CollectionWriter {
             }
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
+            ValueType::Complex(ComplexType::Array(ScalarType::String)) => Some(TypedField::ArrayText(self.default_language.into())),
             _ => None, // @todo: support other types
         }
     }
@@ -300,6 +303,22 @@ impl CollectionWriter {
                         field_name.clone(),
                         ValueType::Scalar(ScalarType::Boolean),
                         CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
+                    ),
+                );
+            }
+            TypedField::ArrayText(locale) => {
+                let parser = self.get_text_parser(*locale);
+                w.insert(
+                    field_id,
+                    (
+                        field_name.clone(),
+                        ValueType::Complex(ComplexType::Array(ScalarType::String)),
+                        CollectionField::new_arr_string(
+                            parser,
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }
