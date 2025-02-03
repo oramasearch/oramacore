@@ -42,7 +42,11 @@ impl CollectionField {
         CollectionField::Number(NumberField::new(collection_id, field_id, field_name, false))
     }
 
-    pub fn new_arr_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+    pub fn new_arr_number(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
         CollectionField::Number(NumberField::new(collection_id, field_id, field_name, true))
     }
 
@@ -50,10 +54,13 @@ impl CollectionField {
         CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, false))
     }
 
-    pub fn new_arr_bool(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+    pub fn new_arr_bool(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
         CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, true))
     }
-
 
     pub fn new_string(
         parser: Arc<TextParser>,
@@ -189,7 +196,12 @@ pub struct NumberField {
 }
 
 impl NumberField {
-    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String, is_array: bool) -> Self {
+    pub fn new(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+        is_array: bool,
+    ) -> Self {
         Self {
             collection_id,
             field_id,
@@ -213,18 +225,15 @@ impl NumberField {
                 if self.is_array {
                     match value.as_array() {
                         None => return Ok(()),
-                        Some(value) => {
-                            value.iter().filter_map(|v| {
-                                Number::try_from(v).ok()
-                            }).collect()
-                        }
+                        Some(value) => value
+                            .iter()
+                            .filter_map(|v| Number::try_from(v).ok())
+                            .collect(),
                     }
+                } else if let Ok(v) = Number::try_from(value) {
+                    vec![v]
                 } else {
-                    if let Ok(v) = Number::try_from(value) {
-                        vec![v]
-                    } else {
-                        return Ok(());
-                    }
+                    return Ok(());
                 }
             }
         };
@@ -261,7 +270,12 @@ pub struct BoolField {
 }
 
 impl BoolField {
-    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String, is_array: bool) -> Self {
+    pub fn new(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+        is_array: bool,
+    ) -> Self {
         Self {
             collection_id,
             field_id,
@@ -283,22 +297,16 @@ impl BoolField {
                 if self.is_array {
                     match value.as_array() {
                         None => return Ok(()),
-                        Some(value) => {
-                            value.iter().filter_map(|v| {
-                                v.as_bool()
-                            }).collect()
-                        }
+                        Some(value) => value.iter().filter_map(|v| v.as_bool()).collect(),
                     }
+                } else if let Some(v) = value.as_bool() {
+                    vec![v]
                 } else {
-                    if let Some(v) = value.as_bool() {
-                        vec![v]
-                    } else {
-                        // If the document has a field with the name `field_name` but the value isn't a boolean
-                        // we ignore it.
-                        // Should we bubble up an error?
-                        // TODO: think about it
-                        return Ok(());
-                    }
+                    // If the document has a field with the name `field_name` but the value isn't a boolean
+                    // we ignore it.
+                    // Should we bubble up an error?
+                    // TODO: think about it
+                    return Ok(());
                 }
             }
         };

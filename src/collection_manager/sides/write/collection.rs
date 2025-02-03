@@ -188,9 +188,15 @@ impl CollectionWriter {
             }
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
-            ValueType::Complex(ComplexType::Array(ScalarType::String)) => Some(TypedField::ArrayText(self.default_language.into())),
-            ValueType::Complex(ComplexType::Array(ScalarType::Number)) => Some(TypedField::ArrayNumber),
-            ValueType::Complex(ComplexType::Array(ScalarType::Boolean)) => Some(TypedField::ArrayBoolean),
+            ValueType::Complex(ComplexType::Array(ScalarType::String)) => {
+                Some(TypedField::ArrayText(self.default_language.into()))
+            }
+            ValueType::Complex(ComplexType::Array(ScalarType::Number)) => {
+                Some(TypedField::ArrayNumber)
+            }
+            ValueType::Complex(ComplexType::Array(ScalarType::Boolean)) => {
+                Some(TypedField::ArrayBoolean)
+            }
             _ => None, // @todo: support other types
         }
     }
@@ -330,7 +336,11 @@ impl CollectionWriter {
                     (
                         field_name.clone(),
                         ValueType::Scalar(ScalarType::Number),
-                        CollectionField::new_arr_number(self.id.clone(), field_id, field_name.clone()),
+                        CollectionField::new_arr_number(
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }
@@ -340,7 +350,11 @@ impl CollectionWriter {
                     (
                         field_name.clone(),
                         ValueType::Scalar(ScalarType::Boolean),
-                        CollectionField::new_arr_bool(self.id.clone(), field_id, field_name.clone()),
+                        CollectionField::new_arr_bool(
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }
