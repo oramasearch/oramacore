@@ -21,7 +21,11 @@ class EmbeddingsConfig:
     total_threads: Optional[int] = 8
 
     def __post_init__(self):
-        available_providers = ["CUDAExecutionProvider", "AzureExecutionProvider", "CPUExecutionProvider"]
+        available_providers = [
+            "CUDAExecutionProvider",
+            "AzureExecutionProvider",
+            "CPUExecutionProvider",
+        ]
         self.execution_providers = [
             provider for provider in self.execution_providers if provider in available_providers
         ]

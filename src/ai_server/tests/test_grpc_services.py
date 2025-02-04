@@ -45,7 +45,9 @@ class TestCalculateEmbeddingService:
     def test_get_embedding_success(self, mock_context, mock_embeddings_service):
         service = CalculateEmbeddingService(mock_embeddings_service)
         request = service_pb2.EmbeddingRequest(
-            model=service_pb2.OramaModel.BGESmall, input=["test input"], intent=service_pb2.OramaIntent.query
+            model=service_pb2.OramaModel.BGESmall,
+            input=["test input"],
+            intent=service_pb2.OramaIntent.query,
         )
 
         response = service.GetEmbedding(request, mock_context)

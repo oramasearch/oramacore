@@ -55,7 +55,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -75,7 +78,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -83,7 +89,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             )
 
             for text_chunk in self.models_manager.chat_stream(
-                model_id=model_name.lower(), history=history, prompt=request.prompt, context=request.context
+                model_id=model_name.lower(),
+                history=history,
+                prompt=request.prompt,
+                context=request.context,
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
@@ -94,12 +103,15 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
     def PlannedAnswer(self, request, context):
         metadata = dict(context.invocation_metadata())
-        api_key = metadata.get("x-api-key")
+        api_key = metadata.get("x-api-key") or ""
 
         try:
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -107,7 +119,9 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             )
 
             for message in self.party_planner.run(
-                collection_id=request.collection_id, input=request.input, history=history, api_key=api_key
+                collection_id=request.collection_id,
+                input=request.input,
+                api_key=api_key,
             ):
                 yield PlannedAnswerResponse(data=message, finished=False)
 

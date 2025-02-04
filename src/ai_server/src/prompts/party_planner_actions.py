@@ -74,7 +74,11 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "returns": RETURN_TYPE_JSON,
         "stream": False,
     },
-    "PERFORM_ORAMA_SEARCH": {"side": EXECUTION_SIDE_ORAMACORE, "returns": RETURN_TYPE_JSON, "stream": False},
+    "PERFORM_ORAMA_SEARCH": {
+        "side": EXECUTION_SIDE_ORAMACORE,
+        "returns": RETURN_TYPE_JSON,
+        "stream": False,
+    },
     "DESCRIBE_INPUT_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(

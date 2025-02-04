@@ -7,7 +7,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 
 from src.utils import OramaAIConfig
 from src.prompts.main import PROMPT_TEMPLATES
-from src.prompts.party_planner_actions import DEFAULT_PARTY_PLANNER_ACTIONS_DATA, RETURN_TYPE_JSON, decode_action_result
+from src.prompts.party_planner_actions import (
+    DEFAULT_PARTY_PLANNER_ACTIONS_DATA,
+    RETURN_TYPE_JSON,
+    decode_action_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +78,7 @@ class ModelsManager:
                 del self._models[model_id]
             raise
 
-    def action(self, action: str, input: str, description: str, history: List[Any]) -> Iterator[str] | str:
+    def action(self, action: str, input: str, description: str, history: List[Any]) -> str:
         actual_model_id = self._model_refs.get("action")
         model_config = self._models.get(actual_model_id)
         model = model_config["model"]
@@ -95,6 +99,12 @@ class ModelsManager:
         decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
 
         if action_data["returns"] == RETURN_TYPE_JSON:
+            print("========== DECODED OUTPUT ==========")
+            print(f"Input: {input}")
+            print(f"Description: {description}")
+            print(decoded_output)
+            print("\n")
+
             return decode_action_result(action=action, result=repair_json(decoded_output))
 
         return decoded_output
@@ -119,12 +129,17 @@ class ModelsManager:
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
 
         generation_kwargs = dict(
-            **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
+            **inputs,
+            max_new_tokens=512,
+            temperature=0.1,
+            do_sample=True,
+            use_cache=True,
+            streamer=streamer,
         )
         thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
         thread.start()
 
-        p = None
+        p = ""
 
         for new_text in streamer:
             old_text = p
@@ -135,7 +150,13 @@ class ModelsManager:
 
         yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.
 
-    def chat(self, model_id: str, history: List[Any], prompt: str, context: Optional[str] = None) -> str:
+    def chat(
+        self,
+        model_id: str,
+        history: List[Any],
+        prompt: str,
+        context: Optional[str] = None,
+    ) -> str:
         actual_model_id = self._model_refs.get(model_id)
         if actual_model_id is None:
             raise ValueError(f"Unknown model configuration: {model_id}")
@@ -148,7 +169,12 @@ class ModelsManager:
         tokenizer = model_config["tokenizer"]
 
         history.insert(0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]})
-        history.append({"role": "user", "content": PROMPT_TEMPLATES[f"{model_id}:user"](prompt, context)})
+        history.append(
+            {
+                "role": "user",
+                "content": PROMPT_TEMPLATES[f"{model_id}:user"](prompt, context),
+            }
+        )
 
         formatted_chat = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
         tokenizer.pad_token = tokenizer.eos_token
@@ -163,7 +189,11 @@ class ModelsManager:
         return decoded_output
 
     def chat_stream(
-        self, model_id: str, history: List[Any], prompt: str, context: Optional[str] = None
+        self,
+        model_id: str,
+        history: List[Any],
+        prompt: str,
+        context: Optional[str] = None,
     ) -> Iterator[str]:
         actual_model_id = self._model_refs.get(model_id)
         if actual_model_id is None:
@@ -177,7 +207,12 @@ class ModelsManager:
         tokenizer = model_config["tokenizer"]
 
         history.insert(0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]})
-        history.append({"role": "user", "content": PROMPT_TEMPLATES[f"{model_id}:user"](prompt, context)})
+        history.append(
+            {
+                "role": "user",
+                "content": PROMPT_TEMPLATES[f"{model_id}:user"](prompt, context),
+            }
+        )
 
         formatted_chat = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
         tokenizer.pad_token = tokenizer.eos_token
@@ -188,7 +223,12 @@ class ModelsManager:
         streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
 
         generation_kwargs = dict(
-            **inputs, max_new_tokens=512, temperature=0.1, do_sample=True, use_cache=True, streamer=streamer
+            **inputs,
+            max_new_tokens=512,
+            temperature=0.1,
+            do_sample=True,
+            use_cache=True,
+            streamer=streamer,
         )
         thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
         thread.start()
