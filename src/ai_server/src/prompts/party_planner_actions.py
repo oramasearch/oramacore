@@ -1,5 +1,6 @@
 import json
 from textwrap import dedent
+from typing import Any, Dict
 
 RETURN_TYPE_TEXT = "TEXT"
 RETURN_TYPE_JSON = "JSON"
@@ -18,7 +19,7 @@ COMMON_USER_PROMPT = lambda input, description: dedent(
 )
 
 
-def decode_action_result(action: str, result: object):
+def decode_action_result(action: str, result) -> str:
     as_json = json.loads(result)
 
     if action == "OPTIMIZE_QUERY":

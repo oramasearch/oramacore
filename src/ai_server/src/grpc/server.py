@@ -29,7 +29,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
         self.embeddings_service = embeddings_service
         self.models_manager = models_manager
         self.party_planner_actions = PartyPlannerActions()
-        self.party_planner = PartyPlanner(config, self.models_manager)
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -118,7 +117,9 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            for message in self.party_planner.run(
+            party_planner = PartyPlanner(self.config, self.models_manager)
+
+            for message in party_planner.run(
                 collection_id=request.collection_id,
                 input=request.input,
                 api_key=api_key,

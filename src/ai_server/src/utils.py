@@ -1,4 +1,5 @@
 import yaml
+import json
 from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
@@ -139,3 +140,31 @@ class OramaAIConfig:
                         self.LLMs = LLMs(**llm_configs)
                     else:
                         setattr(self, k, v)
+
+
+def json_to_md(data, level=0) -> str:
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    indent = "  " * level
+    md = ""
+
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        data = data[0]
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            md += f"{indent}- **{key}**: "
+            if isinstance(value, (dict, list)):
+                md += "\n" + json_to_md(value, level + 1)
+            else:
+                md += f"`{value}`\n"
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                md += json_to_md(item, level)
+            else:
+                md += f"{indent}- `{item}`\n"
+
+    print(md)
+    return md

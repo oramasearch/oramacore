@@ -79,8 +79,8 @@ class ModelsManager:
             raise
 
     def action(self, action: str, input: str, description: str, history: List[Any]) -> str:
-        actual_model_id = self._model_refs.get("action")
-        model_config = self._models.get(actual_model_id)
+        actual_model_id = self._model_refs.get("action") or ""
+        model_config: Dict[str, Any] = self._models.get(actual_model_id)
         model = model_config["model"]
         tokenizer = model_config["tokenizer"]
 
@@ -99,12 +99,6 @@ class ModelsManager:
         decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
 
         if action_data["returns"] == RETURN_TYPE_JSON:
-            print("========== DECODED OUTPUT ==========")
-            print(f"Input: {input}")
-            print(f"Description: {description}")
-            print(decoded_output)
-            print("\n")
-
             return decode_action_result(action=action, result=repair_json(decoded_output))
 
         return decoded_output
