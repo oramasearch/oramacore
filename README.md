@@ -8,7 +8,7 @@ It includes a fully-fledged full-text search engine, vector database, LLM interf
 
 ## Roadmap
 
-- **v0.1.0**. ETA Jan 31st, 2025 (🚧 beta release)
+- **v0.1.0**. ✅ ETA Jan 31st, 2025 (🚧 beta release)
     - ✅ Full-text search
     - ✅ Vector search
     - ✅ Search filters
@@ -18,17 +18,17 @@ It includes a fully-fledged full-text search engine, vector database, LLM interf
     - ✅ Disk persistence
     - ✅ Unified configuration
     - ✅ Dockerfile for load testing in production environment
-    - 🚧 Vector compression
-    - 🚧 Benchmarks
 
 - **v1.0.0**. ETA Feb 28th, 2025 (🎉 production ready!)
     - 🔜 Long-term user memory
-    - 🔜 Multi-node setup
+    - 🚧 Multi-node setup
     - 🔜 Content expansion APIs
     - 🔜 JavaScript API integration
-    - 🔜 Production-ready build
+    - 🚧 Production-ready build
     - 🔜 Geosearch
-    - 🔜 Zero-downtime upgrades
+    - 🚧 Zero-downtime upgrades
+    - 🚧 Vector compression
+    - 🚧 Benchmarks
 
 ## Requirements
 
