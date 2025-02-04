@@ -41,7 +41,7 @@ class PartyPlanner:
 
     def _get_action_plan(self, history: List[Any], input: str) -> List[Dict[str, Any]]:
         """Generate and parse the action plan."""
-        action_plan = self.models_service.chat("party_planner", [], input, DEFAULT_PARTY_PLANNER_ACTIONS)
+        action_plan = self.models_service.chat("party_planner", history, input, DEFAULT_PARTY_PLANNER_ACTIONS)
         return json.loads(repair_json(action_plan))["actions"]
 
     def _create_step(self, action: Dict[str, str]) -> Step:
@@ -90,7 +90,9 @@ class PartyPlanner:
 
     def _handle_non_streaming_step(self, step: Step, input: str, history: List[Any]) -> tuple[str, List[Any]]:
         """Handle non-streaming model steps."""
-        result = self.models_service.action(action=step.name, input=input, description=step.description, history=[])
+        result = self.models_service.action(
+            action=step.name, input=input, description=step.description, history=history
+        )
         history.append({"role": "assistant", "content": result})
         return result, history
 
@@ -98,7 +100,7 @@ class PartyPlanner:
         """Handle streaming model steps."""
         accumulated_result = ""
         for chunk in self.models_service.action_stream(
-            action=step.name, input=input, description=step.description, history=[]
+            action=step.name, input=input, description=step.description, history=history
         ):
             yield chunk, history
 
@@ -106,6 +108,8 @@ class PartyPlanner:
         yield accumulated_result, history
 
     def run(self, collection_id: str, input: str, history: List[Any], api_key: str) -> Iterator[str]:
+        history.append({"role": "user", "content": input})
+
         action_plan = self._get_action_plan(history, input)
         message = Message("ACTION_PLAN", action_plan)
         self.executed_steps.append(message)
@@ -120,6 +124,7 @@ class PartyPlanner:
                 result = self._handle_orama_step(step=step, collection_id=collection_id, input=input, api_key=api_key)
                 message = Message(step.name, result)
                 self.executed_steps.append(message)
+
                 yield message.to_json()
                 continue
 
@@ -142,3 +147,9 @@ class PartyPlanner:
                     step_result_acc = Message(step.name, c_m)
                     yield message.to_json()
                 self.executed_steps.append(step_result_acc)
+
+            history.append({"role": "user", "content": step.description})
+            history.append({"role": "assistant", "content": self.executed_steps[-1].result})
+            print("============= history =============")
+            print(json.dumps(history, indent=2))
+            print("\n\n")
