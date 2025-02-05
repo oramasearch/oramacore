@@ -18,9 +18,7 @@ class Actions:
         headers = {"Content-Type": "application/json; charset=utf-8"}
 
         try:
-            resp = requests.post(
-                url=url, json={"context": body, "name": "search"}, headers=headers
-            )
+            resp = requests.post(url=url, json={"context": body, "name": "search"}, headers=headers)
             as_json = json.loads(resp.text)
             return as_json["hits"]
 

@@ -141,9 +141,7 @@ class PartyPlanner:
             should_stream=step_config["stream"],
         )
 
-    def _execute_orama_search(
-        self, collection_id: str, input: str, api_key: str
-    ) -> str:
+    def _execute_orama_search(self, collection_id: str, input: str, api_key: str) -> str:
         # Look for a prior step that produced queries; otherwise, use the original, unoptimized input.
         queries = None
         for step in self.executed_steps:
@@ -177,21 +175,15 @@ class PartyPlanner:
             # This is to ensure that vector search is used when there is no query optimization.
             mode = "vector" if queries is None else "hybrid"
             full_query = {"term": query, "mode": mode, "limit": limit}
-            res = self.act.call_oramacore_search(
-                collection_id=collection_id, query=full_query, api_key=api_key
-            )
+            res = self.act.call_oramacore_search(collection_id=collection_id, query=full_query, api_key=api_key)
             results.append(res)
 
         return json.dumps(results)
 
-    def _handle_orama_step(
-        self, step: Step, collection_id: str, input: str, api_key: str
-    ) -> str:
+    def _handle_orama_step(self, step: Step, collection_id: str, input: str, api_key: str) -> str:
         if step.name == "PERFORM_ORAMA_SEARCH":
             try:
-                result = self._execute_orama_search(
-                    collection_id=collection_id, input=input, api_key=api_key
-                )
+                result = self._execute_orama_search(collection_id=collection_id, input=input, api_key=api_key)
                 self.history.append(
                     {"role": "assistant", "content": format_orama_search_results_assistant(json_to_md(result, 2))}  # type: ignore
                 )
@@ -199,31 +191,29 @@ class PartyPlanner:
                 return result
             except Exception as e:
                 return json.dumps({"error": str(e)})
-        return json.dumps(
-            {
-                "message": f"Skipping action {step.name} as it requires a missing OramaCore integration"
-            }
-        )
+        return json.dumps({"message": f"Skipping action {step.name} as it requires a missing OramaCore integration"})
 
     def run(self, collection_id: str, input: str, api_key: str) -> Iterator[str]:
         # Add a system prompt to the history if the first entry is not a system prompt.
         if len(self.history) > 0 and self.history[0]["role"] != "system":
-            self.history.insert(
-                0, {"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT}
-            )
+            self.history.insert(0, {"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
         elif len(self.history) == 0:
-            self.history.append(
-                {"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT}
-            )
+            self.history.append({"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
 
         # Use the input as the first history entry.
         self.history.append({"role": "user", "content": input})
 
         # Create an action plan and store it in the executed steps.
         action_plan = self._get_action_plan(input)
-        self.history.append(
-            {"role": "assistant", "content": format_action_plan_assistant(action_plan)}
-        )
+        self.history.append({"role": "assistant", "content": format_action_plan_assistant(action_plan)})
+
+        # Make sure that the last step is either "GIVE_REPLY" or "ASK_FOLLOWUP".
+        # If that's not the case, append them to the action plan.
+        # for now, we'll always append "GIVE_REPLY" as the last step.
+        last_step = action_plan[-1]["step"]
+        if last_step != "GIVE_REPLY" and last_step != "ASK_FOLLOWUP":
+            give_reply_data = filter(lambda data: data["step"] == "GIVE_REPLY", DEFAULT_PARTY_PLANNER_ACTIONS)
+            action_plan.append(next(give_reply_data))
 
         yield Message(action="ACTION_PLAN", result=json.dumps(action_plan)).to_json()
 
@@ -234,9 +224,7 @@ class PartyPlanner:
             # Handle Orama-specific steps first. These should never be streamed.
             if step.is_orama_step:
                 # History is managed internally for Orama steps.
-                result = self._handle_orama_step(
-                    step=step, collection_id=collection_id, input=input, api_key=api_key
-                )
+                result = self._handle_orama_step(step=step, collection_id=collection_id, input=input, api_key=api_key)
                 yield Message(action=action["step"], result=result).to_json()
 
             # Handle non-streaming and streaming steps.

@@ -137,7 +137,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
-        "stream": False,
+        "stream": True,
     },
     "ASK_FOLLOWUP": {
         "side": EXECUTION_SIDE_PYTHON,
