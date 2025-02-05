@@ -3,17 +3,15 @@
   "description": "OramaCore Documentation",
   "root": true,
   "pages": [
-    "---Getting Started---",
+    "---Guide---",
     "index",
-    "api-key",
-    "configuration",
-    "running-oramacore",
+    "...guide",
     "apis",
     "---Customizations---",
-    "text-embeddings",
-    "javascript-hooks",
+    "...customizations",
     "---Architecture---",
-    "architecture",
-    "party-planner"
+    "architecture/overview",
+    "architecture/write-read",
+    "architecture/party-planner"
   ]
 }
