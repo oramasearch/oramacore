@@ -56,7 +56,9 @@ class TestCalculateEmbeddingService:
         assert len(response.embeddings_result[0].embeddings) == 3
         mock_embeddings_service.calculate_embeddings.assert_called_once()
 
-    def test_get_embedding_with_multiple_inputs(self, mock_context, mock_embeddings_service):
+    def test_get_embedding_with_multiple_inputs(
+        self, mock_context, mock_embeddings_service
+    ):
 
         service = CalculateEmbeddingService(mock_embeddings_service)
         request = service_pb2.EmbeddingRequest(
@@ -77,17 +79,23 @@ class TestLLMService:
     def test_call_llm_success(self, mock_context, mock_models_manager):
 
         service = LLMService(mock_models_manager)
-        request = service_pb2.LLMRequest(model=service_pb2.LLMType.content_expansion, prompt="Test prompt")
+        request = service_pb2.LLMRequest(
+            model=service_pb2.LLMType.content_expansion, prompt="Test prompt"
+        )
 
         response = service.CallLLM(request, mock_context)
 
         assert response.text == "Generated text response"
-        mock_models_manager.generate_text.assert_called_once_with(model_key="content_expansion", prompt="Test prompt")
+        mock_models_manager.generate_text.assert_called_once_with(
+            model_key="content_expansion", prompt="Test prompt"
+        )
 
     def test_call_llm_stream_success(self, mock_context, mock_models_manager):
 
         service = LLMService(mock_models_manager)
-        request = service_pb2.LLMRequest(model=service_pb2.LLMType.google_query_translator, prompt="Test prompt")
+        request = service_pb2.LLMRequest(
+            model=service_pb2.LLMType.google_query_translator, prompt="Test prompt"
+        )
 
         responses = list(service.CallLLMStream(request, mock_context))
 
@@ -108,7 +116,9 @@ class TestLLMService:
 
         mock_models_manager.generate_text.side_effect = Exception("Test error")
         service = LLMService(mock_models_manager)
-        request = service_pb2.LLMRequest(model=service_pb2.LLMType.content_expansion, prompt="Test prompt")
+        request = service_pb2.LLMRequest(
+            model=service_pb2.LLMType.content_expansion, prompt="Test prompt"
+        )
 
         response = service.CallLLM(request, mock_context)
 
@@ -128,7 +138,9 @@ class TestVisionService:
         img.save(img_byte_arr, format="JPEG")
         img_byte_arr = img_byte_arr.getvalue()
 
-        request = service_pb2.VisionRequest(image=img_byte_arr, text="What's in this image?")
+        request = service_pb2.VisionRequest(
+            image=img_byte_arr, text="What's in this image?"
+        )
 
         response = service.CallVision(request, mock_context)
 
@@ -149,7 +161,9 @@ class TestVisionService:
     def test_call_vision_invalid_image(self, mock_context, mock_models_manager):
 
         service = VisionService(mock_models_manager)
-        request = service_pb2.VisionRequest(image=b"invalid image data", text="What's in this image?")
+        request = service_pb2.VisionRequest(
+            image=b"invalid image data", text="What's in this image?"
+        )
 
         response = service.CallVision(request, mock_context)
 
@@ -168,10 +182,15 @@ class TestVisionService:
         img.save(img_byte_arr, format="JPEG")
         img_byte_arr = img_byte_arr.getvalue()
 
-        request = service_pb2.VisionRequest(image=img_byte_arr, text="What's in this image?")
+        request = service_pb2.VisionRequest(
+            image=img_byte_arr, text="What's in this image?"
+        )
 
         response = service.CallVision(request, mock_context)
 
         mock_context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
-        assert "Error processing Vision request" in mock_context.set_details.call_args[0][0]
+        assert (
+            "Error processing Vision request"
+            in mock_context.set_details.call_args[0][0]
+        )
         assert response == service_pb2.VisionResponse()

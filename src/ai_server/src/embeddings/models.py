@@ -30,8 +30,12 @@ class EmbeddingsModels:
         self.model_loading_lock = threading.RLock()
         self.model_last_used = {}
 
-        self.models_with_intent_prefix = [s.name for s in ModelGroups.multilingual.value]
-        self.models_with_intent_prefix.append(OramaModelInfo.MultilingualE5LargeRaw.name)
+        self.models_with_intent_prefix = [
+            s.name for s in ModelGroups.multilingual.value
+        ]
+        self.models_with_intent_prefix.append(
+            OramaModelInfo.MultilingualE5LargeRaw.name
+        )
 
     def load_models(self):
         loaded_models = {}
@@ -61,7 +65,9 @@ class EmbeddingsModels:
         )
 
         if model_name in self.loaded_models:
-            return list(embed_alternative(self.loaded_models[model_name], input_strings))
+            return list(
+                embed_alternative(self.loaded_models[model_name], input_strings)
+            )
 
         if self.config.embeddings.dynamically_load_models:
             with self.model_loading_lock:
@@ -71,6 +77,8 @@ class EmbeddingsModels:
                         providers=self.config.embeddings.execution_providers,
                     )
 
-                return list(embed_alternative(self.loaded_models[model_name], input_strings))
+                return list(
+                    embed_alternative(self.loaded_models[model_name], input_strings)
+                )
         else:
             raise ValueError(f"Model {model_name} is not loaded")

@@ -38,10 +38,14 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = ProtoOramaModel.Name(request.model)
             intent_name = ProtoOramaIntent.Name(request.intent)
 
-            embeddings = self.embeddings_service.calculate_embeddings(request.input, intent_name, model_name)
+            embeddings = self.embeddings_service.calculate_embeddings(
+                request.input, intent_name, model_name
+            )
 
             return EmbeddingResponseProto(
-                embeddings_result=[EmbeddingProto(embeddings=e.tolist()) for e in embeddings],
+                embeddings_result=[
+                    EmbeddingProto(embeddings=e.tolist()) for e in embeddings
+                ],
                 dimensions=embeddings[0].shape[0] if embeddings else 0,
             )
         except Exception as e:
@@ -64,7 +68,9 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt=request.prompt)
+            response = self.models_manager.chat(
+                model_id=model_name.lower(), history=history, prompt=request.prompt
+            )
             return ChatResponse(text=response)
         except Exception as e:
             logging.error(f"Error in Chat: {e}", exc_info=True)
@@ -117,7 +123,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            party_planner = PartyPlanner(self.config, self.models_manager)
+            party_planner = PartyPlanner(self.config, self.models_manager, history)
 
             for message in party_planner.run(
                 collection_id=request.collection_id,
@@ -149,7 +155,9 @@ class AuthInterceptor(grpc.ServerInterceptor):
         metadata = dict(handler_call_details.invocation_metadata)
         if "x-api-key" not in metadata:
             return grpc.unary_unary_rpc_method_handler(
-                lambda req, ctx: ctx.abort(grpc.StatusCode.UNAUTHENTICATED, "Missing API key")
+                lambda req, ctx: ctx.abort(
+                    grpc.StatusCode.UNAUTHENTICATED, "Missing API key"
+                )
             )
         return continuation(handler_call_details)
 
@@ -157,7 +165,9 @@ class AuthInterceptor(grpc.ServerInterceptor):
 def serve(config, embeddings_service, models_manager):
     logger = logging.getLogger(__name__)
     logger.info(f"Starting gRPC server on port {config.port}")
-    server = grpc.server(ThreadPoolExecutor(max_workers=10), interceptors=[AuthInterceptor()])
+    server = grpc.server(
+        ThreadPoolExecutor(max_workers=10), interceptors=[AuthInterceptor()]
+    )
     logger.info("gRPC server created")
 
     llm_service = LLMService(embeddings_service, models_manager, config)

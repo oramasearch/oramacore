@@ -18,7 +18,9 @@ DEFAULT_ACTION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 class EmbeddingsConfig:
     default_model_group: Optional[str] = "en"
     dynamically_load_models: Optional[bool] = False
-    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CUDAExecutionProvider"])
+    execution_providers: Optional[List[str]] = field(
+        default_factory=lambda: ["CUDAExecutionProvider"]
+    )
     total_threads: Optional[int] = 8
 
     def __post_init__(self):
@@ -28,7 +30,9 @@ class EmbeddingsConfig:
             "CPUExecutionProvider",
         ]
         self.execution_providers = [
-            provider for provider in self.execution_providers if provider in available_providers
+            provider
+            for provider in self.execution_providers
+            if provider in available_providers
         ]
         if not self.execution_providers:
             self.execution_providers = ["CPUExecutionProvider"]
@@ -61,7 +65,9 @@ class LLMs:
         default_factory=lambda: ModelConfig(
             id=DEFAULT_ANSWER_MODEL,
             tensor_parallel_size=1,
-            sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=2048),
+            sampling_params=SamplingParams(
+                temperature=0.0, top_p=0.95, max_tokens=2048
+            ),
         )
     )
     content_expansion: Optional[ModelConfig] = field(
@@ -89,7 +95,9 @@ class LLMs:
         default_factory=lambda: ModelConfig(
             id=DEFAULT_ANSWER_PLANNING_MODEL,
             tensor_parallel_size=1,
-            sampling_params=SamplingParams(temperature=0.0, top_p=0.95, max_tokens=1024),
+            sampling_params=SamplingParams(
+                temperature=0.0, top_p=0.95, max_tokens=1024
+            ),
         )
     )
     action: Optional[ModelConfig] = field(
@@ -124,8 +132,12 @@ class OramaAIConfig:
             rust_server_config = config.get("http", {})
 
             if rust_server_config:
-                self.rust_server_host = rust_server_config.get("host", self.rust_server_host)
-                self.rust_server_port = rust_server_config.get("port", self.rust_server_port)
+                self.rust_server_host = rust_server_config.get(
+                    "host", self.rust_server_host
+                )
+                self.rust_server_port = rust_server_config.get(
+                    "port", self.rust_server_port
+                )
 
             for k, v in config.items():
                 if hasattr(self, k):
@@ -135,8 +147,12 @@ class OramaAIConfig:
                         llm_configs = {}
                         for model_key, model_config in v.items():
                             if model_config:
-                                sampling_params = SamplingParams(**model_config.pop("sampling_params", {}))
-                                llm_configs[model_key] = ModelConfig(**model_config, sampling_params=sampling_params)
+                                sampling_params = SamplingParams(
+                                    **model_config.pop("sampling_params", {})
+                                )
+                                llm_configs[model_key] = ModelConfig(
+                                    **model_config, sampling_params=sampling_params
+                                )
                         self.LLMs = LLMs(**llm_configs)
                     else:
                         setattr(self, k, v)

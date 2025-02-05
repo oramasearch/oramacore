@@ -42,5 +42,7 @@ class EmbeddingService:
                 selected_models=selected_models,
             )
         except Exception as e:
-            logger.error(f"Error initializing EmbeddingsModels: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error initializing EmbeddingsModels: {str(e)}", exc_info=True
+            )
             raise

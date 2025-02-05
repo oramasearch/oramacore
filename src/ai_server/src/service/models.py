@@ -40,7 +40,9 @@ class ModelsManager:
             self._preload_unique_model(model_id)
 
     def _get_unique_model_ids(self) -> Set[str]:
-        return {config.id for config in self.model_configs.values() if config is not None}
+        return {
+            config.id for config in self.model_configs.values() if config is not None
+        }
 
     def _preload_unique_model(self, model_id: str) -> None:
         try:
@@ -78,7 +80,9 @@ class ModelsManager:
                 del self._models[model_id]
             raise
 
-    def action(self, action: str, input: str, description: str, history: List[Any]) -> str:
+    def action(
+        self, action: str, input: str, description: str, history: List[Any]
+    ) -> str:
         local_history = history.copy()
 
         actual_model_id = self._model_refs.get("action") or ""
@@ -88,24 +92,38 @@ class ModelsManager:
 
         action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
 
-        local_history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
-        local_history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
+        local_history.insert(
+            0, {"role": "system", "content": action_data["prompt:system"]}
+        )
+        local_history.append(
+            {"role": "user", "content": action_data["prompt:user"](input, description)}
+        )
 
-        formatted_chat = tokenizer.apply_chat_template(local_history, tokenize=False, add_generation_prompt=True)
+        formatted_chat = tokenizer.apply_chat_template(
+            local_history, tokenize=False, add_generation_prompt=True
+        )
         tokenizer.pad_token = tokenizer.eos_token
 
-        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = tokenizer(
+            formatted_chat, return_tensors="pt", add_special_tokens=False
+        )
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
         outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
-        decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+        decoded_output = tokenizer.decode(
+            outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True
+        )
 
         if action_data["returns"] == RETURN_TYPE_JSON:
-            return decode_action_result(action=action, result=repair_json(decoded_output))
+            return decode_action_result(
+                action=action, result=repair_json(decoded_output)
+            )
 
         return decoded_output
 
-    def action_stream(self, action: str, input: str, description: str, history: List[Any]) -> Iterator[str]:
+    def action_stream(
+        self, action: str, input: str, description: str, history: List[Any]
+    ) -> Iterator[str]:
         local_history = history.copy()
 
         actual_model_id = self._model_refs.get("action")
@@ -115,16 +133,26 @@ class ModelsManager:
 
         action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
 
-        local_history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
-        local_history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
+        local_history.insert(
+            0, {"role": "system", "content": action_data["prompt:system"]}
+        )
+        local_history.append(
+            {"role": "user", "content": action_data["prompt:user"](input, description)}
+        )
 
-        formatted_chat = tokenizer.apply_chat_template(local_history, tokenize=False, add_generation_prompt=True)
+        formatted_chat = tokenizer.apply_chat_template(
+            local_history, tokenize=False, add_generation_prompt=True
+        )
         tokenizer.pad_token = tokenizer.eos_token
 
-        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = tokenizer(
+            formatted_chat, return_tensors="pt", add_special_tokens=False
+        )
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
-        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
+        streamer = TextIteratorStreamer(
+            tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True}
+        )
 
         generation_kwargs = dict(
             **inputs,
@@ -146,7 +174,9 @@ class ModelsManager:
             if old_text:
                 yield old_text
 
-        yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.
+        yield p.replace(
+            "<|im_end|>", ""
+        )  # @todo: this sucks. Fix it at transformer level.
 
     def chat(
         self,
@@ -168,7 +198,9 @@ class ModelsManager:
         model = model_config["model"]
         tokenizer = model_config["tokenizer"]
 
-        local_history.insert(0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]})
+        local_history.insert(
+            0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]}
+        )
         local_history.append(
             {
                 "role": "user",
@@ -176,15 +208,21 @@ class ModelsManager:
             }
         )
 
-        formatted_chat = tokenizer.apply_chat_template(local_history, tokenize=False, add_generation_prompt=True)
+        formatted_chat = tokenizer.apply_chat_template(
+            local_history, tokenize=False, add_generation_prompt=True
+        )
         tokenizer.pad_token = tokenizer.eos_token
 
-        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = tokenizer(
+            formatted_chat, return_tensors="pt", add_special_tokens=False
+        )
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
         outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
 
-        decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
+        decoded_output = tokenizer.decode(
+            outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True
+        )
 
         return decoded_output
 
@@ -208,7 +246,9 @@ class ModelsManager:
         model = model_config["model"]
         tokenizer = model_config["tokenizer"]
 
-        local_history.insert(0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]})
+        local_history.insert(
+            0, {"role": "system", "content": PROMPT_TEMPLATES[f"{model_id}:system"]}
+        )
         local_history.append(
             {
                 "role": "user",
@@ -216,13 +256,19 @@ class ModelsManager:
             }
         )
 
-        formatted_chat = tokenizer.apply_chat_template(local_history, tokenize=False, add_generation_prompt=True)
+        formatted_chat = tokenizer.apply_chat_template(
+            local_history, tokenize=False, add_generation_prompt=True
+        )
         tokenizer.pad_token = tokenizer.eos_token
 
-        inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        inputs = tokenizer(
+            formatted_chat, return_tensors="pt", add_special_tokens=False
+        )
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
-        streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True})
+        streamer = TextIteratorStreamer(
+            tokenizer, skip_prompt=True, decode_kwargs={"skip_special_tokens": True}
+        )
 
         generation_kwargs = dict(
             **inputs,
@@ -244,4 +290,6 @@ class ModelsManager:
             if old_text:
                 yield old_text
 
-        yield p.replace("<|im_end|>", "")  # @todo: this sucks. Fix it at transformer level.
+        yield p.replace(
+            "<|im_end|>", ""
+        )  # @todo: this sucks. Fix it at transformer level.

@@ -34,14 +34,18 @@ def process_mean_pooling(args):
 
 def embed_alternative(model, input_strings, batch_size=256):
     if _thread_executor is None:
-        raise RuntimeError("Thread executor not initialized. Call `initialize_thread_executor` first.")
+        raise RuntimeError(
+            "Thread executor not initialized. Call `initialize_thread_executor` first."
+        )
 
     for batch in iter_batch(input_strings, batch_size):
         onnx_output = model.model.onnx_embed(batch)
         model_output = onnx_output.model_output
         attention_mask = onnx_output.attention_mask
 
-        args_list = [(model_output[i], attention_mask[i]) for i in range(len(model_output))]
+        args_list = [
+            (model_output[i], attention_mask[i]) for i in range(len(model_output))
+        ]
 
         for result in _thread_executor.map(process_mean_pooling, args_list):
             yield result
@@ -107,7 +111,8 @@ def get_supported_models_info():
     extend_supported_models()
 
     supported_models = {
-        m["model"]: {"dimensions": m["dim"], "model_name": m["model"]} for m in TextEmbedding.list_supported_models()
+        m["model"]: {"dimensions": m["dim"], "model_name": m["model"]}
+        for m in TextEmbedding.list_supported_models()
     }
 
     raw_models = {
