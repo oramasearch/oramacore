@@ -15,10 +15,9 @@ from src.prompts.party_planner_actions import (
 )
 
 PARTY_PLANNER_SYSTEM_PROMPT = dedent(
+    """You're a useful AI assistant. You have access to a vector database and full-text search engine to perform a number of tasks.
+       You should follow them one by one to complete the task successfully.
     """
-    You're a useful AI assistant. You have access to a vector database and full-text search engine to perform a number of tasks.
-    You should follow them one by one to complete the task successfully.
-"""
 )
 
 
@@ -54,12 +53,19 @@ def format_action_plan_assistant(action_plan: List[Dict[str, Any]]) -> str:
 
 
 def format_orama_search_results_assistant(results: List[Dict[str, Any]]) -> str:
-    as_md = json_to_md(results, 2)
+    sources = ""
+
+    try:
+        sources = json_to_md(results, 2)
+        print("Sources translation to md failed. Falling back to JSON")
+    except Exception as e:
+        sources = json.dumps(results)
+
     return dedent(
         f"""
     Here are the search results I found for you:
 
-    {as_md}
+    {sources}
     """
     )
 
@@ -181,6 +187,7 @@ class PartyPlanner:
                 self.history.append(
                     {"role": "assistant", "content": format_orama_search_results_assistant(json_to_md(result, 2))}  # type: ignore
                 )
+
                 return result
             except Exception as e:
                 return json.dumps({"error": str(e)})
@@ -234,6 +241,3 @@ class PartyPlanner:
                     acc_result += chunk
 
                 self.history.append({"role": "assistant", "content": acc_result})
-
-        print("============= history =============")
-        print(json.dumps(self.history, indent=2))
