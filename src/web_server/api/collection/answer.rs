@@ -43,6 +43,8 @@ enum SseMessage {
     AnswerChunk { message: MessageChunk },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "response")]
+    Response { message: String },
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -55,9 +57,15 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .with_state(read_side)
 }
 
+#[derive(Deserialize)]
+struct PlannedAnswerQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+}
 async fn planned_answer_v0(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
+    Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId(id).0;
@@ -65,6 +73,7 @@ async fn planned_answer_v0(
 
     let query = interaction.query;
     let conversation = interaction.messages;
+    let api_key = query_params.api_key;
 
     let (tx, rx) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(rx);
@@ -82,7 +91,7 @@ async fn planned_answer_v0(
             .await;
 
         let mut stream = ai_service
-            .planned_answer_stream(query, collection_id, Some(conversation))
+            .planned_answer_stream(query, collection_id, Some(conversation), api_key)
             .await
             .unwrap();
 
@@ -91,7 +100,7 @@ async fn planned_answer_v0(
                 Ok(response) => {
                     if tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Acknowledge {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: response.data,
                             })
                             .unwrap(),

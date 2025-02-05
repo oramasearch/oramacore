@@ -124,9 +124,30 @@ impl CollectionWriter {
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
-        self.collection_document_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Those `?` is never triggered, but it's here to make the compiler happy:
+        // The "id" property is always present in the document.
+        // TODO: do this better
+        let doc_id_str = doc
+            .inner
+            .get("id")
+            .context("Document does not have an id")?
+            .as_str()
+            .context("Document id is not a string")?;
+        let mut doc_id_storage = self.doc_id_storage.write().await;
+        if !doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id) {
+            // The document is already indexed.
+            // If the document id is there, it will be difficul to remove it.
+            // So, we decided to just ignore it.
+            // We could at least return a warning to the user.
+            // TODO: return a warning
+            warn!("Document '{}' already indexed", doc_id_str);
+            return Ok(());
+        }
+        drop(doc_id_storage);
 
+        // We send the document to index *before* indexing it, so we can
+        // guarantee that the document is there during the search.
+        // Otherwise, we could find the document without having it yet.
         sender
             .send(WriteOperation::Collection(
                 self.id.clone(),
@@ -137,18 +158,6 @@ impl CollectionWriter {
             ))
             .await
             .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
-
-        // Those `?` is never triggered, but it's here to make the compiler happy
-        // TODO: do this better
-        let doc_id_str = doc
-            .inner
-            .get("id")
-            .context("Document does not have an id")?
-            .as_str()
-            .context("Document id is not a string")?;
-        let mut doc_id_storage = self.doc_id_storage.write().await;
-        doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id);
-        drop(doc_id_storage);
 
         let fields_to_index = self
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
@@ -174,6 +183,8 @@ impl CollectionWriter {
                 .with_context(|| format!("Cannot index field {}", field_name))?;
         }
 
+        self.collection_document_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         trace!("Document field indexed");
 
         Ok(())
@@ -186,6 +197,15 @@ impl CollectionWriter {
             }
             ValueType::Scalar(ScalarType::Number) => Some(TypedField::Number),
             ValueType::Scalar(ScalarType::Boolean) => Some(TypedField::Bool),
+            ValueType::Complex(ComplexType::Array(ScalarType::String)) => {
+                Some(TypedField::ArrayText(self.default_language.into()))
+            }
+            ValueType::Complex(ComplexType::Array(ScalarType::Number)) => {
+                Some(TypedField::ArrayNumber)
+            }
+            ValueType::Complex(ComplexType::Array(ScalarType::Boolean)) => {
+                Some(TypedField::ArrayBoolean)
+            }
             _ => None, // @todo: support other types
         }
     }
@@ -300,6 +320,50 @@ impl CollectionWriter {
                         field_name.clone(),
                         ValueType::Scalar(ScalarType::Boolean),
                         CollectionField::new_bool(self.id.clone(), field_id, field_name.clone()),
+                    ),
+                );
+            }
+            TypedField::ArrayText(locale) => {
+                let parser = self.get_text_parser(*locale);
+                w.insert(
+                    field_id,
+                    (
+                        field_name.clone(),
+                        ValueType::Complex(ComplexType::Array(ScalarType::String)),
+                        CollectionField::new_arr_string(
+                            parser,
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
+                    ),
+                );
+            }
+            TypedField::ArrayNumber => {
+                w.insert(
+                    field_id,
+                    (
+                        field_name.clone(),
+                        ValueType::Scalar(ScalarType::Number),
+                        CollectionField::new_arr_number(
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
+                    ),
+                );
+            }
+            TypedField::ArrayBoolean => {
+                w.insert(
+                    field_id,
+                    (
+                        field_name.clone(),
+                        ValueType::Scalar(ScalarType::Boolean),
+                        CollectionField::new_arr_bool(
+                            self.id.clone(),
+                            field_id,
+                            field_name.clone(),
+                        ),
                     ),
                 );
             }

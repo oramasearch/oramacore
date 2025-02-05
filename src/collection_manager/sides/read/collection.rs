@@ -636,6 +636,9 @@ impl CollectionReader {
                     dto::TypedField::Text(locale) => TypedField::Text(locale),
                     dto::TypedField::Number => TypedField::Number,
                     dto::TypedField::Bool => TypedField::Bool,
+                    dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
+                    dto::TypedField::ArrayNumber => TypedField::ArrayNumber,
+                    dto::TypedField::ArrayBoolean => TypedField::ArrayBoolean,
                 };
 
                 self.fields
@@ -650,8 +653,7 @@ impl CollectionReader {
                             .or_default()
                             .push(field_id);
                     }
-                    TypedField::Text(language) => {
-                        let locale = language;
+                    TypedField::Text(locale) | TypedField::ArrayText(locale) => {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
                             .insert(field_id, (locale, text_parser));
@@ -888,7 +890,7 @@ impl CollectionReader {
             Properties::None | Properties::Star => {
                 let mut r = Vec::with_capacity(self.fields.len());
                 for field in &self.fields {
-                    if !matches!(field.1, TypedField::Text(_)) {
+                    if !matches!(field.1, TypedField::Text(_) | TypedField::ArrayText(_)) {
                         continue;
                     }
                     r.push(field.0);
@@ -1248,7 +1250,7 @@ async fn get_filtered_document(
     uncommitted_deleted_documents: &HashSet<DocumentId>,
 ) -> Result<HashSet<DocumentId>> {
     match (&field_type, filter) {
-        (TypedField::Number, Filter::Number(filter_number)) => {
+        (TypedField::Number | TypedField::ArrayNumber, Filter::Number(filter_number)) => {
             get_number_filtered_document(
                 reader,
                 field_id,
@@ -1257,7 +1259,7 @@ async fn get_filtered_document(
             )
             .await
         }
-        (TypedField::Bool, Filter::Bool(filter_bool)) => {
+        (TypedField::Bool | TypedField::ArrayBoolean, Filter::Bool(filter_bool)) => {
             get_bool_filtered_document(reader, field_id, filter_bool, uncommitted_deleted_documents)
                 .await
         }
@@ -1281,4 +1283,7 @@ pub enum TypedField {
     Embedding(OramaModel),
     Number,
     Bool,
+    ArrayText(Locale),
+    ArrayNumber,
+    ArrayBoolean,
 }

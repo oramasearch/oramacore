@@ -39,11 +39,27 @@ pub enum CollectionField {
 }
 impl CollectionField {
     pub fn new_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
-        CollectionField::Number(NumberField::new(collection_id, field_id, field_name))
+        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, false))
+    }
+
+    pub fn new_arr_number(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, true))
     }
 
     pub fn new_bool(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
-        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name))
+        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, false))
+    }
+
+    pub fn new_arr_bool(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, true))
     }
 
     pub fn new_string(
@@ -57,6 +73,22 @@ impl CollectionField {
             collection_id,
             field_id,
             field_name,
+            false,
+        ))
+    }
+
+    pub fn new_arr_string(
+        parser: Arc<TextParser>,
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionField::String(StringField::new(
+            parser,
+            collection_id,
+            field_id,
+            field_name,
+            true,
         ))
     }
 
@@ -160,14 +192,21 @@ pub struct NumberField {
     collection_id: CollectionId,
     field_id: FieldId,
     field_name: String,
+    is_array: bool,
 }
 
 impl NumberField {
-    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+    pub fn new(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+        is_array: bool,
+    ) -> Self {
         Self {
             collection_id,
             field_id,
             field_name,
+            is_array,
         }
     }
 }
@@ -179,25 +218,40 @@ impl NumberField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let value = doc
-            .get(&self.field_name)
-            .and_then(|v| Number::try_from(v).ok());
-
-        let value = match value {
+        let value = doc.get(&self.field_name);
+        let data: Vec<Number> = match value {
             None => return Ok(()),
-            Some(value) => value,
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => value
+                            .iter()
+                            .filter_map(|v| Number::try_from(v).ok())
+                            .collect(),
+                    }
+                } else if let Ok(v) = Number::try_from(value) {
+                    vec![v]
+                } else {
+                    return Ok(());
+                }
+            }
         };
+        if data.is_empty() {
+            return Ok(());
+        }
 
-        let op = WriteOperation::Collection(
-            self.collection_id.clone(),
-            CollectionWriteOperation::Index(
-                doc_id,
-                self.field_id,
-                DocumentFieldIndexOperation::IndexNumber { value },
-            ),
-        );
-
-        sender.send(op).await?;
+        for value in data {
+            let op = WriteOperation::Collection(
+                self.collection_id.clone(),
+                CollectionWriteOperation::Index(
+                    doc_id,
+                    self.field_id,
+                    DocumentFieldIndexOperation::IndexNumber { value },
+                ),
+            );
+            sender.send(op).await?;
+        }
 
         Ok(())
     }
@@ -212,14 +266,21 @@ pub struct BoolField {
     collection_id: CollectionId,
     field_id: FieldId,
     field_name: String,
+    is_array: bool,
 }
 
 impl BoolField {
-    pub fn new(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+    pub fn new(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+        is_array: bool,
+    ) -> Self {
         Self {
             collection_id,
             field_id,
             field_name,
+            is_array,
         }
     }
 
@@ -230,29 +291,38 @@ impl BoolField {
         sender: OperationSender,
     ) -> Result<()> {
         let value = doc.get(&self.field_name);
-
-        let value = match value {
+        let data: Vec<bool> = match value {
             None => return Ok(()),
-            Some(value) => match value.as_bool() {
-                // If the document has a field with the name `field_name` but the value isn't a boolean
-                // we ignore it.
-                // Should we bubble up an error?
-                // TODO: think about it
-                None => return Ok(()),
-                Some(value) => value,
-            },
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => value.iter().filter_map(|v| v.as_bool()).collect(),
+                    }
+                } else if let Some(v) = value.as_bool() {
+                    vec![v]
+                } else {
+                    // If the document has a field with the name `field_name` but the value isn't a boolean
+                    // we ignore it.
+                    // Should we bubble up an error?
+                    // TODO: think about it
+                    return Ok(());
+                }
+            }
         };
 
-        let op = WriteOperation::Collection(
-            self.collection_id.clone(),
-            CollectionWriteOperation::Index(
-                doc_id,
-                self.field_id,
-                DocumentFieldIndexOperation::IndexBoolean { value },
-            ),
-        );
+        for value in data {
+            let op = WriteOperation::Collection(
+                self.collection_id.clone(),
+                CollectionWriteOperation::Index(
+                    doc_id,
+                    self.field_id,
+                    DocumentFieldIndexOperation::IndexBoolean { value },
+                ),
+            );
 
-        sender.send(op).await?;
+            sender.send(op).await?;
+        }
 
         Ok(())
     }
@@ -268,6 +338,7 @@ pub struct StringField {
     field_id: FieldId,
     field_name: String,
     parser: Arc<TextParser>,
+    is_array: bool,
 }
 impl StringField {
     pub fn new(
@@ -275,12 +346,14 @@ impl StringField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        is_array: bool,
     ) -> Self {
         Self {
             parser,
             collection_id,
             field_id,
             field_name,
+            is_array,
         }
     }
 
@@ -296,13 +369,29 @@ impl StringField {
         });
 
         let value = doc.get(&self.field_name);
-
         let data = match value {
             None => return Ok(()),
-            Some(value) => match value.as_str() {
-                None => return Ok(()),
-                Some(value) => self.parser.tokenize_and_stem(value),
-            },
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => {
+                            let mut data = Vec::new();
+                            for value in value {
+                                if let Some(value) = value.as_str() {
+                                    data.extend(self.parser.tokenize_and_stem(value));
+                                }
+                            }
+                            data
+                        }
+                    }
+                } else {
+                    match value.as_str() {
+                        None => return Ok(()),
+                        Some(value) => self.parser.tokenize_and_stem(value),
+                    }
+                }
+            }
         };
 
         let field_length = data.len().min(u16::MAX as usize - 1) as u16;

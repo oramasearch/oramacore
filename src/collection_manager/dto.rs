@@ -71,6 +71,9 @@ pub enum TypedField {
     Embedding(EmbeddingTypedField),
     Number,
     Bool,
+    ArrayText(Locale),
+    ArrayNumber,
+    ArrayBoolean,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

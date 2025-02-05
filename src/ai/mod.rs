@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{net::IpAddr, str::FromStr};
 
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
@@ -6,10 +6,14 @@ use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
-use tonic::{transport::Channel, Request, Response, Streaming};
+use tonic::{
+    metadata::{MetadataMap, MetadataValue},
+    transport::Channel,
+    Request, Response, Streaming,
+};
 use tracing::{info, trace};
 
-use crate::collection_manager::dto::InteractionMessage;
+use crate::collection_manager::dto::{ApiKey, InteractionMessage};
 
 tonic::include_proto!("orama_ai_service");
 
@@ -153,15 +157,25 @@ impl AIService {
         input: String,
         collection_id: String,
         conversation: Option<Vec<InteractionMessage>>,
+        api_key: ApiKey,
     ) -> Result<Streaming<PlannedAnswerResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let conversation = self.get_grpc_conversation(conversation);
-        let request = Request::new(PlannedAnswerRequest {
+
+        // let mut metadata = MetadataMap::new();
+        let api_key_value =
+            MetadataValue::from_str(api_key.0.expose_secret()).context("Invalid API key")?;
+
+        // metadata.insert("x-api-key", api_key_value.clone());
+
+        let mut request = Request::new(PlannedAnswerRequest {
             input,
             collection_id,
             conversation: Some(conversation),
         });
+
+        request.metadata_mut().append("x-api-key", api_key_value);
 
         let response: Response<Streaming<PlannedAnswerResponse>> = conn
             .planned_answer(request)

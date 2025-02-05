@@ -20,7 +20,7 @@ use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::MissedTickBehavior};
-use tracing::{info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -226,6 +226,14 @@ impl WriteSide {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
         // This counter is not atomic with the insert operation.
         // This means we increment the counter even if the insert operation fails.
         // TODO: think better
@@ -235,18 +243,10 @@ impl WriteSide {
             })
             .increment_by(document_list.len());
 
-        let collection = self
-            .collections
-            .get_collection(collection_id.clone())
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
-
         let sender = self.sender.clone();
 
         for mut doc in document_list {
-            info!("Insert doc");
+            debug!("Insert doc");
             let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
                 collection: collection_id.0.clone(),
             });

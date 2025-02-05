@@ -29,7 +29,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
         self.embeddings_service = embeddings_service
         self.models_manager = models_manager
         self.party_planner_actions = PartyPlannerActions()
-        self.party_planner = PartyPlanner(config, self.models_manager)
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -55,7 +54,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -75,7 +77,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -83,7 +88,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             )
 
             for text_chunk in self.models_manager.chat_stream(
-                model_id=model_name.lower(), history=history, prompt=request.prompt, context=request.context
+                model_id=model_name.lower(),
+                history=history,
+                prompt=request.prompt,
+                context=request.context,
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
@@ -93,17 +101,29 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             context.set_details(f"Error in chat stream: {str(e)}")
 
     def PlannedAnswer(self, request, context):
+        metadata = dict(context.invocation_metadata())
+        api_key = metadata.get("x-api-key") or ""
+
         try:
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
                 else []
             )
 
-            for message in self.party_planner.run(request.collection_id, request.input, history):
+            party_planner = PartyPlanner(self.config, self.models_manager, history)
+
+            for message in party_planner.run(
+                collection_id=request.collection_id,
+                input=request.input,
+                api_key=api_key,
+            ):
                 yield PlannedAnswerResponse(data=message, finished=False)
 
             yield PlannedAnswerResponse(data="", finished=True)
@@ -115,10 +135,29 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             return PlannedAnswerResponse()
 
 
+class AuthInterceptor(grpc.ServerInterceptor):
+    def intercept_service(self, continuation, handler_call_details):
+
+        # Health check and embeddings won't require authentication.
+        # This server should never be exposed to the public and it's meant for internal use only.
+        allowed_methods = ["CheckHealth", "GetEmbedding", "ServerReflection"]
+        if any(x in handler_call_details.method for x in allowed_methods):
+            return continuation(handler_call_details)
+
+        # The current gRPC server is a proxy for the Rust server, which requires an API key.
+        # There's no API key validation in the Python server, so we just check if the API key is present.
+        metadata = dict(handler_call_details.invocation_metadata)
+        if "x-api-key" not in metadata:
+            return grpc.unary_unary_rpc_method_handler(
+                lambda req, ctx: ctx.abort(grpc.StatusCode.UNAUTHENTICATED, "Missing API key")
+            )
+        return continuation(handler_call_details)
+
+
 def serve(config, embeddings_service, models_manager):
     logger = logging.getLogger(__name__)
     logger.info(f"Starting gRPC server on port {config.port}")
-    server = grpc.server(ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(ThreadPoolExecutor(max_workers=10), interceptors=[AuthInterceptor()])
     logger.info("gRPC server created")
 
     llm_service = LLMService(embeddings_service, models_manager, config)
