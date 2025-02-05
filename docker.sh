@@ -1,9 +1,9 @@
 docker build -t oramacore .
 
-docker run -it \
+docker run -d \
   -p 8080:8080 \
   -p 50051:50051 \
   -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
-  -v ./config.jsonc:/app/config.jsonc \
+  -v ./config.yaml:/app/config.yaml \
   --gpus all \
-  orama-core
+  oramasearch/oramacore:0.1.1

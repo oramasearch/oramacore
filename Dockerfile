@@ -38,7 +38,7 @@ WORKDIR /app
 
 COPY src/ai_server /app/ai_server
 
-RUN cd ai_server && pip install --no-cache-dir -r requirements.txt
+RUN cd ai_server && pip install --no-cache-dir -r requirements.txt && pip install --no-build-isolation flash-attn
 
 COPY --from=rust-builder /usr/src/app/target/release/oramacore /app/oramacore
 
