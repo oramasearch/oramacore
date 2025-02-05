@@ -166,5 +166,4 @@ def json_to_md(data, level=0) -> str:
             else:
                 md += f"{indent}- `{item}`\n"
 
-    print(md)
     return md

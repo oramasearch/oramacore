@@ -14,6 +14,13 @@ from src.prompts.party_planner_actions import (
     EXECUTION_SIDE_ORAMACORE,
 )
 
+PARTY_PLANNER_SYSTEM_PROMPT = dedent(
+    """
+    You're a useful AI assistant. You have access to a vector database and full-text search engine to perform a number of tasks.
+    You should follow them one by one to complete the task successfully.
+"""
+)
+
 
 @dataclass
 class Message:
@@ -41,7 +48,7 @@ def format_action_plan_assistant(action_plan: List[Dict[str, Any]]) -> str:
     
     {as_md}.
 
-    Ask me to proceed one step at the time and I'll guide you through the process.
+    Ask me to proceed with the next step, one step at a time when you're ready.
     """
     )
 
@@ -83,6 +90,33 @@ class PartyPlanner:
 
         # LLMs can be unpredictable and they may return slightly different formats.
         # Usually, they return a dictionary with an "actions" key, but sometimes they return a list.
+        #
+        # When it follows the instructions, it returns the following format:
+        # {
+        #     "actions": [
+        #         {
+        #             "step": "GENERATE_QUERIES",
+        #             "description": "Generate queries based on the input."
+        #         },
+        #         {
+        #             ...
+        #         }
+        #     ]
+        # }
+        #
+        # Sometimes it'll just return a list of actions:
+        # [
+        #     {
+        #         "step": "GENERATE_QUERIES",
+        #         "description": "Generate queries based on the input."
+        #     },
+        #     {
+        #         ...
+        #     }
+        # ]
+        #
+        # We need to handle both cases.
+
         if isinstance(json_action_plan, dict) and "actions" in json_action_plan:
             return json_action_plan["actions"]
         elif isinstance(json_action_plan, list):
@@ -153,6 +187,12 @@ class PartyPlanner:
         return json.dumps({"message": f"Skipping action {step.name} as it requires a missing OramaCore integration"})
 
     def run(self, collection_id: str, input: str, api_key: str) -> Iterator[str]:
+        # Add a system prompt to the history if the first entry is not a system prompt.
+        if len(self.history) > 0 and self.history[0]["role"] != "system":
+            self.history.insert(0, {"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
+        elif len(self.history) == 0:
+            self.history.append({"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
+
         # Use the input as the first history entry.
         self.history.append({"role": "user", "content": input})
 
