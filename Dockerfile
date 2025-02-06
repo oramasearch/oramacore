@@ -26,20 +26,36 @@ WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release
 
-FROM python:3.11-slim
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
-RUN apt-get update && \
-  apt-get install -y curl && \
-  curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin && \
-  chmod +x /usr/local/bin/grpcurl && \
-  rm -rf /var/lib/apt/lists/*
+# Install Python, pip and other dependencies
+RUN apt-get update && apt-get install -y \
+  python3 \
+  python3-pip \
+  python3-dev \
+  build-essential \
+  curl \
+  && rm -f /usr/bin/python /usr/bin/pip \
+  && ln -s /usr/bin/python3 /usr/bin/python \
+  && ln -s /usr/bin/pip3 /usr/bin/pip \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install grpcurl
+RUN curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin && \
+  chmod +x /usr/local/bin/grpcurl
 
 WORKDIR /app
 
+# Copy requirements first to leverage caching
+COPY src/ai_server/requirements.txt /app/requirements.txt
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+  pip install --no-cache-dir -r requirements.txt && \
+  pip install --no-cache-dir --no-build-isolation flash-attn && \
+  rm -rf /root/.cache/pip
+
 COPY src/ai_server /app/ai_server
-
-RUN cd ai_server && pip install --no-cache-dir -r requirements.txt && pip install --no-build-isolation flash-attn
-
 COPY --from=rust-builder /usr/src/app/target/release/oramacore /app/oramacore
 
 RUN mkdir -p /root/.cache/huggingface
@@ -49,7 +65,7 @@ RUN echo '#!/bin/bash\n\
   \n\
   until grpcurl -plaintext localhost:50051 orama_ai_service.LLMService/CheckHealth 2>/dev/null | grep -q "\"status\": \"OK\""; do\n\
   echo "Waiting for Python gRPC server..."\n\
-  sleep 1\n\
+  sleep 5\n\
   done\n\
   \n\
   cd /app && ./oramacore\n\

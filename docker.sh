@@ -6,4 +6,4 @@ docker run -d \
   -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
   -v ./config.yaml:/app/config.yaml \
   --gpus all \
-  oramasearch/oramacore:0.1.1
+  oramasearch/oramacore:lastest

@@ -1,8 +1,8 @@
-.dataset
-.data
-.custom_models
-.fastembed_cache
-__pycache__
-target
-.venv
-.embeddings_models
+**/.dataset
+**/.data
+**/.custom_models
+**/.fastembed_cache
+**/__pycache__
+**/target
+**/.venv
+**/.embeddings_models
