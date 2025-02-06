@@ -27,7 +27,7 @@ COPY . .
 RUN cargo build --release
 
 # Stage 2: Flash-attention builder
-FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS flash-builder
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS flash-builder
 
 RUN apt-get update && apt-get install -y \
   python3 \
@@ -44,7 +44,7 @@ RUN pip install --upgrade pip \
   && rm -rf /root/.cache/pip
 
 # Stage 3: Final runtime
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 # Install Python and other dependencies
 RUN apt-get update && apt-get install -y \
