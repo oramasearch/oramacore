@@ -107,7 +107,7 @@ class OramaAIConfig:
     port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
-    LLMs = field(default_factory=LLMConfig)
+    LLMs: LLMConfig = field(default_factory=LLMConfig)
     total_threads: Optional[int] = 12
 
     rust_server_host: Optional[str] = "0.0.0.0"
