@@ -1,3 +1,7 @@
+# Set default CUDA version that can be overridden during build
+# Version should match available options at https://hub.docker.com/r/nvidia/cuda/tags
+ARG CUDA_VERSION=12.4.1
+
 # Stage 1: Rust builder
 FROM rust:1.84-slim-bookworm AS rust-builder
 
@@ -27,7 +31,7 @@ COPY . .
 RUN cargo build --release
 
 # Stage 2: Flash-attention builder
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS flash-builder
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu22.04 AS flash-builder
 
 RUN apt-get update && apt-get install -y \
   python3 \
@@ -44,7 +48,7 @@ RUN pip install --upgrade pip \
   && rm -rf /root/.cache/pip
 
 # Stage 3: Final runtime
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-ubuntu22.04
 
 # Install Python and other dependencies
 RUN apt-get update && apt-get install -y \
