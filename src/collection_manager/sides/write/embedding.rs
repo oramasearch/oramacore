@@ -8,15 +8,15 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::FieldId,
-        sides::{CollectionWriteOperation, DocumentFieldIndexOperation},
+        sides::{
+            CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
+        },
     },
     metrics::{
         EmbeddingCalculationLabels, Empty, EMBEDDING_CALCULATION_METRIC, EMBEDDING_REQUEST_GAUDGE,
     },
     types::{CollectionId, DocumentId},
 };
-
-use super::{OperationSender, WriteOperation};
 
 pub struct EmbeddingCalculationRequestInput {
     pub text: String,

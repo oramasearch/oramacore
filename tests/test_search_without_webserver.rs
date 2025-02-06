@@ -1,3 +1,5 @@
+#![cfg(all(feature = "reader", feature = "writer"))]
+
 use anyhow::Result;
 use http::uri::Scheme;
 use oramacore::ai::{AIServiceConfig, OramaModel};
@@ -26,7 +28,7 @@ pub fn generate_new_path() -> PathBuf {
 async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
     let address = create_grpc_server().await.unwrap();
 
-    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
+    let (collections_writer, collections_reader) = build_orama(OramacoreConfig {
         log: Default::default(),
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
@@ -65,18 +67,7 @@ async fn start_server() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
     .await
     .unwrap();
 
-    let collections_reader = collections_reader.unwrap();
-    let collections_reader2 = collections_reader.clone();
-    tokio::spawn(async move {
-        while let Some(op) = receiver.recv().await {
-            let r = collections_reader2.update(op).await;
-            if let Err(e) = r {
-                eprintln!("Error: {:?}", e);
-            }
-        }
-    });
-
-    Ok((collections_writer.unwrap(), collections_reader))
+    Ok((collections_writer.unwrap(), collections_reader.unwrap()))
 }
 
 fn generate_test_data() -> DocumentList {

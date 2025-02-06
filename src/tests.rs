@@ -9,6 +9,7 @@ use http::uri::Scheme;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
+use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
@@ -19,7 +20,6 @@ use crate::{
             CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
         },
     },
-    connect_write_and_read_side,
     test_utils::{create_grpc_server, generate_new_path},
     types::{CollectionId, DocumentList},
     web_server::HttpConfig,
@@ -74,12 +74,12 @@ async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<Read
         let address = create_grpc_server().await?;
         config.ai_server.host = address.ip();
         config.ai_server.port = address.port();
-        println!("AI server started on {}", address);
+        info!("AI server started on {}", address);
     }
 
-    let (write_side, read_side, rec) = build_orama(config).await?;
-
-    connect_write_and_read_side(rec, read_side.clone().unwrap());
+    println!("Creating oramacore");
+    let (write_side, read_side) = build_orama(config).await?;
+    println!("Oramacore created");
 
     let write_side = write_side.unwrap();
     let read_side = read_side.unwrap();
@@ -326,6 +326,7 @@ async fn test_commit_and_load() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_collection_id_already_exists() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let (write_side, _) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());

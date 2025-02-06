@@ -121,3 +121,10 @@ NB: the default username and password for Grafana are `admin` and `admin`.
 ## License
 
 [AGPLv3](/LICENSE.md)
+
+## Distributed
+### RabbitMQ
+
+```
+docker exec rabbitmq rabbitmq-plugins enable rabbitmq_stream rabbitmq_stream_management
+```

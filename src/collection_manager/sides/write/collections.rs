@@ -9,6 +9,7 @@ use tracing::{info, instrument};
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
+use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::nlp::NLPService;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
@@ -18,8 +19,8 @@ use crate::collection_manager::dto::{
     ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
-use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
-use super::{CollectionsWriterConfig, OperationSender};
+use super::CollectionsWriterConfig;
+use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,

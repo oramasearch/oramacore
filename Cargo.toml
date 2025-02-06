@@ -94,6 +94,7 @@ cuid2 = "0.1.4"
 mobc = "0.8"
 redact = { version = "0.1", features = ["serde"] }
 duration-str = "0.12.0"
+rabbitmq-stream-client = "0.7.0"
 
 [build-dependencies]
 cc = "1"
@@ -123,9 +124,11 @@ path = "src/bin/embeddings/embeddings.rs"
 # harness = false
 
 [features]
-default = ["benchmarking"]
+default = ["benchmarking", "writer", "reader"]
 benchmarking = ["tempdir", "fastembed"]
 no_auto_embedding_field_on_creation = []
+writer = []
+reader = []
 
 [workspace]
 members = []

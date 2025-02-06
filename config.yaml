@@ -9,7 +9,10 @@ log:
     file_path: "./log.log"
 
 writer_side:
-    output: in-memory
+    output:
+        type: rabbitmq
+        host: localhost
+        port: 5672
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -31,7 +34,10 @@ writer_side:
         commit_interval: 1m
 
 reader_side:
-    input: in-memory
+    input:
+        type: rabbitmq
+        host: localhost
+        port: 5672
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes

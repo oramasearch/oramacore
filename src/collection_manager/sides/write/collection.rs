@@ -17,7 +17,10 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
-        sides::hooks::{HookName, HooksRuntime},
+        sides::{
+            hooks::{HookName, HooksRuntime},
+            CollectionWriteOperation, OperationSender, WriteOperation,
+        },
     },
     file_utils::BufferedFile,
     metrics::{CommitLabels, COMMIT_METRIC},
@@ -27,10 +30,7 @@ use crate::{
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
-use super::{
-    embedding::EmbeddingCalculationRequest, CollectionField, CollectionWriteOperation,
-    OperationSender, SerializedFieldIndexer, WriteOperation,
-};
+use super::{embedding::EmbeddingCalculationRequest, CollectionField, SerializedFieldIndexer};
 
 mod doc_id_storage;
 

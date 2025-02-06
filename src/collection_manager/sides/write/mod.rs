@@ -2,7 +2,6 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
-mod operation;
 
 use std::{
     collections::HashMap,
@@ -14,7 +13,10 @@ use std::{
     time::Duration,
 };
 
-use super::hooks::{HookName, HooksRuntime};
+use super::{
+    hooks::{HookName, HooksRuntime},
+    Offset, OperationSender,
+};
 
 use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
@@ -24,7 +26,6 @@ use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
@@ -64,120 +65,100 @@ pub struct WriteSideConfig {
     pub config: CollectionsWriterConfig,
 }
 
-pub struct WriteSide {
+pub struct WriteSideLoader {
     sender: OperationSender,
-    collections: CollectionsWriter,
-    document_count: AtomicU64,
-    data_dir: PathBuf,
+    config: WriteSideConfig,
     hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
-
-    operation_counter: RwLock<u64>,
-    insert_batch_commit_size: u64,
-
-    master_api_key: ApiKey,
-
-    commit_interval: Duration,
+    ai_service: Arc<AIService>,
 }
 
-impl WriteSide {
+impl WriteSideLoader {
     pub fn new(
         sender: OperationSender,
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-    ) -> WriteSide {
+    ) -> WriteSideLoader {
+        WriteSideLoader {
+            sender,
+            hook_runtime,
+            nlp_service,
+            config,
+            ai_service,
+        }
+    }
+
+    pub async fn load(self) -> Result<Arc<WriteSide>> {
+        let Self {
+            hook_runtime,
+            nlp_service,
+            sender,
+            config,
+            ai_service,
+        } = self;
+
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
 
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
-            collections_writer_config.embedding_queue_limit as usize,
-        );
-
-        start_calculate_embedding_loop(
-            ai_service,
-            rx,
-            collections_writer_config.embedding_queue_limit,
-        );
-
         let commit_interval = collections_writer_config.commit_interval;
+        let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
-        WriteSide {
-            sender,
-            collections: CollectionsWriter::new(collections_writer_config, sx),
-            document_count: AtomicU64::new(0),
-            data_dir,
-            hook_runtime,
-            nlp_service,
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+            embedding_queue_limit as usize,
+        );
 
-            operation_counter: Default::default(),
-            insert_batch_commit_size,
-
-            master_api_key,
-
-            commit_interval,
-        }
-    }
-
-    pub async fn load(mut self) -> Result<Arc<Self>> {
-        self.collections
-            .load(self.hook_runtime.clone(), self.nlp_service.clone())
+        let mut collections = CollectionsWriter::new(collections_writer_config, sx);
+        collections
+            .load(hook_runtime.clone(), nlp_service.clone())
             .await?;
 
-        let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot read info file")
-        {
-            Ok(info) => info,
-            Err(err) => {
-                warn!("Cannot read info file: {}. Skip loading", err);
-                let s = Arc::new(self);
-
-                s.clone().start_commit_loop(s.commit_interval);
-
-                return Ok(s);
-            }
+        let write_side = WriteSide {
+            document_count: Default::default(),
+            collections,
+            data_dir: data_dir.clone(),
+            hook_runtime,
+            insert_batch_commit_size,
+            master_api_key,
+            operation_counter: Default::default(),
+            sender,
         };
-        let WriteSideInfo::V1(info) = info;
 
-        self.document_count
-            .store(info.document_count, Ordering::Relaxed);
-        self.sender.set_offset(info.offset);
+        let r = BufferedFile::open(data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data::<WriteSideInfo>());
+        if let Ok(info) = r {
+            let WriteSideInfo::V1(info) = info;
+            write_side
+                .document_count
+                .store(info.document_count, Ordering::Relaxed);
+            write_side.sender.set_offset(info.offset);
+        }
+        let write_side = Arc::new(write_side);
 
-        let s = Arc::new(self);
+        start_commit_loop(write_side.clone(), commit_interval);
+        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
 
-        s.clone().start_commit_loop(s.commit_interval);
-
-        Ok(s)
+        Ok(write_side)
     }
+}
 
-    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
-        tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size);
+pub struct WriteSide {
+    sender: OperationSender,
+    collections: CollectionsWriter,
+    document_count: AtomicU64,
+    data_dir: PathBuf,
+    hook_runtime: Arc<HooksRuntime>,
+    operation_counter: RwLock<u64>,
+    insert_batch_commit_size: u64,
 
-            // If for some reason we miss a tick, we skip it.
-            // In fact, the commit is blocked only by `update` method.
-            // If the collection is under heavy load,
-            // the commit will be run due to the `insert_batch_commit_size` config.
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    master_api_key: ApiKey,
+}
 
-            loop {
-                interval.tick().await;
-                info!(
-                    "{:?} time reached. Committing write side",
-                    insert_batch_commit_size.clone()
-                );
-                if let Err(e) = self.commit().await {
-                    tracing::error!(?e, "Cannot commit write side");
-                }
-            }
-        });
-    }
-
+impl WriteSide {
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
@@ -438,6 +419,29 @@ impl WriteSide {
 
         Ok(())
     }
+}
+
+fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(insert_batch_commit_size);
+
+        // If for some reason we miss a tick, we skip it.
+        // In fact, the commit is blocked only by `update` method.
+        // If the collection is under heavy load,
+        // the commit will be run due to the `insert_batch_commit_size` config.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            info!(
+                "{:?} time reached. Committing write side",
+                insert_batch_commit_size.clone()
+            );
+            if let Err(e) = write_side.commit().await {
+                tracing::error!(?e, "Cannot commit write side");
+            }
+        }
+    });
 }
 
 #[derive(Serialize, Deserialize)]

@@ -13,7 +13,11 @@ use crate::{
     ai::OramaModel,
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
-        sides::hooks::{HookName, HooksRuntime},
+        sides::{
+            hooks::{HookName, HooksRuntime},
+            CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, Term,
+            TermStringField, WriteOperation,
+        },
     },
     metrics::{
         Empty, StringCalculationLabels, EMBEDDING_REQUEST_GAUDGE, PENDING_EMBEDDING_REQUEST_GAUDGE,
@@ -23,11 +27,7 @@ use crate::{
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
 
-use super::{
-    embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput},
-    CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, Term, TermStringField,
-    WriteOperation,
-};
+use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
 
 pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
 

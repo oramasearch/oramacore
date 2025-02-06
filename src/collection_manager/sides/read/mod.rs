@@ -28,7 +28,7 @@ use crate::{
     SideChannelType,
 };
 
-use super::{CollectionWriteOperation, Offset, WriteOperation};
+use super::{CollectionWriteOperation, Offset, OperationReceiver, WriteOperation};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -45,7 +45,8 @@ pub struct IndexesConfig {
     pub commit_interval: Duration,
 }
 
-pub struct ReadSide {
+pub struct ReadSideLoader {
+    operation_receiver: OperationReceiver,
     collections: CollectionsReader,
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
@@ -53,8 +54,9 @@ pub struct ReadSide {
     commit_interval: Duration,
 }
 
-impl ReadSide {
+impl ReadSideLoader {
     pub fn try_new(
+        operation_receiver: OperationReceiver,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         config: ReadSideConfig,
@@ -68,6 +70,7 @@ impl ReadSide {
         let commit_interval = config.config.commit_interval;
 
         Ok(Self {
+            operation_receiver,
             collections: CollectionsReader::try_new(ai_service, nlp_service, config.config)?,
             document_storage,
             operation_counter: Default::default(),
@@ -76,43 +79,44 @@ impl ReadSide {
         })
     }
 
-    pub async fn load(mut self) -> Result<Arc<Self>> {
-        self.collections.load().await?;
+    pub async fn load(self) -> Result<Arc<ReadSide>> {
+        let Self {
+            mut collections,
+            commit_interval,
+            mut document_storage,
+            operation_counter,
+            insert_batch_commit_size,
+            operation_receiver,
+        } = self;
 
-        self.document_storage
+        collections.load().await?;
+        document_storage
             .load()
             .context("Cannot load document storage")?;
 
-        let s = Arc::new(self);
+        let read_side = ReadSide {
+            collections,
+            document_storage,
+            operation_counter,
+            insert_batch_commit_size,
+        };
+        let read_side = Arc::new(read_side);
 
-        s.clone().start_commit_loop(s.commit_interval);
+        start_commit_loop(read_side.clone(), commit_interval);
+        start_receive_operations(read_side.clone(), operation_receiver);
 
-        Ok(s)
+        Ok(read_side)
     }
+}
 
-    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
-        tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size);
+pub struct ReadSide {
+    collections: CollectionsReader,
+    document_storage: DocumentStorage,
+    operation_counter: RwLock<u64>,
+    insert_batch_commit_size: u64,
+}
 
-            // If for some reason we miss a tick, we skip it.
-            // In fact, the commit is blocked only by `update` method.
-            // If the collection is under heavy load,
-            // the commit will be run due to the `insert_batch_commit_size` config.
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                info!(
-                    "{:?} time reached. Committing write side",
-                    insert_batch_commit_size.clone()
-                );
-                if let Err(e) = self.commit().await {
-                    tracing::error!(?e, "Cannot commit read side");
-                }
-            }
-        });
-    }
-
+impl ReadSide {
     pub async fn commit(&self) -> Result<()> {
         self.collections.commit().await?;
 
@@ -285,6 +289,39 @@ fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
 
 fn default_insert_batch_commit_size() -> u64 {
     300
+}
+
+fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duration) {
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(insert_batch_commit_size);
+
+        // If for some reason we miss a tick, we skip it.
+        // In fact, the commit is blocked only by `update` method.
+        // If the collection is under heavy load,
+        // the commit will be run due to the `insert_batch_commit_size` config.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            info!(
+                "{:?} time reached. Committing write side",
+                insert_batch_commit_size.clone()
+            );
+            if let Err(e) = read_side.commit().await {
+                tracing::error!(?e, "Cannot commit read side");
+            }
+        }
+    });
+}
+
+fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: OperationReceiver) {
+    tokio::task::spawn(async move {
+        while let Some(op) = operation_receiver.recv().await {
+            if let Err(e) = read_side.update(op).await {
+                tracing::error!(?e, "Cannot update read side");
+            }
+        }
+    });
 }
 
 #[cfg(test)]
