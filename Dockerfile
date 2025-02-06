@@ -1,3 +1,4 @@
+# Stage 1: Rust builder
 FROM rust:1.84-slim-bookworm AS rust-builder
 
 RUN apt-get update && apt-get install -y \
@@ -18,7 +19,6 @@ RUN apt-get update && apt-get install -y \
   curl \
   git
 
-# Set environment variables for v8 build
 ENV RUSTY_V8_MIRROR=https://github.com/denoland/rusty_v8/releases/download
 ENV V8_FROM_SOURCE=0
 
@@ -26,9 +26,27 @@ WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release
 
-FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+# Stage 2: Flash-attention builder
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS flash-builder
 
-# Install Python, pip and other dependencies
+RUN apt-get update && apt-get install -y \
+  python3 \
+  python3-pip \
+  python3-dev \
+  build-essential \
+  ninja-build
+
+# Install build dependencies first
+RUN pip install --upgrade pip \
+  && pip install packaging \
+  && pip install torch \
+  && pip install --no-cache-dir --no-build-isolation flash-attn \
+  && rm -rf /root/.cache/pip
+
+# Stage 3: Final runtime
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
+
+# Install Python and other dependencies
 RUN apt-get update && apt-get install -y \
   python3 \
   python3-pip \
@@ -40,6 +58,9 @@ RUN apt-get update && apt-get install -y \
   && ln -s /usr/bin/pip3 /usr/bin/pip \
   && rm -rf /var/lib/apt/lists/*
 
+# Copy flash-attention from builder
+COPY --from=flash-builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+
 # Install grpcurl
 RUN curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin && \
   chmod +x /usr/local/bin/grpcurl
@@ -49,10 +70,9 @@ WORKDIR /app
 # Copy requirements first to leverage caching
 COPY src/ai_server/requirements.txt /app/requirements.txt
 
-# Install Python dependencies
+# Install Python dependencies (excluding flash-attn since we copied it)
 RUN pip install --upgrade pip && \
   pip install --no-cache-dir -r requirements.txt && \
-  pip install --no-cache-dir --no-build-isolation flash-attn && \
   rm -rf /root/.cache/pip
 
 COPY src/ai_server /app/ai_server

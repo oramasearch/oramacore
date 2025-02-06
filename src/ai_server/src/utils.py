@@ -18,7 +18,7 @@ DEFAULT_ACTION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 class EmbeddingsConfig:
     default_model_group: Optional[str] = "en"
     dynamically_load_models: Optional[bool] = False
-    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CUDAExecutionProvider"])
+    execution_providers: List[str] = field(default_factory=lambda: ["CUDAExecutionProvider"])
     total_threads: Optional[int] = 8
 
     def __post_init__(self):
@@ -56,7 +56,7 @@ class ModelConfig:
 
 
 @dataclass
-class LLMs:
+class LLMConfig:
     answer: Optional[ModelConfig] = field(
         default_factory=lambda: ModelConfig(
             id=DEFAULT_ANSWER_MODEL,
@@ -107,7 +107,7 @@ class OramaAIConfig:
     port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
-    LLMs: Optional[LLMs] = field(default_factory=LLMs)  # type: ignore
+    LLMs = field(default_factory=LLMConfig)
     total_threads: Optional[int] = 12
 
     rust_server_host: Optional[str] = "0.0.0.0"
@@ -137,7 +137,7 @@ class OramaAIConfig:
                             if model_config:
                                 sampling_params = SamplingParams(**model_config.pop("sampling_params", {}))
                                 llm_configs[model_key] = ModelConfig(**model_config, sampling_params=sampling_params)
-                        self.LLMs = LLMs(**llm_configs)
+                        self.LLMs = LLMConfig(**llm_configs)
                     else:
                         setattr(self, k, v)
 
