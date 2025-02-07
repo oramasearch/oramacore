@@ -3,12 +3,6 @@ title: "Introduction"
 description: "An introduction to the OramaCore REST APIs and SDKs."
 ---
 
-<Callout type='warn'>
-At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
-
-We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
-</Callout>
-
 With OramaCore we aim to provide a set of APIs that are backward compatible - or at least, as similar as possible - to those exposed by [Orama Cloud](https://docs.orama.com/cloud/performing-search).
 
 At the time of writing, with OramaCore being in beta, we are still working on the APIs and SDKs. We are also working on the documentation, so please bear with us.
@@ -29,28 +23,38 @@ At the time of writing, the official SDKs are not yet available. We are working 
 
 We plan to provide SDKs for the following languages:
 
-- JavaScript
-- Python
-- Swift
-- Kotlin
+- JavaScript (✅ Available)
+- Python (🚧 In progress)
+- Swift (🚧 In progress)
+- Kotlin (🚧 In progress)
 
 ### JavaScript SDK
 
+<Callout type='warn'>
+**Pay attention to your API keys!**
+
+When using JavaScript on the browser, you're exposing your API keys.\
+While the **read API key** is safe to expose, the **master** and **write API keys** are not.
+
+The `OramaCoreManager` class is **not** safe to use on the browser, as it exposes your **master** API key.
+
+We recommend using the `CollectionManager` class on the browser, as it can work by passing the **read** API key only to the constructor.
+</Callout>
+
 The JavaScript SDK will be available as an NPM package. You will be able to install it with:
 
-```bash
-npm install @orama/core
+```package-install
+npm i @orama/core
 ```
 
-Once installed, you can link it to your project with:
+Once installed, you can start using as a regular JavaScript or TypeScript module:
 
 ```javascript
-import { OramaCore } from '@orama/core';
-
-const orama = new OramaCore({
-  url: 'http://localhost:8080',
-  apiKey: '<api-key>'
-})
+import { CollectionManager, OramaCoreManager } from '@orama/core'
 ```
 
-And you're ready to go.
+As you can see in the example above, the SDK will provide you with two main classes: `CollectionManager` and `OramaCoreManager`.
+
+The `OramaCoreManager` class is used to manage your whole OramaCore database. It allows you to create, update, and delete collections, as well as manage your API keys.
+
+The `CollectionManager` class is used to manage a single collection. It allows you to perform searches, add, update, and delete documents, as well as perform answer engine sessions.

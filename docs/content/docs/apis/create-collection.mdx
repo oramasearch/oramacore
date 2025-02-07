@@ -2,13 +2,6 @@
 title: "Create a new Collection"
 description: "APIs to create a new Collection in OramaCore."
 ---
-import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-
-<Callout type='warn'>
-At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
-
-We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
-</Callout>
 
 We can think of collections as a way to group documents together.
 
@@ -17,15 +10,15 @@ For example, if you want to index all the products in your e-commerce store, you
 ## APIs
 
 <Callout>
-API Key type: **master**.
+API Key type: **master**. Do not expose it to the public.
 </Callout>
 
 Creating a new collection is as simple as:
 
-<Tabs groupId='create' persist items={['cURL']}>
+<Tabs groupId='create' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections \
+  http://localhost:8080/v1/collections/create \
   -H 'Authorization: Bearer <master-api-key>' \
   -d '{
     "id": "products",
@@ -33,14 +26,29 @@ curl -X POST \
     "read_api_key": "my-read-api-key"
   }'
 ```
+
+```js tab="JavaScript"
+import { OramaCoreManager } from '@orama/core'
+
+const orama = new OramaCoreManager({
+  url: 'http://localhost:8080',
+  masterAPIKey: '<master-api-key>'
+})
+
+const newCollection = await orama.createCollection({
+  id: 'products',
+  writeAPIKey: 'my-write-api-key',
+  readAPIKey: 'my-read-api-ley'
+})
+```
 </Tabs>
 
 A more complete example, with all the optional fields:
 
-<Tabs groupId='create' persist items={['cURL']}>
+<Tabs groupId='create' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections \
+  http://localhost:8080/v1/collections/create \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <master-api-key>' \
   -d '{
@@ -55,6 +63,27 @@ curl -X POST \
     }
   }'
 ```
+
+```js tab="JavaScript"
+import { OramaCoreManager } from '@orama/core'
+
+const orama = new OramaCoreManager({
+  url: 'http://localhost:8080',
+  masterAPI: '<master-api-key>'
+})
+
+const newCollection = await orama.createCollection({
+  id: 'products',
+  writeAPIKey: 'my-write-api-key',
+  readAPIKey: 'my-read-api-key',
+  description: 'My optional description about this collection of products',
+  language: 'english',
+  embeddings: {
+    model: 'BGESmall',
+    documentFields: ['title', 'description']
+  }
+})
+```
 </Tabs>
 
 In the next sections, we'll explain each of the parameters in detail.
@@ -63,7 +92,7 @@ In the next sections, we'll explain each of the parameters in detail.
 
 | Name           | Type     | Description | Required | Default |
 | -------------- | -------- | ----------- | -------- | ------- |
-| `id`         | `string`   | The id of the collection. | Yes | - |
+| `id`         | `string`   | The id of the collection. Can be a name you use to identify it. | Yes | - |
 | `write_api_key` | `string`   | The write API key for this collection. | Yes | - |
 | `read_api_key`  | `string`   | The read API key for this collection. | Yes | - |
 | `description`   | `string`   | A description for this collection. | No | - |
@@ -90,14 +119,18 @@ At the time of writing, we have the following hooks available:
 
 - `selectEmbeddingProperties`: Allows you to programmatically select properties for text extraction during text embeddings generation.
 
-  <Tabs groupId='hooks' persist items={['cURL']}>
+  <Tabs groupId='hooks' persist items={['cURL', 'JavaScript']}>
   ```bash tab="cURL"
-  curl -X POST http://localhost:8080/{COLLECTION_ID}/v0/hooks/add \
+  curl -X POST http://localhost:8080/v1/{COLLECTION_ID}/hooks/add \
     -H 'Content-Type: application/json' \
     -d '{
       "id": "selectEmbeddingProperties",
       "code": "function selectEmbeddingProperties(document) { return document.title; }"
     }'
+  ```
+
+  ```js tab="JavaScript"
+  // Not supported yet in the JavaScript SDK
   ```
   </Tabs>
 
