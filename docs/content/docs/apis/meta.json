@@ -4,6 +4,7 @@
     "introduction",
     "create-collection",
     "insert-documents",
-    "search-documents"
+    "search-documents",
+    "answer-session"
   ]
 }
