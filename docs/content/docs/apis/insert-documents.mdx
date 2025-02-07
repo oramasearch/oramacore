@@ -3,34 +3,54 @@ title: "Insert Documents"
 description: "APIs to insert documents into an OramaCore collection."
 ---
 
-import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-
-<Callout type='warn'>
-At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
-
-We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
-</Callout>
-
 ## APIs
 
 <Callout>
-API Key type: **`write_api_key`**.
+API Key type: **`write_api_key`**. Do not expose it to the public.
 </Callout>
 
 To insert a new document, you first need to create a new [collection](/docs/apis/create-collection).
 
 Once you have a collection, you can start inserting documents using the following API:
 
-<Tabs groupId='insert' persist items={['cURL']}>
+<Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
 curl -X PATCH \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/insert \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <write_api_key>' \
-  -d '{
+  -d '[{
     "title": "My first document",
     "content": "This is the content of my first document."
-  }'
+  }]'
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  writeAPI: '<write_api_key>',
+})
+
+// You can insert a single document
+await collection.insert({
+  title: 'My first document',
+  content: 'This is the content of my first document.'
+})
+
+// Or you can insert multiple documents by passing an array of objects
+await collection.insert([
+  {
+    title: 'My first document',
+    content: 'This is the content of my first document.'
+  },
+  {
+    title: 'My second document',
+    content: 'This is the content of my second document.'
+  }
+])
 ```
 </Tabs>
 

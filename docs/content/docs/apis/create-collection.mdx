@@ -130,7 +130,22 @@ At the time of writing, we have the following hooks available:
   ```
 
   ```js tab="JavaScript"
-  // Not supported yet in the JavaScript SDK
+  import { CollectionManager } from '@orama/core'
+
+  const collection = new CollectionManager({
+    url: 'http://localhost:8080',
+    collectionID: '<COLLECTION_ID>',
+    writeAPIKey: '<write_api_key>'
+  })
+
+  function selectEmbeddingProperties(document) {
+    return document.title;
+  }
+
+  await collection.addHook({
+    name: 'selectEmbeddingProperties',
+    code: selectEmbeddingProperties.toString()
+  })
   ```
   </Tabs>
 
