@@ -18,7 +18,7 @@ In total, OramaCore will give you access to three different kinds API keys:
 
 The **master API key** is an essential key that allows you to configure the OramaCore instance and create or delete new collections.
 
-It's configurable via the [`config.yaml`](/docs/configuration) file under the `writer_side` section:
+It's configurable via the [`config.yaml`](/docs/guide/configuration) file under the `writer_side` section:
 
 ```yaml
 # ...
@@ -59,7 +59,7 @@ As you can see, when creating a new collection, you will need to create the `rea
 **Not safe to share**. Never share the write API key publicly. Treat it as a password.
 </Callout>
 
-The **write API key** is used to insert, update, or delete documents in a collection, as well as creating new [hooks](/docs/javascript-hooks/introduction) and [actions](/docs/party-planner#writing-custom-actions).
+The **write API key** is used to insert, update, or delete documents in a collection, as well as creating new [hooks](/docs/customizations/javascript-hooks/introduction) and [actions](/docs/architecture/party-planner#writing-custom-actions).
 
 Every collection has its own write API key, which is generated when you create the collection.
 
