@@ -80,7 +80,7 @@ The `http` section configures the HTTP server that serves the OramaCore API. Her
 The `writer_side` section configures the writer side of OramaCore. Here are the available options:
 
 - `output`: The output where the writer side will store the data. By default, it's set to `in-memory`.
-- `master_api_key`: The master API key used to authenticate the requests to the writer side. By default, it's set to an empty string. See more about the available API keys in the [API Keys](/docs/api-key) section.
+- `master_api_key`: The master API key used to authenticate the requests to the writer side. By default, it's set to an empty string. See more about the available API keys in the [API Keys](/docs/guide/api-key) section.
 - `config`: The configuration options for the writer side. Here are the available options:
   - `data_dir`: The directory where the writer side will persist the data on disk. By default, it's set to `./.data/writer`.
   - `embedding_queue_limit`: The maximum number of embeddings that can be stored in the queue before the writer starts to be blocked. By default, it's set to `50000`.

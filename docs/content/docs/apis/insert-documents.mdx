@@ -54,7 +54,7 @@ await collection.insert([
 ```
 </Tabs>
 
-OramaCore will [automatically generate generate text embeddings](/docs/text-embeddings) for the document in real-time, allowing you to perform full-text, hybrid, and vector search immediately.
+OramaCore will [automatically generate generate text embeddings](/docs/customizations/text-embeddings) for the document in real-time, allowing you to perform full-text, hybrid, and vector search immediately.
 
 ## Optimizations
 
@@ -64,7 +64,7 @@ Since OramaCore uses two immutable data structures (**FST** for full-text search
 
 OramaCore will insert all the new documents into a buffer, and once the buffer reaches a certain size, it will be flushed to the immutable data structures.
 
-The buffer size is configurable via the [`insert_batch_commit_size`](/docs/configuration#writer_side) configuration in the `config.yaml` file.
+The buffer size is configurable via the [`insert_batch_commit_size`](/docs/guide/configuration#writer_side) configuration in the `config.yaml` file.
 
 By default, OramaCore will commit (so will push the buffer to the immutable data structures) every 5000 documents. You can change this value to better suit your use case.
 
