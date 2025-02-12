@@ -3,8 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    channel, hooks::HooksRuntime, ReadSide, ReadSideConfig, ReadSideLoader, WriteSide,
-    WriteSideConfig, WriteSideLoader,
+    channel_creator, hooks::HooksRuntime, InputSideChannelType, OutputSideChannelType, ReadSide,
+    ReadSideConfig, WriteSide, WriteSideConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
@@ -41,18 +41,12 @@ mod tests;
 #[cfg(any(test, feature = "benchmarking"))]
 pub mod test_utils;
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub enum SideChannelType {
-    #[serde(rename = "in-memory")]
-    InMemory,
-}
-
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LogConfig {
     pub file_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct OramacoreConfig {
     pub log: LogConfig,
     pub http: HttpConfig,
@@ -100,7 +94,18 @@ pub async fn build_orama(
     let hooks_runtime = HooksRuntime::new(50).await;
     let hooks_runtime = Arc::new(hooks_runtime);
 
-    let (sender, receiver) = channel(10_000);
+    #[cfg(feature = "writer")]
+    let writer_sender_config: Option<OutputSideChannelType> =
+        Some(config.writer_side.output.clone());
+    #[cfg(not(feature = "writer"))]
+    let writer_sender_config = None;
+    #[cfg(feature = "reader")]
+    let reader_sender_config: Option<InputSideChannelType> = Some(config.reader_side.input.clone());
+    #[cfg(not(feature = "reader"))]
+    let reader_sender_config = None;
+
+    let (sender_creator, receiver_creator) =
+        channel_creator(writer_sender_config, reader_sender_config).await?;
 
     info!("Building nlp_service");
     let nlp_service = Arc::new(NLPService::new());
@@ -108,19 +113,17 @@ pub async fn build_orama(
     #[cfg(feature = "writer")]
     let write_side = {
         info!("Building write_side");
-        assert_eq!(
-            config.writer_side.output,
-            SideChannelType::InMemory,
-            "Only in-memory is supported"
-        );
-        let write_side = WriteSideLoader::new(
-            sender,
+        let sender_creator = sender_creator.expect("Sender is not created");
+
+        let write_side = WriteSide::try_load(
+            sender_creator,
             config.writer_side,
             ai_service.clone(),
             hooks_runtime,
             nlp_service.clone(),
-        );
-        let write_side = write_side.load().await.context("Cannot load write side")?;
+        )
+        .await
+        .context("Cannot create write side")?;
         Some(write_side)
     };
     #[cfg(not(feature = "writer"))]
@@ -132,18 +135,16 @@ pub async fn build_orama(
     #[cfg(feature = "reader")]
     let read_side = {
         info!("Building read_side");
-        assert_eq!(
-            config.reader_side.input,
-            SideChannelType::InMemory,
-            "Only in-memory is supported"
-        );
-        let read_side =
-            ReadSideLoader::try_new(receiver, ai_service, nlp_service, config.reader_side)
-                .context("Cannot create read side")?;
-        let read_side = read_side
-            .load()
-            .await
-            .context("Cannot load collection reader")?;
+
+        let receiver_creator = receiver_creator.expect("Receiver is not created");
+        let read_side = ReadSide::try_load(
+            receiver_creator,
+            ai_service,
+            nlp_service,
+            config.reader_side,
+        )
+        .await
+        .context("Cannot create read side")?;
         Some(read_side)
     };
     #[cfg(not(feature = "reader"))]

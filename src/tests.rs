@@ -17,13 +17,14 @@ use crate::{
     collection_manager::{
         dto::ApiKey,
         sides::{
-            CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
+            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
+            OutputSideChannelType, ReadSide, WriteSide,
         },
     },
     test_utils::{create_grpc_server, generate_new_path},
     types::{CollectionId, DocumentList},
     web_server::HttpConfig,
-    OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
+    OramacoreConfig, ReadSideConfig, WriteSideConfig,
 };
 
 fn create_oramacore_config() -> OramacoreConfig {
@@ -44,7 +45,7 @@ fn create_oramacore_config() -> OramacoreConfig {
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
-            output: SideChannelType::InMemory,
+            output: OutputSideChannelType::InMemory { capacity: 100 },
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -57,7 +58,7 @@ fn create_oramacore_config() -> OramacoreConfig {
             },
         },
         reader_side: ReadSideConfig {
-            input: SideChannelType::InMemory,
+            input: InputSideChannelType::InMemory { capacity: 100 },
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 // Lot of tests commit to test it.

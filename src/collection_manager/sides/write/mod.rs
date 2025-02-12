@@ -15,7 +15,7 @@ use std::{
 
 use super::{
     hooks::{HookName, HooksRuntime},
-    Offset, OperationSender,
+    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
 use anyhow::{bail, Context, Result};
@@ -40,7 +40,6 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
-    SideChannelType,
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -58,92 +57,11 @@ pub struct CollectionsWriterConfig {
     pub commit_interval: Duration,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    pub output: SideChannelType,
+    pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
-}
-
-pub struct WriteSideLoader {
-    sender: OperationSender,
-    config: WriteSideConfig,
-    hook_runtime: Arc<HooksRuntime>,
-    nlp_service: Arc<NLPService>,
-    ai_service: Arc<AIService>,
-}
-
-impl WriteSideLoader {
-    pub fn new(
-        sender: OperationSender,
-        config: WriteSideConfig,
-        ai_service: Arc<AIService>,
-        hook_runtime: Arc<HooksRuntime>,
-        nlp_service: Arc<NLPService>,
-    ) -> WriteSideLoader {
-        WriteSideLoader {
-            sender,
-            hook_runtime,
-            nlp_service,
-            config,
-            ai_service,
-        }
-    }
-
-    pub async fn load(self) -> Result<Arc<WriteSide>> {
-        let Self {
-            hook_runtime,
-            nlp_service,
-            sender,
-            config,
-            ai_service,
-        } = self;
-
-        let master_api_key = config.master_api_key;
-        let collections_writer_config = config.config;
-        let data_dir = collections_writer_config.data_dir.clone();
-
-        let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
-
-        let commit_interval = collections_writer_config.commit_interval;
-        let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
-
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
-            embedding_queue_limit as usize,
-        );
-
-        let mut collections = CollectionsWriter::new(collections_writer_config, sx);
-        collections
-            .load(hook_runtime.clone(), nlp_service.clone())
-            .await?;
-
-        let write_side = WriteSide {
-            document_count: Default::default(),
-            collections,
-            data_dir: data_dir.clone(),
-            hook_runtime,
-            insert_batch_commit_size,
-            master_api_key,
-            operation_counter: Default::default(),
-            sender,
-        };
-
-        let r = BufferedFile::open(data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data::<WriteSideInfo>());
-        if let Ok(info) = r {
-            let WriteSideInfo::V1(info) = info;
-            write_side
-                .document_count
-                .store(info.document_count, Ordering::Relaxed);
-            write_side.sender.set_offset(info.offset);
-        }
-        let write_side = Arc::new(write_side);
-
-        start_commit_loop(write_side.clone(), commit_interval);
-        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
-
-        Ok(write_side)
-    }
 }
 
 pub struct WriteSide {
@@ -159,14 +77,80 @@ pub struct WriteSide {
 }
 
 impl WriteSide {
+    pub async fn try_load(
+        sender_creator: OperationSenderCreator,
+        config: WriteSideConfig,
+        ai_service: Arc<AIService>,
+        hook_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+    ) -> Result<Arc<Self>> {
+        let master_api_key = config.master_api_key;
+        let collections_writer_config = config.config;
+        let data_dir = collections_writer_config.data_dir.clone();
+
+        let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
+
+        let commit_interval = collections_writer_config.commit_interval;
+        let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
+
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+            embedding_queue_limit as usize,
+        );
+
+        let document_count = AtomicU64::new(0);
+
+        let write_side_info_path = data_dir.join("info.json");
+        let r = BufferedFile::open(write_side_info_path)
+            .and_then(|f| f.read_json_data::<WriteSideInfo>());
+        let sender = if let Ok(info) = r {
+            let WriteSideInfo::V1(info) = info;
+            document_count.store(info.document_count, Ordering::Relaxed);
+            sender_creator
+                .create(info.offset)
+                .await
+                .context("Cannot create sender")?
+        } else {
+            sender_creator
+                .create(Offset(0))
+                .await
+                .context("Cannot create sender")?
+        };
+
+        let collections_writer = CollectionsWriter::try_load(
+            collections_writer_config,
+            sx,
+            hook_runtime.clone(),
+            nlp_service.clone(),
+        )
+        .await
+        .context("Cannot load collections")?;
+
+        let write_side = Self {
+            document_count,
+            collections: collections_writer,
+            data_dir,
+            hook_runtime,
+            insert_batch_commit_size,
+            master_api_key,
+            operation_counter: Default::default(),
+            sender,
+        };
+
+        let write_side = Arc::new(write_side);
+
+        start_commit_loop(write_side.clone(), commit_interval);
+        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
+
+        Ok(write_side)
+    }
+
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
-        let offset = self.sender.offset();
-
         self.collections.commit().await?;
 
+        let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
         // This means, we save a document count possible higher.
         // Anyway it is not a problem, because the document count is only used for the document id generation

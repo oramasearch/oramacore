@@ -14,10 +14,7 @@ use dump::{CollectionInfo, CollectionInfoV1};
 use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
 use redact::Secret;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    join,
-    sync::{Mutex, RwLock},
-};
+use tokio::{join, sync::RwLock};
 use tracing::{debug, error, info, instrument, trace, warn};
 use uncommitted::UncommittedCollection;
 
@@ -66,7 +63,6 @@ pub struct CollectionReader {
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
     offset_storage: OffsetStorage,
-    commit_insert_mutex: Mutex<()>,
 }
 
 impl CollectionReader {
@@ -91,8 +87,7 @@ impl CollectionReader {
             committed_collection: RwLock::new(CommittedCollection::new()),
             uncommitted_deleted_documents: RwLock::new(HashSet::new()),
 
-            offset_storage: Default::default(),
-            commit_insert_mutex: Default::default(),
+            offset_storage: OffsetStorage::new(),
         })
     }
 
@@ -140,8 +135,6 @@ impl CollectionReader {
         };
 
         info!("Current offset: {:?}", current_offset);
-        assert!(current_offset.0 > 0);
-        println!("Loaded offset: {:?}", current_offset);
 
         let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
         let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
@@ -194,11 +187,7 @@ impl CollectionReader {
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         info!("Committing collection");
 
-        // We stop insertion operations while we are committing
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
         let offset = self.offset_storage.get_offset();
-        assert!(offset.0 > 0);
         debug!("Committing with offset: {:?}", offset);
 
         let collection_info_path = data_dir.join("info.info");
@@ -594,8 +583,6 @@ impl CollectionReader {
             .write_json_data(&offset)
             .context("Cannot write previous collection info")?;
 
-        drop(commit_insert_mutex_lock);
-
         info!("Collection committed");
 
         Ok(())
@@ -610,9 +597,6 @@ impl CollectionReader {
         offset: Offset,
         collection_operation: CollectionWriteOperation,
     ) -> Result<()> {
-        // We don't allow insertion during the commit
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
         match collection_operation {
             CollectionWriteOperation::InsertDocument { .. } => {
                 unreachable!("InsertDocument is not managed by the collection");
@@ -632,7 +616,7 @@ impl CollectionReader {
                 trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
 
                 let typed_field = match typed_field {
-                    dto::TypedField::Embedding(model) => TypedField::Embedding(model.model),
+                    dto::TypedField::Embedding(model) => TypedField::Embedding(model.model.0),
                     dto::TypedField::Text(locale) => TypedField::Text(locale),
                     dto::TypedField::Number => TypedField::Number,
                     dto::TypedField::Bool => TypedField::Bool,
@@ -676,8 +660,6 @@ impl CollectionReader {
                 trace!("Value indexed");
             }
         };
-
-        drop(commit_insert_mutex_lock);
 
         Ok(())
     }

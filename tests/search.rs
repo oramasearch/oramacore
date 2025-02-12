@@ -77,7 +77,9 @@ async fn start_server() {
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
-            output: oramacore::SideChannelType::InMemory,
+            output: oramacore::collection_manager::sides::OutputSideChannelType::InMemory {
+                capacity: 100,
+            },
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -88,7 +90,9 @@ async fn start_server() {
             },
         },
         reader_side: ReadSideConfig {
-            input: oramacore::SideChannelType::InMemory,
+            input: oramacore::collection_manager::sides::InputSideChannelType::InMemory {
+                capacity: 100,
+            },
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 10,

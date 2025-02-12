@@ -5,16 +5,17 @@ mod document_storage;
 use duration_str::deserialize_duration;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
-use serde::Deserialize;
-use tokio::sync::RwLock;
-use tracing::{info, trace};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{info, trace, warn};
 
+use crate::file_utils::BufferedFile;
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
@@ -25,14 +26,16 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId},
-    SideChannelType,
 };
 
-use super::{CollectionWriteOperation, Offset, OperationReceiver, WriteOperation};
+use super::{
+    CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
+    OperationReceiverCreator, WriteOperation,
+};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
-    pub input: SideChannelType,
+    pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
 
@@ -45,61 +48,62 @@ pub struct IndexesConfig {
     pub commit_interval: Duration,
 }
 
-pub struct ReadSideLoader {
-    operation_receiver: OperationReceiver,
+pub struct ReadSide {
     collections: CollectionsReader,
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
-    commit_interval: Duration,
+    data_dir: PathBuf,
+    // This offset will update everytime a change is made to the read side.
+    commit_insert_mutex: Mutex<Offset>,
 }
 
-impl ReadSideLoader {
-    pub fn try_new(
-        operation_receiver: OperationReceiver,
+impl ReadSide {
+    pub async fn try_load(
+        operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         config: ReadSideConfig,
-    ) -> Result<Self> {
-        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
+    ) -> Result<Arc<Self>> {
+        let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
         })
         .context("Cannot create document storage")?;
 
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
+        let data_dir = config.config.data_dir.clone();
 
-        Ok(Self {
-            operation_receiver,
-            collections: CollectionsReader::try_new(ai_service, nlp_service, config.config)?,
-            document_storage,
-            operation_counter: Default::default(),
-            insert_batch_commit_size,
-            commit_interval,
-        })
-    }
-
-    pub async fn load(self) -> Result<Arc<ReadSide>> {
-        let Self {
-            mut collections,
-            commit_interval,
-            mut document_storage,
-            operation_counter,
-            insert_batch_commit_size,
-            operation_receiver,
-        } = self;
-
-        collections.load().await?;
+        let collections_reader =
+            CollectionsReader::try_load(ai_service, nlp_service, config.config)
+                .await
+                .context("Cannot load collections")?;
         document_storage
             .load()
             .context("Cannot load document storage")?;
 
-        let read_side = ReadSide {
-            collections,
-            document_storage,
-            operation_counter,
-            insert_batch_commit_size,
+        let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot read offset file");
+        let last_offset = match read_info {
+            Ok(ReadInfo::V1(info)) => info.offset,
+            Err(_) => {
+                warn!("Cannot read 'read.info' file. Starting from 0");
+                Offset(0)
+            },
         };
+
+        let read_side = ReadSide {
+            collections: collections_reader,
+            document_storage,
+            operation_counter: Default::default(),
+            insert_batch_commit_size,
+            data_dir,
+            commit_insert_mutex: Mutex::new(last_offset),
+        };
+
+        let operation_receiver = operation_receiver_creator.create(last_offset).await?;
+
         let read_side = Arc::new(read_side);
 
         start_commit_loop(read_side.clone(), commit_interval);
@@ -107,23 +111,24 @@ impl ReadSideLoader {
 
         Ok(read_side)
     }
-}
 
-pub struct ReadSide {
-    collections: CollectionsReader,
-    document_storage: DocumentStorage,
-    operation_counter: RwLock<u64>,
-    insert_batch_commit_size: u64,
-}
-
-impl ReadSide {
     pub async fn commit(&self) -> Result<()> {
-        self.collections.commit().await?;
+        // We stop insertion operations while we are committing
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
+        self.collections.commit().await?;
         self.document_storage
             .commit()
             .await
             .context("Cannot commit document storage")?;
+
+        let offset: Offset = *commit_insert_mutex_lock;
+        BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
+            .context("Cannot create read.info file")?
+            .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
+            .context("Cannot write read.info file")?;
+
+        drop(commit_insert_mutex_lock);
 
         Ok(())
     }
@@ -185,6 +190,9 @@ impl ReadSide {
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?op.0, "Updating read side");
 
+        // We stop commit operations while we are updating
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
         let (offset, op) = op;
         match op {
             WriteOperation::CreateCollection { id, read_api_key } => {
@@ -240,6 +248,8 @@ impl ReadSide {
         };
         drop(lock);
 
+        drop(commit_insert_mutex_lock);
+
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
@@ -293,7 +303,8 @@ fn default_insert_batch_commit_size() -> u64 {
 
 fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duration) {
     tokio::task::spawn(async move {
-        let mut interval = tokio::time::interval(insert_batch_commit_size);
+        let start = Instant::now() + insert_batch_commit_size;
+        let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
 
         // If for some reason we miss a tick, we skip it.
         // In fact, the commit is blocked only by `update` method.
@@ -304,7 +315,7 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
         loop {
             interval.tick().await;
             info!(
-                "{:?} time reached. Committing write side",
+                "{:?} time reached. Committing read side",
                 insert_batch_commit_size.clone()
             );
             if let Err(e) = read_side.commit().await {
@@ -322,6 +333,16 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
             }
         }
     });
+}
+
+#[derive(Deserialize, Serialize)]
+struct ReadInfoV1 {
+    offset: Offset,
+}
+
+#[derive(Deserialize, Serialize)]
+enum ReadInfo {
+    V1(ReadInfoV1),
 }
 
 #[cfg(test)]

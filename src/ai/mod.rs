@@ -218,8 +218,10 @@ impl Manager for GrpcManager {
             .unwrap();
 
         info!("Connecting to gRPC");
-        let endpoint: tonic::transport::Channel =
-            tonic::transport::Endpoint::new(uri)?.connect().await?;
+        let endpoint: tonic::transport::Channel = tonic::transport::Endpoint::new(uri.clone())?
+            .connect()
+            .await
+            .with_context(move || format!("Cannot connect to {:?}", uri))?;
         info!("Connected to gRPC");
 
         let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint);

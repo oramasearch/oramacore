@@ -11,8 +11,9 @@ log:
 writer_side:
     output:
         type: rabbitmq
-        host: localhost
-        port: 5672
+        super_stream_name: oramacore-operations
+        client_provided_name: foo
+        environment_client_provided_name: foo-env
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -36,8 +37,10 @@ writer_side:
 reader_side:
     input:
         type: rabbitmq
-        host: localhost
-        port: 5672
+        super_stream_name: oramacore-operations
+        client_provided_name: foo
+        environment_client_provided_name: foo-env
+        name: oramacore-reader-1
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
@@ -57,7 +60,7 @@ ai_server:
         default_model_group: small
         dynamically_load_models: false
         execution_providers:
-            - CUDAExecutionProvider
+            # - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
     LLMs:

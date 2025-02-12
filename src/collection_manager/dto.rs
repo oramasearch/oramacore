@@ -5,7 +5,6 @@ use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use redact::Secret;
 use serde::{de, Deserialize, Serialize};
 
-use crate::ai::OramaModel;
 use crate::{
     nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
@@ -59,13 +58,13 @@ pub enum DocumentFields {
     AllStringProperties,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingTypedField {
-    pub model: OramaModel,
+    pub model: OramaModelSerializable,
     pub document_fields: DocumentFields,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypedField {
     Text(Locale),
     Embedding(EmbeddingTypedField),

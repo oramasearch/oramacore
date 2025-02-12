@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info, warn};
 
@@ -31,7 +30,7 @@ pub struct EmbeddingCalculationRequest {
     pub input: EmbeddingCalculationRequestInput,
 }
 
-async fn process<I>(ai_service: Arc<AIService>, cache: I) -> Result<()>
+async fn process<I>(ai_service: Arc<AIService>, cache: I)
 where
     I: Iterator<Item = (OramaModel, Vec<EmbeddingCalculationRequestInput>)>,
 {
@@ -46,43 +45,49 @@ where
         });
 
         let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
-        let output = ai_service
-            .embed_passage(model, text_inputs)
-            .await
-            .context("Failed to embed text")?;
+
+        // If something goes wrong, we will just log it and continue
+        // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
+        // TODO: Add circuit breaker
+        let output = ai_service.embed_passage(model, text_inputs).await;
 
         info!("Embedding done");
 
         drop(metric);
 
-        for (input, output) in inputs.into_iter().zip(output.into_iter()) {
-            let EmbeddingCalculationRequestInput {
-                doc_id,
-                coll_id,
-                field_id,
-                op_sender,
-                ..
-            } = input;
-
-            op_sender
-                .send(WriteOperation::Collection(
-                    coll_id,
-                    CollectionWriteOperation::Index(
+        match output {
+            Ok(output) => {
+                for (input, output) in inputs.into_iter().zip(output.into_iter()) {
+                    let EmbeddingCalculationRequestInput {
                         doc_id,
+                        coll_id,
                         field_id,
-                        DocumentFieldIndexOperation::IndexEmbedding { value: output },
-                    ),
-                ))
-                .await
-                .unwrap();
+                        op_sender,
+                        ..
+                    } = input;
+
+                    op_sender
+                        .send(WriteOperation::Collection(
+                            coll_id,
+                            CollectionWriteOperation::Index(
+                                doc_id,
+                                field_id,
+                                DocumentFieldIndexOperation::IndexEmbedding { value: output },
+                            ),
+                        ))
+                        .await
+                        .unwrap();
+                }
+            }
+            Err(e) => {
+                warn!("Failed to calculate embedding {:?}", e);
+            }
         }
 
-        info!("Embedding sent to the read side");
+        debug!("Embedding sent to the read side");
     }
 
     debug!("Embedding batch processed");
-
-    Ok(())
 }
 
 pub fn start_calculate_embedding_loop(
@@ -94,6 +99,8 @@ pub fn start_calculate_embedding_loop(
     assert!(limit > 0);
 
     tokio::task::spawn(async move {
+        info!("Starting embedding calculation loop...");
+
         let mut buffer = Vec::with_capacity(limit as usize);
         let mut cache: HashMap<OramaModel, Vec<EmbeddingCalculationRequestInput>> =
             Default::default();
@@ -117,9 +124,10 @@ pub fn start_calculate_embedding_loop(
                 inputs.push(input);
             }
 
-            process(ai_service.clone(), cache.drain()).await.unwrap();
+            process(ai_service.clone(), cache.drain()).await;
         }
 
         warn!("Stop embedding calculation loop");
+        panic!("Embedding calculation loop stopped");
     });
 }

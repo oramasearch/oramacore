@@ -5,11 +5,11 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Ok, Result};
 use redact::Secret;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{info, instrument};
+use tracing::info;
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
-use crate::collection_manager::sides::{OperationSender, WriteOperation};
+use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
 use crate::nlp::NLPService;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
@@ -29,15 +29,66 @@ pub struct CollectionsWriter {
 }
 
 impl CollectionsWriter {
-    pub fn new(
+    pub async fn try_load(
         config: CollectionsWriterConfig,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-    ) -> CollectionsWriter {
-        CollectionsWriter {
-            collections: Default::default(),
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+    ) -> Result<Self> {
+        let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
+
+        let data_dir = &config.data_dir;
+
+        info!("Loading collections from disk from {:?}", data_dir);
+
+        let collection_dirs =
+            list_directory_in_path(data_dir).context("Cannot read collection list from disk")?;
+
+        let collection_dirs = match collection_dirs {
+            Some(collection_dirs) => collection_dirs,
+            None => {
+                info!(
+                    "No collections found in data directory {:?}. Skipping load.",
+                    data_dir
+                );
+                return Ok(CollectionsWriter {
+                    collections: Default::default(),
+                    config,
+                    embedding_sender,
+                });
+            }
+        };
+
+        for collection_dir in collection_dirs {
+            let file_name = collection_dir
+                .file_name()
+                .expect("File name is always given at this point");
+            let file_name: String = file_name.to_string_lossy().into();
+
+            let collection_id = CollectionId(file_name);
+
+            // All those values are replaced inside `load` method
+            let mut collection = CollectionWriter::new(
+                collection_id.clone(),
+                None,
+                ApiKey(Secret::new("".to_string())),
+                LanguageDTO::English,
+                embedding_sender.clone(),
+            );
+            collection
+                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
+                .await?;
+
+            collections.insert(collection_id, collection);
+        }
+
+        let writer = CollectionsWriter {
+            collections: RwLock::new(collections),
             config,
             embedding_sender,
-        }
+        };
+
+        Ok(writer)
     }
 
     pub async fn get_collection<'s, 'coll>(
@@ -87,7 +138,7 @@ impl CollectionsWriter {
                 .map(DocumentFields::Properties)
                 .unwrap_or(DocumentFields::AllStringProperties);
             let typed_field = TypedField::Embedding(EmbeddingTypedField {
-                model,
+                model: OramaModelSerializable(model),
                 document_fields,
             });
             HashMap::from_iter([(DEFAULT_EMBEDDING_FIELD_NAME.to_string(), typed_field)])
@@ -134,7 +185,8 @@ impl CollectionsWriter {
     pub async fn commit(&self) -> Result<()> {
         let data_dir = &self.config.data_dir;
 
-        let collections = self.collections.read().await;
+        // During the commit, we don't accept any new write operation
+        let collections = self.collections.write().await;
 
         std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
 
@@ -146,61 +198,6 @@ impl CollectionsWriter {
         // Now it is safe to drop the lock
         // because we safe everything to disk
         drop(collections);
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn load(
-        &mut self,
-        hooks_runtime: Arc<HooksRuntime>,
-        nlp_service: Arc<NLPService>,
-    ) -> Result<()> {
-        // `&mut self` isn't needed here
-        // but we need to ensure that the method is not called concurrently
-        let data_dir = &self.config.data_dir;
-
-        info!("Loading collections from disk from {:?}", data_dir);
-
-        let collection_dirs =
-            list_directory_in_path(data_dir).context("Cannot read collection list from disk")?;
-
-        let collection_dirs = match collection_dirs {
-            Some(collection_dirs) => collection_dirs,
-            None => {
-                info!(
-                    "No collections found in data directory {:?}. Skipping load.",
-                    data_dir
-                );
-                return Ok(());
-            }
-        };
-
-        for collection_dir in collection_dirs {
-            let file_name = collection_dir
-                .file_name()
-                .expect("File name is always given at this point");
-            let file_name: String = file_name.to_string_lossy().into();
-
-            let collection_id = CollectionId(file_name);
-
-            // All those values are replaced inside `load` method
-            let mut collection = CollectionWriter::new(
-                collection_id.clone(),
-                None,
-                ApiKey(Secret::new("".to_string())),
-                LanguageDTO::English,
-                self.embedding_sender.clone(),
-            );
-            collection
-                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
-                .await?;
-
-            self.collections
-                .write()
-                .await
-                .insert(collection_id, collection);
-        }
 
         Ok(())
     }

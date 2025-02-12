@@ -277,7 +277,7 @@ impl CollectionWriter {
                         field_name.clone(),
                         ValueType::Complex(ComplexType::Embedding),
                         CollectionField::new_embedding(
-                            embedding_field.model,
+                            embedding_field.model.0,
                             embedding_field.document_fields.clone(),
                             embedding_sender,
                             hooks_runtime,
