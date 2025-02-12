@@ -3,7 +3,6 @@ use std::{collections::HashMap, str::FromStr};
 use redact::Secret;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
-use tracing::warn;
 
 use crate::{
     collection_manager::{
@@ -368,13 +367,12 @@ mod tests {
                     },
                 ),
             ),
-
             WriteOperation::Collection(
                 CollectionId("col".to_string()),
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
-                    DocumentFieldIndexOperation::IndexBoolean { value: false }
+                    DocumentFieldIndexOperation::IndexBoolean { value: false },
                 ),
             ),
             WriteOperation::Collection(
@@ -382,7 +380,9 @@ mod tests {
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
-                    DocumentFieldIndexOperation::IndexNumber { value: NumberWrapper(Number::I32(1)) }
+                    DocumentFieldIndexOperation::IndexNumber {
+                        value: NumberWrapper(Number::I32(1)),
+                    },
                 ),
             ),
             WriteOperation::Collection(
@@ -390,7 +390,9 @@ mod tests {
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
-                    DocumentFieldIndexOperation::IndexNumber { value: NumberWrapper(Number::F32(1.5)) }
+                    DocumentFieldIndexOperation::IndexNumber {
+                        value: NumberWrapper(Number::F32(1.5)),
+                    },
                 ),
             ),
         ];
@@ -409,13 +411,23 @@ mod tests {
             CollectionWriteOperation::Index(
                 DocumentId(1),
                 FieldId(1),
-                DocumentFieldIndexOperation::IndexNumber { value: NumberWrapper(Number::I32(1)) }
+                DocumentFieldIndexOperation::IndexNumber {
+                    value: NumberWrapper(Number::I32(1)),
+                },
             ),
         );
         let serialized = bincode::serialize(&op).unwrap();
         let a: WriteOperation = bincode::deserialize(&serialized).unwrap();
 
-        let WriteOperation::Collection(_, CollectionWriteOperation::Index(_, _, DocumentFieldIndexOperation::IndexNumber { value } )) = a else {
+        let WriteOperation::Collection(
+            _,
+            CollectionWriteOperation::Index(
+                _,
+                _,
+                DocumentFieldIndexOperation::IndexNumber { value },
+            ),
+        ) = a
+        else {
             panic!("Expected Index operation");
         };
         assert_eq!(value.0, Number::I32(1));

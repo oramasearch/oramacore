@@ -71,18 +71,20 @@ async fn main1() -> Result<()> {
 }
 
 async fn main2() -> Result<()> {
-    let output: OutputSideChannelType = OutputSideChannelType::RabbitMQ(OutputRabbitMQConfig {
-        client_options: ClientOptions::default(),
-        producer_config: RabbitMQProducerConfig {
-            stream_name: "foo".to_string(),
-        },
-    });
-    let input: InputSideChannelType = InputSideChannelType::RabbitMQ(InputRabbitMQConfig {
-        client_options: ClientOptions::default(),
-        consumer_config: RabbitMQConsumerConfig {
-            stream_name: "foo".to_string(),
-        },
-    });
+    let output: OutputSideChannelType =
+        OutputSideChannelType::RabbitMQ(Box::new(OutputRabbitMQConfig {
+            client_options: ClientOptions::default(),
+            producer_config: RabbitMQProducerConfig {
+                stream_name: "foo".to_string(),
+            },
+        }));
+    let input: InputSideChannelType =
+        InputSideChannelType::RabbitMQ(Box::new(InputRabbitMQConfig {
+            client_options: ClientOptions::default(),
+            consumer_config: RabbitMQConsumerConfig {
+                stream_name: "foo".to_string(),
+            },
+        }));
     let (producer_creator, consumer_creator) = channel_creator(Some(output), Some(input)).await?;
 
     let producer_creator = producer_creator.unwrap();

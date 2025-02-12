@@ -188,7 +188,7 @@ pub enum OperationSenderCreator {
         sender: tokio::sync::mpsc::Sender<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
-        environment: Environment,
+        environment: Box<Environment>,
         producer_config: RabbitMQProducerConfig,
         name: String,
     },
@@ -208,7 +208,7 @@ impl OperationSenderCreator {
                 producer_config,
                 name,
             } => {
-                let producer = create_producer(environment, producer_config, &name)
+                let producer = create_producer(*environment, producer_config, &name)
                     .await
                     .context("Cannot create producer")?;
 
@@ -223,7 +223,7 @@ pub enum OperationReceiverCreator {
         receiver: tokio::sync::mpsc::Receiver<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
-        environment: Environment,
+        environment: Box<Environment>,
         consumer_config: RabbitMQConsumerConfig,
         name: String,
     },
@@ -248,7 +248,7 @@ impl OperationReceiverCreator {
                     last_offset.next()
                 };
                 let consumer =
-                    create_consumer(environment, &consumer_config, &name, starting_offset)
+                    create_consumer(*environment, &consumer_config, &name, starting_offset)
                         .await
                         .context("Cannot create consumer")?;
 
@@ -306,12 +306,12 @@ pub async fn channel_creator(
                 .await?;
 
             let sender = OperationSenderCreator::RabbitMQ {
-                environment: writer_env,
+                environment: Box::new(writer_env),
                 producer_config: write_rabbit_config.producer_config,
                 name: "writer".to_string(),
             };
             let receiver = OperationReceiverCreator::RabbitMQ {
-                environment: reader_env,
+                environment: Box::new(reader_env),
                 consumer_config: read_rabbit_config.consumer_config,
                 name: "reader".to_string(),
             };
@@ -328,7 +328,7 @@ pub async fn channel_creator(
             .await?;
 
             let sender = OperationSenderCreator::RabbitMQ {
-                environment: writer_env,
+                environment: Box::new(writer_env),
                 producer_config: write_rabbit_config.producer_config,
                 name: "writer".to_string(),
             };
@@ -341,7 +341,7 @@ pub async fn channel_creator(
                 .await?;
 
             let receiver = OperationReceiverCreator::RabbitMQ {
-                environment: reader_env,
+                environment: Box::new(reader_env),
                 consumer_config: read_rabbit_config.consumer_config,
                 name: "reader".to_string(),
             };
@@ -361,7 +361,7 @@ pub enum OutputSideChannelType {
         capacity: usize,
     },
     #[serde(rename = "rabbitmq")]
-    RabbitMQ(OutputRabbitMQConfig),
+    RabbitMQ(Box<OutputRabbitMQConfig>),
 }
 
 #[derive(Deserialize, Clone)]
@@ -373,7 +373,7 @@ pub enum InputSideChannelType {
         capacity: usize,
     },
     #[serde(rename = "rabbitmq")]
-    RabbitMQ(InputRabbitMQConfig),
+    RabbitMQ(Box<InputRabbitMQConfig>),
 }
 
 fn default_in_memory_capacity() -> usize {
