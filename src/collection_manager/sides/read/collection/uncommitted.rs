@@ -214,7 +214,7 @@ impl UncommittedCollection {
                 self.number_index
                     .entry(field_id)
                     .or_insert_with(NumberField::empty)
-                    .insert(doc_id, value);
+                    .insert(doc_id, value.0);
             }
             DocumentFieldIndexOperation::IndexString {
                 field_length,

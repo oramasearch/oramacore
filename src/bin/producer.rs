@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicU32, Arc},
-    time::Duration,
-};
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -20,7 +17,7 @@ async fn main() -> Result<()> {
     let create_response = environment
         .stream_creator()
         .max_length(ByteCapacity::GB(5))
-        .create(&stream)
+        .create(stream)
         .await;
     if let Err(e) = create_response {
         if let StreamCreateError::Create { stream, status } = e {

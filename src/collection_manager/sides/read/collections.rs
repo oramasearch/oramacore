@@ -53,7 +53,7 @@ impl CollectionsReader {
                 return Ok(Self {
                     ai_service,
                     nlp_service,
-        
+
                     collections: Default::default(),
                     indexes_config,
                 });
@@ -152,7 +152,7 @@ impl CollectionsReader {
         id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<()> {
-        info!(collection_id=?id, "Creating collection {:?}", id);
+        info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
         let collection = CollectionReader::try_new(
             id.clone(),
@@ -170,7 +170,7 @@ impl CollectionsReader {
         guard.insert(id.clone(), collection);
         drop(guard);
 
-        info!(collection_id=?id, "Creating collection {:?}", id);
+        info!(collection_id=?id, "Collection created {:?}", id);
 
         Ok(())
     }

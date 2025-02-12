@@ -26,10 +26,10 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            self, ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit,
-            NumberFilter, Properties, SearchMode, SearchParams,
+            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
+            Properties, SearchMode, SearchParams,
         },
-        sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
+        sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
     file_utils::BufferedFile,
     metrics::{
@@ -616,13 +616,13 @@ impl CollectionReader {
                 trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
 
                 let typed_field = match typed_field {
-                    dto::TypedField::Embedding(model) => TypedField::Embedding(model.model.0),
-                    dto::TypedField::Text(locale) => TypedField::Text(locale),
-                    dto::TypedField::Number => TypedField::Number,
-                    dto::TypedField::Bool => TypedField::Bool,
-                    dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
-                    dto::TypedField::ArrayNumber => TypedField::ArrayNumber,
-                    dto::TypedField::ArrayBoolean => TypedField::ArrayBoolean,
+                    TypedFieldWrapper::Embedding(model) => TypedField::Embedding(model.model.0),
+                    TypedFieldWrapper::Text(locale) => TypedField::Text(locale),
+                    TypedFieldWrapper::Number => TypedField::Number,
+                    TypedFieldWrapper::Bool => TypedField::Bool,
+                    TypedFieldWrapper::ArrayText(locale) => TypedField::ArrayText(locale),
+                    TypedFieldWrapper::ArrayNumber => TypedField::ArrayNumber,
+                    TypedFieldWrapper::ArrayBoolean => TypedField::ArrayBoolean,
                 };
 
                 self.fields

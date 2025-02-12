@@ -19,7 +19,8 @@ use crate::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
             hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, OperationSender, WriteOperation,
+            CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
+            EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
         },
     },
     file_utils::BufferedFile,
@@ -153,7 +154,7 @@ impl CollectionWriter {
                 self.id.clone(),
                 CollectionWriteOperation::InsertDocument {
                     doc_id,
-                    doc: doc.into_raw()?,
+                    doc: DocumentToInsert(doc.into_raw()?),
                 },
             ))
             .await
@@ -376,7 +377,22 @@ impl CollectionWriter {
                 CollectionWriteOperation::CreateField {
                     field_id,
                     field_name,
-                    field: typed_field,
+                    field: match typed_field {
+                        TypedField::Embedding(embedding_field) => {
+                            TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
+                                model: embedding_field.model,
+                                document_fields: DocumentFieldsWrapper(
+                                    embedding_field.document_fields,
+                                ),
+                            })
+                        }
+                        TypedField::Text(locale) => TypedFieldWrapper::Text(locale),
+                        TypedField::Number => TypedFieldWrapper::Number,
+                        TypedField::Bool => TypedFieldWrapper::Bool,
+                        TypedField::ArrayText(locale) => TypedFieldWrapper::ArrayText(locale),
+                        TypedField::ArrayNumber => TypedFieldWrapper::ArrayNumber,
+                        TypedField::ArrayBoolean => TypedFieldWrapper::ArrayBoolean,
+                    },
                 },
             ))
             .await

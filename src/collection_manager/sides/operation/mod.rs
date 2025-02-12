@@ -1,98 +1,20 @@
+use std::fmt::Debug;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::{collections::HashMap, fmt::Debug};
 
 use anyhow::{Context, Result};
-use rabbitmq_stream_client::error::StreamCreateError;
-use rabbitmq_stream_client::types::{ByteCapacity, Message, OffsetSpecification, ResponseCode};
-use rabbitmq_stream_client::{ClientOptions, Consumer, Environment, NoDedup, Producer};
-use redact::Secret;
+use rabbitmq_stream_client::types::Message;
+use rabbitmq_stream_client::{Consumer, Environment, NoDedup, Producer};
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
-use tracing::error;
+use tracing::{debug, error, trace, warn};
 
-use crate::collection_manager::dto::{FieldId, Number};
 use crate::metrics::{Empty, OPERATION_GAUGE};
-use crate::types::{CollectionId, DocumentId, RawJSONDocument};
 
-use crate::collection_manager::dto::{ApiKey, TypedField};
-
-#[derive(Debug, Clone)]
-pub enum GenericWriteOperation {
-    CreateCollection,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Term(pub String);
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TermStringField {
-    pub positions: Vec<usize>,
-}
-
-pub type InsertStringTerms = HashMap<Term, TermStringField>;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DocumentFieldIndexOperation {
-    IndexString {
-        field_length: u16,
-        terms: InsertStringTerms,
-    },
-    IndexEmbedding {
-        value: Vec<f32>,
-    },
-    IndexNumber {
-        value: Number,
-    },
-    IndexBoolean {
-        value: bool,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CollectionWriteOperation {
-    InsertDocument {
-        doc_id: DocumentId,
-        doc: RawJSONDocument,
-    },
-    DeleteDocuments {
-        doc_ids: Vec<DocumentId>,
-    },
-    CreateField {
-        field_id: FieldId,
-        field_name: String,
-        field: TypedField,
-    },
-    Index(DocumentId, FieldId, DocumentFieldIndexOperation),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WriteOperation {
-    CreateCollection {
-        id: CollectionId,
-        #[serde(
-            deserialize_with = "deserialize_api_key",
-            serialize_with = "serialize_api_key"
-        )]
-        read_api_key: ApiKey,
-        // Params here... but which ones?
-        // TODO: add params
-    },
-    Collection(CollectionId, CollectionWriteOperation),
-}
-
-fn serialize_api_key<S>(x: &ApiKey, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::ser::Serializer,
-{
-    s.serialize_str(x.0.expose_secret())
-}
-fn deserialize_api_key<'de, D>(deserializer: D) -> Result<ApiKey, D::Error>
-where
-    D: serde::de::Deserializer<'de>,
-{
-    String::deserialize(deserializer).map(|s| ApiKey(Secret::from(s)))
-}
+mod rabbit;
+pub use rabbit::*;
+mod op;
+pub use op::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Offset(pub u64);
@@ -101,13 +23,16 @@ impl Offset {
     pub fn next(self) -> Offset {
         Offset(self.0 + 1)
     }
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 #[derive(Clone)]
 pub enum OperationSender {
     InMemory {
         offset_counter: Arc<AtomicU64>,
-        sender: tokio::sync::mpsc::Sender<(Offset, WriteOperation)>,
+        sender: tokio::sync::mpsc::Sender<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
         producer: Producer<NoDedup>,
@@ -127,19 +52,26 @@ impl OperationSender {
     pub async fn send(&self, operation: WriteOperation) -> Result<()> {
         OPERATION_GAUGE.create(Empty {}).increment_by(1);
 
+        trace!("Sending operation: {:?}", operation);
         match self {
             OperationSender::InMemory {
                 offset_counter,
                 sender,
             } => {
                 let offset = offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                sender.send((Offset(offset), operation)).await?;
+
+                let message_body =
+                    bincode::serialize(&operation).context("Cannot serialize operation")?;
+
+                sender.send((Offset(offset), message_body)).await?;
             }
             OperationSender::RabbitMQ { producer } => {
                 let coll_id = match &operation {
                     WriteOperation::Collection(coll_id, _) => coll_id.clone(),
                     WriteOperation::CreateCollection { id, .. } => id.clone(),
                 };
+
+                let op_type_id = operation.get_type_id();
 
                 let message_body =
                     bincode::serialize(&operation).context("Cannot serialize operation")?;
@@ -151,6 +83,7 @@ impl OperationSender {
                     .application_properties()
                     .insert("coll_id", coll_id.0)
                     .insert("v", 1)
+                    .insert("op_type_id", op_type_id)
                     .message_builder()
                     .build();
 
@@ -170,7 +103,7 @@ impl OperationSender {
 
 pub enum OperationReceiver {
     InMemory {
-        receiver: tokio::sync::mpsc::Receiver<(Offset, WriteOperation)>,
+        receiver: tokio::sync::mpsc::Receiver<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
         consumer: Consumer,
@@ -180,8 +113,28 @@ pub enum OperationReceiver {
 impl OperationReceiver {
     pub async fn recv(&mut self) -> Option<(Offset, WriteOperation)> {
         let r = match self {
-            Self::InMemory { receiver } => receiver.recv().await,
+            Self::InMemory { receiver } => {
+                let (offset, data) = match receiver.recv().await {
+                    None => {
+                        warn!("No message received");
+                        return None;
+                    }
+                    Some((offset, data)) => (offset, data),
+                };
+
+                let message_body: WriteOperation =
+                    match bincode::deserialize(&data).context("Cannot deserialize operation") {
+                        Ok(op) => op,
+                        Err(e) => {
+                            error!("Error deserializing message: {:?}", e);
+                            return None;
+                        }
+                    };
+
+                Some((offset, message_body))
+            }
             Self::RabbitMQ { consumer, .. } => {
+                trace!("Waiting for message");
                 let delivery = consumer.next().await;
 
                 match delivery {
@@ -196,7 +149,12 @@ impl OperationReceiver {
                             Some(data) => data,
                         };
 
-                        let message_body: WriteOperation = match bincode::deserialize(&data)
+                        debug!(
+                            "Received message. application_props: {:?}",
+                            message.application_properties()
+                        );
+
+                        let message_body: WriteOperation = match bincode::deserialize(data)
                             .context("Cannot deserialize operation")
                         {
                             Ok(op) => op,
@@ -212,7 +170,10 @@ impl OperationReceiver {
                         error!("Error receiving message: {:?}", e);
                         None
                     }
-                    None => None,
+                    None => {
+                        warn!("No message received");
+                        None
+                    }
                 }
             }
         };
@@ -224,11 +185,12 @@ impl OperationReceiver {
 
 pub enum OperationSenderCreator {
     InMemory {
-        sender: tokio::sync::mpsc::Sender<(Offset, WriteOperation)>,
+        sender: tokio::sync::mpsc::Sender<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
         environment: Environment,
         producer_config: RabbitMQProducerConfig,
+        name: String,
     },
 }
 impl OperationSenderCreator {
@@ -244,12 +206,13 @@ impl OperationSenderCreator {
             OperationSenderCreator::RabbitMQ {
                 environment,
                 producer_config,
+                name,
             } => {
-                let producer = create_producer(environment, producer_config)
+                let producer = create_producer(environment, producer_config, &name)
                     .await
                     .context("Cannot create producer")?;
 
-                Ok(OperationSender::RabbitMQ { producer: producer })
+                Ok(OperationSender::RabbitMQ { producer })
             }
         }
     }
@@ -257,11 +220,12 @@ impl OperationSenderCreator {
 
 pub enum OperationReceiverCreator {
     InMemory {
-        receiver: tokio::sync::mpsc::Receiver<(Offset, WriteOperation)>,
+        receiver: tokio::sync::mpsc::Receiver<(Offset, Vec<u8>)>,
     },
     RabbitMQ {
         environment: Environment,
         consumer_config: RabbitMQConsumerConfig,
+        name: String,
     },
 }
 
@@ -274,16 +238,19 @@ impl OperationReceiverCreator {
             OperationReceiverCreator::RabbitMQ {
                 environment,
                 consumer_config,
+                name,
             } => {
-                let consumer = create_consumer(
-                    environment,
-                    &consumer_config,
-                    // We save the last offset in the consumer config
-                    // So, what we want to do is to start from the next offset
-                    last_offset.next(),
-                )
-                .await
-                .context("Cannot create consumer")?;
+                // We save the last offset in the consumer config
+                // So, what we want to do is to start from the next offset
+                let starting_offset = if last_offset.is_zero() {
+                    last_offset
+                } else {
+                    last_offset.next()
+                };
+                let consumer =
+                    create_consumer(environment, &consumer_config, &name, starting_offset)
+                        .await
+                        .context("Cannot create consumer")?;
 
                 Ok(OperationReceiver::RabbitMQ { consumer })
             }
@@ -314,17 +281,15 @@ pub async fn channel_creator(
             }
 
             let (sender, receiver) = tokio::sync::mpsc::channel(write_side_capacity);
-            return Ok((
+            Ok((
                 Some(OperationSenderCreator::InMemory { sender }),
                 Some(OperationReceiverCreator::InMemory { receiver }),
-            ));
+            ))
         }
         (Some(OutputSideChannelType::InMemory { .. }), _)
-        | (_, Some(InputSideChannelType::InMemory { .. })) => {
-            return Err(anyhow::anyhow!(
-                "write_side and read_side must both be in-memory"
-            ));
-        }
+        | (_, Some(InputSideChannelType::InMemory { .. })) => Err(anyhow::anyhow!(
+            "write_side and read_side must both be in-memory"
+        )),
         (
             Some(OutputSideChannelType::RabbitMQ(write_rabbit_config)),
             Some(InputSideChannelType::RabbitMQ(read_rabbit_config)),
@@ -343,13 +308,15 @@ pub async fn channel_creator(
             let sender = OperationSenderCreator::RabbitMQ {
                 environment: writer_env,
                 producer_config: write_rabbit_config.producer_config,
+                name: "writer".to_string(),
             };
             let receiver = OperationReceiverCreator::RabbitMQ {
                 environment: reader_env,
                 consumer_config: read_rabbit_config.consumer_config,
+                name: "reader".to_string(),
             };
 
-            return Ok((Some(sender), Some(receiver)));
+            Ok((Some(sender), Some(receiver)))
         }
         (Some(OutputSideChannelType::RabbitMQ(write_rabbit_config)), None) => {
             let writer_env = create_environment(write_rabbit_config.client_options).await?;
@@ -363,8 +330,9 @@ pub async fn channel_creator(
             let sender = OperationSenderCreator::RabbitMQ {
                 environment: writer_env,
                 producer_config: write_rabbit_config.producer_config,
+                name: "writer".to_string(),
             };
-            return Ok((Some(sender), None));
+            Ok((Some(sender), None))
         }
         (None, Some(InputSideChannelType::RabbitMQ(read_rabbit_config))) => {
             let reader_env = create_environment(read_rabbit_config.client_options).await?;
@@ -375,48 +343,13 @@ pub async fn channel_creator(
             let receiver = OperationReceiverCreator::RabbitMQ {
                 environment: reader_env,
                 consumer_config: read_rabbit_config.consumer_config,
+                name: "reader".to_string(),
             };
 
-            return Ok((None, Some(receiver)));
+            Ok((None, Some(receiver)))
         }
-        (None, None) => {
-            return Err(anyhow::anyhow!("write_side or read_side must be provided"));
-        }
+        (None, None) => Err(anyhow::anyhow!("write_side or read_side must be provided")),
     }
-}
-
-async fn create_environment(client_options: ClientOptions) -> Result<Environment> {
-    let environment = Environment::from_client_option(client_options)
-        .await
-        .context("Cannot create environment")?;
-
-    Ok(environment)
-}
-
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub struct RabbitMQProducerConfig {
-    stream_name: String,
-    client_provided_name: String,
-}
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub struct RabbitMQConsumerConfig {
-    stream_name: String,
-    client_provided_name: String,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct OutputRabbitMQConfig {
-    #[serde(flatten)]
-    client_options: ClientOptions,
-    #[serde(flatten)]
-    producer_config: RabbitMQProducerConfig,
-}
-#[derive(Deserialize, Clone)]
-pub struct InputRabbitMQConfig {
-    #[serde(flatten)]
-    client_options: ClientOptions,
-    #[serde(flatten)]
-    consumer_config: RabbitMQConsumerConfig,
 }
 
 #[derive(Deserialize, Clone)]
@@ -445,50 +378,6 @@ pub enum InputSideChannelType {
 
 fn default_in_memory_capacity() -> usize {
     10_000
-}
-
-async fn create_producer(
-    environment: Environment,
-    producer_config: RabbitMQProducerConfig,
-) -> Result<Producer<NoDedup>> {
-    environment
-        .producer()
-        .client_provided_name(&producer_config.client_provided_name)
-        .build(&producer_config.stream_name)
-        .await
-        .context("Failed to create rabbit producer")
-}
-
-async fn create_consumer(
-    environment: Environment,
-    config: &RabbitMQConsumerConfig,
-    starting_offset: Offset,
-) -> Result<Consumer> {
-    environment
-        .consumer()
-        .client_provided_name(&config.client_provided_name)
-        .offset(OffsetSpecification::Offset(starting_offset.0))
-        .build(&config.stream_name)
-        .await
-        .context("Failed to create rabbit consumer")
-}
-
-async fn ensure_queue_exists(environment: &Environment, stream_name: &str) -> Result<()> {
-    let create_response = environment
-        .stream_creator()
-        // TODO: put those values in the config
-        .max_length(ByteCapacity::GB(5))
-        .create(stream_name)
-        .await;
-
-    match create_response {
-        Ok(_) => Ok(()),
-        Err(StreamCreateError::Create {
-            status: ResponseCode::StreamAlreadyExists,
-            ..
-        }) => Ok(()),
-        Err(e) => Err(e.into()),
-    }
 }
 
 #[cfg(test)]

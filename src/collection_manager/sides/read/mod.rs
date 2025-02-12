@@ -13,7 +13,7 @@ use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::file_utils::BufferedFile;
 use crate::{
@@ -54,6 +54,7 @@ pub struct ReadSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
     data_dir: PathBuf,
+    live_offset: RwLock<Offset>,
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
 }
@@ -90,8 +91,9 @@ impl ReadSide {
             Err(_) => {
                 warn!("Cannot read 'read.info' file. Starting from 0");
                 Offset(0)
-            },
+            }
         };
+        info!(offset=?last_offset, "Starting read side");
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -99,6 +101,7 @@ impl ReadSide {
             operation_counter: Default::default(),
             insert_batch_commit_size,
             data_dir,
+            live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
         };
 
@@ -122,7 +125,7 @@ impl ReadSide {
             .await
             .context("Cannot commit document storage")?;
 
-        let offset: Offset = *commit_insert_mutex_lock;
+        let offset: Offset = *(self.live_offset.read().await);
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
             .context("Cannot create read.info file")?
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
@@ -194,6 +197,17 @@ impl ReadSide {
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
         let (offset, op) = op;
+
+        let mut live_offset = self.live_offset.write().await;
+        *live_offset = offset;
+        drop(live_offset);
+
+        // Already applied. We can skip this operation.
+        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+            warn!(offset=?offset, "Operation already applied. Skipping");
+            return Ok(());
+        }
+
         match op {
             WriteOperation::CreateCollection { id, read_api_key } => {
                 COLLECTION_ADDED_COUNTER
@@ -230,7 +244,7 @@ impl ReadSide {
                 {
                     trace!(?doc_id, "Inserting document");
                     collection.increment_document_count();
-                    self.document_storage.add_document(doc_id, doc).await?;
+                    self.document_storage.add_document(doc_id, doc.0).await?;
                     trace!(?doc_id, "Document inserted");
                 } else {
                     collection.update(offset, collection_operation).await?;
@@ -327,11 +341,14 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
 
 fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: OperationReceiver) {
     tokio::task::spawn(async move {
+        info!("Starting operation receiver");
         while let Some(op) = operation_receiver.recv().await {
+            trace!(?op, "Received operation");
             if let Err(e) = read_side.update(op).await {
                 tracing::error!(?e, "Cannot update read side");
             }
         }
+        error!("Operation receiver is closed");
     });
 }
 

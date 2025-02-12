@@ -14,9 +14,7 @@ use crate::{
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
         sides::{
-            hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, Term,
-            TermStringField, WriteOperation,
+            hooks::{HookName, HooksRuntime}, CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender, Term, TermStringField, WriteOperation
         },
     },
     metrics::{
@@ -247,7 +245,7 @@ impl NumberField {
                 CollectionWriteOperation::Index(
                     doc_id,
                     self.field_id,
-                    DocumentFieldIndexOperation::IndexNumber { value },
+                    DocumentFieldIndexOperation::IndexNumber { value: NumberWrapper(value) },
                 ),
             );
             sender.send(op).await?;

@@ -10,10 +10,10 @@ log:
 
 writer_side:
     output:
+        # type: in-memory
         type: rabbitmq
-        super_stream_name: oramacore-operations
-        client_provided_name: foo
-        environment_client_provided_name: foo-env
+        stream_name: oramacore-operations
+        client_provided_name: oramacore-producer
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -27,7 +27,7 @@ writer_side:
         insert_batch_commit_size: 50000000
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
-        default_embedding_model: MultilingualE5Small
+        default_embedding_model: BGESmall
         # The maximum number of request to javascript runtime that can be stored in the queue
         # NB: the elements are in memory, so be careful with this value
         javascript_queue_limit: 500000
@@ -36,11 +36,10 @@ writer_side:
 
 reader_side:
     input:
+        # type: in-memory
         type: rabbitmq
-        super_stream_name: oramacore-operations
-        client_provided_name: foo
-        environment_client_provided_name: foo-env
-        name: oramacore-reader-1
+        stream_name: oramacore-operations
+        client_provided_name: oramacore-reader-1
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes

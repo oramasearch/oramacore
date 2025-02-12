@@ -21,7 +21,10 @@ use super::{
 use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, time::MissedTickBehavior};
+use tokio::{
+    sync::RwLock,
+    time::{Instant, MissedTickBehavior},
+};
 use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
@@ -407,7 +410,8 @@ impl WriteSide {
 
 fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
     tokio::task::spawn(async move {
-        let mut interval = tokio::time::interval(insert_batch_commit_size);
+        let start = Instant::now() + insert_batch_commit_size;
+        let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
 
         // If for some reason we miss a tick, we skip it.
         // In fact, the commit is blocked only by `update` method.

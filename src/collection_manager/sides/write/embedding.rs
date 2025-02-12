@@ -77,14 +77,13 @@ where
                         ))
                         .await
                         .unwrap();
+                    debug!("Embedding sent to the read side");
                 }
             }
             Err(e) => {
                 warn!("Failed to calculate embedding {:?}", e);
             }
         }
-
-        debug!("Embedding sent to the read side");
     }
 
     debug!("Embedding batch processed");

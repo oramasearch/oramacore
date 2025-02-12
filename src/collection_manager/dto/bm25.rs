@@ -29,6 +29,7 @@
  * ```
  */
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use tracing::error;
 
 /// BM25 scoring function
 ///
@@ -104,9 +105,25 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
             k,
             b,
         );
+
+        if score.is_nan() {
+            error!(
+                ?term_occurrence_in_field,
+                ?field_length,
+                ?average_field_length,
+                ?total_documents_with_field,
+                ?total_documents_with_term_in_field,
+                ?k,
+                ?b,
+                "score is NaN. Skipping item"
+            );
+            return;
+        }
+
         let score = score * boost;
 
         let old_score = self.scores.entry(key).or_default();
+
         // This "+" operation doesn't distinguish between the FieldId.
         // This means that if a document matches on the same field
         // or on different fields, it is the same.
