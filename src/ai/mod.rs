@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
 use tonic::{
-    metadata::{MetadataMap, MetadataValue},
+    metadata::MetadataValue,
     transport::Channel,
     Request, Response, Streaming,
 };
