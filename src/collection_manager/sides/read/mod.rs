@@ -3,8 +3,9 @@ mod collections;
 mod document_storage;
 
 use duration_str::deserialize_duration;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
@@ -341,14 +342,48 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
 
 fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: OperationReceiver) {
     tokio::task::spawn(async move {
+        use backoff::future::retry;
+        use backoff::ExponentialBackoff;
+
         info!("Starting operation receiver");
-        while let Some(op) = operation_receiver.recv().await {
-            trace!(?op, "Received operation");
-            if let Err(e) = read_side.update(op).await {
-                tracing::error!(?e, "Cannot update read side");
+        loop {
+            while let Some(op) = operation_receiver.recv().await {
+                trace!(?op, "Received operation");
+                if let Err(e) = read_side.update(op).await {
+                    tracing::error!(?e, "Cannot update read side");
+                }
             }
+            warn!("Operation receiver is closed. Reconnecting...");
+
+            let a = Arc::new(RwLock::new(operation_receiver));
+            let op = || async {
+                let aa = a.clone();
+                let mut operation_receiver = aa.write().await;
+                operation_receiver
+                    .reconnect()
+                    .await
+                    .map_err(|e| backoff::Error::Transient {
+                        err: e,
+                        retry_after: None,
+                    })?;
+                Ok::<(), backoff::Error<anyhow::Error>>(())
+            };
+
+            match retry(ExponentialBackoff::default(), op).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(?e, "Cannot reconnect to operation receiver");
+                    break;
+                }
+            };
+
+            info!("Reconnected to operation receiver");
+            let c: RwLock<OperationReceiver> =
+                Arc::into_inner(a).expect("Only one reference is built in the above code");
+            operation_receiver = c.into_inner();
         }
-        error!("Operation receiver is closed");
+
+        error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
     });
 }
 
@@ -364,9 +399,9 @@ enum ReadInfo {
 
 #[cfg(test)]
 mod tests {
-    use crate::collection_manager::sides::read::{
-        collection::CollectionReader, collections::CollectionsReader,
-    };
+    use crate::collection_manager::sides::read::collection::CollectionReader;
+
+    use super::*;
 
     #[test]
     fn test_side_read_sync_send() {

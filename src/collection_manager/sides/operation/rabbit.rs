@@ -55,7 +55,7 @@ pub async fn create_producer(
 }
 
 pub async fn create_consumer(
-    environment: Environment,
+    environment: &Environment,
     config: &RabbitMQConsumerConfig,
     name: &str,
     starting_offset: Offset,

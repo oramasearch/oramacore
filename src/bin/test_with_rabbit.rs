@@ -45,7 +45,7 @@ async fn main1() -> Result<()> {
     )
     .await?;
     let mut consumer = create_consumer(
-        consumer_env,
+        &consumer_env,
         &RabbitMQConsumerConfig {
             stream_name: "foo".to_string(),
         },

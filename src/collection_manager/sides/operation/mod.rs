@@ -107,6 +107,10 @@ pub enum OperationReceiver {
     },
     RabbitMQ {
         consumer: Consumer,
+        environment: Box<Environment>,
+        consumer_config: RabbitMQConsumerConfig,
+        name: String,
+        last_offset: Offset,
     },
 }
 
@@ -133,7 +137,11 @@ impl OperationReceiver {
 
                 Some((offset, message_body))
             }
-            Self::RabbitMQ { consumer, .. } => {
+            Self::RabbitMQ {
+                consumer,
+                last_offset,
+                ..
+            } => {
                 trace!("Waiting for message");
                 let delivery = consumer.next().await;
 
@@ -141,6 +149,10 @@ impl OperationReceiver {
                     Some(Ok(delivery)) => {
                         let message = delivery.message();
                         let offset = Offset(delivery.offset());
+
+                        // Save last offset in case of reconnect
+                        *last_offset = offset;
+
                         let data = match message.data() {
                             None => {
                                 error!("No data in message");
@@ -180,6 +192,29 @@ impl OperationReceiver {
 
         OPERATION_GAUGE.create(Empty {}).decrement_by(1);
         r
+    }
+
+    pub async fn reconnect(&mut self) -> Result<()> {
+        match self {
+            Self::InMemory { .. } => Ok(()),
+            Self::RabbitMQ {
+                environment,
+                last_offset,
+                consumer_config,
+                name,
+                consumer,
+            } => {
+                *consumer = create_consumer(
+                    &*environment,
+                    consumer_config,
+                    name,
+                    Offset(last_offset.0 + 1),
+                )
+                .await
+                .context("Cannot reconnect")?;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -248,11 +283,17 @@ impl OperationReceiverCreator {
                     last_offset.next()
                 };
                 let consumer =
-                    create_consumer(*environment, &consumer_config, &name, starting_offset)
+                    create_consumer(&environment, &consumer_config, &name, starting_offset)
                         .await
                         .context("Cannot create consumer")?;
 
-                Ok(OperationReceiver::RabbitMQ { consumer })
+                Ok(OperationReceiver::RabbitMQ {
+                    consumer,
+                    environment,
+                    consumer_config,
+                    name,
+                    last_offset,
+                })
             }
         }
     }
