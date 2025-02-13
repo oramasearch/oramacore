@@ -6,11 +6,7 @@ use mobc::{async_trait, Manager, Pool};
 use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
-use tonic::{
-    metadata::MetadataValue,
-    transport::Channel,
-    Request, Response, Streaming,
-};
+use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Streaming};
 use tracing::{info, trace};
 
 use crate::collection_manager::dto::{ApiKey, InteractionMessage};
