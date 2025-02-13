@@ -8,17 +8,16 @@ use oramacore::{
     collection_manager::{
         dto::ApiKey,
         sides::{
-            channel_creator, create_consumer, create_environment, create_producer,
-            InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
-            OutputSideChannelType, RabbitMQConsumerConfig, RabbitMQProducerConfig, WriteOperation,
+            channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset,
+            OutputRabbitMQConfig, OutputSideChannelType, RabbitMQConsumerConfig,
+            RabbitMQProducerConfig, WriteOperation,
         },
     },
     types::CollectionId,
 };
-use rabbitmq_stream_client::{types::Message, ClientOptions};
+use rabbitmq_stream_client::ClientOptions;
 use redact::Secret;
 use tokio::time::sleep;
-use tokio_stream::StreamExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
 #[tokio::main]
@@ -32,59 +31,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn main1() -> Result<()> {
-    let producer_env = create_environment(ClientOptions::default()).await?;
-    let consumer_env = create_environment(ClientOptions::default()).await?;
-
-    let producer = create_producer(
-        producer_env,
-        RabbitMQProducerConfig {
-            stream_name: "foo".to_string(),
-        },
-        "writer",
-    )
-    .await?;
-    let mut consumer = create_consumer(
-        &consumer_env,
-        &RabbitMQConsumerConfig {
-            stream_name: "foo".to_string(),
-        },
-        "reader",
-        Offset(0),
-    )
-    .await?;
-
-    println!("Sending message");
-
-    let msg = Message::builder()
-        .body(format!("stream message_{}", 0))
-        .build();
-    producer.send(msg, |_| async {}).await?;
-
-    println!("Receiving message");
-    let a = consumer.next().await;
-    println!("{:?}", a);
-
-    println!("Done");
-
-    Ok(())
-}
-
 async fn main2() -> Result<()> {
-    let output: OutputSideChannelType =
-        OutputSideChannelType::RabbitMQ(Box::new(OutputRabbitMQConfig {
-            client_options: ClientOptions::default(),
-            producer_config: RabbitMQProducerConfig {
-                stream_name: "foo".to_string(),
-            },
-        }));
-    let input: InputSideChannelType =
-        InputSideChannelType::RabbitMQ(Box::new(InputRabbitMQConfig {
-            client_options: ClientOptions::default(),
-            consumer_config: RabbitMQConsumerConfig {
-                stream_name: "foo".to_string(),
-            },
-        }));
+    let output: OutputSideChannelType = OutputSideChannelType::RabbitMQ(OutputRabbitMQConfig {
+        client_options: ClientOptions::default(),
+        producer_config: RabbitMQProducerConfig {
+            stream_name: "foo".to_string(),
+            producer_name: "producer".to_string(),
+        },
+    });
+    let input: InputSideChannelType = InputSideChannelType::RabbitMQ(InputRabbitMQConfig {
+        client_options: ClientOptions::default(),
+        consumer_config: RabbitMQConsumerConfig {
+            stream_name: "foo".to_string(),
+            consumer_name: "consumer".to_string(),
+        },
+    });
     let (producer_creator, consumer_creator) = channel_creator(Some(output), Some(input)).await?;
 
     let producer_creator = producer_creator.unwrap();

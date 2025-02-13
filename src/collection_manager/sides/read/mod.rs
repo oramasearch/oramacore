@@ -348,6 +348,15 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
         info!("Starting operation receiver");
         loop {
             while let Some(op) = operation_receiver.recv().await {
+                let op = match op {
+                    Ok(op) => op,
+                    Err(e) => {
+                        // If there's a deserialization error, should we skip it or something different?
+                        // TODO: think about it
+                        error!(?e, "Cannot receive operation");
+                        continue;
+                    }
+                };
                 trace!(?op, "Received operation");
                 if let Err(e) = read_side.update(op).await {
                     tracing::error!(?e, "Cannot update read side");
@@ -396,7 +405,6 @@ enum ReadInfo {
 
 #[cfg(test)]
 mod tests {
-
     use crate::collection_manager::sides::read::collection::CollectionReader;
 
     use super::*;
