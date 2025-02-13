@@ -29,7 +29,6 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
         self.embeddings_service = embeddings_service
         self.models_manager = models_manager
         self.party_planner_actions = PartyPlannerActions()
-        self.party_planner = PartyPlanner(config, self.models_manager)
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -55,7 +54,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -75,7 +77,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             model_name = LLMType.Name(request.model)
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
@@ -83,7 +88,10 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             )
 
             for text_chunk in self.models_manager.chat_stream(
-                model_id=model_name.lower(), history=history, prompt=request.prompt, context=request.context
+                model_id=model_name.lower(),
+                history=history,
+                prompt=request.prompt,
+                context=request.context,
             ):
                 yield ChatStreamResponse(text_chunk=text_chunk, is_final=False)
             yield ChatStreamResponse(text_chunk="", is_final=True)
@@ -94,20 +102,27 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
 
     def PlannedAnswer(self, request, context):
         metadata = dict(context.invocation_metadata())
-        api_key = metadata.get("x-api-key")
+        api_key = metadata.get("x-api-key") or ""
 
         try:
             history = (
                 [
-                    {"role": ProtoRole.Name(message.role).lower(), "content": message.content}
+                    {
+                        "role": ProtoRole.Name(message.role).lower(),
+                        "content": message.content,
+                    }
                     for message in request.conversation.messages
                 ]
                 if request.conversation.messages
                 else []
             )
 
-            for message in self.party_planner.run(
-                collection_id=request.collection_id, input=request.input, history=history, api_key=api_key
+            party_planner = PartyPlanner(self.config, self.models_manager, history)
+
+            for message in party_planner.run(
+                collection_id=request.collection_id,
+                input=request.input,
+                api_key=api_key,
             ):
                 yield PlannedAnswerResponse(data=message, finished=False)
 

@@ -1,5 +1,6 @@
 import json
 from textwrap import dedent
+from typing import Any, Dict
 
 RETURN_TYPE_TEXT = "TEXT"
 RETURN_TYPE_JSON = "JSON"
@@ -18,7 +19,7 @@ COMMON_USER_PROMPT = lambda input, description: dedent(
 )
 
 
-def decode_action_result(action: str, result: object):
+def decode_action_result(action: str, result) -> str:
     as_json = json.loads(result)
 
     if action == "OPTIMIZE_QUERY":
@@ -74,7 +75,11 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "returns": RETURN_TYPE_JSON,
         "stream": False,
     },
-    "PERFORM_ORAMA_SEARCH": {"side": EXECUTION_SIDE_ORAMACORE, "returns": RETURN_TYPE_JSON, "stream": False},
+    "PERFORM_ORAMA_SEARCH": {
+        "side": EXECUTION_SIDE_ORAMACORE,
+        "returns": RETURN_TYPE_JSON,
+        "stream": False,
+    },
     "DESCRIBE_INPUT_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
         "prompt:system": dedent(
@@ -132,7 +137,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         ),
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
-        "stream": False,
+        "stream": True,
     },
     "ASK_FOLLOWUP": {
         "side": EXECUTION_SIDE_PYTHON,

@@ -1,4 +1,5 @@
 import yaml
+import json
 from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
@@ -17,11 +18,15 @@ DEFAULT_ACTION_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 class EmbeddingsConfig:
     default_model_group: Optional[str] = "en"
     dynamically_load_models: Optional[bool] = False
-    execution_providers: Optional[List[str]] = field(default_factory=lambda: ["CUDAExecutionProvider"])
+    execution_providers: List[str] = field(default_factory=lambda: ["CUDAExecutionProvider"])
     total_threads: Optional[int] = 8
 
     def __post_init__(self):
-        available_providers = ["CUDAExecutionProvider", "AzureExecutionProvider", "CPUExecutionProvider"]
+        available_providers = [
+            "CUDAExecutionProvider",
+            "AzureExecutionProvider",
+            "CPUExecutionProvider",
+        ]
         self.execution_providers = [
             provider for provider in self.execution_providers if provider in available_providers
         ]
@@ -51,7 +56,7 @@ class ModelConfig:
 
 
 @dataclass
-class LLMs:
+class LLMConfig:
     answer: Optional[ModelConfig] = field(
         default_factory=lambda: ModelConfig(
             id=DEFAULT_ANSWER_MODEL,
@@ -102,7 +107,7 @@ class OramaAIConfig:
     port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
-    LLMs: Optional[LLMs] = field(default_factory=LLMs)  # type: ignore
+    LLMs: LLMConfig = field(default_factory=LLMConfig)
     total_threads: Optional[int] = 12
 
     rust_server_host: Optional[str] = "0.0.0.0"
@@ -132,6 +137,33 @@ class OramaAIConfig:
                             if model_config:
                                 sampling_params = SamplingParams(**model_config.pop("sampling_params", {}))
                                 llm_configs[model_key] = ModelConfig(**model_config, sampling_params=sampling_params)
-                        self.LLMs = LLMs(**llm_configs)
+                        self.LLMs = LLMConfig(**llm_configs)
                     else:
                         setattr(self, k, v)
+
+
+def json_to_md(data, level=0) -> str:
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    indent = "  " * level
+    md = ""
+
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        data = data[0]
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            md += f"{indent}- **{key}**: "
+            if isinstance(value, (dict, list)):
+                md += "\n" + json_to_md(value, level + 1)
+            else:
+                md += f"`{value}`\n"
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                md += json_to_md(item, level)
+            else:
+                md += f"{indent}- `{item}`\n"
+
+    return md

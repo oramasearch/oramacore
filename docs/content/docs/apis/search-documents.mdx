@@ -2,28 +2,35 @@
 title: "Search Documents"
 description: "APIs to search documents in a Collection in OramaCore."
 ---
-import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
-
-<Callout type='warn'>
-At the time of writing, the OramaCore APIs are in beta. We can guarantee that the APIs **will change** in a way that breaks existing applications.
-
-We will make these APIs stable in the v1.0.0 release, planned for February 28th, 2025.
-</Callout>
 
 ## APIs
 
 <Callout>
-API Key type: **`read_api_key`**.
+API Key type: **`read_api_key`**. Safe to expose to the public.
 </Callout>
 
 To search for documents in a collection, you can use the following API:
 
-<Tabs groupId='search' persist items={['cURL']}>
+<Tabs groupId='search' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
   -H 'Content-Type: application/json' \
   -d '{ "term": "The quick brown fox" }'
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>',
+  readAPIKey: '<read_api_key>',
+})
+
+const results = await collection.search({
+  term: 'The quick brown fox'
+})
 ```
 </Tabs>
 
@@ -63,7 +70,8 @@ To filter numbers, you can use the following operators:
 
 So a full query complete with a `where` filter might look like this:
 
-```json
+<Tabs groupId='filters' persist items={['JSON', 'JavaScript']}>
+```json tab='JSON'
 {
   "term": "John Doe",
   "where": {
@@ -73,6 +81,18 @@ So a full query complete with a `where` filter might look like this:
   }
 }
 ```
+
+```js tab='JavaScript'
+const results = await collection.search({
+  term: 'John Doe',
+  where: {
+    age: {
+      gte: 25
+    }
+  }
+})
+```
+</Tabs>
 
 #### Filtering Booleans
 
@@ -85,7 +105,8 @@ To filter booleans, you can use the following operators:
 
 So a full query complete with a `where` filter might look like this:
 
-```json
+<Tabs groupId='filters' persist items={['JSON', 'JavaScript']}>
+```json tab='JSON'
 {
   "term": "John Doe",
   "where": {
@@ -93,6 +114,16 @@ So a full query complete with a `where` filter might look like this:
   }
 }
 ```
+
+```js tab='JavaScript'
+const results = await collection.search({
+  term: 'John Doe',
+  where: {
+    is_active: true
+  }
+})
+```
+</Tabs>
 
 ### Facets
 
@@ -102,7 +133,8 @@ OramaCore supports faceted search. You can use the `facets` parameter to get a l
 
 The `facets` parameter can be used to get numeric facets. For example, to get a histogram of the `price` property, you can use the following query:
 
-```json
+<Tabs groupId='filters' persist items={['JSON', 'JavaScript']}>
+```json tab='JSON'
 {
   "term": "Bluetooth Airbuds",
   "facets": {
@@ -120,11 +152,32 @@ The `facets` parameter can be used to get numeric facets. For example, to get a 
 }
 ```
 
+```js tab='JavaScript'
+const results = await collection.search({
+  term: 'Bluetooth Airbuds',
+  facets: {
+    price: {
+      ranges: [
+        { from: 0, to: 50 },
+        { from: 50, to: 100 },
+        { from: 100, to: 200 },
+        { from: 200, to: 500 },
+        { from: 500, to: 1000 },
+        { from: 1000 }
+      ]
+    }
+  }
+})
+```
+</Tabs>
+
+
 ### Boolean Facets
 
 The `facets` parameter can also be used to get boolean facets. For example, to get a list of `available` values, you can use the following query:
 
-```json
+<Tabs groupId='filters' persist items={['JSON', 'JavaScript']}>
+```json tab='JSON'
 {
   "term": "Bluetooth Airbuds",
   "facets": {
@@ -135,3 +188,16 @@ The `facets` parameter can also be used to get boolean facets. For example, to g
   }
 }
 ```
+
+```js tab='JavaScript'
+const results = await collection.search({
+  term: 'Bluetooth Airbuds',
+  facets: {
+    available: {
+      true: true,
+      false: false
+    }
+  }
+})
+```
+</Tabs>

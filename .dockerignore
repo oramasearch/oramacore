@@ -19,3 +19,11 @@ otel
 ./src/ai_server/.env
 .python-version
 ./src/ai_server/**/__pycache__
+**/.dataset
+**/.data
+**/.custom_models
+**/.fastembed_cache
+**/__pycache__
+**/target
+**/.venv
+**/.embeddings_models

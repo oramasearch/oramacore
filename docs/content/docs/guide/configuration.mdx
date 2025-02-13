@@ -1,12 +1,13 @@
 ---
 title: Configuration
 description: Learn how to configure OramaCore
-icon: Cog
 ---
 
+<Callout type='warn'>
 OramaCore is currently under active development. Our goal is to release the first Beta version (**v0.1.0**) on **Jan 31st, 2025**, and the first stable version (**v1.0.0**) on **Feb 28th, 2025**.
 
 While the system is already quite stable, please note that APIs will undergo changes in **v0.1.0** and **v1.0.0**.
+</Callout>
 
 ## Configuring OramaCore
 
@@ -79,12 +80,12 @@ The `http` section configures the HTTP server that serves the OramaCore API. Her
 The `writer_side` section configures the writer side of OramaCore. Here are the available options:
 
 - `output`: The output where the writer side will store the data. By default, it's set to `in-memory`.
-- `master_api_key`: The master API key used to authenticate the requests to the writer side. By default, it's set to an empty string. See more about the available API keys in the [API Keys](/docs/api-key) section.
+- `master_api_key`: The master API key used to authenticate the requests to the writer side. By default, it's set to an empty string. See more about the available API keys in the [API Keys](/docs/guide/api-key) section.
 - `config`: The configuration options for the writer side. Here are the available options:
   - `data_dir`: The directory where the writer side will persist the data on disk. By default, it's set to `./.data/writer`.
   - `embedding_queue_limit`: The maximum number of embeddings that can be stored in the queue before the writer starts to be blocked. By default, it's set to `50000`.
   - `insert_batch_commit_size`: The number of document insertions after which the write side will commit the changes. By default, it's set to `5000`.
-  - `default_embedding_model`: The default embedding model used to calculate the embeddings if not specified in the collection creation. By default, it's set to `MultilingualE5Small`. See more about the available models in the [Embedding Models](/docs/getting-started/text-embeddings) section.
+  - `default_embedding_model`: The default embedding model used to calculate the embeddings if not specified in the collection creation. By default, it's set to `MultilingualE5Small`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
 
 ## `reader_side`
 
@@ -108,7 +109,7 @@ The `ai_server` section configures the Python gRPC server that is responsible fo
 
 The `embeddings` section configures the embeddings calculation. Here are the available options:
 
-- `default_model_group`: The default model group used to calculate the embeddings if not specified in the collection creation. By default, it's set to `multilingual`. See more about the available models in the [Embedding Models](/docs/getting-started/text-embeddings) section.
+- `default_model_group`: The default model group used to calculate the embeddings if not specified in the collection creation. By default, it's set to `multilingual`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
 - `dynamically_load_models`: Whether to dynamically load the models. By default, it's set to `false`.
 - `execution_providers`: The execution providers used to calculate the embeddings. By default, it's set to `CUDAExecutionProvider` and `CPUExecutionProvider`.
 - `total_threads`: The total number of threads used to calculate the embeddings. By default, it's set to `8`.
