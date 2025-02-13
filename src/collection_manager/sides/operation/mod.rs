@@ -45,6 +45,9 @@ impl OperationSender {
             OperationSender::InMemory { offset_counter, .. } => {
                 Offset(offset_counter.load(std::sync::atomic::Ordering::SeqCst))
             }
+            // This method is invoked only when the write side is committing.
+            // In RabbitMQ case, we don't care to store that offset,
+            // because RabbitMQ server keeps track of it.
             OperationSender::RabbitMQ { .. } => Offset(0),
         }
     }
@@ -93,7 +96,8 @@ impl OperationSender {
                             error!("Message send error {:?}", e);
                         }
                     })
-                    .await?;
+                    .await
+                    .context("Cannot send message")?;
             }
         }
 

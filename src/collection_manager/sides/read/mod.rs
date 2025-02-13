@@ -355,10 +355,10 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
             }
             warn!("Operation receiver is closed. Reconnecting...");
 
-            let a = Arc::new(RwLock::new(operation_receiver));
+            let arc = Arc::new(RwLock::new(&mut operation_receiver));
             let op = || async {
-                let aa = a.clone();
-                let mut operation_receiver = aa.write().await;
+                let arc = arc.clone();
+                let mut operation_receiver = arc.write().await;
                 operation_receiver
                     .reconnect()
                     .await
@@ -378,9 +378,6 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
             };
 
             info!("Reconnected to operation receiver");
-            let c: RwLock<OperationReceiver> =
-                Arc::into_inner(a).expect("Only one reference is built in the above code");
-            operation_receiver = c.into_inner();
         }
 
         error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
@@ -399,6 +396,7 @@ enum ReadInfo {
 
 #[cfg(test)]
 mod tests {
+
     use crate::collection_manager::sides::read::collection::CollectionReader;
 
     use super::*;
