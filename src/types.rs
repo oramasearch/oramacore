@@ -40,6 +40,25 @@ impl Serialize for RawJSONDocument {
         self.inner.serialize(serializer)
     }
 }
+impl<'de> Deserialize<'de> for RawJSONDocument {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WithId {
+            id: String,
+        }
+
+        Box::<serde_json::value::RawValue>::deserialize(deserializer).map(|inner| {
+            let parsed = serde_json::from_str::<WithId>(inner.get()).unwrap();
+            RawJSONDocument {
+                inner,
+                id: Some(parsed.id),
+            }
+        })
+    }
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CollectionId(pub String);

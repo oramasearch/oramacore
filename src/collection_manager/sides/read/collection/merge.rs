@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use tracing::debug;
 
 use crate::collection_manager::dto::SerializableNumber;
 use crate::file_utils::create_if_not_exists;
@@ -125,6 +126,12 @@ pub fn merge_string_field(
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
 ) -> Result<committed_fields::StringField> {
+    debug!(
+        "Merging string field. with_uncommitted {}. with_committed {}",
+        uncommitted.is_some(),
+        committed.is_some()
+    );
+
     let new_committed_field = match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");

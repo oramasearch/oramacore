@@ -13,6 +13,7 @@ use tempdir::TempDir;
 use tokio::time::sleep;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Response, Status};
+use tracing::info;
 
 pub fn generate_new_path() -> PathBuf {
     let tmp_dir = TempDir::new("test").expect("Cannot create temp dir");
@@ -100,6 +101,7 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         .with_cache_dir(std::env::temp_dir())
         .with_show_download_progress(false);
 
+    info!("Initializing the Fastembed: {model}");
     let text_embedding = TextEmbedding::try_new(init_option)
         .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
 
@@ -107,16 +109,18 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         fastembed_model: text_embedding,
     };
 
+    info!("Checking which port is available on system");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let add = listener.local_addr().unwrap();
     drop(listener);
+    info!("Starting the server on: {}", add);
 
     tokio::spawn(async move {
         Server::builder()
             .add_service(grpc_def::llm_service_server::LlmServiceServer::new(server))
             .serve(add)
             .await
-            .unwrap();
+            .expect("Nooope");
     });
 
     // Waiting for the server to start

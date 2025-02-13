@@ -1,3 +1,5 @@
+#![cfg(all(feature = "reader", feature = "writer"))]
+
 use anyhow::Result;
 use futures::future::Either;
 use futures::{future, pin_mut};
@@ -58,7 +60,7 @@ async fn wait_for_server() {
 async fn start_server() {
     let address = create_grpc_server().await.unwrap();
 
-    let (collections_writer, collections_reader, mut receiver) = build_orama(OramacoreConfig {
+    let (collections_writer, collections_reader) = build_orama(OramacoreConfig {
         log: Default::default(),
         http: HttpConfig {
             host: "127.0.0.1".parse().unwrap(),
@@ -75,7 +77,9 @@ async fn start_server() {
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
-            output: oramacore::SideChannelType::InMemory,
+            output: oramacore::collection_manager::sides::OutputSideChannelType::InMemory {
+                capacity: 100,
+            },
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -86,7 +90,9 @@ async fn start_server() {
             },
         },
         reader_side: ReadSideConfig {
-            input: oramacore::SideChannelType::InMemory,
+            input: oramacore::collection_manager::sides::InputSideChannelType::InMemory {
+                capacity: 100,
+            },
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 10,
@@ -97,18 +103,7 @@ async fn start_server() {
     .await
     .unwrap();
 
-    let web_server = WebServer::new(collections_writer, collections_reader.clone(), None);
-
-    let collections_reader = collections_reader.unwrap();
-    tokio::spawn(async move {
-        while let Some(op) = receiver.recv().await {
-            let r = collections_reader.update(op).await;
-            if let Err(e) = r {
-                println!("--------");
-                eprintln!("Error: {:?}", e);
-            }
-        }
-    });
+    let web_server = WebServer::new(collections_writer, collections_reader, None);
 
     let http_config = HttpConfig {
         host: HOST.parse().unwrap(),

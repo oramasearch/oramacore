@@ -9,6 +9,7 @@ use http::uri::Scheme;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
+use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
@@ -16,14 +17,14 @@ use crate::{
     collection_manager::{
         dto::ApiKey,
         sides::{
-            CollectionsWriterConfig, IndexesConfig, OramaModelSerializable, ReadSide, WriteSide,
+            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
+            OutputSideChannelType, ReadSide, WriteSide,
         },
     },
-    connect_write_and_read_side,
     test_utils::{create_grpc_server, generate_new_path},
     types::{CollectionId, DocumentList},
     web_server::HttpConfig,
-    OramacoreConfig, ReadSideConfig, SideChannelType, WriteSideConfig,
+    OramacoreConfig, ReadSideConfig, WriteSideConfig,
 };
 
 fn create_oramacore_config() -> OramacoreConfig {
@@ -44,7 +45,7 @@ fn create_oramacore_config() -> OramacoreConfig {
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
-            output: SideChannelType::InMemory,
+            output: OutputSideChannelType::InMemory { capacity: 100 },
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -57,7 +58,7 @@ fn create_oramacore_config() -> OramacoreConfig {
             },
         },
         reader_side: ReadSideConfig {
-            input: SideChannelType::InMemory,
+            input: InputSideChannelType::InMemory { capacity: 100 },
             config: IndexesConfig {
                 data_dir: generate_new_path(),
                 // Lot of tests commit to test it.
@@ -74,12 +75,10 @@ async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<Read
         let address = create_grpc_server().await?;
         config.ai_server.host = address.ip();
         config.ai_server.port = address.port();
-        println!("AI server started on {}", address);
+        info!("AI server started on {}", address);
     }
 
-    let (write_side, read_side, rec) = build_orama(config).await?;
-
-    connect_write_and_read_side(rec, read_side.clone().unwrap());
+    let (write_side, read_side) = build_orama(config).await?;
 
     let write_side = write_side.unwrap();
     let read_side = read_side.unwrap();
@@ -89,6 +88,7 @@ async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<Read
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_simple_text_search() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -326,6 +326,7 @@ async fn test_commit_and_load() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_collection_id_already_exists() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let (write_side, _) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -468,6 +469,7 @@ async fn test_search_documents_limit() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_filter_number() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -825,6 +827,7 @@ async fn test_facets_bool() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_facets_should_based_on_term() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -1754,6 +1757,55 @@ async fn test_document_duplication() -> Result<()> {
         )
         .await?;
     assert_eq!(result.count, 0);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_simple() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "bar",
+        })],
+    )
+    .await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "bar",
+            })
+            .try_into()?,
+        )
+        .await?;
+    let before = output.hits[0].document.as_ref().unwrap().inner.get();
+
+    read_side.commit().await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id,
+            json!({
+                "term": "bar",
+            })
+            .try_into()?,
+        )
+        .await?;
+    let after = output.hits[0].document.as_ref().unwrap().inner.get();
+
+    assert_eq!(before, after);
 
     Ok(())
 }

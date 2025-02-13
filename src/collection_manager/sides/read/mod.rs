@@ -3,18 +3,20 @@ mod collections;
 mod document_storage;
 
 use duration_str::deserialize_duration;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
-use tokio::time::MissedTickBehavior;
+use std::{collections::HashMap, path::PathBuf};
+use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
-use serde::Deserialize;
-use tokio::sync::RwLock;
-use tracing::{info, trace};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{error, info, trace, warn};
 
+use crate::file_utils::BufferedFile;
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
@@ -25,14 +27,16 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId},
-    SideChannelType,
 };
 
-use super::{CollectionWriteOperation, Offset, WriteOperation};
+use super::{
+    CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
+    OperationReceiverCreator, WriteOperation,
+};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
-    pub input: SideChannelType,
+    pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
 
@@ -50,76 +54,85 @@ pub struct ReadSide {
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
-    commit_interval: Duration,
+    data_dir: PathBuf,
+    live_offset: RwLock<Offset>,
+    // This offset will update everytime a change is made to the read side.
+    commit_insert_mutex: Mutex<Offset>,
 }
 
 impl ReadSide {
-    pub fn try_new(
+    pub async fn try_load(
+        operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         config: ReadSideConfig,
-    ) -> Result<Self> {
-        let document_storage = DocumentStorage::try_new(DocumentStorageConfig {
+    ) -> Result<Arc<Self>> {
+        let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
         })
         .context("Cannot create document storage")?;
 
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
         let commit_interval = config.config.commit_interval;
+        let data_dir = config.config.data_dir.clone();
 
-        Ok(Self {
-            collections: CollectionsReader::try_new(ai_service, nlp_service, config.config)?,
-            document_storage,
-            operation_counter: Default::default(),
-            insert_batch_commit_size,
-            commit_interval,
-        })
-    }
-
-    pub async fn load(mut self) -> Result<Arc<Self>> {
-        self.collections.load().await?;
-
-        self.document_storage
+        let collections_reader =
+            CollectionsReader::try_load(ai_service, nlp_service, config.config)
+                .await
+                .context("Cannot load collections")?;
+        document_storage
             .load()
             .context("Cannot load document storage")?;
 
-        let s = Arc::new(self);
-
-        s.clone().start_commit_loop(s.commit_interval);
-
-        Ok(s)
-    }
-
-    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
-        tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size);
-
-            // If for some reason we miss a tick, we skip it.
-            // In fact, the commit is blocked only by `update` method.
-            // If the collection is under heavy load,
-            // the commit will be run due to the `insert_batch_commit_size` config.
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                info!(
-                    "{:?} time reached. Committing write side",
-                    insert_batch_commit_size.clone()
-                );
-                if let Err(e) = self.commit().await {
-                    tracing::error!(?e, "Cannot commit read side");
-                }
+        let read_info: Result<ReadInfo> = BufferedFile::open(data_dir.join("read.info"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot read offset file");
+        let last_offset = match read_info {
+            Ok(ReadInfo::V1(info)) => info.offset,
+            Err(_) => {
+                warn!("Cannot read 'read.info' file. Starting from 0");
+                Offset(0)
             }
-        });
+        };
+        info!(offset=?last_offset, "Starting read side");
+
+        let read_side = ReadSide {
+            collections: collections_reader,
+            document_storage,
+            operation_counter: Default::default(),
+            insert_batch_commit_size,
+            data_dir,
+            live_offset: RwLock::new(last_offset),
+            commit_insert_mutex: Mutex::new(last_offset),
+        };
+
+        let operation_receiver = operation_receiver_creator.create(last_offset).await?;
+
+        let read_side = Arc::new(read_side);
+
+        start_commit_loop(read_side.clone(), commit_interval);
+        start_receive_operations(read_side.clone(), operation_receiver);
+
+        Ok(read_side)
     }
 
     pub async fn commit(&self) -> Result<()> {
-        self.collections.commit().await?;
+        // We stop insertion operations while we are committing
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
+        self.collections.commit().await?;
         self.document_storage
             .commit()
             .await
             .context("Cannot commit document storage")?;
+
+        let offset: Offset = *(self.live_offset.read().await);
+        BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
+            .context("Cannot create read.info file")?
+            .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
+            .context("Cannot write read.info file")?;
+
+        drop(commit_insert_mutex_lock);
 
         Ok(())
     }
@@ -181,7 +194,21 @@ impl ReadSide {
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?op.0, "Updating read side");
 
+        // We stop commit operations while we are updating
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
         let (offset, op) = op;
+
+        let mut live_offset = self.live_offset.write().await;
+        *live_offset = offset;
+        drop(live_offset);
+
+        // Already applied. We can skip this operation.
+        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+            warn!(offset=?offset, "Operation already applied. Skipping");
+            return Ok(());
+        }
+
         match op {
             WriteOperation::CreateCollection { id, read_api_key } => {
                 COLLECTION_ADDED_COUNTER
@@ -218,7 +245,7 @@ impl ReadSide {
                 {
                     trace!(?doc_id, "Inserting document");
                     collection.increment_document_count();
-                    self.document_storage.add_document(doc_id, doc).await?;
+                    self.document_storage.add_document(doc_id, doc.0).await?;
                     trace!(?doc_id, "Document inserted");
                 } else {
                     collection.update(offset, collection_operation).await?;
@@ -235,6 +262,8 @@ impl ReadSide {
             false
         };
         drop(lock);
+
+        drop(commit_insert_mutex_lock);
 
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
@@ -287,11 +316,98 @@ fn default_insert_batch_commit_size() -> u64 {
     300
 }
 
+fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duration) {
+    tokio::task::spawn(async move {
+        let start = Instant::now() + insert_batch_commit_size;
+        let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
+
+        // If for some reason we miss a tick, we skip it.
+        // In fact, the commit is blocked only by `update` method.
+        // If the collection is under heavy load,
+        // the commit will be run due to the `insert_batch_commit_size` config.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            info!(
+                "{:?} time reached. Committing read side",
+                insert_batch_commit_size.clone()
+            );
+            if let Err(e) = read_side.commit().await {
+                tracing::error!(?e, "Cannot commit read side");
+            }
+        }
+    });
+}
+
+fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: OperationReceiver) {
+    tokio::task::spawn(async move {
+        use backoff::future::retry;
+        use backoff::ExponentialBackoff;
+
+        info!("Starting operation receiver");
+        loop {
+            while let Some(op) = operation_receiver.recv().await {
+                let op = match op {
+                    Ok(op) => op,
+                    Err(e) => {
+                        // If there's a deserialization error, should we skip it or something different?
+                        // TODO: think about it
+                        error!(?e, "Cannot receive operation");
+                        continue;
+                    }
+                };
+                trace!(?op, "Received operation");
+                if let Err(e) = read_side.update(op).await {
+                    tracing::error!(?e, "Cannot update read side");
+                }
+            }
+            warn!("Operation receiver is closed. Reconnecting...");
+
+            let arc = Arc::new(RwLock::new(&mut operation_receiver));
+            let op = || async {
+                let arc = arc.clone();
+                let mut operation_receiver = arc.write().await;
+                operation_receiver
+                    .reconnect()
+                    .await
+                    .map_err(|e| backoff::Error::Transient {
+                        err: e,
+                        retry_after: None,
+                    })?;
+                Ok::<(), backoff::Error<anyhow::Error>>(())
+            };
+
+            match retry(ExponentialBackoff::default(), op).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(?e, "Cannot reconnect to operation receiver");
+                    break;
+                }
+            };
+
+            info!("Reconnected to operation receiver");
+        }
+
+        error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
+    });
+}
+
+#[derive(Deserialize, Serialize)]
+struct ReadInfoV1 {
+    offset: Offset,
+}
+
+#[derive(Deserialize, Serialize)]
+enum ReadInfo {
+    V1(ReadInfoV1),
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::collection_manager::sides::read::{
-        collection::CollectionReader, collections::CollectionsReader,
-    };
+    use crate::collection_manager::sides::read::collection::CollectionReader;
+
+    use super::*;
 
     #[test]
     fn test_side_read_sync_send() {

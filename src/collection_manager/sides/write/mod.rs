@@ -2,7 +2,6 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
-mod operation;
 
 use std::{
     collections::HashMap,
@@ -14,17 +13,22 @@ use std::{
     time::Duration,
 };
 
-use super::hooks::{HookName, HooksRuntime};
+use super::{
+    hooks::{HookName, HooksRuntime},
+    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
+};
 
 use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, time::MissedTickBehavior};
+use tokio::{
+    sync::RwLock,
+    time::{Instant, MissedTickBehavior},
+};
 use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-pub use operation::*;
 
 #[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
@@ -39,7 +43,6 @@ use crate::{
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
-    SideChannelType,
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -57,10 +60,10 @@ pub struct CollectionsWriterConfig {
     pub commit_interval: Duration,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    pub output: SideChannelType,
+    pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
 }
 
@@ -70,122 +73,87 @@ pub struct WriteSide {
     document_count: AtomicU64,
     data_dir: PathBuf,
     hook_runtime: Arc<HooksRuntime>,
-    nlp_service: Arc<NLPService>,
-
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
     master_api_key: ApiKey,
-
-    commit_interval: Duration,
 }
 
 impl WriteSide {
-    pub fn new(
-        sender: OperationSender,
+    pub async fn try_load(
+        sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-    ) -> WriteSide {
+    ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
 
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
-            collections_writer_config.embedding_queue_limit as usize,
-        );
-
-        start_calculate_embedding_loop(
-            ai_service,
-            rx,
-            collections_writer_config.embedding_queue_limit,
-        );
-
         let commit_interval = collections_writer_config.commit_interval;
+        let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
-        WriteSide {
-            sender,
-            collections: CollectionsWriter::new(collections_writer_config, sx),
-            document_count: AtomicU64::new(0),
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+            embedding_queue_limit as usize,
+        );
+
+        let document_count = AtomicU64::new(0);
+
+        let write_side_info_path = data_dir.join("info.json");
+        let r = BufferedFile::open(write_side_info_path)
+            .and_then(|f| f.read_json_data::<WriteSideInfo>());
+        let sender = if let Ok(info) = r {
+            let WriteSideInfo::V1(info) = info;
+            document_count.store(info.document_count, Ordering::Relaxed);
+            sender_creator
+                .create(info.offset)
+                .await
+                .context("Cannot create sender")?
+        } else {
+            sender_creator
+                .create(Offset(0))
+                .await
+                .context("Cannot create sender")?
+        };
+
+        let collections_writer = CollectionsWriter::try_load(
+            collections_writer_config,
+            sx,
+            hook_runtime.clone(),
+            nlp_service.clone(),
+        )
+        .await
+        .context("Cannot load collections")?;
+
+        let write_side = Self {
+            document_count,
+            collections: collections_writer,
             data_dir,
             hook_runtime,
-            nlp_service,
-
-            operation_counter: Default::default(),
             insert_batch_commit_size,
-
             master_api_key,
-
-            commit_interval,
-        }
-    }
-
-    pub async fn load(mut self) -> Result<Arc<Self>> {
-        self.collections
-            .load(self.hook_runtime.clone(), self.nlp_service.clone())
-            .await?;
-
-        let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot read info file")
-        {
-            Ok(info) => info,
-            Err(err) => {
-                warn!("Cannot read info file: {}. Skip loading", err);
-                let s = Arc::new(self);
-
-                s.clone().start_commit_loop(s.commit_interval);
-
-                return Ok(s);
-            }
+            operation_counter: Default::default(),
+            sender,
         };
-        let WriteSideInfo::V1(info) = info;
 
-        self.document_count
-            .store(info.document_count, Ordering::Relaxed);
-        self.sender.set_offset(info.offset);
+        let write_side = Arc::new(write_side);
 
-        let s = Arc::new(self);
+        start_commit_loop(write_side.clone(), commit_interval);
+        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
 
-        s.clone().start_commit_loop(s.commit_interval);
-
-        Ok(s)
-    }
-
-    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
-        tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size);
-
-            // If for some reason we miss a tick, we skip it.
-            // In fact, the commit is blocked only by `update` method.
-            // If the collection is under heavy load,
-            // the commit will be run due to the `insert_batch_commit_size` config.
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                info!(
-                    "{:?} time reached. Committing write side",
-                    insert_batch_commit_size.clone()
-                );
-                if let Err(e) = self.commit().await {
-                    tracing::error!(?e, "Cannot commit write side");
-                }
-            }
-        });
+        Ok(write_side)
     }
 
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
-        let offset = self.sender.offset();
-
         self.collections.commit().await?;
 
+        let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
         // This means, we save a document count possible higher.
         // Anyway it is not a problem, because the document count is only used for the document id generation
@@ -438,6 +406,30 @@ impl WriteSide {
 
         Ok(())
     }
+}
+
+fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
+    tokio::task::spawn(async move {
+        let start = Instant::now() + insert_batch_commit_size;
+        let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
+
+        // If for some reason we miss a tick, we skip it.
+        // In fact, the commit is blocked only by `update` method.
+        // If the collection is under heavy load,
+        // the commit will be run due to the `insert_batch_commit_size` config.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            info!(
+                "{:?} time reached. Committing write side",
+                insert_batch_commit_size.clone()
+            );
+            if let Err(e) = write_side.commit().await {
+                tracing::error!(?e, "Cannot commit write side");
+            }
+        }
+    });
 }
 
 #[derive(Serialize, Deserialize)]

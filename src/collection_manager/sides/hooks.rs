@@ -10,6 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
+use std::str::FromStr;
 
 use crate::js::deno::{JavaScript, Operation};
 use crate::types::CollectionId;
@@ -30,6 +31,17 @@ impl HookValue {
 pub enum HookName {
     #[serde(rename = "selectEmbeddingProperties")]
     SelectEmbeddingsProperties,
+}
+
+impl FromStr for HookName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "selectEmbeddingProperties" => Ok(HookName::SelectEmbeddingsProperties),
+            _ => Err(anyhow::anyhow!("Invalid hook name")),
+        }
+    }
 }
 
 impl Display for HookName {

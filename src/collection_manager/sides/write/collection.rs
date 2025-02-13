@@ -17,7 +17,11 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
-        sides::hooks::{HookName, HooksRuntime},
+        sides::{
+            hooks::{HookName, HooksRuntime},
+            CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
+            EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
+        },
     },
     file_utils::BufferedFile,
     metrics::{CommitLabels, COMMIT_METRIC},
@@ -27,10 +31,7 @@ use crate::{
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
-use super::{
-    embedding::EmbeddingCalculationRequest, CollectionField, CollectionWriteOperation,
-    OperationSender, SerializedFieldIndexer, WriteOperation,
-};
+use super::{embedding::EmbeddingCalculationRequest, CollectionField, SerializedFieldIndexer};
 
 mod doc_id_storage;
 
@@ -153,7 +154,7 @@ impl CollectionWriter {
                 self.id.clone(),
                 CollectionWriteOperation::InsertDocument {
                     doc_id,
-                    doc: doc.into_raw()?,
+                    doc: DocumentToInsert(doc.into_raw()?),
                 },
             ))
             .await
@@ -277,7 +278,7 @@ impl CollectionWriter {
                         field_name.clone(),
                         ValueType::Complex(ComplexType::Embedding),
                         CollectionField::new_embedding(
-                            embedding_field.model,
+                            embedding_field.model.0,
                             embedding_field.document_fields.clone(),
                             embedding_sender,
                             hooks_runtime,
@@ -376,7 +377,22 @@ impl CollectionWriter {
                 CollectionWriteOperation::CreateField {
                     field_id,
                     field_name,
-                    field: typed_field,
+                    field: match typed_field {
+                        TypedField::Embedding(embedding_field) => {
+                            TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
+                                model: embedding_field.model,
+                                document_fields: DocumentFieldsWrapper(
+                                    embedding_field.document_fields,
+                                ),
+                            })
+                        }
+                        TypedField::Text(locale) => TypedFieldWrapper::Text(locale),
+                        TypedField::Number => TypedFieldWrapper::Number,
+                        TypedField::Bool => TypedFieldWrapper::Bool,
+                        TypedField::ArrayText(locale) => TypedFieldWrapper::ArrayText(locale),
+                        TypedField::ArrayNumber => TypedFieldWrapper::ArrayNumber,
+                        TypedField::ArrayBoolean => TypedFieldWrapper::ArrayBoolean,
+                    },
                 },
             ))
             .await

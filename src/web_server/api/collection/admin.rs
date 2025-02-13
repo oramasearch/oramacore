@@ -148,6 +148,7 @@ async fn add_documents(
             info!("Documents added to collection");
         }
         Err(e) => {
+            error!("{e:?}");
             error!("Error adding documents to collection: {}", e);
             e.chain()
                 .skip(1)
