@@ -10,11 +10,11 @@ log:
 
 writer_side:
     output:
-        # type: in-memory
-        type: rabbitmq
-        stream_name: oramacore-operations
-        client_provided_name: oramacore-producer
-        producer_name: write
+        type: in-memory
+        # type: rabbitmq
+        # stream_name: oramacore-operations
+        # client_provided_name: oramacore-producer
+        # producer_name: write
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -37,11 +37,11 @@ writer_side:
 
 reader_side:
     input:
-        # type: in-memory
-        type: rabbitmq
-        stream_name: oramacore-operations
-        client_provided_name: oramacore-reader-1
-        consumer_name: read
+        type: in-memory
+        # type: rabbitmq
+        # stream_name: oramacore-operations
+        # client_provided_name: oramacore-reader-1
+        # consumer_name: read
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
