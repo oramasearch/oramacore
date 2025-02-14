@@ -57,3 +57,6 @@ jobs:
     - name: Build
       run: |
         cargo build --target x86_64-unknown-linux-gnu
+        # Test the build is working with the reader and writer features
+        cargo build --target x86_64-unknown-linux-gnu --features reader --no-default-features
+        cargo build --target x86_64-unknown-linux-gnu --features writer --no-default-features

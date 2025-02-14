@@ -30,7 +30,6 @@ use tracing::{debug, info, instrument, trace, warn};
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 
-#[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
 
 use crate::{

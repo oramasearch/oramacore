@@ -68,7 +68,6 @@ http = "1.2.0"
 axum-openapi3 = { version = "0.2", features = ["derive"] }
 
 hora = { version = "0.1.1" }
-fastembed = { version = "4.4.0", features = ["ort-download-binaries"], optional = true }
 strum_macros = "0.26.4"
 
 # Tracing
@@ -87,14 +86,13 @@ metrics-exporter-prometheus = "0.16.1"
 metrics = "0.24.1"
 metrics-util = "0.19.0"
 
-tempdir = { version = "0.3.7", optional = true }
 memmap = "0.7.0"
 cuid2 = "0.1.4"
 
 mobc = "0.8"
 redact = { version = "0.1", features = ["serde"] }
 duration-str = "0.12.0"
-rabbitmq-stream-client = { version = "0.8", features = ["serde"] }
+rabbitmq-stream-client = { version = "0.8", features = ["serde"], path = "/Users/allevo/repos/rabbitmq-stream-rust-client" }
 backoff = { version = "0.4.0", features = ["tokio"] }
 
 [build-dependencies]
@@ -112,6 +110,7 @@ tower = { version = "0.5.2", features = ["util"] }
 assert_approx_eq = "1.1.0"
 fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
+tempfile = "3"
 
 [[bin]]
 name = "oramacore"
@@ -125,8 +124,7 @@ path = "src/bin/embeddings/embeddings.rs"
 # harness = false
 
 [features]
-default = ["benchmarking", "writer", "reader"]
-benchmarking = ["tempdir", "fastembed"]
+default = ["writer", "reader"]
 no_auto_embedding_field_on_creation = []
 writer = []
 reader = []

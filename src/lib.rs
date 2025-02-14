@@ -38,9 +38,6 @@ pub mod ai;
 #[cfg(test)]
 mod tests;
 
-#[cfg(any(test, feature = "benchmarking"))]
-pub mod test_utils;
-
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LogConfig {
     pub file_path: Option<PathBuf>,

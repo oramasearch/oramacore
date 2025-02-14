@@ -335,7 +335,7 @@ And this should not happen. Return the first page."#);
 mod tests {
     use crate::{
         collection_manager::dto::{Number, SerializableNumber},
-        test_utils::generate_new_path,
+        tests::utils::generate_new_path,
         types::DocumentId,
     };
 

@@ -127,7 +127,7 @@ impl Iterator for FTSIterWithKey<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::generate_new_path;
+    use crate::tests::utils::generate_new_path;
 
     use super::*;
 
