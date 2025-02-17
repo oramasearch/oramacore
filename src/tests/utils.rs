@@ -195,9 +195,3 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         },
     }
 }
-
-pub async fn start_all() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
-    let (collections_writer, collections_reader) = build_orama(create_oramacore_config()).await?;
-
-    Ok((collections_writer.unwrap(), collections_reader.unwrap()))
-}

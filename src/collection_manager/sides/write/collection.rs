@@ -24,7 +24,7 @@ use crate::{
         },
     },
     file_utils::BufferedFile,
-    metrics::{CommitLabels, COMMIT_METRIC},
+    metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
     nlp::{locales::Locale, NLPService, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
@@ -178,10 +178,16 @@ impl CollectionWriter {
                 Some(v) => v,
             };
 
+            let metric = FIELD_CALCULATION_TIME.create(FieldCalculationLabels {
+                collection: self.id.0.clone().into(),
+                field: field_name.clone().into(),
+                field_type: field.get_type().into(),
+            });
             field
                 .get_write_operations(doc_id, &flatten, sender.clone())
                 .await
                 .with_context(|| format!("Cannot index field {}", field_name))?;
+            drop(metric);
         }
 
         self.collection_document_count
@@ -489,11 +495,6 @@ impl CollectionWriter {
     pub async fn commit(&self, path: PathBuf) -> Result<()> {
         info!(coll_id= ?self.id, "Committing collection");
 
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "write",
-            collection: self.id.0.clone(),
-            index_type: "info",
-        });
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
         let fields = self.fields.read().await;
@@ -535,8 +536,6 @@ impl CollectionWriter {
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
-
-        drop(m);
 
         Ok(())
     }

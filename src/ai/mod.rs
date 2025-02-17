@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Streaming};
 use tracing::{info, trace};
 
-use crate::collection_manager::dto::{ApiKey, InteractionMessage};
+use crate::{collection_manager::dto::{ApiKey, InteractionMessage}, metrics::{embedding::{EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME}, EmbeddingCalculationLabels}};
 
 tonic::include_proto!("orama_ai_service");
 
@@ -58,18 +58,27 @@ impl AIService {
     ) -> Result<Vec<Vec<f32>>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
+        let time_metric = EMBEDDING_CALCULATION_TIME.create(EmbeddingCalculationLabels {
+            model: model.as_str_name().into(),
+        });
+        EMBEDDING_CALCULATION_PARALLEL_COUNT.track_usize(EmbeddingCalculationLabels {
+            model: model.as_str_name().into(),
+        }, input.len());
+
+        trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
             input: input.into_iter().cloned().collect(),
             model: model.into(),
             intent: intent.into(),
         });
-
-        trace!("Requesting embeddings");
         let v = conn
             .get_embedding(request)
             .await
             .map(|response| response.into_inner())
             .context("Cannot get embeddings")?;
+
+        drop(time_metric);
+
         trace!("Received embeddings");
 
         let v = v

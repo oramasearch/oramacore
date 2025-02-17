@@ -58,10 +58,11 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
 }
 
 #[derive(Deserialize)]
-struct PlannedAnswerQueryParams {
+struct AnswerQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
+
 async fn planned_answer_v0(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
@@ -131,12 +132,6 @@ async fn planned_answer_v0(
             .interval(Duration::from_secs(15))
             .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
     )
-}
-
-#[derive(Deserialize)]
-struct AnswerQueryParams {
-    #[serde(rename = "api-key")]
-    api_key: ApiKey,
 }
 
 // @todo: this function needs some cleaning. It works but it's not well structured.

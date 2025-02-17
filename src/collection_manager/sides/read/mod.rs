@@ -17,14 +17,13 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
 use crate::file_utils::BufferedFile;
+use crate::metrics::operations::OPERATION_COUNT;
+use crate::metrics::search::SEARCH_CALCULATION_TIME;
+use crate::metrics::{CollectionLabels, SearchCollectionLabels};
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
     collection_manager::dto::{ApiKey, SearchParams, SearchResult, SearchResultHit, TokenScore},
-    metrics::{
-        CollectionAddedLabels, CollectionOperationLabels, COLLECTION_ADDED_COUNTER,
-        COLLECTION_OPERATION_COUNTER,
-    },
     nlp::NLPService,
     types::{CollectionId, DocumentId},
 };
@@ -148,10 +147,17 @@ impl ReadSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id)
+            .get_collection(collection_id.clone())
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
+
+        let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
+            collection: collection_id.0.clone().into(),
+            mode: search_params.mode.as_str(),
+            has_filter: if search_params.where_filter.is_empty() { "false" } else { "true" },
+            has_facet: if facets.is_empty() { "false" } else { "true" },
+        });
 
         let token_scores = collection.search(search_params).await?;
 
@@ -184,6 +190,8 @@ impl ReadSide {
             })
             .collect();
 
+        drop(m);
+
         Ok(SearchResult {
             count,
             hits,
@@ -211,21 +219,14 @@ impl ReadSide {
 
         match op {
             WriteOperation::CreateCollection { id, read_api_key } => {
-                COLLECTION_ADDED_COUNTER
-                    .create(CollectionAddedLabels {
-                        collection: id.0.clone(),
-                    })
-                    .increment_by_one();
                 self.collections
                     .create_collection(offset, id, read_api_key)
                     .await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
-                COLLECTION_OPERATION_COUNTER
-                    .create(CollectionOperationLabels {
-                        collection: collection_id.0.clone(),
-                    })
-                    .increment_by_one();
+                OPERATION_COUNT.track_usize(CollectionLabels {
+                    collection: collection_id.0.clone(),
+                }, 1);
 
                 let collection = self
                     .collections

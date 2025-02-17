@@ -10,6 +10,8 @@ use tracing::info;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::metrics::commit::COMMIT_CALCULATION_TIME;
+use crate::metrics::CollectionCommitLabels;
 use crate::nlp::NLPService;
 use crate::{
     collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
@@ -192,7 +194,13 @@ impl CollectionsWriter {
 
         for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
+
+            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+                collection: collection_id.0.clone(),
+                side: "write",
+            });
             collection.commit(collection_dir).await?;
+            drop(m);
         }
 
         // Now it is safe to drop the lock

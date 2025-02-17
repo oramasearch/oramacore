@@ -11,9 +11,6 @@ use crate::{
             CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
         },
     },
-    metrics::{
-        EmbeddingCalculationLabels, Empty, EMBEDDING_CALCULATION_METRIC, EMBEDDING_REQUEST_GAUDGE,
-    },
     types::{CollectionId, DocumentId},
 };
 
@@ -40,10 +37,6 @@ where
         let model_name = model.as_str_name();
         info!(model_name = ?model_name, inputs = %inputs.len(), "Process embedding batch");
 
-        let metric = EMBEDDING_CALCULATION_METRIC.create(EmbeddingCalculationLabels {
-            model: model_name.to_string(),
-        });
-
         let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
 
         // If something goes wrong, we will just log it and continue
@@ -52,8 +45,6 @@ where
         let output = ai_service.embed_passage(model, text_inputs).await;
 
         info!("Embedding done");
-
-        drop(metric);
 
         match output {
             Ok(output) => {
@@ -113,9 +104,6 @@ pub fn start_calculate_embedding_loop(
                 break;
             }
 
-            EMBEDDING_REQUEST_GAUDGE
-                .create(Empty {})
-                .decrement_by(item_count as u32);
             for item in buffer.drain(..) {
                 let EmbeddingCalculationRequest { model, input } = item;
 

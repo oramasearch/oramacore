@@ -37,8 +37,7 @@ use crate::{
     collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{
-        AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
-        DOCUMENT_PROCESS_METRIC,
+        document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels
     },
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
@@ -201,23 +200,13 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
-        // This counter is not atomic with the insert operation.
-        // This means we increment the counter even if the insert operation fails.
-        // TODO: think better
-        ADDED_DOCUMENTS_COUNTER
-            .create(AddedDocumentsLabels {
-                collection: collection_id.0.clone(),
-            })
-            .increment_by(document_list.len());
-
         let sender = self.sender.clone();
-
         for mut doc in document_list {
-            debug!("Insert doc");
-            let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
+            let metric = DOCUMENT_CALCULATION_TIME.create(CollectionLabels {
                 collection: collection_id.0.clone(),
             });
 
+            debug!("Inserting doc");
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
             let doc_id_value = doc.get("id");
@@ -249,7 +238,7 @@ impl WriteSide {
                 .context("Cannot process document")?;
             info!("Document inserted");
 
-            drop(m);
+            drop(metric);
 
             info!("Doc inserted");
         }
