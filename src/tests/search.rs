@@ -154,7 +154,7 @@ async fn run_tests() {
     run_embedding_search_test().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_hurl() {
     let _ = tracing_subscriber::fmt::try_init();
 

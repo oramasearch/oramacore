@@ -690,13 +690,9 @@ impl CollectionReader {
         let uncommitted_deleted_documents = self.uncommitted_deleted_documents.read().await;
         let uncommitted_deleted_documents = uncommitted_deleted_documents.clone();
 
-        let filter_m = FILTER_CALCULATION_TIME.create(CollectionLabels {
-            collection: self.id.0.clone(),
-        });
         let filtered_doc_ids = self
             .calculate_filtered_doc_ids(where_filter, &uncommitted_deleted_documents)
             .await?;
-        drop(filter_m);
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
             FILTER_PERC_CALCULATION_COUNT.track(
                 CollectionLabels {
@@ -780,6 +776,19 @@ impl CollectionReader {
             }
         };
 
+        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len(),
+        );
+        MATCHING_PERC_CALCULATION_COUNT.track(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+        );
+
         info!("token_scores len: {:?}", token_scores.len());
         debug!("token_scores: {:?}", token_scores);
 
@@ -808,6 +817,10 @@ impl CollectionReader {
         if where_filter.is_empty() {
             return Ok(None);
         }
+
+        let filter_m = FILTER_CALCULATION_TIME.create(CollectionLabels {
+            collection: self.id.0.clone(),
+        });
 
         info!(
             "where_filter: {:?} {:?}",
@@ -858,20 +871,9 @@ impl CollectionReader {
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
-        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
-            CollectionLabels {
-                collection: self.id.0.clone(),
-            },
-            doc_ids.len(),
-        );
-        MATCHING_PERC_CALCULATION_COUNT.track(
-            CollectionLabels {
-                collection: self.id.0.clone(),
-            },
-            doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
-        );
-
         info!("Matching doc from filters: {:?}", doc_ids.len());
+
+        drop(filter_m);
 
         Ok(Some(doc_ids))
     }
