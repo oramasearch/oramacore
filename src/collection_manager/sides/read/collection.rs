@@ -615,6 +615,10 @@ impl CollectionReader {
                 let mut uncommitted_deleted_documents =
                     self.uncommitted_deleted_documents.write().await;
                 uncommitted_deleted_documents.extend(doc_ids);
+                self.document_count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| {
+                    Some(a.saturating_sub(len))
+                })
+                    .map_err(|_| anyhow!("Cannot update document count"))?;
                 self.document_count.fetch_sub(len, Ordering::Relaxed);
                 info!("Document deleted: {:?}", len);
             }
@@ -700,7 +704,7 @@ impl CollectionReader {
                 CollectionLabels {
                     collection: self.id.0.clone(),
                 },
-                filtered_doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+                filtered_doc_ids.len() as f64 / self.count_documents() as f64,
             );
             FILTER_COUNT_CALCULATION_COUNT.track_usize(
                 CollectionLabels {
@@ -788,7 +792,7 @@ impl CollectionReader {
             CollectionLabels {
                 collection: self.id.0.clone(),
             },
-            token_scores.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+            token_scores.len() as f64 / self.count_documents() as f64,
         );
 
         info!("token_scores len: {:?}", token_scores.len());
