@@ -201,11 +201,18 @@ pub struct VectorMode {
     // For simplicity, we only support "term" for now
     // TODO: support "vector"
     pub term: String,
+    #[serde(default = "default_similarity")]
+    pub similarity: f32,
+}
+fn default_similarity() -> f32 {
+    0.8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HybridMode {
     pub term: String,
+    #[serde(default = "default_similarity")]
+    pub similarity: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

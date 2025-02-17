@@ -105,7 +105,33 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
         .sum();
     let distance = distance.sqrt();
 
+    // We want to align this implementation with the `hora` one.
+    // `hora` returns the score as Euclidean distance.
+    // That means 0.0 is the best score and the larger the score, the worse.
+    // NB: because it is a distance, it is always positive.
+    // NB2: the score is capped with a maximum value.
+    // So, inverting the score could be a good idea.
+    // NB3: we capped the score to "100".
+    // TODO: put `0.01` number in config.
     let score = 1.0 / distance.max(0.01);
 
     Ok(score)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_score_vector() {
+        let vector1 = vec![0.0, 0.0, 0.0];
+        let vector2 = vec![0.1, 0.0, 0.0];
+        let vector3 = vec![1.0, 0.0, 0.0];
+        assert!(
+            score_vector(&vector1, &vector1).unwrap() > score_vector(&vector1, &vector2).unwrap()
+        );
+        assert!(
+            score_vector(&vector1, &vector2).unwrap() > score_vector(&vector1, &vector3).unwrap()
+        );
+    }
 }

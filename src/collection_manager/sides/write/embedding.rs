@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::mpsc::Receiver;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     ai::{AIService, OramaModel},
@@ -35,8 +35,7 @@ where
 
     for (model, inputs) in cache {
         let model_name = model.as_str_name();
-        info!(model_name = ?model_name, inputs = %inputs.len(), "Process embedding batch");
-
+        trace!(model_name = ?model_name, inputs = %inputs.len(), "Process embedding batch");
         let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
 
         // If something goes wrong, we will just log it and continue

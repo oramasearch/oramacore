@@ -503,6 +503,7 @@ impl EmbeddingField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
+        println!("AAAAAAA");
         let input: String = match &self.document_fields {
             DocumentFields::Properties(v) => v
                 .iter()
@@ -519,7 +520,10 @@ impl EmbeddingField {
 
                 let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
                     Some(Ok(input)) => input,
-                    _ => return Ok(()),
+                    _ => {
+                        println!("BBBBBBB");
+                        return Ok(());
+                    }
                 };
 
                 match input {

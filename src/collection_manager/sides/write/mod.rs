@@ -148,6 +148,7 @@ impl WriteSide {
         info!("Committing write side");
 
         self.collections.commit().await?;
+        self.hook_runtime.commit().await?;
 
         let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
@@ -293,6 +294,7 @@ impl WriteSide {
     ) -> Result<()> {
         self.hook_runtime
             .insert_hook(collection_id.clone(), name.clone(), code)
+            .await
             .context("Cannot insert hook")?;
 
         let collection = self
@@ -346,6 +348,7 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .get_hook(collection_id, name)
+            .await
             .map(|hook| hook.code))
     }
 
@@ -380,6 +383,7 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .list_hooks(collection_id)
+            .await
             .into_iter()
             .map(|(name, hook)| (name, hook.code))
             .collect())

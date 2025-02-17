@@ -198,6 +198,7 @@ async fn answer_v0(
                 SearchParams {
                     mode: SearchMode::Hybrid(HybridMode {
                         term: optimized_query.text,
+                        similarity: 0.8,
                     }),
                     limit: Limit(5),
                     where_filter: HashMap::new(),

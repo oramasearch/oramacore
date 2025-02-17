@@ -732,6 +732,7 @@ impl CollectionReader {
             SearchMode::Vector(search_params) => {
                 self.search_vector(
                     &search_params.term,
+                    search_params.similarity,
                     filtered_doc_ids.as_ref(),
                     &limit,
                     &uncommitted_deleted_documents,
@@ -744,6 +745,7 @@ impl CollectionReader {
                 let (vector, fulltext) = join!(
                     self.search_vector(
                         &search_params.term,
+                        search_params.similarity,
                         filtered_doc_ids.as_ref(),
                         &limit,
                         &uncommitted_deleted_documents
@@ -974,6 +976,7 @@ impl CollectionReader {
     async fn search_vector(
         &self,
         term: &str,
+        similarity: f32,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: &Limit,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
@@ -991,14 +994,14 @@ impl CollectionReader {
 
             info!("Searching on model {:?} on fields {:?}", model, fields);
 
-            let e = self
+            let targets = self
                 .ai_service
                 .embed_query(*model, vec![&term.to_string()])
                 .await?;
 
-            for k in e {
+            for target in targets {
                 committed_lock.vector_search(
-                    &k,
+                    &target,
                     fields,
                     filtered_doc_ids,
                     limit.0,
@@ -1006,7 +1009,7 @@ impl CollectionReader {
                     uncommitted_deleted_documents,
                 )?;
                 uncommitted_lock.vector_search(
-                    &k,
+                    &target,
                     fields,
                     filtered_doc_ids,
                     &mut output,
@@ -1015,6 +1018,16 @@ impl CollectionReader {
             }
         }
 
+        let similarity = similarity * 100.0;
+        // We *could* perform this filter inside the search.
+        // Anyway, a document can match multiple time the same query.
+        // In that case, we should consider the sum of the scores.
+        // So, we are doing the filter here.
+        // TODO: consider if we could ignore multiple matching
+        let output = output
+            .into_iter()
+            .filter(|(_, v)| *v >= similarity)
+            .collect();
         Ok(output)
     }
 
