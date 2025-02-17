@@ -615,9 +615,10 @@ impl CollectionReader {
                 let mut uncommitted_deleted_documents =
                     self.uncommitted_deleted_documents.write().await;
                 uncommitted_deleted_documents.extend(doc_ids);
-                self.document_count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| {
-                    Some(a.saturating_sub(len))
-                })
+                self.document_count
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| {
+                        Some(a.saturating_sub(len))
+                    })
                     .map_err(|_| anyhow!("Cannot update document count"))?;
                 self.document_count.fetch_sub(len, Ordering::Relaxed);
                 info!("Document deleted: {:?}", len);
