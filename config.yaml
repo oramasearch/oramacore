@@ -12,11 +12,11 @@ writer_side:
     output:
         # type: in-memory
         type: rabbitmq
-        host: albatross.rmq.cloudamqp.com
-        port: 5552
-        user: qqnyasnb
-        password: kG5vEPyzOc6VWfmQQK8sBwEhjNsykMAe
-        v_host: qqnyasnb
+        # host: localhost
+        # port: 5672
+        # user: guest
+        # password: guest
+        # v_host: /
         stream_name: oramacore-operations
         client_provided_name: oramacore-producer
         producer_name: write
@@ -44,11 +44,11 @@ reader_side:
     input:
         # type: in-memory
         type: rabbitmq
-        host: albatross.rmq.cloudamqp.com
-        port: 5552
-        user: qqnyasnb
-        password: kG5vEPyzOc6VWfmQQK8sBwEhjNsykMAe
-        v_host: qqnyasnb
+        # host: localhost
+        # port: 5672
+        # user: guest
+        # password: guest
+        # v_host: /
         stream_name: oramacore-operations
         client_provided_name: oramacore-producer
         consumer_name: reader

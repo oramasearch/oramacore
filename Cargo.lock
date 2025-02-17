@@ -3405,6 +3405,7 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
+ "pin-project-lite",
  "pretty_assertions",
  "prost",
  "ptrie",

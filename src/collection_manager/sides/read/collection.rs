@@ -33,8 +33,12 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{
-        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
-        SEARCH_FILTER_METRIC, SEARCH_METRIC,
+        commit::FIELD_COMMIT_CALCULATION_TIME,
+        search::{
+            FILTER_CALCULATION_TIME, FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
+            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
+        },
+        CollectionFieldCommitLabels, CollectionLabels,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
@@ -262,9 +266,10 @@ impl CollectionReader {
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
         for field_id in uncommitted_infos.number_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "number",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "number",
                 side: "read",
             });
             let uncommitted_number_index = uncommitted.number_index.get(&field_id);
@@ -327,9 +332,10 @@ impl CollectionReader {
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
         for field_id in uncommitted_infos.string_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "string",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "string",
                 side: "read",
             });
 
@@ -397,9 +403,10 @@ impl CollectionReader {
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
         for field_id in uncommitted_infos.bool_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "bool",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "bool",
                 side: "read",
             });
             let uncommitted_bool_index = uncommitted.bool_index.get(&field_id);
@@ -461,9 +468,10 @@ impl CollectionReader {
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
         for field_id in uncommitted_infos.vector_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "vector",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "vector",
                 side: "read",
             });
             let uncommitted_vector_index = uncommitted.vector_index.get(&field_id);
@@ -670,9 +678,6 @@ impl CollectionReader {
         search_params: SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
         info!(search_params = ?search_params, "Start search");
-        let metric = SEARCH_METRIC.create(SearchLabels {
-            collection: self.id.0.to_string(),
-        });
         let SearchParams {
             mode,
             properties,
@@ -688,6 +693,21 @@ impl CollectionReader {
         let filtered_doc_ids = self
             .calculate_filtered_doc_ids(where_filter, &uncommitted_deleted_documents)
             .await?;
+        if let Some(filtered_doc_ids) = &filtered_doc_ids {
+            FILTER_PERC_CALCULATION_COUNT.track(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+            );
+            FILTER_COUNT_CALCULATION_COUNT.track_usize(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len(),
+            );
+        }
+
         let boost = self.calculate_boost(boost);
 
         let token_scores = match mode {
@@ -756,10 +776,21 @@ impl CollectionReader {
             }
         };
 
+        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len(),
+        );
+        MATCHING_PERC_CALCULATION_COUNT.track(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+        );
+
         info!("token_scores len: {:?}", token_scores.len());
         debug!("token_scores: {:?}", token_scores);
-
-        drop(metric);
 
         Ok(token_scores)
     }
@@ -787,14 +818,14 @@ impl CollectionReader {
             return Ok(None);
         }
 
+        let filter_m = FILTER_CALCULATION_TIME.create(CollectionLabels {
+            collection: self.id.0.clone(),
+        });
+
         info!(
             "where_filter: {:?} {:?}",
             where_filter, self.uncommitted_collection
         );
-
-        let metric = SEARCH_FILTER_METRIC.create(SearchFilterLabels {
-            collection: self.id.0.to_string(),
-        });
 
         let filters: Result<Vec<_>> = where_filter
             .into_iter()
@@ -840,14 +871,9 @@ impl CollectionReader {
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
-        drop(metric);
-
-        SEARCH_FILTER_HISTOGRAM
-            .create(SearchFilterLabels {
-                collection: self.id.0.to_string(),
-            })
-            .record_usize(doc_ids.len());
         info!("Matching doc from filters: {:?}", doc_ids.len());
+
+        drop(filter_m);
 
         Ok(Some(doc_ids))
     }

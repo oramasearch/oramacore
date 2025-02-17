@@ -227,6 +227,16 @@ impl Default for SearchMode {
         })
     }
 }
+impl SearchMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SearchMode::FullText(_) => "fulltext",
+            SearchMode::Vector(_) => "vector",
+            SearchMode::Hybrid(_) => "hybrid",
+            SearchMode::Default(_) => "fulltext",
+        }
+    }
+}
 
 #[derive(Debug, Clone, ToSchema, PartialEq)]
 pub enum Properties {

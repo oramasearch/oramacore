@@ -5,7 +5,8 @@ use strum_macros::Display;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, trace, warn};
 
-use crate::metrics::{Empty, JAVASCRIPT_REQUEST_GAUDGE};
+use crate::metrics::js::JS_CALCULATION_TIME;
+use crate::metrics::JSOperationLabels;
 
 pub struct JavaScript {
     sender: mpsc::Sender<Job>,
@@ -16,6 +17,16 @@ pub enum Operation {
     Anonymous,
     SelectEmbeddingsProperties,
     DynamicDocumentRanking,
+}
+
+impl Operation {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Anonymous => "anonymous",
+            Self::SelectEmbeddingsProperties => "select_embeddings_properties",
+            Self::DynamicDocumentRanking => "dynamic_document_ranking",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -91,7 +102,6 @@ impl JavaScript {
 
                 for job in buff.drain(..count) {
                     process_job(job, &mut runtime);
-                    JAVASCRIPT_REQUEST_GAUDGE.create(Empty {}).decrement_by(1);
                 }
             }
             warn!("JS runtime thread finished");
@@ -106,8 +116,9 @@ impl JavaScript {
         code: String,
         input: T,
     ) -> Result<R> {
-        JAVASCRIPT_REQUEST_GAUDGE.create(Empty {}).increment_by(1);
-
+        let m = JS_CALCULATION_TIME.create(JSOperationLabels {
+            operation: operation.as_str(),
+        });
         let input_json = serde_json::to_value(input)?;
         let (response_tx, response_rx) = oneshot::channel();
         let job = Job {
@@ -125,6 +136,11 @@ impl JavaScript {
         let res = response_rx.await??;
         trace!("Received response from JavaScript runtime {}", res);
 
-        serde_json::from_str(&res).context("Unable to deserialize string into valid data structure")
+        let r = serde_json::from_str(&res)
+            .context("Unable to deserialize string into valid data structure");
+
+        drop(m);
+
+        r
     }
 }

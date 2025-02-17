@@ -19,3 +19,4 @@ flamegraph.svg
 .env
 
 log.log
+.DS_Store

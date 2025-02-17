@@ -3,7 +3,6 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     pin::Pin,
-    sync::Arc,
     time::Duration,
 };
 
@@ -19,12 +18,11 @@ use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
-    build_orama,
     collection_manager::{
         dto::ApiKey,
         sides::{
             CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-            OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
+            OutputSideChannelType, ReadSideConfig, WriteSideConfig,
         },
     },
     web_server::HttpConfig,
@@ -194,10 +192,4 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             },
         },
     }
-}
-
-pub async fn start_all() -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
-    let (collections_writer, collections_reader) = build_orama(create_oramacore_config()).await?;
-
-    Ok((collections_writer.unwrap(), collections_reader.unwrap()))
 }

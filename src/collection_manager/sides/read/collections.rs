@@ -10,6 +10,7 @@ use crate::{
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
+    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
     nlp::NLPService,
     types::CollectionId,
 };
@@ -120,17 +121,22 @@ impl CollectionsReader {
         let col = self.collections.read().await;
         let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
-        for (id, reader) in col {
+        for (id, collection) in col {
             let collection_dir = collections_dir.join(&id.0);
 
             create_if_not_exists_async(&collection_dir)
                 .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
-            reader
+            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+                collection: id.0.clone(),
+                side: "read",
+            });
+            collection
                 .commit(collection_dir)
                 .await
-                .with_context(|| format!("Cannot commit collection {:?}", reader.get_id()))?;
+                .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
+            drop(m);
         }
 
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {

@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
 use tracing::{error, trace, warn};
 
-use crate::metrics::{Empty, OPERATION_GAUGE};
-
 mod rabbit;
 pub use rabbit::*;
 mod op;
@@ -49,8 +47,6 @@ impl OperationSender {
     }
 
     pub async fn send(&self, operation: WriteOperation) -> Result<()> {
-        OPERATION_GAUGE.create(Empty {}).increment_by(1);
-
         trace!("Sending operation: {:?}", operation);
         match self {
             OperationSender::InMemory {
@@ -82,7 +78,7 @@ pub enum OperationReceiver {
 
 impl OperationReceiver {
     pub async fn recv(&mut self) -> Option<Result<(Offset, WriteOperation)>> {
-        let r = match self {
+        match self {
             Self::InMemory { receiver } => {
                 let (offset, data) = match receiver.recv().await {
                     None => {
@@ -104,10 +100,7 @@ impl OperationReceiver {
                 Some(Ok((offset, message_body)))
             }
             Self::RabbitMQ(receiver) => receiver.next().await,
-        };
-
-        OPERATION_GAUGE.create(Empty {}).decrement_by(1);
-        r
+        }
     }
 
     pub async fn reconnect(&mut self) -> Result<()> {
