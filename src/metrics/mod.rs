@@ -80,6 +80,11 @@ pub mod ai {
         "chat_calculation_time_sec",
         ChatCalculationLabels
     );
+    create_time_histogram!(
+        STREAM_CHAT_CALCULATION_TIME,
+        "stream_chat_calculation_time_sec",
+        ChatCalculationLabels
+    );
 }
 
 pub mod document_insertion {

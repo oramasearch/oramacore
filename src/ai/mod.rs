@@ -15,7 +15,8 @@ use crate::{
     collection_manager::dto::{ApiKey, InteractionMessage},
     metrics::{
         ai::{
-            CHAT_CALCULATION_TIME, EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME,
+            CHAT_CALCULATION_TIME, EMBEDDING_CALCULATION_PARALLEL_COUNT,
+            EMBEDDING_CALCULATION_TIME, STREAM_CHAT_CALCULATION_TIME,
         },
         ChatCalculationLabels, EmbeddingCalculationLabels,
     },
@@ -160,7 +161,7 @@ impl AIService {
     ) -> Result<ChatStream> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
-        let time_metric = CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
+        let time_metric = STREAM_CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
             model: llm_type.as_str_name(),
         });
 
