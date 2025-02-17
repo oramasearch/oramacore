@@ -5,9 +5,14 @@ use std::{
 };
 
 use crate::{
-    ai::AIService, collection_manager::{dto::ApiKey, sides::Offset}, file_utils::{
+    ai::AIService,
+    collection_manager::{dto::ApiKey, sides::Offset},
+    file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
-    }, metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels}, nlp::NLPService, types::CollectionId
+    },
+    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
+    nlp::NLPService,
+    types::CollectionId,
 };
 
 use anyhow::{Context, Result};

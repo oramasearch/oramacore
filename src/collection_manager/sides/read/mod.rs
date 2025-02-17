@@ -155,7 +155,11 @@ impl ReadSide {
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
             collection: collection_id.0.clone().into(),
             mode: search_params.mode.as_str(),
-            has_filter: if search_params.where_filter.is_empty() { "false" } else { "true" },
+            has_filter: if search_params.where_filter.is_empty() {
+                "false"
+            } else {
+                "true"
+            },
             has_facet: if facets.is_empty() { "false" } else { "true" },
         });
 
@@ -224,9 +228,12 @@ impl ReadSide {
                     .await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
-                OPERATION_COUNT.track_usize(CollectionLabels {
-                    collection: collection_id.0.clone(),
-                }, 1);
+                OPERATION_COUNT.track_usize(
+                    CollectionLabels {
+                        collection: collection_id.0.clone(),
+                    },
+                    1,
+                );
 
                 let collection = self
                     .collections

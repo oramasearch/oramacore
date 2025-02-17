@@ -33,7 +33,12 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{
-        commit::FIELD_COMMIT_CALCULATION_TIME, search::{FILTER_CALCULATION_TIME, FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT, MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT}, CollectionFieldCommitLabels, CollectionLabels
+        commit::FIELD_COMMIT_CALCULATION_TIME,
+        search::{
+            FILTER_CALCULATION_TIME, FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
+            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
+        },
+        CollectionFieldCommitLabels, CollectionLabels,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
@@ -693,12 +698,18 @@ impl CollectionReader {
             .await?;
         drop(filter_m);
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
-            FILTER_PERC_CALCULATION_COUNT.track(CollectionLabels {
-                collection: self.id.0.clone(),
-            }, filtered_doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64);
-            FILTER_COUNT_CALCULATION_COUNT.track_usize(CollectionLabels {
-                collection: self.id.0.clone(),
-            }, filtered_doc_ids.len());
+            FILTER_PERC_CALCULATION_COUNT.track(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+            );
+            FILTER_COUNT_CALCULATION_COUNT.track_usize(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len(),
+            );
         }
 
         let boost = self.calculate_boost(boost);
@@ -847,12 +858,18 @@ impl CollectionReader {
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
-        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(CollectionLabels {
-            collection: self.id.0.clone(),
-        }, doc_ids.len());
-        MATCHING_PERC_CALCULATION_COUNT.track(CollectionLabels {
-            collection: self.id.0.clone(),
-        }, doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64);
+        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            doc_ids.len(),
+        );
+        MATCHING_PERC_CALCULATION_COUNT.track(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            doc_ids.len() as f64 / self.document_count.load(Ordering::Relaxed) as f64,
+        );
 
         info!("Matching doc from filters: {:?}", doc_ids.len());
 

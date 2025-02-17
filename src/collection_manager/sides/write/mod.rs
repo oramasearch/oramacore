@@ -36,9 +36,7 @@ use crate::{
     ai::AIService,
     collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
-    metrics::{
-        document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels
-    },
+    metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
 };

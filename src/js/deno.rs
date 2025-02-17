@@ -136,7 +136,8 @@ impl JavaScript {
         let res = response_rx.await??;
         trace!("Received response from JavaScript runtime {}", res);
 
-        let r = serde_json::from_str(&res).context("Unable to deserialize string into valid data structure");
+        let r = serde_json::from_str(&res)
+            .context("Unable to deserialize string into valid data structure");
 
         drop(m);
 

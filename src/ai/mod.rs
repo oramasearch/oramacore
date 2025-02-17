@@ -1,15 +1,25 @@
-use std::{net::IpAddr, str::FromStr};
+use std::{net::IpAddr, pin::Pin, str::FromStr, task::Poll};
 
+use futures::Stream;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
+use pin_project_lite::pin_project;
 use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
-use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Streaming};
+use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Status, Streaming};
 use tracing::{info, trace};
 
-use crate::{collection_manager::dto::{ApiKey, InteractionMessage}, metrics::{embedding::{EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME}, EmbeddingCalculationLabels}};
+use crate::{
+    collection_manager::dto::{ApiKey, InteractionMessage},
+    metrics::{
+        ai::{
+            CHAT_CALCULATION_TIME, EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME,
+        },
+        ChatCalculationLabels, EmbeddingCalculationLabels,
+    },
+};
 
 tonic::include_proto!("orama_ai_service");
 
@@ -61,9 +71,12 @@ impl AIService {
         let time_metric = EMBEDDING_CALCULATION_TIME.create(EmbeddingCalculationLabels {
             model: model.as_str_name().into(),
         });
-        EMBEDDING_CALCULATION_PARALLEL_COUNT.track_usize(EmbeddingCalculationLabels {
-            model: model.as_str_name().into(),
-        }, input.len());
+        EMBEDDING_CALCULATION_PARALLEL_COUNT.track_usize(
+            EmbeddingCalculationLabels {
+                model: model.as_str_name().into(),
+            },
+            input.len(),
+        );
 
         trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
@@ -115,6 +128,10 @@ impl AIService {
     ) -> Result<ChatResponse> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
+        let time_metric = CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
+            model: llm_type.as_str_name(),
+        });
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
             conversation: Some(conversation),
@@ -129,6 +146,8 @@ impl AIService {
             .map(|response| response.into_inner())
             .context("Cannot perform chat request")?;
 
+        drop(time_metric);
+
         Ok(response)
     }
 
@@ -138,8 +157,12 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
-    ) -> Result<Streaming<ChatStreamResponse>> {
+    ) -> Result<ChatStream> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let time_metric = CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
+            model: llm_type.as_str_name(),
+        });
 
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
@@ -154,7 +177,14 @@ impl AIService {
             .await
             .context("Cannot initiate chat stream request")?;
 
-        Ok(response.into_inner())
+        let chat_stream = ChatStream {
+            inner: response.into_inner(),
+            end_cb: std::sync::RwLock::new(Some(Box::new(move || {
+                drop(time_metric);
+            }))),
+        };
+
+        Ok(chat_stream)
     }
 
     pub async fn planned_answer_stream(
@@ -213,6 +243,44 @@ impl AIService {
             Conversation { messages }
         } else {
             Conversation { messages: vec![] }
+        }
+    }
+}
+
+pin_project! {
+    pub struct ChatStream {
+        #[pin]
+        inner: Streaming<ChatStreamResponse>,
+        end_cb: std::sync::RwLock<Option<Box<dyn FnOnce() + Send>>>,
+    }
+}
+impl Stream for ChatStream {
+    type Item = Result<ChatStreamResponse, Status>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let a = this.inner.poll_next(cx);
+
+        match a {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => {
+                let end_cb = this.end_cb.get_mut().unwrap();
+                if let Some(end_cb) = end_cb.take() {
+                    end_cb();
+                }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Ok(a))) => Poll::Ready(Some(Ok(a))),
+            Poll::Ready(Some(Err(e))) => {
+                let end_cb = this.end_cb.get_mut().unwrap();
+                if let Some(end_cb) = end_cb.take() {
+                    end_cb();
+                }
+                Poll::Ready(Some(Err(e)))
+            }
         }
     }
 }

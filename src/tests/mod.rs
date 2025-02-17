@@ -1,5 +1,5 @@
 mod search;
 
-mod tests;
+mod all;
 
 pub mod utils;

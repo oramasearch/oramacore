@@ -1,4 +1,4 @@
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use metrics::{histogram, Label};
 use num_traits::cast;
@@ -7,19 +7,21 @@ use tracing::error;
 #[macro_export]
 macro_rules! create_counter_histogram {
     ($name:ident, $key:expr, $type: ident) => {
-        pub static $name: crate::metrics::histogram::CounterHistogram<$type> = crate::metrics::histogram::CounterHistogram {
-            key: $key,
-            phantom: std::marker::PhantomData,
-        };
+        pub static $name: $crate::metrics::histogram::CounterHistogram<$type> =
+            $crate::metrics::histogram::CounterHistogram {
+                key: $key,
+                phantom: std::marker::PhantomData,
+            };
     };
 }
 #[macro_export]
 macro_rules! create_time_histogram {
     ($name:ident, $key:expr, $type: ident) => {
-        pub static $name: crate::metrics::histogram::TimeHistogram<$type> = crate::metrics::histogram::TimeHistogram {
-            key: $key,
-            phantom: std::marker::PhantomData,
-        };
+        pub static $name: $crate::metrics::histogram::TimeHistogram<$type> =
+            $crate::metrics::histogram::TimeHistogram {
+                key: $key,
+                phantom: std::marker::PhantomData,
+            };
     };
 }
 
