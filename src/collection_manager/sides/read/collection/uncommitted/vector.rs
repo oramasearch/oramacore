@@ -173,10 +173,6 @@ mod tests {
         let vector2 = vec![0.1, 0.001, 0.0];
         let vector3 = vec![0.0, 1.0, 0.0];
 
-        dbg!(score_vector(&vector1, &vector1).unwrap());
-        dbg!(score_vector(&vector1, &vector2).unwrap());
-        dbg!(score_vector(&vector1, &vector3).unwrap());
-
         assert!(
             score_vector(&vector1, &vector1).unwrap() > score_vector(&vector1, &vector2).unwrap()
         );
