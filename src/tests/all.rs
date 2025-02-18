@@ -957,7 +957,6 @@ async fn test_vector_search_grpc() -> Result<()> {
             .try_into()?,
         )
         .await?;
-
     sleep(Duration::from_millis(100)).await;
 
     let mut docs = vec![
@@ -977,18 +976,36 @@ async fn test_vector_search_grpc() -> Result<()> {
     for i in 4..100 {
         docs.push(json!({
             "id": i.to_string(),
-            "text": "foobar",
+            "text": "Max Pezzali is the best.",
         }));
     }
-    write_side
-        .write(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        docs
+    ).await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
-            docs.try_into().unwrap(),
+            json!({
+                "mode": "vector",
+                "term": "The feline is napping comfortably indoors.",
+                "similarity": 0.6,
+            })
+            .try_into()?,
         )
         .await?;
+    assert_eq!(output.count, 2);
 
-    sleep(Duration::from_millis(500)).await;
+    println!("------ 1");
+
+    read_side.commit().await?;
+
+    println!("------ COMMITTED");
 
     let output = read_side
         .search(
@@ -997,10 +1014,14 @@ async fn test_vector_search_grpc() -> Result<()> {
             json!({
                 "mode": "vector",
                 "term": "The feline is napping comfortably indoors.",
+                "similarity": 0.6,
             })
             .try_into()?,
         )
         .await?;
+    assert_eq!(output.count, 2);
+
+    println!("------ 2");
 
     // Due to the lack of a large enough dataset,
     // the search will not return 2 results as expected.

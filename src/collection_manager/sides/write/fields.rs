@@ -503,7 +503,6 @@ impl EmbeddingField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        println!("AAAAAAA");
         let input: String = match &self.document_fields {
             DocumentFields::Properties(v) => v
                 .iter()

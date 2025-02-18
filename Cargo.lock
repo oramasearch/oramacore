@@ -1248,6 +1248,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e60eed09d8c01d3cee5b7d30acb059b76614c918fa0f992e0dd6eeb10daad6f"
 
 [[package]]
+name = "debug_panic"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9377eb110cece2e9431deb8d7d2ec8c116510b896741f9f2bf02b352147aa2a6"
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3381,6 +3387,7 @@ dependencies = [
  "csv",
  "cuid2",
  "dashmap",
+ "debug_panic",
  "deno_core",
  "duration-str",
  "duration-string",
@@ -3405,6 +3412,7 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
+ "parking_lot",
  "pin-project-lite",
  "pretty_assertions",
  "prost",
@@ -3417,6 +3425,7 @@ dependencies = [
  "reqwest",
  "rust-stemmers",
  "serde",
+ "serde-big-array",
  "serde_json",
  "serde_v8",
  "smallvec",
@@ -4739,6 +4748,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02fc4265df13d6fa1d00ecff087228cc0a2b5f3c0e87e258d8b94a156e984c70"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde-big-array"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

@@ -95,6 +95,9 @@ duration-str = "0.12.0"
 rabbitmq-stream-client = { version = "0.8", features = ["serde"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
 pin-project-lite = "0.2.16"
+parking_lot = "0.12.3"
+serde-big-array = "0.5.1"
+debug_panic = "0.2.1"
 
 [build-dependencies]
 cc = "1"

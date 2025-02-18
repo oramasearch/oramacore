@@ -106,6 +106,7 @@ impl UncommittedCollection {
     pub fn vector_search(
         &self,
         target: &[f32],
+        similarity: f32,
         properties: &[FieldId],
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
@@ -121,6 +122,7 @@ impl UncommittedCollection {
             };
             vector_field.search(
                 target,
+                similarity,
                 filtered_doc_ids,
                 output,
                 uncommitted_deleted_documents,

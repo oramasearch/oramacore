@@ -1,121 +1,156 @@
 use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    collections::{HashMap, HashSet}, fmt::Debug, path::PathBuf
 };
 
 use anyhow::{anyhow, Context, Result};
-use hora::{
-    core::{
-        ann_index::{ANNIndex, SerializableIndex},
-        metrics::Metric,
-        node::IdxType,
-    },
-    index::{hnsw_idx::HNSWIndex, hnsw_params::HNSWParams},
-};
+
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    types::DocumentId,
+    file_utils::{create_if_not_exists, BufferedFile}, indexes::hnsw::{Builder, HnswMap, Point, Search}, types::DocumentId
 };
 
-#[derive(
-    Clone, Default, core::fmt::Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Hash, Deserialize,
-)]
-pub struct IdxID(Option<DocumentId>);
-impl IdxType for IdxID {}
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct VectorPoint {
+    magnitude: f32,
+    point: Vec<f32>,
+}
 
-#[derive(Debug)]
+impl VectorPoint {
+    fn new(v: Vec<f32>) -> Self {
+        let magnitude = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let magnitude = magnitude.max(0.0001);
+        debug_assert!(magnitude > 0.0, "Magnitude is zero");
+
+        Self {
+            magnitude,
+            point: v,
+        }
+    }
+}
+impl Point for VectorPoint {
+    fn distance(&self, other: &Self) -> f32 {
+        let my_mag = self.magnitude;
+        let other_mag = other.magnitude;
+        let dot_product = self
+            .point
+            .iter()
+            .zip(other.point.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>();
+        let similarity = dot_product / (my_mag * other_mag);
+
+        // cosine similarity is between 0 and 1.
+        // 1 = equal
+        // 0 = orthogonal
+        // Anyway the definition of distance (https://en.wikipedia.org/wiki/Distance#Mathematical_formalization)
+        // consider 0 = equal.
+        // So we need to invert the similarity to have a distance.
+        1.0 - similarity
+    }
+}
+
 pub struct VectorField {
-    inner: HNSWIndex<f32, IdxID>,
+    inner: HnswMap<VectorPoint, DocumentId>,
     data_dir: PathBuf,
-    deleted_documents: HashSet<DocumentId>,
+}
+
+impl Debug for VectorField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inner = serde_json::to_string(&self.inner).unwrap();
+        f.debug_struct("VectorField")
+            .field("inner", &inner)
+            .field("data_dir", &self.data_dir)
+            .finish()
+    }
 }
 
 impl VectorField {
-    pub fn from_iter<I>(iter: I, dimension: usize, data_dir: PathBuf) -> Result<Self>
+    pub fn from_iter<I>(iter: I, _dimension: usize, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
-        let params = HNSWParams::<f32>::default().max_item(1_000_000_000);
-        let inner = HNSWIndex::new(dimension, &params);
 
-        let mut s = Self {
+        println!("Flatting iter.... ------ ");
+        let iter = iter.flat_map(|(doc_id, vectors)| {
+            vectors.into_iter().map(move |vector| (VectorPoint::new(vector), doc_id))
+        });
+        println!("Unzipping.. ------ ");
+        let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
+        println!("Unzipped.. ------ ");
+        println!("Building..... ------ ");
+        let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
+        println!("Built ------ ");
+
+        create_if_not_exists(&data_dir)
+            .context("Cannot create data directory")?;
+        println!("Committing.... ------ ");
+        BufferedFile::create(data_dir.join("index.hnsw"))
+            .context("Cannot create hnsw file")?
+            .write_bincode_data(&inner)
+            .context("Cannot write hnsw file")?;
+        println!("Committed.... ------ ");
+
+        Ok(Self {
             inner,
             data_dir,
-            deleted_documents: HashSet::new(),
-        };
-
-        s.add_and_dump(iter)?;
-
-        Ok(s)
+        })
     }
 
     pub fn from_dump_and_iter(
         data_dir: PathBuf,
         iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
+        new_data_dir: PathBuf,
     ) -> Result<Self> {
         let dump_file_path = data_dir.join("index.hnsw");
 
-        let inner = HNSWIndex::load(
-            dump_file_path
-                .to_str()
-                .ok_or_else(|| anyhow!("Cannot convert path to string"))?,
-        )
-        .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", dump_file_path, e))?;
+        let inner: HnswMap<VectorPoint, DocumentId> = BufferedFile::open(dump_file_path)
+            .context("Cannot open hnsw file")?
+            .read_bincode_data()
+            .context("Cannot read hnsw file")?;
 
-        let mut s = Self {
+        let iter = iter
+            .flat_map(|(doc_id, vectors)| {
+                vectors.into_iter().map(move |vector| (VectorPoint::new(vector), doc_id))
+            })
+            .chain(inner.into_iter())
+            .filter(|(_, doc_id)| !uncommitted_document_deletions.contains(doc_id));
+
+        let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
+        let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
+
+        println!("1 Committing.... ------ ");
+        create_if_not_exists(&new_data_dir)
+            .context("Cannot create data directory")?;
+        BufferedFile::create(new_data_dir.join("index.hnsw"))
+            .context("Cannot create hnsw file")?
+            .write_bincode_data(&inner)
+            .context("Cannot write hnsw file")?;
+        println!("1 Committed ------ ");
+
+        Ok(Self {
             inner,
-            data_dir,
-            deleted_documents: uncommitted_document_deletions.clone(),
-        };
-
-        s.add_and_dump(
-            iter.filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
-        )?;
-
-        Ok(s)
+            data_dir: new_data_dir,
+        })
     }
 
     pub fn load(info: VectorFieldInfo) -> Result<Self> {
         let dump_file_path = info.data_dir.join("index.hnsw");
-        let deleted_documents_file_path = info.data_dir.join("deleted_documents.bin");
 
-        let file_path_str = match dump_file_path.to_str() {
-            Some(file_path_str) => file_path_str,
-            None => {
-                return Err(anyhow!("Cannot convert path to string"));
-            }
-        };
-
-        let inner = HNSWIndex::load(file_path_str)
-            .map_err(|e| anyhow!("Cannot load HNSWIndex from {:?}: {}", dump_file_path, e))?;
-
-        let deleted_documents = BufferedFile::open(deleted_documents_file_path)
-            .map_err(|e| anyhow!("Cannot open deleted documents file: {}", e))?
+        let inner: HnswMap<VectorPoint, DocumentId> = BufferedFile::open(dump_file_path)
+            .map_err(|e| anyhow!("Cannot open hnsw file: {}", e))?
             .read_bincode_data()
-            .map_err(|e| anyhow!("Cannot read deleted documents file: {}", e))?;
-
-        if inner.dimension() != info.dimension {
-            return Err(anyhow!(
-                "Dimension mismatch: expected {}, got {}",
-                info.dimension,
-                inner.dimension()
-            ));
-        }
+            .map_err(|e| anyhow!("Cannot read hnsw file: {}", e))?;
 
         Ok(Self {
             inner,
             data_dir: info.data_dir,
-            deleted_documents,
         })
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
         VectorFieldInfo {
-            dimension: self.inner.dimension(),
             data_dir: self.data_dir.clone(),
         }
     }
@@ -123,31 +158,23 @@ impl VectorField {
     pub fn search(
         &self,
         target: &[f32],
+        similarity: f32,
         limit: usize,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let search_output = self.inner.search_nodes(target, limit);
-        if search_output.is_empty() {
-            return Ok(());
-        }
+        let mut search = Search::default();
+        let cambridge_blue = VectorPoint::new(target.to_vec());
+        let iter_results = self.inner.search(&cambridge_blue, &mut search);
 
-        for (node, distance) in search_output {
-            let doc_id = match node.idx() {
-                Some(idx) => match idx.0 {
-                    Some(id) => id,
-                    // ???
-                    None => {
-                        warn!("This should not happen");
-                        continue;
-                    }
-                },
-                None => {
-                    warn!("This should not happen");
-                    continue;
-                }
-            };
+        let mut skipped = 0;
+        let mut found = 0;
+        for r in iter_results {
+            let distance = r.distance;
+            // See comment above
+            let score = 1.0 - distance;
+            let doc_id = *r.value;
 
             if filtered_doc_ids.map_or(false, |ids| !ids.contains(&doc_id)) {
                 continue;
@@ -156,81 +183,30 @@ impl VectorField {
                 continue;
             }
 
-            // `hora` returns the score as Euclidean distance.
-            // That means 0.0 is the best score and the larger the score, the worse.
-            // NB: because it is a distance, it is always positive.
-            // NB2: the score is capped with a maximum value.
-            // So, inverting the score could be a good idea.
-            // NB3: we capped the score to "100".
-            // TODO: put `0.01` number in config.
-            let inc = 1.0 / distance.max(0.01);
-
-            let v = output.entry(doc_id).or_insert(0.0);
-            *v += inc;
-        }
-
-        Ok(())
-    }
-
-    fn add_and_dump(
-        &mut self,
-        iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
-    ) -> Result<()> {
-        self.add(iter)?;
-
-        create_if_not_exists(&self.data_dir)?;
-
-        let dump_file_path = self.data_dir.join("index.hnsw");
-        let deleted_documents_file_path = self.data_dir.join("deleted_documents.bin");
-
-        let file_path_str = match dump_file_path.to_str() {
-            Some(file_path_str) => file_path_str,
-            None => {
-                return Err(anyhow!("Cannot convert path to string"));
+            // HNSW returns the results but it does not guarantee the order of the results.
+            // We count the number of the skipped documents due to the similarity.
+            // If we filtered 100 documents due to the similarity, we stop the search.
+            // This is a heuristic to stop the loop hopping the HNSW graph returns the relevant documents before.
+            // Should we put this `100` as a parameter?
+            // TODO: think about it
+            if skipped > 100 {
+                break;
             }
-        };
-        self.inner
-            .dump(file_path_str)
-            .map_err(|e| anyhow!("Cannot dump index to file: {}", e))?;
 
-        BufferedFile::create_or_overwrite(deleted_documents_file_path)
-            .context("Cannot create deleted documents file")?
-            .write_bincode_data(&self.deleted_documents)
-            .context("Cannot serialize deleted documents file")?;
+            if score >= similarity {
+                let v = output.entry(doc_id).or_insert(0.0);
+                *v += score;
 
-        Ok(())
-    }
+                found += 1;
 
-    pub fn clone_to(&self, data_dir: &Path) -> Result<()> {
-        let new_dump_file_path = data_dir.join("index.hnsw");
-        let new_deleted_documents_file_path = data_dir.join("deleted_documents.bin");
-
-        let old_dump_file_path = self.data_dir.join("index.hnsw");
-        let old_deleted_documents_file_path = self.data_dir.join("deleted_documents.bin");
-
-        std::fs::copy(
-            old_deleted_documents_file_path,
-            new_deleted_documents_file_path,
-        )
-        .map_err(|e| anyhow!("Cannot copy deleted documents file: {}", e))?;
-        std::fs::copy(old_dump_file_path, new_dump_file_path)
-            .map_err(|e| anyhow!("Cannot copy hnsw file: {}", e))?;
-
-        Ok(())
-    }
-
-    fn add(&mut self, iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>) -> Result<()> {
-        for (doc_id, vectors) in iter {
-            for vector in vectors {
-                self.inner
-                    .add(&vector, IdxID(Some(doc_id)))
-                    .map_err(|e| anyhow!("Cannot add vector to index: {}", e))?;
+                // Reach the number of documents we want to return
+                if found > limit {
+                    break;
+                }
+            } else {
+                skipped += 1;
             }
         }
-
-        self.inner
-            .build(Metric::Manhattan)
-            .map_err(|e| anyhow!("Cannot build index: {}", e))?;
 
         Ok(())
     }
@@ -238,6 +214,56 @@ impl VectorField {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VectorFieldInfo {
-    pub dimension: usize,
     pub data_dir: PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::utils::generate_new_path;
+
+    use super::*;
+
+    #[test]
+    fn test_vector_index() {
+        let data = [
+            (DocumentId(0), vec![vec![1.0, 1.0, 1.0]]),
+            (DocumentId(1), vec![vec![2.0, 2.0, 2.0]]),
+            (DocumentId(2), vec![vec![-1.0, -1.0, -1.0]]),
+            (DocumentId(3), vec![vec![0.0, 0.0, 0.0]]),
+        ];
+
+        let index = VectorField::from_iter(data.into_iter(), 3, generate_new_path()).unwrap();
+
+        let mut output = HashMap::new();
+        index.search(
+            &[0.1, 0.1, 0.1],
+            0.6,
+            5,
+            None,
+            &mut output,
+            &HashSet::new(),
+        ).unwrap();
+        assert_eq!(HashSet::from([
+            DocumentId(1),
+            DocumentId(0),
+        ]), output.keys().cloned().collect());
+
+        let info = index.get_field_info();
+
+        let index = VectorField::load(info).unwrap();
+
+        let mut output = HashMap::new();
+        index.search(
+            &[0.1, 0.1, 0.1],
+            0.6,
+            5,
+            None,
+            &mut output,
+            &HashSet::new(),
+        ).unwrap();
+        assert_eq!(HashSet::from([
+            DocumentId(1),
+            DocumentId(0),
+        ]), output.keys().cloned().collect());
+    }
 }

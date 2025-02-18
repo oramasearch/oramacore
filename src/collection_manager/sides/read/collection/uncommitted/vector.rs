@@ -27,6 +27,7 @@ impl VectorField {
     pub fn search(
         &self,
         target: &[f32],
+        similarity: f32,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
@@ -43,8 +44,7 @@ impl VectorField {
 
             for (m, vector) in vectors {
                 let score = score_vector(vector, target)?;
-
-                if score <= 0.0 {
+                if score < similarity {
                     continue;
                 }
 
@@ -98,24 +98,15 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
         target.len(),
         "Vector and target must have the same length"
     );
-    let distance: f32 = vector
-        .iter()
-        .zip(target)
-        .map(|(a, b)| (a - b).powi(2))
-        .sum();
-    let distance = distance.sqrt();
 
-    // We want to align this implementation with the `hora` one.
-    // `hora` returns the score as Euclidean distance.
-    // That means 0.0 is the best score and the larger the score, the worse.
-    // NB: because it is a distance, it is always positive.
-    // NB2: the score is capped with a maximum value.
-    // So, inverting the score could be a good idea.
-    // NB3: we capped the score to "100".
-    // TODO: put `0.01` number in config.
-    let score = 1.0 / distance.max(0.01);
+    let mag_1 = vector.iter().map(|x| x.powi(2)).sum::<f32>()
+        .sqrt().max(0.0001);
+    let mag_2 = target.iter().map(|x| x.powi(2)).sum::<f32>()
+        .sqrt().max(0.0001);
+    let dot_product = target.iter().zip(vector).map(|(a, b)| a * b).sum::<f32>();
+    let similarity = dot_product / (mag_1 * mag_2);
 
-    Ok(score)
+    Ok(similarity)
 }
 
 #[cfg(test)]
@@ -123,10 +114,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_uncommitted_vector() {
+        let mut index = VectorField::empty(3);
+        index.insert(DocumentId(0), vec![vec![1.0, 0.0, 0.0]]).unwrap();
+        index.insert(DocumentId(1), vec![vec![1.0, 0.0001, 0.0]]).unwrap();
+        index.insert(DocumentId(2), vec![vec![0.0, 0.0, 1.0]]).unwrap();
+
+        // With similarity
+        let mut output = HashMap::new();
+        index.search(&[1.0, 0.0, 0.0], 0.6, None, &mut output, &Default::default()).unwrap();
+        assert_eq!(HashSet::from([DocumentId(0), DocumentId(1)]), output.keys().cloned().collect());
+
+        // With similarity to 0
+        let mut output = HashMap::new();
+        index.search(&[1.0, 0.0, 0.0], 0.0, None, &mut output, &Default::default()).unwrap();
+        assert_eq!(HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]), output.keys().cloned().collect());
+    }
+
+    #[test]
     fn test_score_vector() {
-        let vector1 = vec![0.0, 0.0, 0.0];
-        let vector2 = vec![0.1, 0.0, 0.0];
-        let vector3 = vec![1.0, 0.0, 0.0];
+        let vector1 = vec![0.1, 0.0, 0.0];
+        let vector2 = vec![0.1, 0.001, 0.0];
+        let vector3 = vec![0.0, 1.0, 0.0];
+
+        dbg!(score_vector(&vector1, &vector1).unwrap());
+        dbg!(score_vector(&vector1, &vector2).unwrap());
+        dbg!(score_vector(&vector1, &vector3).unwrap());
+
         assert!(
             score_vector(&vector1, &vector1).unwrap() > score_vector(&vector1, &vector2).unwrap()
         );

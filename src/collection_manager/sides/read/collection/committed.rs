@@ -89,6 +89,7 @@ impl CommittedCollection {
     pub fn vector_search(
         &self,
         target: &[f32],
+        similarity: f32,
         properties: &[FieldId],
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: usize,
@@ -106,6 +107,7 @@ impl CommittedCollection {
             };
             vector_field.search(
                 target,
+                similarity,
                 limit,
                 filtered_doc_ids,
                 output,
