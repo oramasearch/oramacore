@@ -78,6 +78,7 @@ impl CollectionsWriter {
                 ApiKey(Secret::new("".to_string())),
                 LanguageDTO::English,
                 embedding_sender.clone(),
+                kv.clone(),
             );
             collection
                 .load(
@@ -116,6 +117,7 @@ impl CollectionsWriter {
         collection_option: CreateCollection,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        kv: Arc<KV>,
     ) -> Result<()> {
         let CreateCollection {
             id,
@@ -134,6 +136,7 @@ impl CollectionsWriter {
             write_api_key,
             language.unwrap_or(LanguageDTO::English),
             self.embedding_sender.clone(),
+            kv,
         );
 
         let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {

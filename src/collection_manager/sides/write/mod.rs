@@ -72,6 +72,7 @@ pub struct WriteSide {
     hook_runtime: Arc<HooksRuntime>,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
+    kv: Arc<KV>,
 
     master_api_key: ApiKey,
 }
@@ -122,7 +123,7 @@ impl WriteSide {
             sx,
             hook_runtime.clone(),
             nlp_service.clone(),
-            kv,
+            kv.clone(),
         )
         .await
         .context("Cannot load collections")?;
@@ -136,6 +137,7 @@ impl WriteSide {
             master_api_key,
             operation_counter: Default::default(),
             sender,
+            kv,
         };
 
         let write_side = Arc::new(write_side);
@@ -178,7 +180,12 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .create_collection(
+                option,
+                self.sender.clone(),
+                self.hook_runtime.clone(),
+                self.kv.clone(),
+            )
             .await?;
 
         Ok(())

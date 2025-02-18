@@ -52,6 +52,8 @@ pub struct CollectionWriter {
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 
     doc_id_storage: RwLock<DocIdStorage>,
+
+    kv: RwLock<Arc<KV>>,
 }
 
 impl CollectionWriter {
@@ -61,6 +63,7 @@ impl CollectionWriter {
         write_api_key: ApiKey,
         default_language: LanguageDTO,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        kv: Arc<KV>,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -73,6 +76,7 @@ impl CollectionWriter {
             field_id_generator: Default::default(),
             embedding_sender,
             doc_id_storage: Default::default(),
+            kv: RwLock::new(kv),
         }
     }
 
@@ -561,6 +565,7 @@ impl CollectionWriter {
         self.default_language = dump.default_language;
         self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
         self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
+        self.kv = RwLock::new(kv);
 
         for (field_name, serialized) in dump.fields {
             let field_id_by_name = self.field_id_by_name.read().await;
