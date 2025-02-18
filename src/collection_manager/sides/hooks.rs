@@ -88,10 +88,7 @@ impl HookStorage {
 
     async fn list_hooks(&self, collection_id: CollectionId) -> HashMap<HookName, HookValue> {
         let hooks_map = self.hooks_map.read().await;
-        hooks_map
-            .get(&collection_id)
-            .map(|hooks| hooks.clone())
-            .unwrap_or_default()
+        hooks_map.get(&collection_id).cloned().unwrap_or_default()
     }
 
     async fn delete_hook(

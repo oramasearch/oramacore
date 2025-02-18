@@ -170,7 +170,7 @@ where
     pub fn into_iter(self) -> impl Iterator<Item = (P, V)> {
         self.hnsw
             .into_iter()
-            .zip(self.values.into_iter())
+            .zip(self.values)
             .map(|((p, _), v)| (p, v))
     }
 
@@ -401,10 +401,7 @@ where
         self.zero.push(ZeroNode::default());
 
         let taken = mem::take(&mut self.zero);
-        let zeros = taken
-            .into_iter()
-            .map(|node| RwLock::new(node))
-            .collect::<Vec<_>>();
+        let zeros = taken.into_iter().map(RwLock::new).collect::<Vec<_>>();
 
         /*
         let zeros = self
@@ -432,11 +429,7 @@ where
         let new_layer = construction.top;
         construction.insert(new_point_id, new_layer, &self.layers);
 
-        self.zero = construction
-            .zero
-            .iter()
-            .map(|node| node.read().clone())
-            .collect();
+        self.zero = construction.zero.iter().map(|node| *node.read()).collect();
 
         new_point_id
     }
