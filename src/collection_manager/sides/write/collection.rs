@@ -18,6 +18,7 @@ use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
+            generic_kv::KV,
             hooks::{HookName, HooksRuntime},
             CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
             EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
@@ -545,6 +546,7 @@ impl CollectionWriter {
         path: PathBuf,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        kv: Arc<KV>,
     ) -> Result<()> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?

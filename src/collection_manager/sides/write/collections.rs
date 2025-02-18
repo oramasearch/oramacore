@@ -80,7 +80,12 @@ impl CollectionsWriter {
                 embedding_sender.clone(),
             );
             collection
-                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
+                .load(
+                    collection_dir,
+                    hooks_runtime.clone(),
+                    nlp_service.clone(),
+                    kv.clone(),
+                )
                 .await?;
 
             collections.insert(collection_id, collection);

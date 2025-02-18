@@ -11,6 +11,8 @@ use anyhow::{anyhow, Context, Result};
 use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Status, Streaming};
 use tracing::{info, trace};
 
+pub mod segments;
+
 use crate::{
     collection_manager::dto::{ApiKey, InteractionMessage},
     metrics::{
