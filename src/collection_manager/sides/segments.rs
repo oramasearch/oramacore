@@ -1,35 +1,33 @@
 use crate::{
+    ai::AIService,
     collection_manager::sides::generic_kv::{format_key, KV},
     types::CollectionId,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
-
-use super::AIService;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Segment {
-    id: String,
-    name: String,
-    description: String,
-    goal: Option<String>,
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub goal: Option<String>,
 }
 
 pub struct SegmentInterface {
-    kv: Arc<KV<Segment>>,
+    kv: Arc<KV>,
     ai_service: Arc<AIService>,
 }
 
 impl SegmentInterface {
-    pub fn new(kv: Arc<KV<Segment>>, ai_service: Arc<AIService>) -> Self {
+    pub fn new(kv: Arc<KV>, ai_service: Arc<AIService>) -> Self {
         Self { kv, ai_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {
         let key = format_key(collection_id, &format!("segment:{}", segment.id));
-        self.kv.insert(key, segment);
+        self.kv.insert(key, segment).await?;
         Ok(())
     }
 
@@ -40,8 +38,12 @@ impl SegmentInterface {
     ) -> Result<Option<Segment>> {
         let segment_key = format!("segment:{}", segment_id);
         let key = format_key(collection_id, &segment_key);
-        let kv = self.kv.read().await;
-        Ok(kv.get(&key).cloned())
+
+        match self.kv.get(&key).await {
+            None => Ok(None),
+            Some(Err(e)) => Err(e),
+            Some(Ok(segment)) => Ok(Some(segment)),
+        }
     }
 
     pub async fn delete(
@@ -51,15 +53,22 @@ impl SegmentInterface {
     ) -> Result<Option<Segment>> {
         let segment_key = format!("segment:{}", segment_id);
         let key = format_key(collection_id, &segment_key);
-        let mut kv = self.kv.write().await;
-        Ok(kv.remove(&key))
+
+        match self.kv.remove_and_get(&key).await? {
+            None => Ok(None),
+            Some(Err(e)) => Err(e),
+            Some(Ok(segment)) => Ok(Some(segment)),
+        }
     }
 
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Segment>> {
-        let kv = self.kv.read().await;
         let prefix = format_key(collection_id.clone(), "segment:");
 
-        let segments: Vec<Segment> = kv.prefix_scan(&prefix).map(|(_, value)| value).collect();
+        let segments = self
+            .kv
+            .prefix_scan(&prefix)
+            .await
+            .context("Cannot scan segments")?;
 
         if segments.is_empty() {
             Err(anyhow::anyhow!(format!(

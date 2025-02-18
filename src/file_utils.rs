@@ -54,41 +54,6 @@ pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
     Ok(())
 }
 
-// TODO: check if this function is still used
-pub fn list_directory_in_path<P: AsRef<Path>>(p: P) -> Result<Option<Vec<PathBuf>>> {
-    let mut result = vec![];
-
-    let p: PathBuf = p.as_ref().to_path_buf();
-
-    let entries = match std::fs::read_dir(&p) {
-        Ok(entries) => entries,
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                return Ok(None);
-            }
-            return Err(e).context(format!("Cannot read directory {:?}", p));
-        }
-    };
-
-    for entry in entries {
-        let entry = entry.with_context(|| format!("Cannot get entry from dir {:?}", p))?;
-
-        let is_dir = entry
-            .file_type()
-            .with_context(|| format!("Cannot get file type of {:?}", entry))?
-            .is_dir();
-
-        if !is_dir {
-            continue;
-        }
-
-        let path = entry.path();
-        result.push(path);
-    }
-
-    Ok(Some(result))
-}
-
 pub async fn create_or_overwrite<T: serde::Serialize>(path: PathBuf, data: &T) -> Result<()> {
     let mut file = tokio::fs::File::create(&path)
         .await

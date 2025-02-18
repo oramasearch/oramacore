@@ -18,7 +18,6 @@ use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
-            generic_kv::KV,
             hooks::{HookName, HooksRuntime},
             CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
             EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
@@ -52,8 +51,6 @@ pub struct CollectionWriter {
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
 
     doc_id_storage: RwLock<DocIdStorage>,
-
-    kv: RwLock<Arc<KV>>,
 }
 
 impl CollectionWriter {
@@ -63,7 +60,6 @@ impl CollectionWriter {
         write_api_key: ApiKey,
         default_language: LanguageDTO,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-        kv: Arc<KV>,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -76,7 +72,6 @@ impl CollectionWriter {
             field_id_generator: Default::default(),
             embedding_sender,
             doc_id_storage: Default::default(),
-            kv: RwLock::new(kv),
         }
     }
 
@@ -550,8 +545,8 @@ impl CollectionWriter {
         path: PathBuf,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-        kv: Arc<KV>,
     ) -> Result<()> {
+        println!("Loading collection from {:?}", path);
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -565,7 +560,6 @@ impl CollectionWriter {
         self.default_language = dump.default_language;
         self.field_id_by_name = RwLock::new(dump.field_id_by_name.into_iter().collect());
         self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
-        self.kv = RwLock::new(kv);
 
         for (field_name, serialized) in dump.fields {
             let field_id_by_name = self.field_id_by_name.read().await;

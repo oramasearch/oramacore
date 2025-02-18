@@ -14,8 +14,9 @@ use std::{
 };
 
 use super::{
-    generic_kv::KV,
+    generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
+    segments::{Segment, SegmentInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -34,7 +35,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{segments::Segment, AIService},
+    ai::AIService,
     collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
@@ -72,8 +73,9 @@ pub struct WriteSide {
     hook_runtime: Arc<HooksRuntime>,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
-    kv: Arc<KV>,
 
+    segments: SegmentInterface,
+    kv: Arc<KV>,
     master_api_key: ApiKey,
 }
 
@@ -84,7 +86,6 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-        kv: Arc<KV>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -118,15 +119,24 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        println!("Loading collections {:#?}", collections_writer_config);
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
             hook_runtime.clone(),
             nlp_service.clone(),
-            kv.clone(),
         )
         .await
         .context("Cannot load collections")?;
+
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: Some(sender.clone()),
+        })
+        .context("Cannot load KV")?;
+
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
 
         let write_side = Self {
             document_count,
@@ -137,6 +147,7 @@ impl WriteSide {
             master_api_key,
             operation_counter: Default::default(),
             sender,
+            segments,
             kv,
         };
 
@@ -153,6 +164,8 @@ impl WriteSide {
         info!("Committing write side");
 
         self.collections.commit().await?;
+
+        self.kv.commit().await?;
 
         let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
@@ -180,12 +193,7 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(
-                option,
-                self.sender.clone(),
-                self.hook_runtime.clone(),
-                self.kv.clone(),
-            )
+            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
 
         Ok(())
@@ -395,6 +403,19 @@ impl WriteSide {
             .collect())
     }
 
+    pub async fn insert_segment(
+        &self,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.segments
+            .insert(collection_id.clone(), segment.clone())
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
     fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
         if self.master_api_key != master_api_key {
             return Err(anyhow::anyhow!("Invalid master api key"));
@@ -402,8 +423,6 @@ impl WriteSide {
 
         Ok(())
     }
-
-    fn insert_segment(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {}
 }
 
 fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {

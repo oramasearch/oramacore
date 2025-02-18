@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
+use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
+use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
@@ -28,6 +30,7 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
+use super::segments::Segment;
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -57,6 +60,9 @@ pub struct ReadSide {
     live_offset: RwLock<Offset>,
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
+
+    segments: SegmentInterface,
+    kv: Arc<KV>,
 }
 
 impl ReadSide {
@@ -76,7 +82,7 @@ impl ReadSide {
         let data_dir = config.config.data_dir.clone();
 
         let collections_reader =
-            CollectionsReader::try_load(ai_service, nlp_service, config.config)
+            CollectionsReader::try_load(ai_service.clone(), nlp_service, config.config)
                 .await
                 .context("Cannot load collections")?;
         document_storage
@@ -95,6 +101,14 @@ impl ReadSide {
         };
         info!(offset=?last_offset, "Starting read side");
 
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: None,
+        })
+        .context("Cannot load KV")?;
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
@@ -103,6 +117,8 @@ impl ReadSide {
             data_dir,
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
+            segments,
+            kv,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -124,6 +140,7 @@ impl ReadSide {
             .commit()
             .await
             .context("Cannot commit document storage")?;
+        self.kv.commit().await.context("Cannot commit KV")?;
 
         let offset: Offset = *(self.live_offset.read().await);
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
@@ -259,6 +276,9 @@ impl ReadSide {
                     collection.update(offset, collection_operation).await?;
                 }
             }
+            WriteOperation::KV(op) => {
+                self.kv.update(op).await.context("Cannot insert into KV")?;
+            }
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -294,6 +314,14 @@ impl ReadSide {
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
+    }
+
+    pub async fn get_segment(
+        &self,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.segments.get(collection_id, segment_id).await
     }
 }
 

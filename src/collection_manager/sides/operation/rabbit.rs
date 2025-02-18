@@ -10,7 +10,10 @@ use rabbitmq_stream_client::{
 use serde::Deserialize;
 use tracing::{debug, error, info};
 
-use crate::metrics::{rabbit::RABBITMQ_ENQUEUE_CALCULATION_TIME, Empty};
+use crate::{
+    metrics::{rabbit::RABBITMQ_ENQUEUE_CALCULATION_TIME, Empty},
+    types::CollectionId,
+};
 
 use super::{Offset, WriteOperation};
 
@@ -87,21 +90,28 @@ impl RabbitOperationSender {
     }
 
     pub async fn send(&self, operation: &WriteOperation) -> Result<()> {
-        let coll_id = match operation {
-            WriteOperation::Collection(coll_id, _) => coll_id.clone(),
-            WriteOperation::CreateCollection { id, .. } => id.clone(),
+        let coll_id: Option<CollectionId> = match operation {
+            WriteOperation::Collection(coll_id, _) => Some(coll_id.clone()),
+            WriteOperation::CreateCollection { id, .. } => Some(id.clone()),
+            WriteOperation::KV(_) => None,
         };
 
         let op_type_id = operation.get_type_id();
 
         let message_body = bincode::serialize(&operation).context("Cannot serialize operation")?;
 
-        let message = Message::builder()
+        let prop = Message::builder()
             .message_annotations()
             .message_builder()
             .body(message_body)
-            .application_properties()
-            .insert("coll_id", coll_id.0)
+            .application_properties();
+
+        let prop = if let Some(coll_id) = coll_id {
+            prop.insert("coll_id", coll_id.0)
+        } else {
+            prop
+        };
+        let message = prop
             .insert("v", 1)
             .insert("op_type_id", op_type_id)
             .message_builder()
