@@ -50,12 +50,15 @@ impl SegmentInterface {
 
     pub fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Segment>> {
         let kv = self.kv.read().unwrap();
-        let prefix = format_key(collection_id, "segment:");
+        let prefix = format_key(collection_id.clone(), "segment:");
 
         let segments: Vec<Segment> = kv.prefix_scan(&prefix).map(|(_, value)| value).collect();
 
         if segments.is_empty() {
-            Err(anyhow::anyhow!("No segments found"))
+            Err(anyhow::anyhow!(format!(
+                "No segments found for collection {}",
+                collection_id.0
+            )))
         } else {
             Ok(segments)
         }
