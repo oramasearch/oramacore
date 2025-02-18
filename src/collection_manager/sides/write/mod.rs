@@ -14,6 +14,7 @@ use std::{
 };
 
 use super::{
+    generic_kv::KV,
     hooks::{HookName, HooksRuntime},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
@@ -82,6 +83,7 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        kv: Arc<KV>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -120,6 +122,7 @@ impl WriteSide {
             sx,
             hook_runtime.clone(),
             nlp_service.clone(),
+            kv,
         )
         .await
         .context("Cannot load collections")?;

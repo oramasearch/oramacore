@@ -7,6 +7,7 @@ use redact::Secret;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
+use crate::collection_manager::sides::generic_kv::KV;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
@@ -36,6 +37,7 @@ impl CollectionsWriter {
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        kv: Arc<KV>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
