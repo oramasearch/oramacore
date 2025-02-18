@@ -99,10 +99,18 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
         "Vector and target must have the same length"
     );
 
-    let mag_1 = vector.iter().map(|x| x.powi(2)).sum::<f32>()
-        .sqrt().max(0.0001);
-    let mag_2 = target.iter().map(|x| x.powi(2)).sum::<f32>()
-        .sqrt().max(0.0001);
+    let mag_1 = vector
+        .iter()
+        .map(|x| x.powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.0001);
+    let mag_2 = target
+        .iter()
+        .map(|x| x.powi(2))
+        .sum::<f32>()
+        .sqrt()
+        .max(0.0001);
     let dot_product = target.iter().zip(vector).map(|(a, b)| a * b).sum::<f32>();
     let similarity = dot_product / (mag_1 * mag_2);
 
@@ -116,19 +124,47 @@ mod tests {
     #[test]
     fn test_uncommitted_vector() {
         let mut index = VectorField::empty(3);
-        index.insert(DocumentId(0), vec![vec![1.0, 0.0, 0.0]]).unwrap();
-        index.insert(DocumentId(1), vec![vec![1.0, 0.0001, 0.0]]).unwrap();
-        index.insert(DocumentId(2), vec![vec![0.0, 0.0, 1.0]]).unwrap();
+        index
+            .insert(DocumentId(0), vec![vec![1.0, 0.0, 0.0]])
+            .unwrap();
+        index
+            .insert(DocumentId(1), vec![vec![1.0, 0.0001, 0.0]])
+            .unwrap();
+        index
+            .insert(DocumentId(2), vec![vec![0.0, 0.0, 1.0]])
+            .unwrap();
 
         // With similarity
         let mut output = HashMap::new();
-        index.search(&[1.0, 0.0, 0.0], 0.6, None, &mut output, &Default::default()).unwrap();
-        assert_eq!(HashSet::from([DocumentId(0), DocumentId(1)]), output.keys().cloned().collect());
+        index
+            .search(
+                &[1.0, 0.0, 0.0],
+                0.6,
+                None,
+                &mut output,
+                &Default::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            HashSet::from([DocumentId(0), DocumentId(1)]),
+            output.keys().cloned().collect()
+        );
 
         // With similarity to 0
         let mut output = HashMap::new();
-        index.search(&[1.0, 0.0, 0.0], 0.0, None, &mut output, &Default::default()).unwrap();
-        assert_eq!(HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]), output.keys().cloned().collect());
+        index
+            .search(
+                &[1.0, 0.0, 0.0],
+                0.0,
+                None,
+                &mut output,
+                &Default::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]),
+            output.keys().cloned().collect()
+        );
     }
 
     #[test]

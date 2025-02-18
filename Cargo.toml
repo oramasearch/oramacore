@@ -115,6 +115,7 @@ assert_approx_eq = "1.1.0"
 fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
+fake = "4.0.0"
 
 [[bin]]
 name = "oramacore"

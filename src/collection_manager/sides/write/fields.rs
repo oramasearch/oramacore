@@ -519,10 +519,7 @@ impl EmbeddingField {
 
                 let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
                     Some(Ok(input)) => input,
-                    _ => {
-                        println!("BBBBBBB");
-                        return Ok(());
-                    }
+                    _ => return Ok(()),
                 };
 
                 match input {

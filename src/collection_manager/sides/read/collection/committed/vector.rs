@@ -1,19 +1,39 @@
 use std::{
-    collections::{HashMap, HashSet}, fmt::Debug, path::PathBuf
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    path::PathBuf,
 };
 
 use anyhow::{anyhow, Context, Result};
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    file_utils::{create_if_not_exists, BufferedFile}, indexes::hnsw::{Builder, HnswMap, Point, Search}, types::DocumentId
+    file_utils::{create_if_not_exists, BufferedFile},
+    indexes::hnsw::{Builder, HnswMap, Point, Search},
+    types::DocumentId,
 };
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug)]
 struct VectorPoint {
     magnitude: f32,
     point: Vec<f32>,
+}
+
+impl Serialize for VectorPoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.point.serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for VectorPoint {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Vec::<f32>::deserialize(deserializer).map(VectorPoint::new)
+    }
 }
 
 impl VectorPoint {
@@ -70,31 +90,21 @@ impl VectorField {
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
-
-        println!("Flatting iter.... ------ ");
         let iter = iter.flat_map(|(doc_id, vectors)| {
-            vectors.into_iter().map(move |vector| (VectorPoint::new(vector), doc_id))
+            vectors
+                .into_iter()
+                .map(move |vector| (VectorPoint::new(vector), doc_id))
         });
-        println!("Unzipping.. ------ ");
         let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
-        println!("Unzipped.. ------ ");
-        println!("Building..... ------ ");
         let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
-        println!("Built ------ ");
 
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory")?;
-        println!("Committing.... ------ ");
+        create_if_not_exists(&data_dir).context("Cannot create data directory")?;
         BufferedFile::create(data_dir.join("index.hnsw"))
             .context("Cannot create hnsw file")?
             .write_bincode_data(&inner)
             .context("Cannot write hnsw file")?;
-        println!("Committed.... ------ ");
 
-        Ok(Self {
-            inner,
-            data_dir,
-        })
+        Ok(Self { inner, data_dir })
     }
 
     pub fn from_dump_and_iter(
@@ -112,7 +122,9 @@ impl VectorField {
 
         let iter = iter
             .flat_map(|(doc_id, vectors)| {
-                vectors.into_iter().map(move |vector| (VectorPoint::new(vector), doc_id))
+                vectors
+                    .into_iter()
+                    .map(move |vector| (VectorPoint::new(vector), doc_id))
             })
             .chain(inner.into_iter())
             .filter(|(_, doc_id)| !uncommitted_document_deletions.contains(doc_id));
@@ -120,14 +132,11 @@ impl VectorField {
         let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
         let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
 
-        println!("1 Committing.... ------ ");
-        create_if_not_exists(&new_data_dir)
-            .context("Cannot create data directory")?;
+        create_if_not_exists(&new_data_dir).context("Cannot create data directory")?;
         BufferedFile::create(new_data_dir.join("index.hnsw"))
             .context("Cannot create hnsw file")?
             .write_bincode_data(&inner)
             .context("Cannot write hnsw file")?;
-        println!("1 Committed ------ ");
 
         Ok(Self {
             inner,
@@ -235,35 +244,25 @@ mod tests {
         let index = VectorField::from_iter(data.into_iter(), 3, generate_new_path()).unwrap();
 
         let mut output = HashMap::new();
-        index.search(
-            &[0.1, 0.1, 0.1],
-            0.6,
-            5,
-            None,
-            &mut output,
-            &HashSet::new(),
-        ).unwrap();
-        assert_eq!(HashSet::from([
-            DocumentId(1),
-            DocumentId(0),
-        ]), output.keys().cloned().collect());
+        index
+            .search(&[0.1, 0.1, 0.1], 0.6, 5, None, &mut output, &HashSet::new())
+            .unwrap();
+        assert_eq!(
+            HashSet::from([DocumentId(1), DocumentId(0),]),
+            output.keys().cloned().collect()
+        );
 
         let info = index.get_field_info();
 
         let index = VectorField::load(info).unwrap();
 
         let mut output = HashMap::new();
-        index.search(
-            &[0.1, 0.1, 0.1],
-            0.6,
-            5,
-            None,
-            &mut output,
-            &HashSet::new(),
-        ).unwrap();
-        assert_eq!(HashSet::from([
-            DocumentId(1),
-            DocumentId(0),
-        ]), output.keys().cloned().collect());
+        index
+            .search(&[0.1, 0.1, 0.1], 0.6, 5, None, &mut output, &HashSet::new())
+            .unwrap();
+        assert_eq!(
+            HashSet::from([DocumentId(1), DocumentId(0),]),
+            output.keys().cloned().collect()
+        );
     }
 }

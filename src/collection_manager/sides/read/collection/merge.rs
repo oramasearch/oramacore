@@ -32,7 +32,10 @@ pub fn merge_number_field(
                 (k, d)
             });
 
-            Ok(Some(committed_fields::NumberField::from_iter(committed_iter, data_dir)?))
+            Ok(Some(committed_fields::NumberField::from_iter(
+                committed_iter,
+                data_dir,
+            )?))
         }
         (Some(uncommitted), None) => {
             let iter = uncommitted
@@ -42,7 +45,9 @@ pub fn merge_number_field(
                     d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                     (k, d)
                 });
-            Ok(Some(committed_fields::NumberField::from_iter(iter, data_dir)?))
+            Ok(Some(committed_fields::NumberField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), Some(committed)) => {
             let uncommitted_iter = uncommitted.iter().map(|(n, v)| (SerializableNumber(n), v));
@@ -61,7 +66,9 @@ pub fn merge_number_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::NumberField::from_iter(iter, data_dir)?))
+            Ok(Some(committed_fields::NumberField::from_iter(
+                iter, data_dir,
+            )?))
         }
     }
 }
@@ -93,7 +100,9 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::BoolField::from_iter(iter, data_dir)?))
+            Ok(Some(committed_fields::BoolField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), None) => {
             let (true_docs, false_docs) = uncommitted.clone_inner();
@@ -107,7 +116,9 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::BoolField::from_iter(iter, data_dir)?))
+            Ok(Some(committed_fields::BoolField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), Some(committed)) => {
             let (uncommitted_true_docs, uncommitted_false_docs) = uncommitted.clone_inner();
@@ -167,14 +178,16 @@ pub fn merge_string_field(
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            Ok(Some(committed_fields::StringField::from_iter_and_committed(
-                entries.into_iter(),
-                committed,
-                length_per_documents,
-                data_dir,
-                uncommitted_document_deletions,
-            )
-            .context("Failed to merge string field")?))
+            Ok(Some(
+                committed_fields::StringField::from_iter_and_committed(
+                    entries.into_iter(),
+                    committed,
+                    length_per_documents,
+                    data_dir,
+                    uncommitted_document_deletions,
+                )
+                .context("Failed to merge string field")?,
+            ))
         }
     }
 }
@@ -205,7 +218,6 @@ pub fn merge_vector_field(
                 )?;
                 Ok(Some(new_field))
             }
-            
         }
         (Some(uncommitted), None) => {
             let new_field = committed_fields::VectorField::from_iter(
@@ -216,7 +228,7 @@ pub fn merge_vector_field(
                 data_dir,
             )?;
             Ok(Some(new_field))
-        },
+        }
         (Some(uncommitted), Some(committed)) => {
             let info = committed.get_field_info();
             let new_field = committed_fields::VectorField::from_dump_and_iter(

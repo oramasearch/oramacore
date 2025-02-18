@@ -938,8 +938,8 @@ async fn test_empty_term() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_vector_search_grpc() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
-
-    let (write_side, read_side) = create(create_oramacore_config()).await?;
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
     write_side
@@ -974,9 +974,11 @@ async fn test_vector_search_grpc() -> Result<()> {
         }),
     ];
     for i in 4..100 {
+        use fake::{Fake, Faker};
+        let s: String = Faker.fake();
         docs.push(json!({
             "id": i.to_string(),
-            "text": "Max Pezzali is the best.",
+            "text": s,
         }));
     }
 
@@ -984,8 +986,9 @@ async fn test_vector_search_grpc() -> Result<()> {
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
         collection_id.clone(),
-        docs
-    ).await?;
+        docs,
+    )
+    .await?;
 
     let output = read_side
         .search(
@@ -1001,11 +1004,7 @@ async fn test_vector_search_grpc() -> Result<()> {
         .await?;
     assert_eq!(output.count, 2);
 
-    println!("------ 1");
-
     read_side.commit().await?;
-
-    println!("------ COMMITTED");
 
     let output = read_side
         .search(
@@ -1021,8 +1020,6 @@ async fn test_vector_search_grpc() -> Result<()> {
         .await?;
     assert_eq!(output.count, 2);
 
-    println!("------ 2");
-
     // Due to the lack of a large enough dataset,
     // the search will not return 2 results as expected.
     // But it should return at least one result.
@@ -1030,7 +1027,6 @@ async fn test_vector_search_grpc() -> Result<()> {
     assert_ne!(output.count, 0);
     assert_ne!(output.hits.len(), 0);
     assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
-
     Ok(())
 }
 

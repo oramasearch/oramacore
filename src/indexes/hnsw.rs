@@ -3,9 +3,11 @@
  * It is also released under the MIT license.
  * See the original repo here:
  * https://github.com/djc/instant-distance/tree/84745917de862ca02da02105549c6e13edd8d3ac/instant-distance
+ * Some part of this code comes also from here:
+ * https://github.com/djc/instant-distance/pull/40/files
  */
-
 use std::hash::Hash;
+use std::mem;
 use std::ops::{Deref, Index};
 
 use ordered_float::OrderedFloat;
@@ -123,6 +125,7 @@ impl Default for Heuristic {
 #[derive(Deserialize, Serialize)]
 pub struct HnswMap<P, V> {
     hnsw: Hnsw<P>,
+    ef_construction: usize,
     pub values: Vec<V>,
 }
 
@@ -132,18 +135,21 @@ where
     V: Clone,
 {
     fn new(points: Vec<P>, values: Vec<V>, builder: Builder) -> Self {
+        let ef_construction = builder.ef_construction;
         let (hnsw, ids) = Hnsw::new(points, builder);
 
-        println!("Sorting....");
         let mut sorted = ids.into_iter().enumerate().collect::<Vec<_>>();
         sorted.sort_unstable_by(|a, b| a.1.cmp(&b.1));
         let new = sorted
             .into_iter()
             .map(|(src, _)| values[src].clone())
             .collect();
-        println!("Done....");
 
-        Self { hnsw, values: new }
+        Self {
+            hnsw,
+            values: new,
+            ef_construction,
+        }
     }
 
     pub fn search<'a>(
@@ -162,13 +168,20 @@ where
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = (P, V)> {
-        self.hnsw.into_iter()
+        self.hnsw
+            .into_iter()
             .zip(self.values.into_iter())
             .map(|((p, _), v)| (p, v))
     }
 
     pub fn get(&self, i: usize, search: &Search) -> Option<MapItem<'_, P, V>> {
         Some(MapItem::from(self.hnsw.get(i, search)?, self))
+    }
+
+    pub fn insert_multiple(&mut self, points: Vec<P>, values: Vec<V>) {
+        self.hnsw
+            .insert_multiple(points, self.ef_construction, Some(Heuristic::default()));
+        self.values.extend(values);
     }
 }
 
@@ -245,13 +258,11 @@ where
         // construction. This allows us to copy higher layers to lower layers as construction
         // progresses, while preserving randomness in each point's layer and insertion order.
 
-        println!("Randomizing....");
         assert!(points.len() < u32::MAX as usize);
         let mut shuffled = (0..points.len())
             .map(|i| (PointId(rng.random_range(0..points.len() as u32)), i))
             .collect::<Vec<_>>();
         shuffled.sort_unstable();
-        println!("Done....");
 
         let mut out = vec![INVALID; points.len()];
         let points = shuffled
@@ -291,9 +302,7 @@ where
             ef_construction,
         };
 
-        println!("Inserting....");
         for (layer, range) in ranges {
-            println!("a");
             let inserter = |pid| state.insert(pid, layer, &layers);
 
             let end = range.end;
@@ -314,7 +323,6 @@ where
                     .collect_into_vec(&mut layers[layer.0 - 1]);
             }
         }
-        println!("Inserted");
 
         (
             Self {
@@ -378,6 +386,59 @@ where
             .into_iter()
             .enumerate()
             .map(|(i, p)| (p, PointId(i as u32)))
+    }
+
+    pub fn insert_multiple(
+        &mut self,
+        points: Vec<P>,
+        ef_construction: usize,
+        heuristic: Option<Heuristic>,
+    ) -> PointId {
+        let new_pid = self.points.len();
+        let new_point_id = PointId(new_pid as u32);
+
+        self.points.extend(points);
+        self.zero.push(ZeroNode::default());
+
+        let taken = mem::take(&mut self.zero);
+        let zeros = taken
+            .into_iter()
+            .map(|node| RwLock::new(node))
+            .collect::<Vec<_>>();
+
+        /*
+        let zeros = self
+            .zero
+            .iter()
+            .map(|z| RwLock::new(z.clone()))
+            .collect::<Vec<_>>();
+        */
+
+        let top = if self.layers.is_empty() {
+            LayerId(0)
+        } else {
+            LayerId(self.layers.len())
+        };
+
+        let construction = Construction {
+            zero: zeros.as_slice(),
+            pool: SearchPool::new(self.points.len()),
+            top,
+            points: self.points.as_slice(),
+            heuristic,
+            ef_construction,
+        };
+
+        let new_layer = construction.top;
+        construction.insert(new_point_id, new_layer, &self.layers);
+
+        self.zero = construction
+            .zero
+            .iter()
+            .map(|node| node.read().clone())
+            .collect();
+
+        new_point_id
     }
 
     #[doc(hidden)]
@@ -812,8 +873,7 @@ impl Visited {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, Default)]
 pub(crate) struct UpperNode([PointId; M]);
 
 impl UpperNode {
@@ -832,12 +892,8 @@ impl<'a> Layer for &'a [UpperNode] {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ZeroNode(
-    #[serde(with = "BigArray")]
-    pub(crate) [PointId; M * 2],
-);
+#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+pub(crate) struct ZeroNode(#[serde(with = "BigArray")] pub(crate) [PointId; M * 2]);
 
 impl ZeroNode {
     pub(crate) fn rewrite(&mut self, mut iter: impl Iterator<Item = PointId>) {
@@ -991,8 +1047,7 @@ pub struct Candidate {
 /// References a `Point` in the `Hnsw`
 ///
 /// This can be used to index into the `Hnsw` to refer to the `Point` data.
-#[derive(Deserialize, Serialize)]
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PointId(pub(crate) u32);
 
 impl PointId {
@@ -1048,6 +1103,8 @@ pub(crate) const INVALID: PointId = PointId(u32::MAX);
 
 #[cfg(test)]
 mod tests {
+    use rand::rngs::ThreadRng;
+
     use super::*;
 
     #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1056,7 +1113,8 @@ mod tests {
     impl super::Point for Point {
         fn distance(&self, other: &Self) -> f32 {
             // Euclidean distance metric
-            (((self.0 - other.0).pow(2) + (self.1 - other.1).pow(2) + (self.2 - other.2).pow(2)) as f32)
+            (((self.0 - other.0).pow(2) + (self.1 - other.1).pow(2) + (self.2 - other.2).pow(2))
+                as f32)
                 .sqrt()
         }
     }
@@ -1081,5 +1139,87 @@ mod tests {
         assert_eq!(closest_point_1.pid, closest_point_2.pid);
         assert_eq!(closest_point_1.point, closest_point_2.point);
         assert_eq!(closest_point_1.value, closest_point_2.value);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp, clippy::approx_constant)]
+    fn incremental_insert() {
+        let points = (0..4)
+            .map(|i| Point(i as isize, i as isize, 0))
+            .collect::<Vec<_>>();
+        let values = vec!["zero", "one", "two", "three"];
+        let seed = ThreadRng::default().random::<u64>();
+        let builder = Builder::default().seed(seed);
+
+        let mut map = builder.build(points, values);
+
+        map.insert_multiple(vec![Point(4, 4, 0)], vec!["four"]);
+
+        let mut search = Search::default();
+
+        for (i, item) in map.search(&Point(4, 4, 0), &mut search).enumerate() {
+            match i {
+                0 => {
+                    assert_eq!(item.distance, 0.0);
+                    assert_eq!(item.value, &"four");
+                }
+                1 => {
+                    assert_eq!(item.distance, 1.4142135);
+                    assert!(item.value == &"three");
+                }
+                2 => {
+                    assert_eq!(item.distance, 2.828427);
+                    assert!(item.value == &"two");
+                }
+                3 => {
+                    assert_eq!(item.distance, 4.2426405);
+                    assert!(item.value == &"one");
+                }
+                4 => {
+                    assert_eq!(item.distance, 5.656854);
+                    assert!(item.value == &"zero");
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        // Note
+        // This has the same expected results as incremental_insert but builds
+        // the whole map in one go. Only here for comparison.
+        {
+            let points = (0..5)
+                .map(|i| Point(i as isize, i as isize, 0))
+                .collect::<Vec<_>>();
+            let values = vec!["zero", "one", "two", "three", "four"];
+            let seed = ThreadRng::default().random::<u64>();
+            let builder = Builder::default().seed(seed);
+            let map = builder.build(points, values);
+            let mut search = Search::default();
+            for (i, item) in map.search(&Point(4, 4, 0), &mut search).enumerate() {
+                match i {
+                    0 => {
+                        assert_eq!(item.distance, 0.0);
+                        assert_eq!(item.value, &"four");
+                    }
+                    1 => {
+                        assert_eq!(item.distance, 1.4142135);
+                        assert!(item.value == &"three");
+                    }
+                    2 => {
+                        assert_eq!(item.distance, 2.828427);
+                        assert!(item.value == &"two");
+                    }
+                    3 => {
+                        assert_eq!(item.distance, 4.2426405);
+                        assert!(item.value == &"one");
+                    }
+                    4 => {
+                        assert_eq!(item.distance, 5.656854);
+                        assert!(item.value == &"zero");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }

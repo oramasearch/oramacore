@@ -8,7 +8,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use bincode::de;
 use committed::CommittedCollection;
 use dashmap::DashMap;
 use debug_panic::debug_panic;
@@ -267,7 +266,10 @@ impl CollectionReader {
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
-        debug!("Merging number fields {:?}", uncommitted_infos.number_fields);
+        debug!(
+            "Merging number fields {:?}",
+            uncommitted_infos.number_fields
+        );
         for field_id in uncommitted_infos.number_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -298,7 +300,7 @@ impl CollectionReader {
                 None => {
                     debug_panic!("Number field is not changed");
                     continue;
-                },
+                }
                 Some(new_committed_number_index) => new_committed_number_index,
             };
 
@@ -344,7 +346,10 @@ impl CollectionReader {
 
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
-        debug!("Merging string fields {:?}", uncommitted_infos.string_fields);
+        debug!(
+            "Merging string fields {:?}",
+            uncommitted_infos.string_fields
+        );
         for field_id in uncommitted_infos.string_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -376,7 +381,7 @@ impl CollectionReader {
                 None => {
                     debug_panic!("String field is not changed");
                     continue;
-                },
+                }
                 Some(new_committed_string_index) => new_committed_string_index,
             };
 
@@ -456,7 +461,7 @@ impl CollectionReader {
                 None => {
                     debug_panic!("Bool field is not changed");
                     continue;
-                },
+                }
                 Some(new_committed_bool_index) => new_committed_bool_index,
             };
 
@@ -501,7 +506,10 @@ impl CollectionReader {
 
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
-        debug!("Merging vector fields {:?}", uncommitted_infos.vector_fields);
+        debug!(
+            "Merging vector fields {:?}",
+            uncommitted_infos.vector_fields
+        );
         for field_id in uncommitted_infos.vector_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -532,7 +540,7 @@ impl CollectionReader {
                 None => {
                     debug_panic!("Vector field is not changed");
                     continue;
-                },
+                }
                 Some(new_committed_vector_index) => new_committed_vector_index,
             };
 
