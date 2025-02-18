@@ -144,9 +144,13 @@ impl KV {
     ) -> Result<Vec<V>> {
         let read_ref = self.data.read().await;
 
-        let data = read_ref.find_prefixes(prefix.as_bytes().iter().cloned());
+        let data = read_ref.find_postfixes(prefix.as_bytes().iter().cloned());
+
         data.into_iter()
-            .map(|value| serde_json::from_str(value).context("Cannot deserialize value"))
+            .map(|value| {
+                serde_json::from_str(value)
+                    .context("Cannot deserialize prefix value in segments scan")
+            })
             .collect()
     }
 
