@@ -323,6 +323,13 @@ impl ReadSide {
     ) -> Result<Option<Segment>> {
         self.segments.get(collection_id, segment_id).await
     }
+
+    pub async fn get_all_segments_by_collection(
+        &self,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Segment>> {
+        self.segments.list_by_collection(collection_id).await
+    }
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {

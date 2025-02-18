@@ -423,6 +423,34 @@ impl WriteSide {
 
         Ok(())
     }
+
+    pub async fn delete_segment(
+        &self,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.segments
+            .delete(collection_id.clone(), segment_id.clone())
+            .await
+            .context("Cannot delete segment")
+    }
+
+    pub async fn update_segment(
+        &self,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.segments
+            .delete(collection_id.clone(), segment.id.clone())
+            .await
+            .context("Cannot delete segment")?;
+        self.segments
+            .insert(collection_id, segment)
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
 }
 
 fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
