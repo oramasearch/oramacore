@@ -34,7 +34,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::AIService,
+    ai::{segments::Segment, AIService},
     collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
@@ -402,6 +402,8 @@ impl WriteSide {
 
         Ok(())
     }
+
+    fn insert_segment(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {}
 }
 
 fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {

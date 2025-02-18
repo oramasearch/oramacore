@@ -1,37 +1,58 @@
-use crate::types::CollectionId;
+use crate::{file_utils::BufferedFile, types::CollectionId};
+use anyhow::{Context, Result};
 use ptrie::Trie;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
+use tokio::sync::RwLock;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct KV<V = String> {
-    data: Trie<u8, V>,
+    data: RwLock<Trie<u8, V>>,
 }
 
-impl<V: Clone> KV<V> {
+impl<V: Clone + Serialize + DeserializeOwned> KV<V> {
     pub fn new() -> Self {
-        KV { data: Trie::new() }
+        KV {
+            data: RwLock::new(Trie::new()),
+        }
     }
 
-    pub fn insert(&mut self, key: String, value: V) {
-        self.data.insert(key.as_bytes().iter().cloned(), value);
-    }
-
-    pub fn get(&self, key: &str) -> Option<&V> {
-        self.data.get(key.as_bytes().iter().cloned())
-    }
-
-    pub fn remove(&mut self, key: &str) -> Option<V> {
-        self.data.remove(key.as_bytes().iter().cloned())
-    }
-
-    pub fn prefix_scan<'a>(&'a self, prefix: &str) -> impl Iterator<Item = (Vec<u8>, V)> + 'a
-    where
-        V: Clone,
-    {
-        let prefix_bytes = prefix.as_bytes().to_vec();
+    pub async fn insert(&self, key: String, value: V) {
         self.data
-            .iter()
-            .filter(move |(key, _)| key.starts_with(&prefix_bytes))
+            .write()
+            .await
+            .insert(key.as_bytes().iter().cloned(), value)
+    }
+
+    pub async fn get(&self, key: &str) -> Option<V> {
+        let read_ref = self.data.read().await;
+        read_ref.get(key.as_bytes().iter().cloned()).cloned()
+    }
+
+    pub async fn remove(&self, key: &str) -> Option<V> {
+        self.data
+            .write()
+            .await
+            .remove(key.as_bytes().iter().cloned())
+    }
+
+    pub async fn prefix_scan(&self, prefix: &str) -> Vec<V> {
+        let read_ref = self.data.read().await;
+
+        read_ref
+            .find_prefixes(prefix.as_bytes().iter().cloned())
+            .into_iter()
+            .map(|v| v.clone())
+            .collect()
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        let data = self.data.read().await;
+        let path = "data/kv".to_string();
+
+        BufferedFile::create_or_overwrite(path)
+            .context("Cannot create previous kv info")?
+            .write_json_data(&*data)
+            .context("Cannot write previous kv info")
     }
 }
 
