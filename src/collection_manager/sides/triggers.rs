@@ -1,5 +1,5 @@
 use super::generic_kv::{format_key, KV};
-use crate::{ai::AIService, types::CollectionId};
+use crate::{ai::AIService, collection_manager::dto::InteractionMessage, types::CollectionId};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -58,6 +58,12 @@ impl TriggerInterface {
         }
     }
 
+    pub async fn has_triggers(&self, collection_id: CollectionId) -> Result<bool> {
+        let triggers = self.list_by_collection(collection_id).await?;
+
+        Ok(!triggers.is_empty())
+    }
+
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Trigger>> {
         let prefix = format!("{}:trigger:", collection_id.0.clone());
 
@@ -67,6 +73,17 @@ impl TriggerInterface {
         ))?;
 
         Ok(triggers)
+    }
+
+    pub async fn perform_trigger_selection(
+        &self,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<crate::ai::TriggerResponse> {
+        let triggers = self.list_by_collection(collection_id).await?;
+        let selected_trigger = self.ai_service.get_trigger(triggers, conversation).await?;
+
+        Ok(selected_trigger)
     }
 }
 

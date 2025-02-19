@@ -120,6 +120,60 @@ impl AIService {
         self.embed(model, input, OramaIntent::Passage).await
     }
 
+    pub async fn get_trigger(
+        &self,
+        triggers: Vec<crate::collection_manager::sides::triggers::Trigger>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<TriggerResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let grpc_triggers = triggers
+            .iter()
+            .map(|trigger| Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            })
+            .collect();
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(TriggerRequest {
+            triggers: grpc_triggers,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_trigger(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform trigger request")?;
+
+        Ok(response)
+    }
+
+    pub async fn get_segments(
+        &self,
+        segments: Vec<Segment>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<SegmentResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(SegmentRequest {
+            segments,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_segment(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform segment request")?;
+
+        Ok(response)
+    }
+
     pub async fn chat(
         &self,
         llm_type: LlmType,

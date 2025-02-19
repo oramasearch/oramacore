@@ -61,6 +61,12 @@ impl SegmentInterface {
         }
     }
 
+    pub async fn has_segments(&self, collection_id: CollectionId) -> Result<bool> {
+        let segments = self.list_by_collection(collection_id).await?;
+
+        Ok(!segments.is_empty())
+    }
+
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Segment>> {
         let prefix = format!("{}:segment:", collection_id.0.clone());
 
