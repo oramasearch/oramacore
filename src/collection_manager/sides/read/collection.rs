@@ -10,6 +10,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use committed::CommittedCollection;
 use dashmap::DashMap;
+use debug_panic::debug_panic;
 use dump::{CollectionInfo, CollectionInfoV1};
 use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
 use redact::Secret;
@@ -265,6 +266,10 @@ impl CollectionReader {
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
+        debug!(
+            "Merging number fields {:?}",
+            uncommitted_infos.number_fields
+        );
         for field_id in uncommitted_infos.number_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -290,6 +295,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_number_index = match new_committed_number_index {
+                None => {
+                    debug_panic!("Number field is not changed");
+                    continue;
+                }
+                Some(new_committed_number_index) => new_committed_number_index,
+            };
+
             let field_info = new_committed_number_index.get_field_info();
             current_collection_info
                 .number_field_infos
@@ -328,9 +342,14 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Number fields merged");
 
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
+        debug!(
+            "Merging string fields {:?}",
+            uncommitted_infos.string_fields
+        );
         for field_id in uncommitted_infos.string_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -357,6 +376,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_string_index = match new_committed_string_index {
+                None => {
+                    debug_panic!("String field is not changed");
+                    continue;
+                }
+                Some(new_committed_string_index) => new_committed_string_index,
+            };
+
             let field_info = new_committed_string_index.get_field_info();
             string_fields.insert(field_id, new_committed_string_index);
             current_collection_info
@@ -399,9 +427,11 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("String fields merged");
 
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
+        debug!("Merging bool fields {:?}", uncommitted_infos.bool_fields);
         for field_id in uncommitted_infos.bool_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -427,6 +457,14 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+            let new_committed_bool_index = match new_committed_bool_index {
+                None => {
+                    debug_panic!("Bool field is not changed");
+                    continue;
+                }
+                Some(new_committed_bool_index) => new_committed_bool_index,
+            };
+
             let field_info = new_committed_bool_index.get_field_info();
             bool_fields.insert(field_id, new_committed_bool_index);
             current_collection_info
@@ -464,9 +502,14 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Bool fields merged");
 
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
+        debug!(
+            "Merging vector fields {:?}",
+            uncommitted_infos.vector_fields
+        );
         for field_id in uncommitted_infos.vector_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
                 collection: self.id.0.clone().into(),
@@ -492,6 +535,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_vector_index = match new_committed_vector_index {
+                None => {
+                    debug_panic!("Vector field is not changed");
+                    continue;
+                }
+                Some(new_committed_vector_index) => new_committed_vector_index,
+            };
+
             let field_info = new_committed_vector_index.get_field_info();
             vector_fields.insert(field_id, new_committed_vector_index);
             current_collection_info
@@ -550,6 +602,7 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Vector fields merged");
 
         // Read lock ends
         drop(committed);
@@ -1002,6 +1055,7 @@ impl CollectionReader {
             for target in targets {
                 committed_lock.vector_search(
                     &target,
+                    similarity,
                     fields,
                     filtered_doc_ids,
                     limit.0,
@@ -1010,6 +1064,7 @@ impl CollectionReader {
                 )?;
                 uncommitted_lock.vector_search(
                     &target,
+                    similarity,
                     fields,
                     filtered_doc_ids,
                     &mut output,
@@ -1018,16 +1073,6 @@ impl CollectionReader {
             }
         }
 
-        let similarity = similarity * 100.0;
-        // We *could* perform this filter inside the search.
-        // Anyway, a document can match multiple time the same query.
-        // In that case, we should consider the sum of the scores.
-        // So, we are doing the filter here.
-        // TODO: consider if we could ignore multiple matching
-        let output = output
-            .into_iter()
-            .filter(|(_, v)| *v >= similarity)
-            .collect();
         Ok(output)
     }
 

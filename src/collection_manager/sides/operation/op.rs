@@ -398,7 +398,6 @@ mod tests {
         ];
 
         for op in ops {
-            println!("{:?}", op);
             let serialized = bincode::serialize(&op).unwrap();
             let _: WriteOperation = bincode::deserialize(&serialized).unwrap();
         }
