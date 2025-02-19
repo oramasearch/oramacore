@@ -8,6 +8,8 @@ service LLMService {
     rpc Chat (ChatRequest) returns (ChatResponse);
     rpc ChatStream (ChatRequest) returns (stream ChatStreamResponse);
     rpc PlannedAnswer (PlannedAnswerRequest) returns (stream PlannedAnswerResponse);
+
+    rpc GetSegment (SegmentRequest) returns (SegmentResponse);
 }
 
 enum OramaModel {
@@ -103,4 +105,26 @@ message HealthCheckRequest {
 // Response message for health check
 message HealthCheckResponse {
     string status = 1;           // Service status
+}
+
+// ----------------------------------------------------------------
+// Segments
+// ----------------------------------------------------------------
+
+message Segment {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+    optional string goal = 4;
+}
+
+message SegmentRequest {
+    repeated Segment segments = 1;
+    Conversation conversation = 2;
+}
+
+message SegmentResponse {
+    string id = 1;
+    string name = 2;
+    float probability = 3;
 }

@@ -1,22 +1,31 @@
 import textwrap
-from typing import Dict, Callable, TypeAlias, Literal
+from typing import Dict, Callable, Any, Literal, TypeVar, Union
 
-PromptTemplate: TypeAlias = str | Callable[[str], str]
+Context = TypeVar("Context")
+
+PromptTemplate = Union[str, Callable[[str, Context], str]]
 
 TemplateKey = Literal[
     "vision_ecommerce:system",
     "vision_ecommerce:user",
     "vision_generic:system",
     "vision_generic:user",
+    "vision_tech_documentation:system",
+    "vision_tech_documentation:user",
+    "vision_code:system",
+    "vision_code:user",
     "google_query_translator:system",
     "google_query_translator:user",
     "answer:system",
     "answer:user",
     "party_planner:system",
     "party_planner:user",
+    "segmenter:system",
+    "segmenter:user",
 ]
 
-PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
+
+PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
     # ------------------------------
     # Vision eCommerce model
     # ------------------------------
@@ -100,7 +109,7 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
 
         Remember, each step will produce the input for the next one. So you must only combine actions that can work one after another.
         
-        You must return an JSON object that looks like this:
+        You must return a JSON object that looks like this:
 
         {
           "actions": [
@@ -115,4 +124,33 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
         """
     ),
     "party_planner:user": lambda input, actions: f"### Input\n{input}\n\n### Actions\n{actions}",
+    # ------------------------------
+    # Segmenter
+    # ------------------------------
+    "segmenter:system": textwrap.dedent(
+        """
+          You're a tool used to determine the Persona of a user based on the messages they send.
+          You'll receive a series of Personas (### Personas) in a JSON format, and a conversation (### Conversation) between a user and an AI assistant.
+          Your job is to return the most likely Persona for the user based on the messages they sent.
+
+          You must return a JSON object containing:
+
+          - id: The ID of the Persona
+          - name: The name of the Persona
+          - probability: The probability of the user being classified as this Persona
+
+          Here's an example:
+
+          {
+            "id": "clx4rwbwy0003zdv7ddsku14w",
+            "name": "evaluator",
+            "probability": 0.7
+          }
+
+          In the example above, the user is classified as an "evaluator" with a 70% probability.
+
+          Reply with a valid JSON and nothing more.
+        """
+    ),
+    "segmenter:user": lambda input, context: f"### Personas\n{context}\n\n### Conversation\n{input}",
 }
