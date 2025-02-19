@@ -126,7 +126,7 @@ impl Default for Heuristic {
 pub struct HnswMap<P, V> {
     hnsw: Hnsw<P>,
     ef_construction: usize,
-    pub values: Vec<V>,
+    values: Vec<V>,
 }
 
 impl<P, V> HnswMap<P, V>
@@ -150,6 +150,10 @@ where
             values: new,
             ef_construction,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.hnsw.points.len()
     }
 
     pub fn search<'a>(

@@ -109,7 +109,7 @@ impl VectorField {
 
     pub fn from_dump_and_iter(
         data_dir: PathBuf,
-        iter: impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+        iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
         new_data_dir: PathBuf,
     ) -> Result<Self> {
@@ -119,6 +119,14 @@ impl VectorField {
             .context("Cannot open hnsw file")?
             .read_bincode_data()
             .context("Cannot read hnsw file")?;
+
+        // HnswMap exposes an `insert_multiple` method that is faster than building the index from scratch.
+        // We could implement some logic to use it here.
+        // NB: `insert_multuple` doens't change the internal structure of the HnswMap.
+        // Instead, building the index from scratch optimizes the structure.
+        // We should implement an heuristic to decide when to use `insert_multiple` and when to build the index from scratch.
+        // For now, we always build the index from scratch.
+        // TODO: implement the heuristic
 
         let iter = iter
             .flat_map(|(doc_id, vectors)| {

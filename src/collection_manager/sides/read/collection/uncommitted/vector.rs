@@ -81,7 +81,7 @@ impl VectorField {
         self.dimension
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (DocumentId, Vec<Vec<f32>>)> + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)> + '_ {
         self.data
             .iter()
             .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
