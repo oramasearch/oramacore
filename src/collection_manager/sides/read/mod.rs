@@ -31,6 +31,7 @@ use crate::{
 };
 
 use super::segments::Segment;
+use super::triggers::{Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -61,6 +62,7 @@ pub struct ReadSide {
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
 
+    triggers: TriggerInterface,
     segments: SegmentInterface,
     kv: Arc<KV>,
 }
@@ -108,6 +110,7 @@ impl ReadSide {
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -118,6 +121,7 @@ impl ReadSide {
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
             segments,
+            triggers,
             kv,
         };
 
@@ -329,6 +333,21 @@ impl ReadSide {
         collection_id: CollectionId,
     ) -> Result<Vec<Segment>> {
         self.segments.list_by_collection(collection_id).await
+    }
+
+    pub async fn get_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.triggers.get(collection_id, trigger_id).await
+    }
+
+    pub async fn get_all_triggers_by_collection(
+        &self,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Trigger>> {
+        self.triggers.list_by_collection(collection_id).await
     }
 }
 

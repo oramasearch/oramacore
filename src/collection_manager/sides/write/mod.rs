@@ -17,6 +17,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
     segments::{Segment, SegmentInterface},
+    triggers::{Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -75,6 +76,7 @@ pub struct WriteSide {
     insert_batch_commit_size: u64,
 
     segments: SegmentInterface,
+    triggers: TriggerInterface,
     kv: Arc<KV>,
     master_api_key: ApiKey,
 }
@@ -137,6 +139,7 @@ impl WriteSide {
 
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
         let write_side = Self {
             document_count,
@@ -148,6 +151,7 @@ impl WriteSide {
             operation_counter: Default::default(),
             sender,
             segments,
+            triggers,
             kv,
         };
 
@@ -403,6 +407,14 @@ impl WriteSide {
             .collect())
     }
 
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
+        if self.master_api_key != master_api_key {
+            return Err(anyhow::anyhow!("Invalid master api key"));
+        }
+
+        Ok(())
+    }
+
     pub async fn insert_segment(
         &self,
         collection_id: CollectionId,
@@ -412,14 +424,6 @@ impl WriteSide {
             .insert(collection_id.clone(), segment.clone())
             .await
             .context("Cannot insert segment")?;
-
-        Ok(())
-    }
-
-    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
-        if self.master_api_key != master_api_key {
-            return Err(anyhow::anyhow!("Invalid master api key"));
-        }
 
         Ok(())
     }
@@ -448,6 +452,47 @@ impl WriteSide {
             .insert(collection_id, segment)
             .await
             .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        self.triggers
+            .insert(collection_id.clone(), trigger.clone())
+            .await
+            .context("Cannot insert trigger")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.triggers
+            .delete(collection_id.clone(), trigger_id.clone())
+            .await
+            .context("Cannot delete trigger")
+    }
+
+    pub async fn update_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        self.triggers
+            .delete(collection_id.clone(), trigger.id.clone())
+            .await
+            .context("Cannot delete trigger")?;
+        self.triggers
+            .insert(collection_id, trigger)
+            .await
+            .context("Cannot insert trigger")?;
 
         Ok(())
     }

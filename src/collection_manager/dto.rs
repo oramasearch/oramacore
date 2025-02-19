@@ -429,6 +429,27 @@ pub struct UpdateSegmentParams {
     pub goal: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertTriggerParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub response: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteTriggerParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateTriggerParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub response: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
