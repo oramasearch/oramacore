@@ -19,6 +19,7 @@ from service_pb2 import (
     LLMType,
     PlannedAnswerResponse,
     SegmentResponse as ProtoSegmentResponse,
+    TriggerResponse as ProtoTriggerResponse,
 )
 from src.utils import OramaAIConfig
 from src.prompts.party_planner import PartyPlannerActions
@@ -145,7 +146,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             return ProtoSegmentResponse()
 
         try:
-            model_name = "answer"
+            model_name = "answer"  # @todo: make this configurable
 
             full_conversation = ""
             for message in request.conversation.messages:
@@ -189,6 +190,60 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Error in segment classification: {str(e)}")
             return ProtoSegmentResponse()
+
+    def GetTrigger(self, request, context):
+
+        if not request.triggers:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("At least one trigger must be provided")
+            return ProtoTriggerResponse()
+
+        try:
+            model_name = "answer"  # @todo: make this configurable
+
+            full_conversation = ""
+            for message in request.conversation.messages:
+                role = ProtoRole.Name(message.role).lower()
+                full_conversation += f"Role: {role}\nContent: {message.content}\n"
+
+            triggers_data = [
+                {
+                    "id": trigger.id,
+                    "name": trigger.name,
+                    "description": trigger.description,
+                    "response": trigger.response,
+                }
+                for trigger in request.triggers
+            ]
+
+            history = [
+                {
+                    "role": "system",
+                    "content": PROMPT_TEMPLATES["trigger:system"],
+                },
+                {
+                    "role": "user",
+                    "content": PROMPT_TEMPLATES["trigger:user"](triggers_data, full_conversation),
+                },
+            ]
+
+            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt="")
+
+            repaired_response = repair_json(response)
+            repaired_response_json = json.loads(repaired_response)
+
+            return ProtoTriggerResponse(
+                id=repaired_response_json.get("id", ""),
+                name=repaired_response_json.get("name", ""),
+                response=repaired_response_json.get("response", ""),
+                probability=repaired_response_json.get("probability", 0.0),
+            )
+
+        except Exception as e:
+            logging.error(f"Error in GetSegment: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error in segment classification: {str(e)}")
+            return ProtoTriggerResponse()
 
 
 class AuthInterceptor(grpc.ServerInterceptor):
