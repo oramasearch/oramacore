@@ -156,6 +156,10 @@ where
         self.hnsw.points.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn search<'a>(
         &'a self,
         point: &P,
@@ -171,13 +175,6 @@ where
         self.hnsw.iter()
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = (P, V)> {
-        self.hnsw
-            .into_iter()
-            .zip(self.values)
-            .map(|((p, _), v)| (p, v))
-    }
-
     pub fn get(&self, i: usize, search: &Search) -> Option<MapItem<'_, P, V>> {
         Some(MapItem::from(self.hnsw.get(i, search)?, self))
     }
@@ -186,6 +183,31 @@ where
         self.hnsw
             .insert_multiple(points, self.ef_construction, Some(Heuristic::default()));
         self.values.extend(values);
+    }
+}
+
+fn hnsw_map_into_iter_map<P, V>(((p, _), v): ((P, PointId), V)) -> (P, V) {
+    (p, v)
+}
+
+impl<P, V> IntoIterator for HnswMap<P, V> {
+    type Item = (P, V);
+    type IntoIter = std::iter::Map<
+        std::iter::Zip<
+            std::iter::Map<
+                std::iter::Enumerate<std::vec::IntoIter<P>>,
+                fn((usize, P)) -> (P, PointId),
+            >,
+            std::vec::IntoIter<V>,
+        >,
+        fn(((P, PointId), V)) -> (P, V),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.hnsw
+            .into_iter()
+            .zip(self.values)
+            .map(hnsw_map_into_iter_map)
     }
 }
 
@@ -385,13 +407,6 @@ where
             .map(|(i, p)| (PointId(i as u32), p))
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = (P, PointId)> {
-        self.points
-            .into_iter()
-            .enumerate()
-            .map(|(i, p)| (p, PointId(i as u32)))
-    }
-
     pub fn insert_multiple(
         &mut self,
         points: Vec<P>,
@@ -406,14 +421,6 @@ where
 
         let taken = mem::take(&mut self.zero);
         let zeros = taken.into_iter().map(RwLock::new).collect::<Vec<_>>();
-
-        /*
-        let zeros = self
-            .zero
-            .iter()
-            .map(|z| RwLock::new(z.clone()))
-            .collect::<Vec<_>>();
-        */
 
         let top = if self.layers.is_empty() {
             LayerId(0)
@@ -441,6 +448,20 @@ where
     #[doc(hidden)]
     pub fn get(&self, i: usize, search: &Search) -> Option<Item<'_, P>> {
         Some(Item::new(search.nearest.get(i).copied()?, self))
+    }
+}
+
+fn hnsw_into_iter_map<P>((i, p): (usize, P)) -> (P, PointId) {
+    (p, PointId(i as u32))
+}
+
+impl<P> IntoIterator for Hnsw<P> {
+    type Item = (P, PointId);
+    type IntoIter =
+        std::iter::Map<std::iter::Enumerate<std::vec::IntoIter<P>>, fn((usize, P)) -> (P, PointId)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.points.into_iter().enumerate().map(hnsw_into_iter_map)
     }
 }
 

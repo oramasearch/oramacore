@@ -134,7 +134,7 @@ impl VectorField {
                     .into_iter()
                     .map(move |vector| (VectorPoint::new(vector), doc_id))
             })
-            .chain(inner.into_iter())
+            .chain(inner)
             .filter(|(_, doc_id)| !uncommitted_document_deletions.contains(doc_id));
 
         let (points, values): (Vec<_>, Vec<_>) = iter.unzip();

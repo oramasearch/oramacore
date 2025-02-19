@@ -86,6 +86,7 @@ impl CommittedCollection {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn vector_search(
         &self,
         target: &[f32],
