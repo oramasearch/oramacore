@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
+use crate::collection_manager::dto::SearchMode;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
@@ -348,6 +349,13 @@ impl ReadSide {
         collection_id: CollectionId,
     ) -> Result<Vec<Trigger>> {
         self.triggers.list_by_collection(collection_id).await
+    }
+
+    pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
+        let ai_service = self.get_ai_service();
+        let search_mode = ai_service.get_autoquery(query.clone()).await?;
+
+        Ok(SearchMode::from_str(&search_mode.mode, query))
     }
 }
 

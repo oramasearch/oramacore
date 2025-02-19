@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -14,7 +15,7 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, SearchParams},
+        dto::{ApiKey, AutoMode, HybridMode, SearchMode, SearchParams},
         sides::ReadSide,
     },
     types::CollectionId,
@@ -47,7 +48,35 @@ async fn search(
     let collection_id = CollectionId(id);
     let read_api_key = query.api_key;
 
-    let output = read_side.search(read_api_key, collection_id, json).await;
+    let search_mode: SearchMode = match json.mode.clone() {
+        SearchMode::Auto(mode) => {
+            let final_mode = read_side
+                .get_search_mode(mode.term.clone())
+                .await
+                .context("Error getting search mode")
+                .unwrap_or(SearchMode::Hybrid(HybridMode { term: mode.term }));
+
+            match final_mode {
+                SearchMode::FullText(mode) => SearchMode::FullText(mode),
+                SearchMode::Hybrid(mode) => SearchMode::Hybrid(mode),
+                SearchMode::Vector(mode) => SearchMode::Vector(mode),
+                _ => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Invalid search mode" })),
+                ))?,
+            }
+        }
+        _ => json.mode.clone(),
+    };
+
+    let final_json = SearchParams {
+        mode: search_mode,
+        ..json
+    };
+
+    let output = read_side
+        .search(read_api_key, collection_id, final_json)
+        .await;
 
     match output {
         Ok(data) => Ok((StatusCode::OK, Json(data))),
