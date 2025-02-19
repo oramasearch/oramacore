@@ -785,7 +785,7 @@ impl CollectionReader {
             SearchMode::Vector(search_params) => {
                 self.search_vector(
                     &search_params.term,
-                    search_params.similarity,
+                    search_params.similarity.0,
                     filtered_doc_ids.as_ref(),
                     &limit,
                     &uncommitted_deleted_documents,
@@ -798,7 +798,7 @@ impl CollectionReader {
                 let (vector, fulltext) = join!(
                     self.search_vector(
                         &search_params.term,
-                        search_params.similarity,
+                        search_params.similarity.0,
                         filtered_doc_ids.as_ref(),
                         &limit,
                         &uncommitted_deleted_documents

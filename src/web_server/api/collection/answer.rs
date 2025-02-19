@@ -1,6 +1,6 @@
 use crate::ai::LlmType;
 use crate::collection_manager::dto::{
-    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult,
+    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult, Similarity,
 };
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
@@ -198,7 +198,7 @@ async fn answer_v0(
                 SearchParams {
                     mode: SearchMode::Hybrid(HybridMode {
                         term: optimized_query.text,
-                        similarity: 0.8,
+                        similarity: Similarity(0.8),
                     }),
                     limit: Limit(5),
                     where_filter: HashMap::new(),

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use axum_openapi3::utoipa::{self, IntoParams};
 use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use redact::Secret;
+use serde::de::{Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
 
 use crate::{
@@ -188,12 +189,12 @@ pub enum FacetDefinition {
     Bool(#[schema(inline)] BoolFacetDefinition),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, ToSchema)]
 pub struct FulltextMode {
     pub term: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, ToSchema)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -201,32 +202,148 @@ pub struct VectorMode {
     // For simplicity, we only support "term" for now
     // TODO: support "vector"
     pub term: String,
-    #[serde(default = "default_similarity")]
-    pub similarity: f32,
-}
-fn default_similarity() -> f32 {
-    0.8
+    #[schema(inline)]
+    pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, ToSchema)]
+pub struct Similarity(pub f32);
+
+impl Default for Similarity {
+    fn default() -> Self {
+        Similarity(0.8)
+    }
+}
+
+impl<'de> Deserialize<'de> for Similarity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct SimilarityVisitor;
+
+        fn check_similarity<E>(value: f32) -> Result<f32, E>
+        where
+            E: de::Error,
+        {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
+            }
+            Ok(value)
+        }
+
+        impl<'de> Visitor<'de> for SimilarityVisitor {
+            type Value = Similarity;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid similarity value")
+            }
+
+            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let f = f32::from(value);
+                check_similarity(f).map(Similarity)
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                check_similarity(value).map(Similarity)
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                check_similarity(value as f32).map(Similarity)
+            }
+
+            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+            where
+                V: de::MapAccess<'de>,
+            {
+                println!("visit_map.....");
+                let k: Option<String> = visitor
+                    .next_key()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+                if k.is_none() {
+                    return Err(de::Error::invalid_type(Unexpected::Map, &self));
+                }
+                let f: String = visitor
+                    .next_value()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+                let f: f32 = f
+                    .parse()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+
+                check_similarity(f).map(Similarity)
+            }
+        }
+
+        deserializer.deserialize_any(SimilarityVisitor)
+    }
+}
+
+#[derive(Debug, Clone, ToSchema)]
 pub struct HybridMode {
     pub term: String,
-    #[serde(default = "default_similarity")]
-    pub similarity: f32,
+    pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "mode")]
+#[derive(Debug, Clone, ToSchema)]
 pub enum SearchMode {
-    #[serde(rename = "fulltext")]
     FullText(#[schema(inline)] FulltextMode),
-    #[serde(rename = "vector")]
     Vector(#[schema(inline)] VectorMode),
-    #[serde(rename = "hybrid")]
     Hybrid(#[schema(inline)] HybridMode),
-    #[serde(untagged)]
     Default(#[schema(inline)] FulltextMode),
 }
+
+impl<'de> Deserialize<'de> for SearchMode {
+    fn deserialize<D>(deserializer: D) -> Result<SearchMode, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        fn default_search_mode() -> String {
+            "default".to_string()
+        }
+
+        #[derive(Deserialize)]
+        struct HiddenSearchMode {
+            #[serde(default = "default_search_mode")]
+            mode: String,
+            term: String,
+            similarity: Option<Similarity>,
+        }
+
+        let mode = match HiddenSearchMode::deserialize(deserializer) {
+            Ok(mode) => mode,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        match mode.mode.as_str() {
+            "fulltext" => Ok(SearchMode::FullText(FulltextMode { term: mode.term })),
+            "vector" => Ok(SearchMode::Vector(VectorMode {
+                term: mode.term,
+                similarity: mode.similarity.unwrap_or_default(),
+            })),
+            "hybrid" => Ok(SearchMode::Hybrid(HybridMode {
+                term: mode.term,
+                similarity: mode.similarity.unwrap_or_default(),
+            })),
+            "default" => Ok(SearchMode::Default(FulltextMode { term: mode.term })),
+            m => Err(serde::de::Error::custom(format!(
+                "Invalid search mode: {}",
+                m
+            ))),
+        }
+    }
+}
+
 impl Default for SearchMode {
     fn default() -> Self {
         SearchMode::Default(FulltextMode {
@@ -234,6 +351,7 @@ impl Default for SearchMode {
         })
     }
 }
+
 impl SearchMode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -268,7 +386,7 @@ pub struct SearchParams {
     pub limit: Limit,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
-    #[serde(default, deserialize_with = "deserialize_json_string")]
+    #[serde(default, deserialize_with = "deserialize_properties")]
     #[schema(inline)]
     pub properties: Properties,
     #[serde(default, rename = "where")]
@@ -279,7 +397,7 @@ pub struct SearchParams {
     pub facets: HashMap<String, FacetDefinition>,
 }
 
-fn deserialize_json_string<'de, D>(deserializer: D) -> Result<Properties, D::Error>
+fn deserialize_properties<'de, D>(deserializer: D) -> Result<Properties, D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -427,35 +545,49 @@ mod test {
             "mode": "fulltext",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
         assert!(matches!(p.mode, SearchMode::FullText(_)));
 
         let j = json!({
             "mode": "vector",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
         assert!(matches!(p.mode, SearchMode::Vector(_)));
 
         let j = json!({
             "mode": "hybrid",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
         assert!(matches!(p.mode, SearchMode::Hybrid(_)));
 
         let j = json!({
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams>(j).unwrap();
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
         assert!(matches!(p.mode, SearchMode::Default(_)));
 
         let j = json!({
             "mode": "unknown_value",
             "term": "hello",
         });
-        let p = serde_json::from_value::<SearchParams>(j).unwrap();
-        assert!(matches!(p.mode, SearchMode::Default(_)));
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap_err();
+        assert!(format!("{}", p).contains("Invalid search mode: unknown_value"));
+
+        let j = json!({
+            "mode": "vector",
+            "term": "The feline is napping comfortably indoors.",
+            "similarity": 0.6,
+        });
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
+        assert!(matches!(p.mode, SearchMode::Vector(v) if (v.similarity.0 - 0.6).abs() < 0.01));
     }
 
     #[test]

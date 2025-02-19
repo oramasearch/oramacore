@@ -14,8 +14,8 @@ Authorization: Bearer my-master-api-key
 {
     "id": "{{collection_id}}",
     "embeddings": {
-        "model_name": "BGESmall",
-        "document_fields": ["content"]
+        "model": "BGESmall",
+        "document_fields": ["text"]
     },
     "read_api_key": "my-read-api-key",
     "write_api_key": "my-write-api-key"
@@ -27,15 +27,15 @@ Authorization: Bearer my-write-api-key
 [
     {
         "id": "1",
-        "content": "The cat is running outside."
+        "text": "The cat is sleeping on the table."
     },
     {
         "id": "2",
-        "content": "A cat rests peacefully on the sofa."
+        "text": "A cat rests peacefully on the sofa."
     },
     {
         "id": "3",
-        "content": "The dog is barking loudly in the yard."
+        "text": "The dog is barking loudly in the yard."
     }
 ]
 HTTP 200
@@ -48,7 +48,8 @@ retry: 10
 retry-interval: 500ms
 {
     "mode": "vector",
-    "term": "The feline is napping comfortably indoors."
+    "term": "The feline is napping comfortably indoors.",
+    "similarity": 0.6
 }
 HTTP 200
 [Asserts]

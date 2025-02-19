@@ -8,18 +8,22 @@ log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
 
+hooks:
+    channel_limit: 500
+    data_dir: ./.data/hooks
+
 writer_side:
     output:
-        # type: in-memory
-        type: rabbitmq
+        type: in-memory
+        # type: rabbitmq
         # host: localhost
         # port: 5672
         # user: guest
         # password: guest
         # v_host: /
-        stream_name: oramacore-operations
-        client_provided_name: oramacore-producer
-        producer_name: write
+        # stream_name: oramacore-operations
+        # client_provided_name: oramacore-producer
+        # producer_name: write
 
     # Replace the following value with your own API key
     master_api_key: my-master-api-key
@@ -42,16 +46,16 @@ writer_side:
 
 reader_side:
     input:
-        # type: in-memory
-        type: rabbitmq
+        type: in-memory
+        # type: rabbitmq
         # host: localhost
         # port: 5672
         # user: guest
         # password: guest
         # v_host: /
-        stream_name: oramacore-operations
-        client_provided_name: oramacore-producer
-        consumer_name: reader
+        # stream_name: oramacore-operations
+        # client_provided_name: oramacore-producer
+        # consumer_name: reader
 
     config:
         data_dir: ./.data/reader
