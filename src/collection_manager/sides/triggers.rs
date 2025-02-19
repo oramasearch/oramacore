@@ -81,9 +81,7 @@ impl TriggerInterface {
         conversation: Option<Vec<InteractionMessage>>,
     ) -> Result<crate::ai::TriggerResponse> {
         let triggers = self.list_by_collection(collection_id).await?;
-        let selected_trigger = self.ai_service.get_trigger(triggers, conversation).await?;
-
-        Ok(selected_trigger)
+        self.ai_service.get_trigger(triggers, conversation).await
     }
 }
 

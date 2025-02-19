@@ -1,6 +1,9 @@
 use crate::{
     ai::AIService,
-    collection_manager::sides::generic_kv::{format_key, KV},
+    collection_manager::{
+        dto::InteractionMessage,
+        sides::generic_kv::{format_key, KV},
+    },
     types::CollectionId,
 };
 use anyhow::{Context, Result};
@@ -76,6 +79,15 @@ impl SegmentInterface {
         ))?;
 
         Ok(segments)
+    }
+
+    pub async fn perform_segment_selection(
+        &self,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<crate::ai::SegmentResponse> {
+        let segments = self.list_by_collection(collection_id).await?;
+        self.ai_service.get_segments(segments, conversation).await
     }
 }
 

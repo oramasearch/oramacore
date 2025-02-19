@@ -154,14 +154,24 @@ impl AIService {
 
     pub async fn get_segments(
         &self,
-        segments: Vec<Segment>,
+        segments: Vec<crate::collection_manager::sides::segments::Segment>,
         conversation: Option<Vec<InteractionMessage>>,
     ) -> Result<SegmentResponse> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
+        let grpc_segments = segments
+            .iter()
+            .map(|segment| Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            })
+            .collect();
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(SegmentRequest {
-            segments,
+            segments: grpc_segments,
             conversation: Some(conversation),
         });
 
