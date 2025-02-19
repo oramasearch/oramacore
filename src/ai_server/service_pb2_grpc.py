@@ -65,6 +65,18 @@ class LLMServiceStub(object):
             response_deserializer=service__pb2.PlannedAnswerResponse.FromString,
             _registered_method=True,
         )
+        self.GetSegment = channel.unary_unary(
+            "/orama_ai_service.LLMService/GetSegment",
+            request_serializer=service__pb2.SegmentRequest.SerializeToString,
+            response_deserializer=service__pb2.SegmentResponse.FromString,
+            _registered_method=True,
+        )
+        self.GetTrigger = channel.unary_unary(
+            "/orama_ai_service.LLMService/GetTrigger",
+            request_serializer=service__pb2.TriggerRequest.SerializeToString,
+            response_deserializer=service__pb2.TriggerResponse.FromString,
+            _registered_method=True,
+        )
 
 
 class LLMServiceServicer(object):
@@ -100,6 +112,18 @@ class LLMServiceServicer(object):
         context.set_details("Method not implemented!")
         raise NotImplementedError("Method not implemented!")
 
+    def GetSegment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def GetTrigger(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
 
 def add_LLMServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -127,6 +151,16 @@ def add_LLMServiceServicer_to_server(servicer, server):
             servicer.PlannedAnswer,
             request_deserializer=service__pb2.PlannedAnswerRequest.FromString,
             response_serializer=service__pb2.PlannedAnswerResponse.SerializeToString,
+        ),
+        "GetSegment": grpc.unary_unary_rpc_method_handler(
+            servicer.GetSegment,
+            request_deserializer=service__pb2.SegmentRequest.FromString,
+            response_serializer=service__pb2.SegmentResponse.SerializeToString,
+        ),
+        "GetTrigger": grpc.unary_unary_rpc_method_handler(
+            servicer.GetTrigger,
+            request_deserializer=service__pb2.TriggerRequest.FromString,
+            response_serializer=service__pb2.TriggerResponse.SerializeToString,
         ),
     }
     generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
@@ -277,6 +311,66 @@ class LLMService(object):
             "/orama_ai_service.LLMService/PlannedAnswer",
             service__pb2.PlannedAnswerRequest.SerializeToString,
             service__pb2.PlannedAnswerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def GetSegment(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/orama_ai_service.LLMService/GetSegment",
+            service__pb2.SegmentRequest.SerializeToString,
+            service__pb2.SegmentResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+    @staticmethod
+    def GetTrigger(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            "/orama_ai_service.LLMService/GetTrigger",
+            service__pb2.TriggerRequest.SerializeToString,
+            service__pb2.TriggerResponse.FromString,
             options,
             channel_credentials,
             insecure,
