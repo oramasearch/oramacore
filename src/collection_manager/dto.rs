@@ -408,6 +408,48 @@ pub struct ExecuteActionPayload {
     pub context: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertSegmentParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub goal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteSegmentParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateSegmentParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub goal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertTriggerParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub response: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteTriggerParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateTriggerParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub response: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

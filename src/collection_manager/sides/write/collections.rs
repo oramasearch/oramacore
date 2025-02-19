@@ -4,18 +4,18 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use redact::Secret;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::nlp::NLPService;
-use crate::{
-    collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
-};
+use crate::{collection_manager::dto::CollectionDTO, types::CollectionId};
 
 use crate::collection_manager::dto::{
     ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
@@ -39,18 +39,18 @@ impl CollectionsWriter {
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
-        let data_dir = &config.data_dir;
+        let data_dir = &config.data_dir.join("collections");
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        info!("Loading collections from disk from {:?}", data_dir);
-
-        let collection_dirs =
-            list_directory_in_path(data_dir).context("Cannot read collection list from disk")?;
-
-        let collection_dirs = match collection_dirs {
-            Some(collection_dirs) => collection_dirs,
-            None => {
+        let info_path = data_dir.join("info.json");
+        info!("Loading collections from disk from {:?}", info_path);
+        let collection_ids = match BufferedFile::open(info_path)
+            .and_then(|file| file.read_json_data::<CollectionsInfo>())
+        {
+            std::result::Result::Ok(CollectionsInfo::V1(info)) => info,
+            Err(_) => {
                 info!(
-                    "No collections found in data directory {:?}. Skipping load.",
+                    "No collections found in data directory {:?}. Create new instance",
                     data_dir
                 );
                 return Ok(CollectionsWriter {
@@ -61,13 +61,8 @@ impl CollectionsWriter {
             }
         };
 
-        for collection_dir in collection_dirs {
-            let file_name = collection_dir
-                .file_name()
-                .expect("File name is always given at this point");
-            let file_name: String = file_name.to_string_lossy().into();
-
-            let collection_id = CollectionId(file_name);
+        for collection_id in collection_ids {
+            let collection_dir = data_dir.join(collection_id.0.clone());
 
             // All those values are replaced inside `load` method
             let mut collection = CollectionWriter::new(
@@ -185,12 +180,11 @@ impl CollectionsWriter {
     }
 
     pub async fn commit(&self) -> Result<()> {
-        let data_dir = &self.config.data_dir;
-
         // During the commit, we don't accept any new write operation
         let collections = self.collections.write().await;
 
-        std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
+        let data_dir = &self.config.data_dir.join("collections");
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
         for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
@@ -202,6 +196,15 @@ impl CollectionsWriter {
             collection.commit(collection_dir).await?;
             drop(m);
         }
+
+        let info_path = data_dir.join("info.json");
+        info!("Committing info at {:?}", info_path);
+        BufferedFile::create_or_overwrite(info_path)
+            .context("Cannot create info.json")?
+            .write_json_data(&CollectionsInfo::V1(
+                collections.keys().cloned().collect::<Vec<_>>(),
+            ))
+            .context("Cannot write info.json")?;
 
         // Now it is safe to drop the lock
         // because we safe everything to disk
@@ -240,6 +243,11 @@ impl Deref for CollectionWriteLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum CollectionsInfo {
+    V1(Vec<CollectionId>),
 }
 
 #[cfg(test)]

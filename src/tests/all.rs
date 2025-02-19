@@ -14,7 +14,7 @@ use crate::{
     build_orama,
     collection_manager::{
         dto::ApiKey,
-        sides::{ReadSide, WriteSide},
+        sides::{segments::Segment, ReadSide, WriteSide},
     },
     tests::utils::{create_grpc_server, create_oramacore_config},
     types::{CollectionId, DocumentList},
@@ -1476,6 +1476,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side.commit().await.unwrap();
     read_side.commit().await.unwrap();
+
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1558,6 +1559,51 @@ async fn test_delete_documents() -> Result<()> {
         )
         .await?;
     assert_eq!(result.count, document_count - 2);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+async fn test_trigger() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let mut config = create_oramacore_config();
+    config.reader_side.config.insert_batch_commit_size = 1_000_000;
+    config.writer_side.config.insert_batch_commit_size = 1_000_000;
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    write_side
+        .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
+            json!({
+                "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
+            })
+            .try_into()?,
+        )
+        .await?;
+    write_side
+        .insert_segment(
+            collection_id.clone(),
+            Segment {
+                id: "the id".to_string(),
+                description: "".to_string(),
+                name: "the name".to_string(),
+                goal: Some("the goal".to_string()),
+            },
+        )
+        .await?;
+
+    sleep(Duration::from_millis(100)).await;
+
+    let output = read_side
+        .get_segment(collection_id, "the id".to_string())
+        .await?
+        .expect("Segment should be there");
+    assert_eq!(output.name, "the name");
+    assert_eq!(output.goal, Some("the goal".to_string()));
 
     Ok(())
 }

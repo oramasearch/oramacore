@@ -14,7 +14,10 @@ use std::{
 };
 
 use super::{
+    generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
+    segments::{Segment, SegmentInterface},
+    triggers::{Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -72,6 +75,9 @@ pub struct WriteSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
+    segments: SegmentInterface,
+    triggers: TriggerInterface,
+    kv: Arc<KV>,
     master_api_key: ApiKey,
 }
 
@@ -115,6 +121,7 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        println!("Loading collections {:#?}", collections_writer_config);
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
@@ -123,6 +130,16 @@ impl WriteSide {
         )
         .await
         .context("Cannot load collections")?;
+
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: Some(sender.clone()),
+        })
+        .context("Cannot load KV")?;
+
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
         let write_side = Self {
             document_count,
@@ -133,6 +150,9 @@ impl WriteSide {
             master_api_key,
             operation_counter: Default::default(),
             sender,
+            segments,
+            triggers,
+            kv,
         };
 
         let write_side = Arc::new(write_side);
@@ -148,6 +168,8 @@ impl WriteSide {
         info!("Committing write side");
 
         self.collections.commit().await?;
+
+        self.kv.commit().await?;
 
         let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
@@ -389,6 +411,88 @@ impl WriteSide {
         if self.master_api_key != master_api_key {
             return Err(anyhow::anyhow!("Invalid master api key"));
         }
+
+        Ok(())
+    }
+
+    pub async fn insert_segment(
+        &self,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.segments
+            .insert(collection_id.clone(), segment.clone())
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_segment(
+        &self,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.segments
+            .delete(collection_id.clone(), segment_id.clone())
+            .await
+            .context("Cannot delete segment")
+    }
+
+    pub async fn update_segment(
+        &self,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.segments
+            .delete(collection_id.clone(), segment.id.clone())
+            .await
+            .context("Cannot delete segment")?;
+        self.segments
+            .insert(collection_id, segment)
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        self.triggers
+            .insert(collection_id.clone(), trigger.clone())
+            .await
+            .context("Cannot insert trigger")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.triggers
+            .delete(collection_id.clone(), trigger_id.clone())
+            .await
+            .context("Cannot delete trigger")
+    }
+
+    pub async fn update_trigger(
+        &self,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        self.triggers
+            .delete(collection_id.clone(), trigger.id.clone())
+            .await
+            .context("Cannot delete trigger")?;
+        self.triggers
+            .insert(collection_id, trigger)
+            .await
+            .context("Cannot insert trigger")?;
 
         Ok(())
     }
