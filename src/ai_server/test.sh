@@ -27,3 +27,6 @@ grpcurl -plaintext -H 'x-api-key: read_api_key' -d '{ "segments": [ { "id": "123
 
 # Trigger
 grpcurl -plaintext -H 'x-api-key: read_api_key' -d '{ "triggers": [ { "id": "123", "name": "Asks for a product recommendation", "description": "a user is asking a recommendation for a product", "response": "reply with a detailed explanation of the best products for the users needs" }, { "id": "456", "name": "Asks for a product comparison", "description": "a user is asking for a comparison between two or more products", "response": "reply with a detailed comparison of the products in a table format. The last row should contain a buy link if available." }, { "id": "789", "name": "Asks for a product review", "description": "a user is asking for a review of a product", "response": "reply with the most positive reviews of the product from reputable sources. Include a link to the full review if available." } ], "conversation": { "messages": [ { "role": "user", "content": "I would like to buy a pair of basketball shoes. I like bright colors. Which ones should I consider? Ideally under USD 200." } ] } }' localhost:50051 orama_ai_service.LLMService/GetTrigger
+
+# AutoQuery
+grpcurl -plaintext -H 'x-api-key: read_api_key' -d '{ "query": "Fast AMD Chip" }' localhost:50051 orama_ai_service.LLMService/AutoQuery
