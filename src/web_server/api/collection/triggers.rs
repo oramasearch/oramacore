@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
     Json, Router,
 };
 use axum_extra::{headers, TypedHeader};
-use axum_openapi3::*;
+use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
     collection_manager::{
-        dto::{DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
+        dto::{ApiKey, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
         sides::{triggers::Trigger, ReadSide, WriteSide},
     },
     types::CollectionId,
@@ -20,6 +21,20 @@ use crate::{
 
 type AuthorizationBearerHeader =
     TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
+
+#[derive(Deserialize, IntoParams)]
+struct ApiKeyQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+}
+
+#[derive(Deserialize, IntoParams)]
+struct GetTriggerQueryParams {
+    #[serde(rename = "api-key")]
+    api_key: ApiKey,
+    #[serde(rename = "trigger_id")]
+    trigger_id: String,
+}
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
@@ -38,16 +53,16 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/triggers/{trigger_id}",
+    path = "/v1/collections/{id}/triggers/get",
     description = "Get a single trigger by ID"
 )]
 async fn get_trigger_v1(
     Path(id): Path<String>,
-    Path(trigger_id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    Query(query): Query<GetTriggerQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let trigger_id = query.trigger_id;
 
     match read_side.get_trigger(collection_id, trigger_id).await {
         Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
@@ -66,7 +81,7 @@ async fn get_trigger_v1(
 )]
 async fn get_all_triggers_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
