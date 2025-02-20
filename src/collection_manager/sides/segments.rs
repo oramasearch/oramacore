@@ -91,6 +91,12 @@ impl SegmentInterface {
     }
 }
 
+pub fn parse_segment_id_from_trigger(id: String) -> Option<String> {
+    id.split(":")
+        .find(|s| s.starts_with("s_"))
+        .map(|s| s.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

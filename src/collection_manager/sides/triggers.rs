@@ -5,6 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TriggerIdContent {
+    pub collection_id: CollectionId,
+    pub trigger_id: String,
+    pub segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Trigger {
     pub id: String,
     pub name: String,
@@ -23,29 +30,34 @@ impl TriggerInterface {
         Self { kv, ai_service }
     }
 
-    pub async fn insert(&self, collection_id: CollectionId, trigger: Trigger) -> Result<()> {
+    pub async fn insert(&self, collection_id: CollectionId, trigger: Trigger) -> Result<String> {
         let key = self.get_trigger_key(
             collection_id,
             trigger.id.clone(),
             trigger.segment_id.clone(),
         );
 
-        self.kv.insert(key, trigger).await?;
-        Ok(())
+        self.kv.insert(key.clone(), trigger).await?;
+        Ok(key)
     }
 
     pub async fn get(
         &self,
         collection_id: CollectionId,
         trigger_id: String,
-        segment_id: Option<String>,
     ) -> Result<Option<Trigger>> {
-        let key = self.get_trigger_key(collection_id, trigger_id, segment_id);
+        let trigger_id_parts = parse_trigger_id(trigger_id.clone());
+
+        let key = self.get_trigger_key(
+            collection_id,
+            trigger_id_parts.trigger_id,
+            trigger_id_parts.segment_id,
+        );
 
         match self.kv.get(&key).await {
             None => Ok(None),
             Some(Err(e)) => Err(e),
-            Some(Ok(trigger)) => Ok(Some(trigger)),
+            Some(Ok(trigger)) => Ok(Some(Trigger { id: key, ..trigger })),
         }
     }
 
@@ -54,8 +66,13 @@ impl TriggerInterface {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
-        let trigger_key = format!("trigger:{}", trigger_id);
-        let key = format_key(collection_id, &trigger_key);
+        let trigger_id_parts = parse_trigger_id(trigger_id.clone());
+
+        let key = self.get_trigger_key(
+            collection_id,
+            trigger_id_parts.trigger_id,
+            trigger_id_parts.segment_id,
+        );
 
         match self.kv.remove_and_get(&key).await? {
             None => Ok(None),
@@ -73,12 +90,24 @@ impl TriggerInterface {
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Trigger>> {
         let prefix = format!("{}:trigger:", collection_id.0.clone());
 
-        let triggers = self.kv.prefix_scan(&prefix).await.context(format!(
+        let triggers: Vec<Trigger> = self.kv.prefix_scan(&prefix).await.context(format!(
             "Cannot scan triggers for collection {}",
             collection_id.0
         ))?;
 
-        Ok(triggers)
+        let triggers_with_key = triggers
+            .into_iter()
+            .map(|trigger| Trigger {
+                id: self.get_trigger_key(
+                    collection_id.clone(),
+                    trigger.id.clone(),
+                    trigger.segment_id.clone(),
+                ),
+                ..trigger
+            })
+            .collect();
+
+        Ok(triggers_with_key)
     }
 
     pub async fn perform_trigger_selection(
@@ -103,6 +132,24 @@ impl TriggerInterface {
             ),
             None => format_key(collection_id, &format!("trigger:t_{}", trigger_id)),
         }
+    }
+}
+
+pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
+    let parts = trigger_id.split(':').collect::<Vec<&str>>();
+    let collection_id = CollectionId(parts[0].to_string());
+
+    let segment_id = parts
+        .iter()
+        .find(|part| part.starts_with("s_"))
+        .map(|s| s.to_string());
+
+    let trigger_id = parts.iter().find(|part| part.starts_with("t_")).unwrap();
+
+    TriggerIdContent {
+        collection_id,
+        trigger_id: trigger_id.replace("t_", ""),
+        segment_id: segment_id.map(|s| s.replace("s_", "")),
     }
 }
 
@@ -151,7 +198,7 @@ mod tests {
             .unwrap();
 
         let retrieved_trigger = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone(), None)
+            .get(collection_id.clone(), trigger.id.clone())
             .await
             .unwrap()
             .unwrap();
@@ -200,7 +247,7 @@ mod tests {
             .unwrap();
 
         let after_delete_result = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone(), None)
+            .get(collection_id.clone(), trigger.id.clone())
             .await
             .unwrap();
 

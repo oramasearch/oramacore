@@ -449,7 +449,6 @@ pub struct UpdateSegmentParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertTriggerParams {
-    pub id: Option<String>,
     pub name: String,
     pub description: String,
     pub response: String,
@@ -467,6 +466,7 @@ pub struct UpdateTriggerParams {
     pub name: String,
     pub description: String,
     pub response: String,
+    pub segment_id: Option<String>,
 }
 
 #[cfg(test)]

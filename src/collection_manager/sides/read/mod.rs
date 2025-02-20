@@ -340,11 +340,8 @@ impl ReadSide {
         &self,
         collection_id: CollectionId,
         trigger_id: String,
-        segment_id: Option<String>,
     ) -> Result<Option<Trigger>> {
-        self.triggers
-            .get(collection_id, trigger_id, segment_id)
-            .await
+        self.triggers.get(collection_id, trigger_id).await
     }
 
     pub async fn get_all_triggers_by_collection(

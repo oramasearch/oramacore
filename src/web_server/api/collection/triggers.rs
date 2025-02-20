@@ -14,7 +14,11 @@ use serde_json::json;
 use crate::{
     collection_manager::{
         dto::{ApiKey, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
-        sides::{triggers::Trigger, ReadSide, WriteSide},
+        sides::{
+            segments::parse_segment_id_from_trigger,
+            triggers::{parse_trigger_id, Trigger},
+            ReadSide, WriteSide,
+        },
     },
     types::CollectionId,
 };
@@ -65,12 +69,8 @@ async fn get_trigger_v1(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let trigger_id = query.trigger_id;
-    let segment_id = query.segment_id;
 
-    match read_side
-        .get_trigger(collection_id, trigger_id, segment_id)
-        .await
-    {
+    match read_side.get_trigger(collection_id, trigger_id).await {
         Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
         Err(e) => Err((
@@ -118,7 +118,7 @@ async fn insert_trigger_v1(
     let collection_id = CollectionId(id);
 
     let trigger = Trigger {
-        id: params.id.unwrap_or(cuid2::create_id()),
+        id: cuid2::create_id(),
         name: params.name.clone(),
         description: params.description.clone(),
         response: params.response.clone(),
@@ -129,9 +129,12 @@ async fn insert_trigger_v1(
         .insert_trigger(collection_id, trigger.clone())
         .await
     {
-        Ok(_) => Ok((
+        Ok(id) => Ok((
             StatusCode::OK,
-            Json(json!({ "success": true, "id": trigger.id, "trigger": trigger })),
+            Json(json!({ "success": true, "id": id, "trigger": Trigger {
+                id,
+                ..trigger
+            } })),
         )),
         Err(e) => {
             e.chain()
@@ -184,24 +187,35 @@ async fn update_trigger_v1(
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let trigger_id_parts = parse_trigger_id(params.id.clone());
 
-    let segment_id: Option<String> = params
-        .id
-        .clone()
-        .split(":")
-        .find(|s| s.starts_with("s_"))
-        .map(|s| s.to_string());
+    if Some(trigger_id_parts.segment_id.clone()) != Some(params.segment_id.clone()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({ "error": "You can not update a segment ID. Please create a new trigger and link it to a new segment instead." }),
+            ),
+        ));
+    }
 
     let trigger = Trigger {
-        id: params.id.clone(),
+        id: params.id,
         name: params.name.clone(),
         description: params.description.clone(),
         response: params.response.clone(),
-        segment_id,
+        segment_id: trigger_id_parts.segment_id,
     };
 
-    match write_side.update_trigger(collection_id, trigger).await {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
+    match write_side
+        .update_trigger(collection_id, trigger.clone())
+        .await
+    {
+        Ok(updated_trigger) => Ok((
+            StatusCode::OK,
+            Json(
+                json!({ "success": true, "id": updated_trigger.id.clone(), "trigger": updated_trigger }),
+            ),
+        )),
         Err(e) => {
             e.chain()
                 .skip(1)

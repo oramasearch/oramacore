@@ -460,13 +460,11 @@ impl WriteSide {
         &self,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<()> {
+    ) -> Result<String> {
         self.triggers
             .insert(collection_id.clone(), trigger.clone())
             .await
-            .context("Cannot insert trigger")?;
-
-        Ok(())
+            .context("Cannot insert trigger")
     }
 
     pub async fn delete_trigger(
@@ -475,7 +473,7 @@ impl WriteSide {
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
         self.triggers
-            .delete(collection_id.clone(), trigger_id.clone())
+            .delete(collection_id, trigger_id)
             .await
             .context("Cannot delete trigger")
     }
@@ -484,17 +482,17 @@ impl WriteSide {
         &self,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<()> {
+    ) -> Result<Trigger> {
         self.triggers
             .delete(collection_id.clone(), trigger.id.clone())
             .await
             .context("Cannot delete trigger")?;
         self.triggers
-            .insert(collection_id, trigger)
+            .insert(collection_id, trigger.clone())
             .await
             .context("Cannot insert trigger")?;
 
-        Ok(())
+        Ok(trigger)
     }
 }
 
