@@ -742,7 +742,7 @@ impl CollectionReader {
                     _ => anyhow::bail!("Invalid search mode"),
                 }
             }
-            _ => mode.clone(),
+            _ => mode,
         };
 
         let boost = self.calculate_boost(boost);
