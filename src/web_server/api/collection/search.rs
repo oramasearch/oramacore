@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -15,7 +14,7 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, HybridMode, SearchMode, SearchParams},
+        dto::{ApiKey, SearchParams},
         sides::ReadSide,
     },
     types::CollectionId,
