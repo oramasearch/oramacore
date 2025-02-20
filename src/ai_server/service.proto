@@ -11,6 +11,8 @@ service LLMService {
 
     rpc GetSegment (SegmentRequest) returns (SegmentResponse);
     rpc GetTrigger (TriggerRequest) returns (TriggerResponse);
+
+    rpc AutoQuery (AutoQueryRequest) returns (AutoQueryResponse);
 }
 
 enum OramaModel {
@@ -151,4 +153,16 @@ message TriggerResponse {
     string name = 2;
     string response = 3;
     float probability = 4;
+}
+
+// ----------------------------------------------------------------
+// Auto Query
+// ----------------------------------------------------------------
+
+message AutoQueryRequest {
+    string query = 1;
+}
+
+message AutoQueryResponse {
+    string mode = 1;
 }

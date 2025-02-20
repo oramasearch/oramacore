@@ -209,6 +209,11 @@ pub struct HybridMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AutoMode {
+    pub term: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "mode")]
 pub enum SearchMode {
     #[serde(rename = "fulltext")]
@@ -217,6 +222,8 @@ pub enum SearchMode {
     Vector(#[schema(inline)] VectorMode),
     #[serde(rename = "hybrid")]
     Hybrid(#[schema(inline)] HybridMode),
+    #[serde(rename = "auto")]
+    Auto(#[schema(inline)] AutoMode),
     #[serde(untagged)]
     Default(#[schema(inline)] FulltextMode),
 }
@@ -233,7 +240,18 @@ impl SearchMode {
             SearchMode::FullText(_) => "fulltext",
             SearchMode::Vector(_) => "vector",
             SearchMode::Hybrid(_) => "hybrid",
+            SearchMode::Auto(_) => "auto",
             SearchMode::Default(_) => "fulltext",
+        }
+    }
+
+    pub fn from_str(s: &str, term: String) -> Self {
+        match s {
+            "fulltext" => SearchMode::FullText(FulltextMode { term }),
+            "vector" => SearchMode::Vector(VectorMode { term }),
+            "hybrid" => SearchMode::Hybrid(HybridMode { term }),
+            "auto" => SearchMode::Auto(AutoMode { term }),
+            _ => SearchMode::Default(FulltextMode { term }),
         }
     }
 }

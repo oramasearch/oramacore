@@ -285,6 +285,20 @@ impl AIService {
         Ok(response.into_inner())
     }
 
+    pub async fn get_autoquery(&self, query: String) -> Result<AutoQueryResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(AutoQueryRequest { query });
+
+        let response = conn
+            .auto_query(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform autoquery request")?;
+
+        Ok(response)
+    }
+
     fn get_grpc_conversation(&self, interactions: Option<Vec<InteractionMessage>>) -> Conversation {
         use crate::collection_manager::dto::Role as DtoRole;
 
