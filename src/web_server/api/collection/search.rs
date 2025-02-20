@@ -15,7 +15,7 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, AutoMode, HybridMode, SearchMode, SearchParams},
+        dto::{ApiKey, HybridMode, SearchMode, SearchParams},
         sides::ReadSide,
     },
     types::CollectionId,

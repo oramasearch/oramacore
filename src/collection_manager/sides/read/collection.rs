@@ -781,6 +781,7 @@ impl CollectionReader {
                 }
                 fulltext
             }
+            SearchMode::Auto(_) => unreachable!(),
         };
 
         MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
