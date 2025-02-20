@@ -2,6 +2,7 @@
     "title": "Audience Management",
     "pages": [
       "introduction",
-      "segments"
+      "segments",
+      "triggers"
     ]
   }
