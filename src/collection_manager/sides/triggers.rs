@@ -10,6 +10,7 @@ pub struct Trigger {
     pub name: String,
     pub description: String,
     pub response: String,
+    pub segment_id: Option<String>,
 }
 
 pub struct TriggerInterface {
@@ -23,7 +24,12 @@ impl TriggerInterface {
     }
 
     pub async fn insert(&self, collection_id: CollectionId, trigger: Trigger) -> Result<()> {
-        let key = format_key(collection_id, &format!("trigger:{}", trigger.id));
+        let key = self.get_trigger_key(
+            collection_id,
+            trigger.id.clone(),
+            trigger.segment_id.clone(),
+        );
+
         self.kv.insert(key, trigger).await?;
         Ok(())
     }
@@ -32,9 +38,9 @@ impl TriggerInterface {
         &self,
         collection_id: CollectionId,
         trigger_id: String,
+        segment_id: Option<String>,
     ) -> Result<Option<Trigger>> {
-        let trigger_key = format!("trigger:{}", trigger_id);
-        let key = format_key(collection_id, &trigger_key);
+        let key = self.get_trigger_key(collection_id, trigger_id, segment_id);
 
         match self.kv.get(&key).await {
             None => Ok(None),
@@ -83,6 +89,21 @@ impl TriggerInterface {
         let triggers = self.list_by_collection(collection_id).await?;
         self.ai_service.get_trigger(triggers, conversation).await
     }
+
+    fn get_trigger_key(
+        &self,
+        collection_id: CollectionId,
+        trigger_id: String,
+        segment_id: Option<String>,
+    ) -> String {
+        match segment_id {
+            Some(segment_id) => format_key(
+                collection_id,
+                &format!("trigger:s_{}:t_{}", segment_id, trigger_id),
+            ),
+            None => format_key(collection_id, &format!("trigger:t_{}", trigger_id)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -121,6 +142,7 @@ mod tests {
             name: "Test Trigger".to_string(),
             description: "This is a test trigger".to_string(),
             response: "Test response".to_string(),
+            segment_id: None,
         };
 
         trigger_interface
@@ -129,7 +151,7 @@ mod tests {
             .unwrap();
 
         let retrieved_trigger = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone())
+            .get(collection_id.clone(), trigger.id.clone(), None)
             .await
             .unwrap()
             .unwrap();
@@ -163,6 +185,7 @@ mod tests {
             name: "Test Trigger".to_string(),
             description: "This is a test trigger".to_string(),
             response: "Test response".to_string(),
+            segment_id: None,
         };
 
         trigger_interface
@@ -177,7 +200,7 @@ mod tests {
             .unwrap();
 
         let after_delete_result = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone())
+            .get(collection_id.clone(), trigger.id.clone(), None)
             .await
             .unwrap();
 
@@ -211,6 +234,7 @@ mod tests {
             name: "Test Trigger 1".to_string(),
             description: "This is a test trigger 1".to_string(),
             response: "Test response 1".to_string(),
+            segment_id: None,
         };
 
         let trigger2 = Trigger {
@@ -218,6 +242,7 @@ mod tests {
             name: "Test Trigger 2".to_string(),
             description: "This is a test trigger 2".to_string(),
             response: "Test response 2".to_string(),
+            segment_id: None,
         };
 
         trigger_interface

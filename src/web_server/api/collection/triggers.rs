@@ -34,6 +34,8 @@ struct GetTriggerQueryParams {
     api_key: ApiKey,
     #[serde(rename = "trigger_id")]
     trigger_id: String,
+    #[serde(rename = "segment_id")]
+    segment_id: Option<String>,
 }
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
@@ -63,8 +65,12 @@ async fn get_trigger_v1(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let trigger_id = query.trigger_id;
+    let segment_id = query.segment_id;
 
-    match read_side.get_trigger(collection_id, trigger_id).await {
+    match read_side
+        .get_trigger(collection_id, trigger_id, segment_id)
+        .await
+    {
         Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
         Err(e) => Err((
@@ -116,6 +122,7 @@ async fn insert_trigger_v1(
         name: params.name.clone(),
         description: params.description.clone(),
         response: params.response.clone(),
+        segment_id: params.segment_id.clone(),
     };
 
     match write_side
@@ -178,11 +185,19 @@ async fn update_trigger_v1(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
 
+    let segment_id: Option<String> = params
+        .id
+        .clone()
+        .split(":")
+        .find(|s| s.starts_with("s_"))
+        .map(|s| s.to_string());
+
     let trigger = Trigger {
         id: params.id.clone(),
         name: params.name.clone(),
         description: params.description.clone(),
         response: params.response.clone(),
+        segment_id,
     };
 
     match write_side.update_trigger(collection_id, trigger).await {

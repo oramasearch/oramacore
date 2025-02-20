@@ -453,6 +453,7 @@ pub struct InsertTriggerParams {
     pub name: String,
     pub description: String,
     pub response: String,
+    pub segment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
