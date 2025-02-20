@@ -23,11 +23,11 @@ mod merge;
 mod uncommitted;
 
 use crate::{
-    ai::{AIService, OramaModel},
+    ai::{AIService, AutoQueryResponse, OramaModel},
     collection_manager::{
         dto::{
-            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
-            Properties, SearchMode, SearchParams,
+            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
+            HybridMode, Limit, NumberFilter, Properties, SearchMode, SearchParams, VectorMode,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
@@ -715,9 +715,39 @@ impl CollectionReader {
             );
         }
 
+        // Manage the "auto" search mode. OramaCore will automatically determine
+        // wether to use full text search, vector search or hybrid search.
+        let search_mode: SearchMode = match mode.clone() {
+            SearchMode::Auto(mode_result) => {
+                let final_mode = self
+                    .ai_service
+                    .get_autoquery(mode_result.term.clone())
+                    .await
+                    .unwrap_or(AutoQueryResponse {
+                        // By default, we can use the hybrid mode when something goes wrong
+                        // with the AI service. This is the most versatile mode.
+                        mode: "hybrid".to_string(),
+                    });
+
+                match final_mode.mode.as_str() {
+                    "fulltext" => SearchMode::FullText(FulltextMode {
+                        term: mode_result.term,
+                    }),
+                    "hybrid" => SearchMode::Hybrid(HybridMode {
+                        term: mode_result.term,
+                    }),
+                    "vector" => SearchMode::Vector(VectorMode {
+                        term: mode_result.term,
+                    }),
+                    _ => anyhow::bail!("Invalid search mode"),
+                }
+            }
+            _ => mode.clone(),
+        };
+
         let boost = self.calculate_boost(boost);
 
-        let token_scores = match mode {
+        let token_scores = match search_mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
                 self.search_full_text(
