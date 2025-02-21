@@ -17,7 +17,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
     segments::{Segment, SegmentInterface},
-    triggers::{Trigger, TriggerInterface},
+    triggers::{self, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -37,7 +37,9 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
+    collection_manager::dto::{
+        ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
+    },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
@@ -407,6 +409,22 @@ impl WriteSide {
             .collect())
     }
 
+    async fn check_write_api_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(())
+    }
+
     fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
         if self.master_api_key != master_api_key {
             return Err(anyhow::anyhow!("Invalid master api key"));
@@ -417,9 +435,13 @@ impl WriteSide {
 
     pub async fn insert_segment(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         segment: Segment,
     ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
         self.segments
             .insert(collection_id.clone(), segment.clone())
             .await
@@ -430,9 +452,13 @@ impl WriteSide {
 
     pub async fn delete_segment(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
         self.segments
             .delete(collection_id.clone(), segment_id.clone())
             .await
@@ -441,9 +467,13 @@ impl WriteSide {
 
     pub async fn update_segment(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         segment: Segment,
     ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
         self.segments
             .delete(collection_id.clone(), segment.id.clone())
             .await
@@ -458,20 +488,39 @@ impl WriteSide {
 
     pub async fn insert_trigger(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
-        trigger: Trigger,
-    ) -> Result<String> {
+        trigger: InsertTriggerParams,
+        trigger_id: Option<String>,
+    ) -> Result<Trigger> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        let trigger = Trigger {
+            id: trigger_id.unwrap_or(cuid2::create_id()),
+            name: trigger.name,
+            description: trigger.description,
+            response: trigger.response,
+            segment_id: trigger.segment_id,
+        };
+
         self.triggers
             .insert(collection_id.clone(), trigger.clone())
             .await
-            .context("Cannot insert trigger")
+            .context("Cannot insert trigger")?;
+
+        Ok(trigger)
     }
 
     pub async fn delete_trigger(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
         self.triggers
             .delete(collection_id, trigger_id)
             .await
@@ -480,19 +529,27 @@ impl WriteSide {
 
     pub async fn update_trigger(
         &self,
+        write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<Trigger> {
-        self.triggers
-            .delete(collection_id.clone(), trigger.id.clone())
-            .await
-            .context("Cannot delete trigger")?;
-        self.triggers
-            .insert(collection_id, trigger.clone())
-            .await
-            .context("Cannot insert trigger")?;
+    ) -> Result<()> {
+        let part_trigger = InsertTriggerParams {
+            name: trigger.name.clone(),
+            description: trigger.description.clone(),
+            response: trigger.response.clone(),
+            segment_id: trigger.segment_id.clone(),
+        };
 
-        Ok(trigger)
+        self.insert_trigger(
+            write_api_key.clone(),
+            collection_id.clone(),
+            part_trigger,
+            Some(trigger.id.clone()),
+        )
+        .await
+        .context("Cannot insert updated trigger")?;
+
+        Ok(())
     }
 }
 

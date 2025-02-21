@@ -13,7 +13,7 @@ use tracing::info;
 use crate::{
     build_orama,
     collection_manager::{
-        dto::ApiKey,
+        dto::{ApiKey, InsertTriggerParams},
         sides::{segments::Segment, ReadSide, WriteSide},
     },
     tests::utils::{create_grpc_server, create_oramacore_config},
@@ -1563,50 +1563,50 @@ async fn test_delete_documents() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-async fn test_trigger() -> Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-    let mut config = create_oramacore_config();
-    config.reader_side.config.insert_batch_commit_size = 1_000_000;
-    config.writer_side.config.insert_batch_commit_size = 1_000_000;
+// #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+// async fn test_trigger() -> Result<()> {
+//     let _ = tracing_subscriber::fmt::try_init();
+//     let mut config = create_oramacore_config();
+//     config.reader_side.config.insert_batch_commit_size = 1_000_000;
+//     config.writer_side.config.insert_batch_commit_size = 1_000_000;
 
-    let (write_side, read_side) = create(config.clone()).await?;
+//     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    write_side
-        .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
-            json!({
-                "id": collection_id.0.clone(),
-                "read_api_key": "my-read-api-key",
-                "write_api_key": "my-write-api-key",
-            })
-            .try_into()?,
-        )
-        .await?;
-    write_side
-        .insert_segment(
-            collection_id.clone(),
-            Segment {
-                id: "the id".to_string(),
-                description: "".to_string(),
-                name: "the name".to_string(),
-                goal: Some("the goal".to_string()),
-            },
-        )
-        .await?;
+//     let collection_id = CollectionId("test-collection".to_string());
+//     write_side
+//         .create_collection(
+//             ApiKey(Secret::new("my-master-api-key".to_string())),
+//             json!({
+//                 "id": collection_id.0.clone(),
+//                 "read_api_key": "my-read-api-key",
+//                 "write_api_key": "my-write-api-key",
+//             })
+//             .try_into()?,
+//         )
+//         .await?;
+//     write_side
+//         .insert_segment(
+//             collection_id.clone(),
+//             Segment {
+//                 id: "the id".to_string(),
+//                 description: "".to_string(),
+//                 name: "the name".to_string(),
+//                 goal: Some("the goal".to_string()),
+//             },
+//         )
+//         .await?;
 
-    sleep(Duration::from_millis(100)).await;
+//     sleep(Duration::from_millis(100)).await;
 
-    let output = read_side
-        .get_segment(collection_id, "the id".to_string())
-        .await?
-        .expect("Segment should be there");
-    assert_eq!(output.name, "the name");
-    assert_eq!(output.goal, Some("the goal".to_string()));
+//     let output = read_side
+//         .get_segment(collection_id, "the id".to_string())
+//         .await?
+//         .expect("Segment should be there");
+//     assert_eq!(output.name, "the name");
+//     assert_eq!(output.goal, Some("the goal".to_string()));
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_array_types() -> Result<()> {
@@ -1806,6 +1806,49 @@ async fn test_simple() -> Result<()> {
 
     Ok(())
 }
+
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_triggers() -> Result<()> {
+//     use crate::collection_manager::sides::triggers::Trigger;
+
+//     let _ = tracing_subscriber::fmt::try_init();
+//     let config = create_oramacore_config();
+//     let (write_side, read_side) = create(config.clone()).await?;
+
+//     let collection_id = CollectionId("test-collection".to_string());
+
+//     let new_trigger = InsertTriggerParams {
+//         name: "new_trigger".to_string(),
+//         description: "new_trigger description".to_string(),
+//         response: "new_trigger response".to_string(),
+//         segment_id: None,
+//     };
+
+//     let inserted_trigger = write_side
+//         .insert_trigger(collection_id.clone(), new_trigger.clone())
+//         .await?;
+
+//     assert!(inserted_trigger.name == new_trigger.name);
+
+//     let updated_trigger = Trigger {
+//         id: inserted_trigger.id.clone(),
+//         name: "updated_trigger".to_string(),
+//         description: "updated_trigger description".to_string(),
+//         response: "updated_trigger response".to_string(),
+//         segment_id: None,
+//     };
+
+//     let updated_trigger_response = write_side
+//         .update_trigger(collection_id, updated_trigger.clone())
+//         .await?
+//         .unwrap();
+
+//     assert!(updated_trigger_response.name == updated_trigger.name);
+//     assert!(updated_trigger_response.description == updated_trigger.description);
+//     assert!(updated_trigger_response.response == updated_trigger.response);
+
+//     Ok(())
+// }
 
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side

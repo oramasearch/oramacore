@@ -323,31 +323,44 @@ impl ReadSide {
 
     pub async fn get_segment(
         &self,
+        read_api_key: ApiKey,
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
         self.segments.get(collection_id, segment_id).await
     }
 
     pub async fn get_all_segments_by_collection(
         &self,
+        read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Segment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
         self.segments.list_by_collection(collection_id).await
     }
 
     pub async fn get_trigger(
         &self,
+        read_api_key: ApiKey,
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
         self.triggers.get(collection_id, trigger_id).await
     }
 
     pub async fn get_all_triggers_by_collection(
         &self,
+        read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
         self.triggers.list_by_collection(collection_id).await
     }
 
@@ -356,6 +369,20 @@ impl ReadSide {
         let search_mode = ai_service.get_autoquery(query.clone()).await?;
 
         Ok(SearchMode::from_str(&search_mode.mode, query))
+    }
+
+    async fn check_read_api_key(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_read_api_key(read_api_key)
     }
 }
 

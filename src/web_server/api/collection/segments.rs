@@ -8,6 +8,7 @@ use axum::{
 use axum_extra::{headers, TypedHeader};
 use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
+use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -63,8 +64,12 @@ async fn get_segment_v1(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let segment_id = query.segment_id;
+    let read_api_key = query.api_key;
 
-    match read_side.get_segment(collection_id, segment_id).await {
+    match read_side
+        .get_segment(read_api_key, collection_id, segment_id)
+        .await
+    {
         Ok(Some(segment)) => Ok((StatusCode::OK, Json(json!({ "segment": segment })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "segment": null })))),
         Err(e) => Err((
@@ -85,9 +90,10 @@ async fn get_all_segments_v1(
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let read_api_key = query.api_key;
 
     match read_side
-        .get_all_segments_by_collection(collection_id)
+        .get_all_segments_by_collection(read_api_key, collection_id)
         .await
     {
         Ok(segments) => Ok((StatusCode::OK, Json(json!({ "segments": segments })))),
@@ -105,11 +111,12 @@ async fn get_all_segments_v1(
 )]
 async fn insert_segment_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSegmentParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let segment = Segment {
         id: params.id.unwrap_or(cuid2::create_id()),
@@ -119,7 +126,7 @@ async fn insert_segment_v1(
     };
 
     match write_side
-        .insert_segment(collection_id, segment.clone())
+        .insert_segment(write_api_key, collection_id, segment.clone())
         .await
     {
         Ok(_) => Ok((
@@ -145,13 +152,17 @@ async fn insert_segment_v1(
 )]
 async fn delete_segment_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
-    match write_side.delete_segment(collection_id, params.id).await {
+    match write_side
+        .delete_segment(write_api_key, collection_id, params.id)
+        .await
+    {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
             e.chain()
@@ -172,11 +183,12 @@ async fn delete_segment_v1(
 )]
 async fn update_segment_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSegmentParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let segment = Segment {
         id: params.id.clone(),
@@ -185,7 +197,10 @@ async fn update_segment_v1(
         goal: params.goal.clone(),
     };
 
-    match write_side.update_segment(collection_id, segment).await {
+    match write_side
+        .update_segment(write_api_key, collection_id, segment)
+        .await
+    {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
             e.chain()

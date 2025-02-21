@@ -8,6 +8,7 @@ use axum::{
 use axum_extra::{headers, TypedHeader};
 use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
+use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -69,8 +70,12 @@ async fn get_trigger_v1(
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let trigger_id = query.trigger_id;
+    let read_api_key = query.api_key;
 
-    match read_side.get_trigger(collection_id, trigger_id).await {
+    match read_side
+        .get_trigger(read_api_key, collection_id, trigger_id)
+        .await
+    {
         Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
         Err(e) => Err((
@@ -91,9 +96,10 @@ async fn get_all_triggers_v1(
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let read_api_key = query.api_key;
 
     match read_side
-        .get_all_triggers_by_collection(collection_id)
+        .get_all_triggers_by_collection(read_api_key, collection_id)
         .await
     {
         Ok(triggers) => Ok((StatusCode::OK, Json(json!({ "triggers": triggers })))),
@@ -111,30 +117,20 @@ async fn get_all_triggers_v1(
 )]
 async fn insert_trigger_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
-
-    let trigger = Trigger {
-        id: cuid2::create_id(),
-        name: params.name.clone(),
-        description: params.description.clone(),
-        response: params.response.clone(),
-        segment_id: params.segment_id.clone(),
-    };
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
-        .insert_trigger(collection_id, trigger.clone())
+        .insert_trigger(write_api_key, collection_id, params, None)
         .await
     {
-        Ok(id) => Ok((
+        Ok(new_trigger) => Ok((
             StatusCode::OK,
-            Json(json!({ "success": true, "id": id, "trigger": Trigger {
-                id,
-                ..trigger
-            } })),
+            Json(json!({ "success": true, "id": new_trigger.id.clone(), "trigger": new_trigger })),
         )),
         Err(e) => {
             e.chain()
@@ -155,13 +151,17 @@ async fn insert_trigger_v1(
 )]
 async fn delete_trigger_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
-    match write_side.delete_trigger(collection_id, params.id).await {
+    match write_side
+        .delete_trigger(write_api_key, collection_id, params.id)
+        .await
+    {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
             e.chain()
@@ -182,12 +182,13 @@ async fn delete_trigger_v1(
 )]
 async fn update_trigger_v1(
     Path(id): Path<String>,
-    TypedHeader(_auth): AuthorizationBearerHeader,
+    TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId(id);
     let trigger_id_parts = parse_trigger_id(params.id.clone());
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     if Some(trigger_id_parts.segment_id.clone()) != Some(params.segment_id.clone()) {
         return Err((
@@ -207,15 +208,10 @@ async fn update_trigger_v1(
     };
 
     match write_side
-        .update_trigger(collection_id, trigger.clone())
+        .update_trigger(write_api_key, collection_id, trigger.clone())
         .await
     {
-        Ok(updated_trigger) => Ok((
-            StatusCode::OK,
-            Json(
-                json!({ "success": true, "id": updated_trigger.id.clone(), "trigger": updated_trigger }),
-            ),
-        )),
+        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
             e.chain()
                 .skip(1)
