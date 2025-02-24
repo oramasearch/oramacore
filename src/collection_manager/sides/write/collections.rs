@@ -4,22 +4,25 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use redact::Secret;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{info, instrument};
+use tracing::info;
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
+use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::file_utils::{create_if_not_exists, BufferedFile};
+use crate::metrics::commit::COMMIT_CALCULATION_TIME;
+use crate::metrics::CollectionCommitLabels;
 use crate::nlp::NLPService;
-use crate::{
-    collection_manager::dto::CollectionDTO, file_utils::list_directory_in_path, types::CollectionId,
-};
+use crate::{collection_manager::dto::CollectionDTO, types::CollectionId};
 
 use crate::collection_manager::dto::{
     ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
-use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest, WriteOperation};
-use super::{CollectionsWriterConfig, OperationSender};
+use super::CollectionsWriterConfig;
+use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
@@ -28,15 +31,61 @@ pub struct CollectionsWriter {
 }
 
 impl CollectionsWriter {
-    pub fn new(
+    pub async fn try_load(
         config: CollectionsWriterConfig,
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-    ) -> CollectionsWriter {
-        CollectionsWriter {
-            collections: Default::default(),
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+    ) -> Result<Self> {
+        let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
+
+        let data_dir = &config.data_dir.join("collections");
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
+
+        let info_path = data_dir.join("info.json");
+        info!("Loading collections from disk from {:?}", info_path);
+        let collection_ids = match BufferedFile::open(info_path)
+            .and_then(|file| file.read_json_data::<CollectionsInfo>())
+        {
+            std::result::Result::Ok(CollectionsInfo::V1(info)) => info,
+            Err(_) => {
+                info!(
+                    "No collections found in data directory {:?}. Create new instance",
+                    data_dir
+                );
+                return Ok(CollectionsWriter {
+                    collections: Default::default(),
+                    config,
+                    embedding_sender,
+                });
+            }
+        };
+
+        for collection_id in collection_ids {
+            let collection_dir = data_dir.join(collection_id.0.clone());
+
+            // All those values are replaced inside `load` method
+            let mut collection = CollectionWriter::new(
+                collection_id.clone(),
+                None,
+                ApiKey(Secret::new("".to_string())),
+                LanguageDTO::English,
+                embedding_sender.clone(),
+            );
+            collection
+                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
+                .await?;
+
+            collections.insert(collection_id, collection);
+        }
+
+        let writer = CollectionsWriter {
+            collections: RwLock::new(collections),
             config,
             embedding_sender,
-        }
+        };
+
+        Ok(writer)
     }
 
     pub async fn get_collection<'s, 'coll>(
@@ -67,11 +116,13 @@ impl CollectionsWriter {
 
         info!("Creating collection {:?}", id);
 
+        let default_language = language.unwrap_or(LanguageDTO::English);
+
         let collection = CollectionWriter::new(
             id.clone(),
-            description,
+            description.clone(),
             write_api_key,
-            language.unwrap_or(LanguageDTO::English),
+            default_language,
             self.embedding_sender.clone(),
         );
 
@@ -86,7 +137,7 @@ impl CollectionsWriter {
                 .map(DocumentFields::Properties)
                 .unwrap_or(DocumentFields::AllStringProperties);
             let typed_field = TypedField::Embedding(EmbeddingTypedField {
-                model,
+                model: OramaModelSerializable(model),
                 document_fields,
             });
             HashMap::from_iter([(DEFAULT_EMBEDDING_FIELD_NAME.to_string(), typed_field)])
@@ -106,6 +157,8 @@ impl CollectionsWriter {
             .send(WriteOperation::CreateCollection {
                 id: id.clone(),
                 read_api_key,
+                description,
+                default_language,
             })
             .await
             .context("Cannot send create collection")?;
@@ -131,75 +184,35 @@ impl CollectionsWriter {
     }
 
     pub async fn commit(&self) -> Result<()> {
-        let data_dir = &self.config.data_dir;
+        // During the commit, we don't accept any new write operation
+        let collections = self.collections.write().await;
 
-        let collections = self.collections.read().await;
-
-        std::fs::create_dir_all(data_dir).context("Cannot create data directory")?;
+        let data_dir = &self.config.data_dir.join("collections");
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
         for (collection_id, collection) in collections.iter() {
             let collection_dir = data_dir.join(collection_id.0.clone());
+
+            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+                collection: collection_id.0.clone(),
+                side: "write",
+            });
             collection.commit(collection_dir).await?;
+            drop(m);
         }
+
+        let info_path = data_dir.join("info.json");
+        info!("Committing info at {:?}", info_path);
+        BufferedFile::create_or_overwrite(info_path)
+            .context("Cannot create info.json")?
+            .write_json_data(&CollectionsInfo::V1(
+                collections.keys().cloned().collect::<Vec<_>>(),
+            ))
+            .context("Cannot write info.json")?;
 
         // Now it is safe to drop the lock
         // because we safe everything to disk
         drop(collections);
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    pub async fn load(
-        &mut self,
-        hooks_runtime: Arc<HooksRuntime>,
-        nlp_service: Arc<NLPService>,
-    ) -> Result<()> {
-        // `&mut self` isn't needed here
-        // but we need to ensure that the method is not called concurrently
-        let data_dir = &self.config.data_dir;
-
-        info!("Loading collections from disk from {:?}", data_dir);
-
-        let collection_dirs =
-            list_directory_in_path(data_dir).context("Cannot read collection list from disk")?;
-
-        let collection_dirs = match collection_dirs {
-            Some(collection_dirs) => collection_dirs,
-            None => {
-                info!(
-                    "No collections found in data directory {:?}. Skipping load.",
-                    data_dir
-                );
-                return Ok(());
-            }
-        };
-
-        for collection_dir in collection_dirs {
-            let file_name = collection_dir
-                .file_name()
-                .expect("File name is always given at this point");
-            let file_name: String = file_name.to_string_lossy().into();
-
-            let collection_id = CollectionId(file_name);
-
-            // All those values are replaced inside `load` method
-            let mut collection = CollectionWriter::new(
-                collection_id.clone(),
-                None,
-                ApiKey(Secret::new("".to_string())),
-                LanguageDTO::English,
-                self.embedding_sender.clone(),
-            );
-            collection
-                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
-                .await?;
-
-            self.collections
-                .write()
-                .await
-                .insert(collection_id, collection);
-        }
 
         Ok(())
     }
@@ -234,6 +247,11 @@ impl Deref for CollectionWriteLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum CollectionsInfo {
+    V1(Vec<CollectionId>),
 }
 
 #[cfg(test)]

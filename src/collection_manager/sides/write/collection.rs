@@ -17,20 +17,21 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
-        sides::hooks::{HookName, HooksRuntime},
+        sides::{
+            hooks::{HookName, HooksRuntime},
+            CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
+            EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
+        },
     },
     file_utils::BufferedFile,
-    metrics::{CommitLabels, COMMIT_METRIC},
+    metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
     nlp::{locales::Locale, NLPService, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
-use super::{
-    embedding::EmbeddingCalculationRequest, CollectionField, CollectionWriteOperation,
-    OperationSender, SerializedFieldIndexer, WriteOperation,
-};
+use super::{embedding::EmbeddingCalculationRequest, CollectionField, SerializedFieldIndexer};
 
 mod doc_id_storage;
 
@@ -153,7 +154,7 @@ impl CollectionWriter {
                 self.id.clone(),
                 CollectionWriteOperation::InsertDocument {
                     doc_id,
-                    doc: doc.into_raw()?,
+                    doc: DocumentToInsert(doc.into_raw()?),
                 },
             ))
             .await
@@ -177,10 +178,16 @@ impl CollectionWriter {
                 Some(v) => v,
             };
 
+            let metric = FIELD_CALCULATION_TIME.create(FieldCalculationLabels {
+                collection: self.id.0.clone().into(),
+                field: field_name.clone().into(),
+                field_type: field.get_type().into(),
+            });
             field
                 .get_write_operations(doc_id, &flatten, sender.clone())
                 .await
                 .with_context(|| format!("Cannot index field {}", field_name))?;
+            drop(metric);
         }
 
         self.collection_document_count
@@ -277,7 +284,7 @@ impl CollectionWriter {
                         field_name.clone(),
                         ValueType::Complex(ComplexType::Embedding),
                         CollectionField::new_embedding(
-                            embedding_field.model,
+                            embedding_field.model.0,
                             embedding_field.document_fields.clone(),
                             embedding_sender,
                             hooks_runtime,
@@ -376,7 +383,22 @@ impl CollectionWriter {
                 CollectionWriteOperation::CreateField {
                     field_id,
                     field_name,
-                    field: typed_field,
+                    field: match typed_field {
+                        TypedField::Embedding(embedding_field) => {
+                            TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
+                                model: embedding_field.model,
+                                document_fields: DocumentFieldsWrapper(
+                                    embedding_field.document_fields,
+                                ),
+                            })
+                        }
+                        TypedField::Text(locale) => TypedFieldWrapper::Text(locale),
+                        TypedField::Number => TypedFieldWrapper::Number,
+                        TypedField::Bool => TypedFieldWrapper::Bool,
+                        TypedField::ArrayText(locale) => TypedFieldWrapper::ArrayText(locale),
+                        TypedField::ArrayNumber => TypedFieldWrapper::ArrayNumber,
+                        TypedField::ArrayBoolean => TypedFieldWrapper::ArrayBoolean,
+                    },
                 },
             ))
             .await
@@ -473,11 +495,6 @@ impl CollectionWriter {
     pub async fn commit(&self, path: PathBuf) -> Result<()> {
         info!(coll_id= ?self.id, "Committing collection");
 
-        let m = COMMIT_METRIC.create(CommitLabels {
-            side: "write",
-            collection: self.id.0.clone(),
-            index_type: "info",
-        });
         std::fs::create_dir_all(&path).context("Cannot create collection directory")?;
 
         let fields = self.fields.read().await;
@@ -520,8 +537,6 @@ impl CollectionWriter {
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
 
-        drop(m);
-
         Ok(())
     }
 
@@ -531,6 +546,7 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
     ) -> Result<()> {
+        println!("Loading collection from {:?}", path);
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()

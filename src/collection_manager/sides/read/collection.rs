@@ -8,47 +8,63 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use committed::CommittedCollection;
+use committed::{
+    fields::{
+        BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
+        VectorCommittedFieldStats,
+    },
+    CommittedCollection,
+};
 use dashmap::DashMap;
+use debug_panic::debug_panic;
 use dump::{CollectionInfo, CollectionInfoV1};
 use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
 use redact::Secret;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    join,
-    sync::{Mutex, RwLock},
+use tokio::{join, sync::RwLock};
+use tracing::{debug, error, info, instrument, trace};
+use uncommitted::{
+    fields::{
+        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringUncommittedFieldStats,
+        VectorUncommittedFieldStats,
+    },
+    UncommittedCollection,
 };
-use tracing::{debug, error, info, instrument, trace, warn};
-use uncommitted::UncommittedCollection;
 
 mod committed;
 mod merge;
 mod uncommitted;
 
 use crate::{
-    ai::{AIService, OramaModel},
+    ai::{AIService, AutoQueryResponse, OramaModel},
     collection_manager::{
         dto::{
-            self, ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit,
-            NumberFilter, Properties, SearchMode, SearchParams,
+            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
+            HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchParams,
+            Similarity, VectorMode,
         },
-        sides::{CollectionWriteOperation, Offset, OramaModelSerializable},
+        sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
     file_utils::BufferedFile,
     metrics::{
-        CommitLabels, SearchFilterLabels, SearchLabels, COMMIT_METRIC, SEARCH_FILTER_HISTOGRAM,
-        SEARCH_FILTER_METRIC, SEARCH_METRIC,
+        commit::FIELD_COMMIT_CALCULATION_TIME,
+        search::{
+            FILTER_CALCULATION_TIME, FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
+            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
+        },
+        CollectionFieldCommitLabels, CollectionLabels,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
     types::{CollectionId, DocumentId},
 };
 
-use super::IndexesConfig;
-
 #[derive(Debug)]
 pub struct CollectionReader {
     id: CollectionId,
+    description: Option<String>,
+    default_language: LanguageDTO,
+
     read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
@@ -66,36 +82,122 @@ pub struct CollectionReader {
     text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
 
     offset_storage: OffsetStorage,
-    commit_insert_mutex: Mutex<()>,
 }
 
 impl CollectionReader {
-    pub fn try_new(
+    pub fn empty(
         id: CollectionId,
+        description: Option<String>,
+        default_language: LanguageDTO,
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        _: IndexesConfig,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             id,
+            description,
+            default_language,
+
             read_api_key,
             ai_service,
             nlp_service,
             document_count: AtomicU64::new(0),
-            fields_per_model: Default::default(),
-            text_parser_per_field: Default::default(),
             fields: Default::default(),
 
             uncommitted_collection: RwLock::new(UncommittedCollection::new()),
-            committed_collection: RwLock::new(CommittedCollection::new()),
+            committed_collection: RwLock::new(CommittedCollection::empty()),
+            uncommitted_deleted_documents: Default::default(),
+
+            fields_per_model: Default::default(),
+
+            text_parser_per_field: Default::default(),
+
+            offset_storage: OffsetStorage::new(),
+        }
+    }
+
+    pub fn try_load(
+        ai_service: Arc<AIService>,
+        nlp_service: Arc<NLPService>,
+        data_dir: PathBuf,
+    ) -> Result<Self> {
+        info!("Loading collection from {:?}", data_dir);
+
+        let collection_info_path = data_dir.join("info.info");
+        let current_offset: Offset = BufferedFile::open(collection_info_path.clone())
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+            .context("Cannot read previous info")?;
+
+        info!("Current offset: {:?}", current_offset);
+
+        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
+        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+            .context("Cannot read previous collection info")?;
+
+        let dump::CollectionInfo::V1(collection_info) = collection_info;
+        let read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
+
+        let fields: DashMap<String, (FieldId, TypedField)> = Default::default();
+        for (field_name, (field_id, field_type)) in collection_info.fields {
+            let typed_field: TypedField = match field_type {
+                dump::TypedField::Text(locale) => TypedField::Text(locale),
+                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
+                dump::TypedField::Number => TypedField::Number,
+                dump::TypedField::Bool => TypedField::Bool,
+            };
+            fields.insert(field_name, (field_id, typed_field));
+        }
+
+        let fields_per_model: DashMap<OramaModel, Vec<FieldId>> = Default::default();
+        for (orama_model, fields) in collection_info.used_models {
+            fields_per_model.insert(orama_model.0, fields);
+        }
+
+        let text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)> = fields
+            .iter()
+            .filter_map(|e| {
+                if let TypedField::Text(l) = e.1 {
+                    let locale = l;
+                    Some((e.0, (locale, nlp_service.get(locale))))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let committed_collection = CommittedCollection::try_load(
+            collection_info.number_field_infos,
+            collection_info.bool_field_infos,
+            collection_info.string_field_infos,
+            collection_info.vector_field_infos,
+        )
+        .context("Cannot load committed collection")?;
+        let committed_collection = RwLock::new(committed_collection);
+
+        Ok(Self {
+            id: collection_info.id,
+            description: collection_info.description,
+            default_language: collection_info.default_language,
+            read_api_key,
+            ai_service,
+            nlp_service,
+            document_count: AtomicU64::new(collection_info.document_count),
+            fields_per_model,
+            text_parser_per_field,
+            fields,
+
+            uncommitted_collection: RwLock::new(UncommittedCollection::new()),
+            committed_collection,
             uncommitted_deleted_documents: RwLock::new(HashSet::new()),
 
-            offset_storage: Default::default(),
-            commit_insert_mutex: Default::default(),
+            offset_storage: OffsetStorage::new(),
         })
     }
 
+    #[inline]
     pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
         if api_key != self.read_api_key {
             return Err(anyhow!("Invalid read api key"));
@@ -124,81 +226,11 @@ impl CollectionReader {
             .ok_or_else(|| anyhow!("Field not found"))
     }
 
-    pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
-        info!("Loading collection from {:?}", data_dir);
-
-        let collection_info_path = data_dir.join("info.info");
-        let current_offset: Offset = match BufferedFile::open(collection_info_path.clone())
-            .context("Cannot open previous collection info")?
-            .read_json_data()
-        {
-            Ok(offset) => offset,
-            Err(e) => {
-                warn!("Cannot read previous collection info from {:?} due to {:?}. Skip loading collection", collection_info_path, e);
-                return Ok(());
-            }
-        };
-
-        info!("Current offset: {:?}", current_offset);
-        assert!(current_offset.0 > 0);
-        println!("Loaded offset: {:?}", current_offset);
-
-        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
-        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
-            .context("Cannot open previous collection info")?
-            .read_json_data()
-            .context("Cannot read previous collection info")?;
-
-        let dump::CollectionInfo::V1(collection_info) = collection_info;
-        self.read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
-
-        for (field_name, (field_id, field_type)) in collection_info.fields {
-            let typed_field: TypedField = match field_type {
-                dump::TypedField::Text(locale) => TypedField::Text(locale),
-                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
-                dump::TypedField::Number => TypedField::Number,
-                dump::TypedField::Bool => TypedField::Bool,
-            };
-            self.fields.insert(field_name, (field_id, typed_field));
-        }
-
-        for (orama_model, fields) in collection_info.used_models {
-            self.fields_per_model.insert(orama_model.0, fields);
-        }
-
-        self.text_parser_per_field = self
-            .fields
-            .iter()
-            .filter_map(|e| {
-                if let TypedField::Text(l) = e.1 {
-                    let locale = l;
-                    Some((e.0, (locale, self.nlp_service.get(locale))))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut lock = self.committed_collection.write().await;
-        lock.load(
-            collection_info.number_field_infos,
-            collection_info.bool_field_infos,
-            collection_info.string_field_infos,
-            collection_info.vector_field_infos,
-        )?;
-
-        Ok(())
-    }
-
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
         info!("Committing collection");
 
-        // We stop insertion operations while we are committing
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
         let offset = self.offset_storage.get_offset();
-        assert!(offset.0 > 0);
         debug!("Committing with offset: {:?}", offset);
 
         let collection_info_path = data_dir.join("info.info");
@@ -229,9 +261,12 @@ impl CollectionReader {
         } else {
             debug!("No previous collection info found, creating a new one");
             CollectionInfoV1 {
+                id: self.id.clone(),
+                description: self.description.clone(),
+                document_count: 0,
+                default_language: self.default_language,
                 fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
-                id: self.id.clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
@@ -251,7 +286,7 @@ impl CollectionReader {
             info!("Uncommitted document deletion: commit every fields");
 
             let uncommitted_document_deletions = uncommitted_document_deletions.clone();
-            let info = committed.get_infos();
+            let info = committed.get_keys();
 
             uncommitted_infos.bool_fields.extend(info.bool_fields);
             uncommitted_infos.number_fields.extend(info.number_fields);
@@ -272,10 +307,15 @@ impl CollectionReader {
 
         let mut number_fields = HashMap::new();
         let number_dir = data_dir.join("numbers");
+        debug!(
+            "Merging number fields {:?}",
+            uncommitted_infos.number_fields
+        );
         for field_id in uncommitted_infos.number_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "number",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "number",
                 side: "read",
             });
             let uncommitted_number_index = uncommitted.number_index.get(&field_id);
@@ -296,6 +336,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_number_index = match new_committed_number_index {
+                None => {
+                    debug_panic!("Number field is not changed");
+                    continue;
+                }
+                Some(new_committed_number_index) => new_committed_number_index,
+            };
+
             let field_info = new_committed_number_index.get_field_info();
             current_collection_info
                 .number_field_infos
@@ -334,13 +383,19 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Number fields merged");
 
         let mut string_fields = HashMap::new();
         let string_dir = data_dir.join("strings");
+        debug!(
+            "Merging string fields {:?}",
+            uncommitted_infos.string_fields
+        );
         for field_id in uncommitted_infos.string_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "string",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "string",
                 side: "read",
             });
 
@@ -362,6 +417,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_string_index = match new_committed_string_index {
+                None => {
+                    debug_panic!("String field is not changed");
+                    continue;
+                }
+                Some(new_committed_string_index) => new_committed_string_index,
+            };
+
             let field_info = new_committed_string_index.get_field_info();
             string_fields.insert(field_id, new_committed_string_index);
             current_collection_info
@@ -404,13 +468,16 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("String fields merged");
 
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
+        debug!("Merging bool fields {:?}", uncommitted_infos.bool_fields);
         for field_id in uncommitted_infos.bool_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "bool",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "bool",
                 side: "read",
             });
             let uncommitted_bool_index = uncommitted.bool_index.get(&field_id);
@@ -431,6 +498,14 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+            let new_committed_bool_index = match new_committed_bool_index {
+                None => {
+                    debug_panic!("Bool field is not changed");
+                    continue;
+                }
+                Some(new_committed_bool_index) => new_committed_bool_index,
+            };
+
             let field_info = new_committed_bool_index.get_field_info();
             bool_fields.insert(field_id, new_committed_bool_index);
             current_collection_info
@@ -468,13 +543,19 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Bool fields merged");
 
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
+        debug!(
+            "Merging vector fields {:?}",
+            uncommitted_infos.vector_fields
+        );
         for field_id in uncommitted_infos.vector_fields {
-            let m = COMMIT_METRIC.create(CommitLabels {
-                collection: self.id.0.to_string(),
-                index_type: "vector",
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "vector",
                 side: "read",
             });
             let uncommitted_vector_index = uncommitted.vector_index.get(&field_id);
@@ -495,6 +576,15 @@ impl CollectionReader {
                     field_id, self.id
                 )
             })?;
+
+            let new_committed_vector_index = match new_committed_vector_index {
+                None => {
+                    debug_panic!("Vector field is not changed");
+                    continue;
+                }
+                Some(new_committed_vector_index) => new_committed_vector_index,
+            };
+
             let field_info = new_committed_vector_index.get_field_info();
             vector_fields.insert(field_id, new_committed_vector_index);
             current_collection_info
@@ -553,6 +643,7 @@ impl CollectionReader {
             }
             drop(m);
         }
+        debug!("Vector fields merged");
 
         // Read lock ends
         drop(committed);
@@ -594,8 +685,6 @@ impl CollectionReader {
             .write_json_data(&offset)
             .context("Cannot write previous collection info")?;
 
-        drop(commit_insert_mutex_lock);
-
         info!("Collection committed");
 
         Ok(())
@@ -610,19 +699,23 @@ impl CollectionReader {
         offset: Offset,
         collection_operation: CollectionWriteOperation,
     ) -> Result<()> {
-        // We don't allow insertion during the commit
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
         match collection_operation {
             CollectionWriteOperation::InsertDocument { .. } => {
                 unreachable!("InsertDocument is not managed by the collection");
             }
             CollectionWriteOperation::DeleteDocuments { doc_ids } => {
+                let len = doc_ids.len() as u64;
                 self.offset_storage.set_offset(offset);
                 let mut uncommitted_deleted_documents =
                     self.uncommitted_deleted_documents.write().await;
                 uncommitted_deleted_documents.extend(doc_ids);
-                info!("Document deleted: {:?}", uncommitted_deleted_documents);
+                self.document_count
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |a| {
+                        Some(a.saturating_sub(len))
+                    })
+                    .map_err(|_| anyhow!("Cannot update document count"))?;
+                self.document_count.fetch_sub(len, Ordering::Relaxed);
+                info!("Document deleted: {:?}", len);
             }
             CollectionWriteOperation::CreateField {
                 field_id,
@@ -632,13 +725,13 @@ impl CollectionReader {
                 trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
 
                 let typed_field = match typed_field {
-                    dto::TypedField::Embedding(model) => TypedField::Embedding(model.model),
-                    dto::TypedField::Text(locale) => TypedField::Text(locale),
-                    dto::TypedField::Number => TypedField::Number,
-                    dto::TypedField::Bool => TypedField::Bool,
-                    dto::TypedField::ArrayText(locale) => TypedField::ArrayText(locale),
-                    dto::TypedField::ArrayNumber => TypedField::ArrayNumber,
-                    dto::TypedField::ArrayBoolean => TypedField::ArrayBoolean,
+                    TypedFieldWrapper::Embedding(model) => TypedField::Embedding(model.model.0),
+                    TypedFieldWrapper::Text(locale) => TypedField::Text(locale),
+                    TypedFieldWrapper::Number => TypedField::Number,
+                    TypedFieldWrapper::Bool => TypedField::Bool,
+                    TypedFieldWrapper::ArrayText(locale) => TypedField::ArrayText(locale),
+                    TypedFieldWrapper::ArrayNumber => TypedField::ArrayNumber,
+                    TypedFieldWrapper::ArrayBoolean => TypedField::ArrayBoolean,
                 };
 
                 self.fields
@@ -677,8 +770,6 @@ impl CollectionReader {
             }
         };
 
-        drop(commit_insert_mutex_lock);
-
         Ok(())
     }
 
@@ -688,9 +779,6 @@ impl CollectionReader {
         search_params: SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
         info!(search_params = ?search_params, "Start search");
-        let metric = SEARCH_METRIC.create(SearchLabels {
-            collection: self.id.0.to_string(),
-        });
         let SearchParams {
             mode,
             properties,
@@ -706,9 +794,56 @@ impl CollectionReader {
         let filtered_doc_ids = self
             .calculate_filtered_doc_ids(where_filter, &uncommitted_deleted_documents)
             .await?;
+        if let Some(filtered_doc_ids) = &filtered_doc_ids {
+            FILTER_PERC_CALCULATION_COUNT.track(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len() as f64 / self.count_documents() as f64,
+            );
+            FILTER_COUNT_CALCULATION_COUNT.track_usize(
+                CollectionLabels {
+                    collection: self.id.0.clone(),
+                },
+                filtered_doc_ids.len(),
+            );
+        }
+
+        // Manage the "auto" search mode. OramaCore will automatically determine
+        // wether to use full text search, vector search or hybrid search.
+        let search_mode: SearchMode = match mode.clone() {
+            SearchMode::Auto(mode_result) => {
+                let final_mode = self
+                    .ai_service
+                    .get_autoquery(mode_result.term.clone())
+                    .await
+                    .unwrap_or(AutoQueryResponse {
+                        // By default, we can use the hybrid mode when something goes wrong
+                        // with the AI service. This is the most versatile mode.
+                        mode: "hybrid".to_string(),
+                    });
+
+                match final_mode.mode.as_str() {
+                    "fulltext" => SearchMode::FullText(FulltextMode {
+                        term: mode_result.term,
+                    }),
+                    "hybrid" => SearchMode::Hybrid(HybridMode {
+                        term: mode_result.term,
+                        similarity: Similarity(0.8),
+                    }),
+                    "vector" => SearchMode::Vector(VectorMode {
+                        term: mode_result.term,
+                        similarity: Similarity(0.8),
+                    }),
+                    _ => anyhow::bail!("Invalid search mode"),
+                }
+            }
+            _ => mode,
+        };
+
         let boost = self.calculate_boost(boost);
 
-        let token_scores = match mode {
+        let token_scores = match search_mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
                 self.search_full_text(
@@ -723,6 +858,7 @@ impl CollectionReader {
             SearchMode::Vector(search_params) => {
                 self.search_vector(
                     &search_params.term,
+                    search_params.similarity.0,
                     filtered_doc_ids.as_ref(),
                     &limit,
                     &uncommitted_deleted_documents,
@@ -735,6 +871,7 @@ impl CollectionReader {
                 let (vector, fulltext) = join!(
                     self.search_vector(
                         &search_params.term,
+                        search_params.similarity.0,
                         filtered_doc_ids.as_ref(),
                         &limit,
                         &uncommitted_deleted_documents
@@ -772,12 +909,24 @@ impl CollectionReader {
                 }
                 fulltext
             }
+            SearchMode::Auto(_) => unreachable!(),
         };
+
+        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len(),
+        );
+        MATCHING_PERC_CALCULATION_COUNT.track(
+            CollectionLabels {
+                collection: self.id.0.clone(),
+            },
+            token_scores.len() as f64 / self.count_documents() as f64,
+        );
 
         info!("token_scores len: {:?}", token_scores.len());
         debug!("token_scores: {:?}", token_scores);
-
-        drop(metric);
 
         Ok(token_scores)
     }
@@ -805,14 +954,14 @@ impl CollectionReader {
             return Ok(None);
         }
 
+        let filter_m = FILTER_CALCULATION_TIME.create(CollectionLabels {
+            collection: self.id.0.clone(),
+        });
+
         info!(
             "where_filter: {:?} {:?}",
             where_filter, self.uncommitted_collection
         );
-
-        let metric = SEARCH_FILTER_METRIC.create(SearchFilterLabels {
-            collection: self.id.0.to_string(),
-        });
 
         let filters: Result<Vec<_>> = where_filter
             .into_iter()
@@ -858,14 +1007,9 @@ impl CollectionReader {
             doc_ids = doc_ids.intersection(&doc_ids_for_field).copied().collect();
         }
 
-        drop(metric);
-
-        SEARCH_FILTER_HISTOGRAM
-            .create(SearchFilterLabels {
-                collection: self.id.0.to_string(),
-            })
-            .record_usize(doc_ids.len());
         info!("Matching doc from filters: {:?}", doc_ids.len());
+
+        drop(filter_m);
 
         Ok(Some(doc_ids))
     }
@@ -959,6 +1103,7 @@ impl CollectionReader {
     async fn search_vector(
         &self,
         term: &str,
+        similarity: f32,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: &Limit,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
@@ -976,14 +1121,15 @@ impl CollectionReader {
 
             info!("Searching on model {:?} on fields {:?}", model, fields);
 
-            let e = self
+            let targets = self
                 .ai_service
                 .embed_query(*model, vec![&term.to_string()])
                 .await?;
 
-            for k in e {
+            for target in targets {
                 committed_lock.vector_search(
-                    &k,
+                    &target,
+                    similarity,
                     fields,
                     filtered_doc_ids,
                     limit.0,
@@ -991,7 +1137,8 @@ impl CollectionReader {
                     uncommitted_deleted_documents,
                 )?;
                 uncommitted_lock.vector_search(
-                    &k,
+                    &target,
+                    similarity,
                     fields,
                     filtered_doc_ids,
                     &mut output,
@@ -1126,6 +1273,172 @@ impl CollectionReader {
 
         Ok(Some(res_facets))
     }
+
+    pub async fn stats(&self) -> Result<CollectionStats> {
+        let mut fields_stats = Vec::new();
+
+        let mut bools: HashMap<
+            FieldId,
+            (
+                Option<BoolCommittedFieldStats>,
+                Option<BoolUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let bool_committed_fields_stats =
+            self.committed_collection.read().await.get_bool_stats()?;
+        bools.extend(
+            bool_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let bool_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_bool_stats();
+        for (k, v) in bool_uncommitted_fields_stats {
+            let e = bools.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(bools.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Bool {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut numbers: HashMap<
+            FieldId,
+            (
+                Option<NumberCommittedFieldStats>,
+                Option<NumberUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let number_committed_fields_stats =
+            self.committed_collection.read().await.get_number_stats()?;
+        numbers.extend(
+            number_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let number_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_number_stats();
+        for (k, v) in number_uncommitted_fields_stats {
+            let e = numbers.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(numbers.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Number {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut strings: HashMap<
+            FieldId,
+            (
+                Option<StringCommittedFieldStats>,
+                Option<StringUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let string_committed_fields_stats =
+            self.committed_collection.read().await.get_string_stats()?;
+        strings.extend(
+            string_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let string_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_string_stats();
+        for (k, v) in string_uncommitted_fields_stats {
+            let e = strings.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(strings.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::String {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut vectors: HashMap<
+            FieldId,
+            (
+                Option<VectorCommittedFieldStats>,
+                Option<VectorUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let vector_committed_fields_stats =
+            self.committed_collection.read().await.get_vector_stats()?;
+        vectors.extend(
+            vector_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let vector_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_vector_stats();
+        for (k, v) in vector_uncommitted_fields_stats {
+            let e = vectors.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(vectors.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Vector {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        fields_stats.sort_by_key(|e| e.field_id.0);
+
+        Ok(CollectionStats {
+            id: self.get_id(),
+            description: self.description.clone(),
+            default_language: self.default_language,
+            document_count: self.document_count.load(Ordering::Relaxed),
+            fields_stats,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1137,7 +1450,10 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{dto::FieldId, sides::OramaModelSerializable},
+        collection_manager::{
+            dto::{FieldId, LanguageDTO},
+            sides::OramaModelSerializable,
+        },
         nlp::locales::Locale,
         types::CollectionId,
     };
@@ -1154,6 +1470,9 @@ mod dump {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct CollectionInfoV1 {
         pub id: CollectionId,
+        pub description: Option<String>,
+        pub default_language: LanguageDTO,
+        pub document_count: u64,
         pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
@@ -1286,4 +1605,52 @@ pub enum TypedField {
     ArrayText(Locale),
     ArrayNumber,
     ArrayBoolean,
+}
+
+#[derive(Serialize)]
+pub struct FieldStats {
+    name: String,
+    field_id: FieldId,
+    #[serde(flatten)]
+    stats: FieldStatsType,
+}
+
+#[derive(Serialize)]
+pub struct CollectionStats {
+    pub id: CollectionId,
+    pub description: Option<String>,
+    pub default_language: LanguageDTO,
+    pub document_count: u64,
+    pub fields_stats: Vec<FieldStats>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub enum FieldStatsType {
+    #[serde(rename = "bool")]
+    Bool {
+        uncommitted: Option<BoolUncommittedFieldStats>,
+        committed: Option<BoolCommittedFieldStats>,
+    },
+    #[serde(rename = "number")]
+    Number {
+        uncommitted: Option<NumberUncommittedFieldStats>,
+        committed: Option<NumberCommittedFieldStats>,
+    },
+    #[serde(rename = "string")]
+    String {
+        uncommitted: Option<StringUncommittedFieldStats>,
+        committed: Option<StringCommittedFieldStats>,
+    },
+    #[serde(rename = "vector")]
+    Vector {
+        uncommitted: Option<VectorUncommittedFieldStats>,
+        committed: Option<VectorCommittedFieldStats>,
+    },
+}
+
+#[derive(Serialize)]
+pub struct BoolFieldStats {
+    true_count: usize,
+    false_count: usize,
 }

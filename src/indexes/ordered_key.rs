@@ -105,6 +105,36 @@ impl<
         }
     }
 
+    pub fn count(&self) -> Result<usize> {
+        match &self.pointer {
+            PagePointer::InMemory { items, .. } => Ok(items.len()),
+            PagePointer::OnFile { path } => {
+                let items = self.load_items(path)?;
+                Ok(items.len())
+            }
+        }
+    }
+
+    pub fn min_item_key(&self) -> Result<Key> {
+        match &self.pointer {
+            PagePointer::InMemory { items, .. } => Ok(items[0].key.clone()),
+            PagePointer::OnFile { path } => {
+                let items = self.load_items(path)?;
+                Ok(items[0].key.clone())
+            }
+        }
+    }
+
+    pub fn max_item_key(&self) -> Result<Key> {
+        match &self.pointer {
+            PagePointer::InMemory { items, .. } => Ok(items.last().unwrap().key.clone()),
+            PagePointer::OnFile { path } => {
+                let items = self.load_items(path)?;
+                Ok(items.last().unwrap().key.clone())
+            }
+        }
+    }
+
     fn save_on_disk(&self) -> Result<()> {
         match &self.pointer {
             PagePointer::InMemory { items, path } => {
@@ -265,6 +295,29 @@ impl<
         Ok(Self { pages, bounds })
     }
 
+    pub fn count(&self, key: Key) -> Result<usize> {
+        let page_index = self.find_page_index(&key)?;
+        let page = self
+            .pages
+            .get(page_index)
+            .context("The page is not present")?;
+        let items = page.get_page_items()?;
+        let count = items
+            .into_iter()
+            .filter(|item| item.key == key)
+            .map(|item| item.values.len())
+            .sum();
+        Ok(count)
+    }
+
+    pub fn min_max(&self) -> Result<(Key, Key)> {
+        let min = self.pages.first().expect("The page is empty");
+        let min = min.min_item_key()?;
+        let max = self.pages.last().expect("The page is empty");
+        let max = max.max_item_key()?;
+        Ok((min, max))
+    }
+
     pub fn get_items(
         &self,
         min: Key,
@@ -335,7 +388,7 @@ And this should not happen. Return the first page."#);
 mod tests {
     use crate::{
         collection_manager::dto::{Number, SerializableNumber},
-        test_utils::generate_new_path,
+        tests::utils::generate_new_path,
         types::DocumentId,
     };
 

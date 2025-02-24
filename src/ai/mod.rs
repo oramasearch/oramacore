@@ -1,19 +1,26 @@
-use std::{net::IpAddr, str::FromStr};
+use std::{net::IpAddr, pin::Pin, str::FromStr, task::Poll};
 
+use futures::Stream;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
+use pin_project_lite::pin_project;
 use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
-use tonic::{
-    metadata::{MetadataMap, MetadataValue},
-    transport::Channel,
-    Request, Response, Streaming,
-};
+use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Status, Streaming};
 use tracing::{info, trace};
 
-use crate::collection_manager::dto::{ApiKey, InteractionMessage};
+use crate::{
+    collection_manager::dto::{ApiKey, InteractionMessage},
+    metrics::{
+        ai::{
+            CHAT_CALCULATION_TIME, EMBEDDING_CALCULATION_PARALLEL_COUNT,
+            EMBEDDING_CALCULATION_TIME, STREAM_CHAT_CALCULATION_TIME,
+        },
+        ChatCalculationLabels, EmbeddingCalculationLabels,
+    },
+};
 
 tonic::include_proto!("orama_ai_service");
 
@@ -62,18 +69,30 @@ impl AIService {
     ) -> Result<Vec<Vec<f32>>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
+        let time_metric = EMBEDDING_CALCULATION_TIME.create(EmbeddingCalculationLabels {
+            model: model.as_str_name().into(),
+        });
+        EMBEDDING_CALCULATION_PARALLEL_COUNT.track_usize(
+            EmbeddingCalculationLabels {
+                model: model.as_str_name().into(),
+            },
+            input.len(),
+        );
+
+        trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
             input: input.into_iter().cloned().collect(),
             model: model.into(),
             intent: intent.into(),
         });
-
-        trace!("Requesting embeddings");
         let v = conn
             .get_embedding(request)
             .await
             .map(|response| response.into_inner())
             .context("Cannot get embeddings")?;
+
+        drop(time_metric);
+
         trace!("Received embeddings");
 
         let v = v
@@ -101,14 +120,108 @@ impl AIService {
         self.embed(model, input, OramaIntent::Passage).await
     }
 
+    pub async fn get_trigger(
+        &self,
+        triggers: Vec<crate::collection_manager::sides::triggers::Trigger>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<TriggerResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let grpc_triggers = triggers
+            .iter()
+            .map(|trigger| Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            })
+            .collect();
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(TriggerRequest {
+            triggers: grpc_triggers,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_trigger(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform trigger request")?;
+
+        Ok(response)
+    }
+
+    pub async fn get_segment(
+        &self,
+        segments: Vec<crate::collection_manager::sides::segments::Segment>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<Option<SegmentResponse>> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let grpc_segments = segments
+            .iter()
+            .map(|segment| Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            })
+            .collect();
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(SegmentRequest {
+            segments: grpc_segments,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_segment(request)
+            .await
+            .map(|response| response.into_inner())
+            .map(|segment| match segment.probability {
+                0.0 => None,
+                _ => Some(segment),
+            })
+            .context("Cannot perform segment request")?;
+
+        Ok(response)
+    }
+
     pub async fn chat(
         &self,
         llm_type: LlmType,
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<ChatResponse> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let time_metric = CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
+            model: llm_type.as_str_name(),
+        });
+
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
 
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
@@ -116,6 +229,8 @@ impl AIService {
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response = conn
@@ -123,6 +238,8 @@ impl AIService {
             .await
             .map(|response| response.into_inner())
             .context("Cannot perform chat request")?;
+
+        drop(time_metric);
 
         Ok(response)
     }
@@ -133,8 +250,34 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
-    ) -> Result<Streaming<ChatStreamResponse>> {
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
+    ) -> Result<ChatStream> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let time_metric = STREAM_CHAT_CALCULATION_TIME.create(ChatCalculationLabels {
+            model: llm_type.as_str_name(),
+        });
+
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
 
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
@@ -142,6 +285,8 @@ impl AIService {
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response: Response<Streaming<ChatStreamResponse>> = conn
@@ -149,7 +294,14 @@ impl AIService {
             .await
             .context("Cannot initiate chat stream request")?;
 
-        Ok(response.into_inner())
+        let chat_stream = ChatStream {
+            inner: response.into_inner(),
+            end_cb: std::sync::RwLock::new(Some(Box::new(move || {
+                drop(time_metric);
+            }))),
+        };
+
+        Ok(chat_stream)
     }
 
     pub async fn planned_answer_stream(
@@ -158,21 +310,42 @@ impl AIService {
         collection_id: String,
         conversation: Option<Vec<InteractionMessage>>,
         api_key: ApiKey,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<Streaming<PlannedAnswerResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let conversation = self.get_grpc_conversation(conversation);
 
-        // let mut metadata = MetadataMap::new();
         let api_key_value =
             MetadataValue::from_str(api_key.0.expose_secret()).context("Invalid API key")?;
 
-        // metadata.insert("x-api-key", api_key_value.clone());
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
 
         let mut request = Request::new(PlannedAnswerRequest {
             input,
             collection_id,
             conversation: Some(conversation),
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         request.metadata_mut().append("x-api-key", api_key_value);
@@ -183,6 +356,20 @@ impl AIService {
             .context("Cannot initiate chat stream request")?;
 
         Ok(response.into_inner())
+    }
+
+    pub async fn get_autoquery(&self, query: String) -> Result<AutoQueryResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(AutoQueryRequest { query });
+
+        let response = conn
+            .auto_query(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform autoquery request")?;
+
+        Ok(response)
     }
 
     fn get_grpc_conversation(&self, interactions: Option<Vec<InteractionMessage>>) -> Conversation {
@@ -212,6 +399,44 @@ impl AIService {
     }
 }
 
+pin_project! {
+    pub struct ChatStream {
+        #[pin]
+        inner: Streaming<ChatStreamResponse>,
+        end_cb: std::sync::RwLock<Option<Box<dyn FnOnce() + Send>>>,
+    }
+}
+impl Stream for ChatStream {
+    type Item = Result<ChatStreamResponse, Status>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let a = this.inner.poll_next(cx);
+
+        match a {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => {
+                let end_cb = this.end_cb.get_mut().unwrap();
+                if let Some(end_cb) = end_cb.take() {
+                    end_cb();
+                }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Ok(a))) => Poll::Ready(Some(Ok(a))),
+            Poll::Ready(Some(Err(e))) => {
+                let end_cb = this.end_cb.get_mut().unwrap();
+                if let Some(end_cb) = end_cb.take() {
+                    end_cb();
+                }
+                Poll::Ready(Some(Err(e)))
+            }
+        }
+    }
+}
+
 struct GrpcManager {
     config: AIServiceConfig,
 }
@@ -232,8 +457,10 @@ impl Manager for GrpcManager {
             .unwrap();
 
         info!("Connecting to gRPC");
-        let endpoint: tonic::transport::Channel =
-            tonic::transport::Endpoint::new(uri)?.connect().await?;
+        let endpoint: tonic::transport::Channel = tonic::transport::Endpoint::new(uri.clone())?
+            .connect()
+            .await
+            .with_context(move || format!("Cannot connect to {:?}", uri))?;
         info!("Connected to gRPC");
 
         let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint);

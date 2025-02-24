@@ -2,7 +2,6 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
-mod operation;
 
 use std::{
     collections::HashMap,
@@ -14,32 +13,37 @@ use std::{
     time::Duration,
 };
 
-use super::hooks::{HookName, HooksRuntime};
+use super::{
+    generic_kv::{KVConfig, KV},
+    hooks::{HookName, HooksRuntime},
+    segments::{Segment, SegmentInterface},
+    triggers::{get_trigger_key, Trigger, TriggerInterface},
+    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
+};
 
 use anyhow::{bail, Context, Result};
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, time::MissedTickBehavior};
+use tokio::{
+    sync::RwLock,
+    time::{Instant, MissedTickBehavior},
+};
 use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-pub use operation::*;
 
-#[cfg(any(test, feature = "benchmarking"))]
 pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
-    file_utils::BufferedFile,
-    metrics::{
-        AddedDocumentsLabels, DocumentProcessLabels, ADDED_DOCUMENTS_COUNTER,
-        DOCUMENT_PROCESS_METRIC,
+    collection_manager::dto::{
+        ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
     },
+    file_utils::BufferedFile,
+    metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
     types::{CollectionId, DocumentId, DocumentList},
-    SideChannelType,
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -57,10 +61,10 @@ pub struct CollectionsWriterConfig {
     pub commit_interval: Duration,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    pub output: SideChannelType,
+    pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
 }
 
@@ -70,122 +74,107 @@ pub struct WriteSide {
     document_count: AtomicU64,
     data_dir: PathBuf,
     hook_runtime: Arc<HooksRuntime>,
-    nlp_service: Arc<NLPService>,
-
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
+    segments: SegmentInterface,
+    triggers: TriggerInterface,
+    kv: Arc<KV>,
     master_api_key: ApiKey,
-
-    commit_interval: Duration,
 }
 
 impl WriteSide {
-    pub fn new(
-        sender: OperationSender,
+    pub async fn try_load(
+        sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-    ) -> WriteSide {
+    ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
         let data_dir = collections_writer_config.data_dir.clone();
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
 
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
-            collections_writer_config.embedding_queue_limit as usize,
-        );
-
-        start_calculate_embedding_loop(
-            ai_service,
-            rx,
-            collections_writer_config.embedding_queue_limit,
-        );
-
         let commit_interval = collections_writer_config.commit_interval;
+        let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
-        WriteSide {
-            sender,
-            collections: CollectionsWriter::new(collections_writer_config, sx),
-            document_count: AtomicU64::new(0),
+        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+            embedding_queue_limit as usize,
+        );
+
+        let document_count = AtomicU64::new(0);
+
+        let write_side_info_path = data_dir.join("info.json");
+        let r = BufferedFile::open(write_side_info_path)
+            .and_then(|f| f.read_json_data::<WriteSideInfo>());
+        let sender = if let Ok(info) = r {
+            let WriteSideInfo::V1(info) = info;
+            document_count.store(info.document_count, Ordering::Relaxed);
+            sender_creator
+                .create(info.offset)
+                .await
+                .context("Cannot create sender")?
+        } else {
+            sender_creator
+                .create(Offset(0))
+                .await
+                .context("Cannot create sender")?
+        };
+
+        println!("Loading collections {:#?}", collections_writer_config);
+        let collections_writer = CollectionsWriter::try_load(
+            collections_writer_config,
+            sx,
+            hook_runtime.clone(),
+            nlp_service.clone(),
+        )
+        .await
+        .context("Cannot load collections")?;
+
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: Some(sender.clone()),
+        })
+        .context("Cannot load KV")?;
+
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
+
+        let write_side = Self {
+            document_count,
+            collections: collections_writer,
             data_dir,
             hook_runtime,
-            nlp_service,
-
-            operation_counter: Default::default(),
             insert_batch_commit_size,
-
             master_api_key,
-
-            commit_interval,
-        }
-    }
-
-    pub async fn load(mut self) -> Result<Arc<Self>> {
-        self.collections
-            .load(self.hook_runtime.clone(), self.nlp_service.clone())
-            .await?;
-
-        let info: WriteSideInfo = match BufferedFile::open(self.data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot read info file")
-        {
-            Ok(info) => info,
-            Err(err) => {
-                warn!("Cannot read info file: {}. Skip loading", err);
-                let s = Arc::new(self);
-
-                s.clone().start_commit_loop(s.commit_interval);
-
-                return Ok(s);
-            }
+            operation_counter: Default::default(),
+            sender,
+            segments,
+            triggers,
+            kv,
         };
-        let WriteSideInfo::V1(info) = info;
 
-        self.document_count
-            .store(info.document_count, Ordering::Relaxed);
-        self.sender.set_offset(info.offset);
+        let write_side = Arc::new(write_side);
 
-        let s = Arc::new(self);
+        start_commit_loop(write_side.clone(), commit_interval);
+        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
 
-        s.clone().start_commit_loop(s.commit_interval);
-
-        Ok(s)
-    }
-
-    fn start_commit_loop(self: Arc<Self>, insert_batch_commit_size: Duration) {
-        tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(insert_batch_commit_size);
-
-            // If for some reason we miss a tick, we skip it.
-            // In fact, the commit is blocked only by `update` method.
-            // If the collection is under heavy load,
-            // the commit will be run due to the `insert_batch_commit_size` config.
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-            loop {
-                interval.tick().await;
-                info!(
-                    "{:?} time reached. Committing write side",
-                    insert_batch_commit_size.clone()
-                );
-                if let Err(e) = self.commit().await {
-                    tracing::error!(?e, "Cannot commit write side");
-                }
-            }
-        });
+        Ok(write_side)
     }
 
     #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
-        let offset = self.sender.offset();
-
         self.collections.commit().await?;
+        self.hook_runtime.commit().await?;
 
+        self.kv.commit().await?;
+
+        let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
         // This means, we save a document count possible higher.
         // Anyway it is not a problem, because the document count is only used for the document id generation
@@ -234,23 +223,13 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
-        // This counter is not atomic with the insert operation.
-        // This means we increment the counter even if the insert operation fails.
-        // TODO: think better
-        ADDED_DOCUMENTS_COUNTER
-            .create(AddedDocumentsLabels {
-                collection: collection_id.0.clone(),
-            })
-            .increment_by(document_list.len());
-
         let sender = self.sender.clone();
-
         for mut doc in document_list {
-            debug!("Insert doc");
-            let m = DOCUMENT_PROCESS_METRIC.create(DocumentProcessLabels {
+            let metric = DOCUMENT_CALCULATION_TIME.create(CollectionLabels {
                 collection: collection_id.0.clone(),
             });
 
+            debug!("Inserting doc");
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
             let doc_id_value = doc.get("id");
@@ -282,7 +261,7 @@ impl WriteSide {
                 .context("Cannot process document")?;
             info!("Document inserted");
 
-            drop(m);
+            drop(metric);
 
             info!("Doc inserted");
         }
@@ -339,6 +318,7 @@ impl WriteSide {
     ) -> Result<()> {
         self.hook_runtime
             .insert_hook(collection_id.clone(), name.clone(), code)
+            .await
             .context("Cannot insert hook")?;
 
         let collection = self
@@ -392,6 +372,7 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .get_hook(collection_id, name)
+            .await
             .map(|hook| hook.code))
     }
 
@@ -426,9 +407,26 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .list_hooks(collection_id)
+            .await
             .into_iter()
             .map(|(name, hook)| (name, hook.code))
             .collect())
+    }
+
+    async fn check_write_api_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(())
     }
 
     fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
@@ -438,6 +436,157 @@ impl WriteSide {
 
         Ok(())
     }
+
+    pub async fn insert_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .insert(collection_id.clone(), segment.clone())
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .delete(collection_id.clone(), segment_id.clone())
+            .await
+            .context("Cannot delete segment")
+    }
+
+    pub async fn update_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .delete(collection_id.clone(), segment.id.clone())
+            .await
+            .context("Cannot delete segment")?;
+        self.segments
+            .insert(collection_id, segment)
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger: InsertTriggerParams,
+        trigger_id: Option<String>,
+    ) -> Result<Trigger> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        let final_trigger_id = match trigger_id {
+            Some(id) => id,
+            None => {
+                let cuid = cuid2::create_id();
+                get_trigger_key(collection_id.clone(), cuid, trigger.segment_id.clone())
+            }
+        };
+
+        let trigger = Trigger {
+            id: final_trigger_id,
+            name: trigger.name,
+            description: trigger.description,
+            response: trigger.response,
+            segment_id: trigger.segment_id,
+        };
+
+        self.triggers
+            .insert(trigger.clone())
+            .await
+            .context("Cannot insert trigger")?;
+
+        Ok(trigger)
+    }
+
+    pub async fn delete_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.triggers
+            .delete(collection_id, trigger_id)
+            .await
+            .context("Cannot delete trigger")
+    }
+
+    pub async fn update_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        let updated_trigger = InsertTriggerParams {
+            name: trigger.name.clone(),
+            description: trigger.description.clone(),
+            response: trigger.response.clone(),
+            segment_id: trigger.segment_id.clone(),
+        };
+
+        self.insert_trigger(
+            write_api_key.clone(),
+            collection_id.clone(),
+            updated_trigger,
+            Some(trigger.id),
+        )
+        .await
+        .context("Cannot insert updated trigger")?;
+
+        Ok(())
+    }
+}
+
+fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
+    tokio::task::spawn(async move {
+        let start = Instant::now() + insert_batch_commit_size;
+        let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
+
+        // If for some reason we miss a tick, we skip it.
+        // In fact, the commit is blocked only by `update` method.
+        // If the collection is under heavy load,
+        // the commit will be run due to the `insert_batch_commit_size` config.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            info!(
+                "{:?} time reached. Committing write side",
+                insert_batch_commit_size.clone()
+            );
+            if let Err(e) = write_side.commit().await {
+                tracing::error!(?e, "Cannot commit write side");
+            }
+        }
+    });
 }
 
 #[derive(Serialize, Deserialize)]

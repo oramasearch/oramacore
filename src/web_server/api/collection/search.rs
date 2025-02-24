@@ -23,6 +23,7 @@ use crate::{
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(search())
+        .add(stats())
         // .route("/:collection_id/documents/:document_id", get(get_doc_by_id))
         .with_state(read_side)
 }
@@ -64,6 +65,36 @@ async fn search(
     }
 }
 
+#[endpoint(
+    method = "GET",
+    path = "/v1/collections/{id}/stats",
+    description = "Stats Endpoint"
+)]
+async fn stats(
+    Path(id): Path<String>,
+    read_side: State<Arc<ReadSide>>,
+    Query(query): Query<SearchQueryParams>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let collection_id = CollectionId(id);
+    let read_api_key = query.api_key;
+
+    match read_side
+        .collection_stats(read_api_key, collection_id)
+        .await
+    {
+        Ok(data) => Ok(Json(data)),
+        Err(e) => {
+            error!("Error getting stats for collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
 /*
 async fn get_doc_by_id(
     Path((collection_id, document_id)): Path<(String, String)>,

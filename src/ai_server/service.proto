@@ -8,6 +8,11 @@ service LLMService {
     rpc Chat (ChatRequest) returns (ChatResponse);
     rpc ChatStream (ChatRequest) returns (stream ChatStreamResponse);
     rpc PlannedAnswer (PlannedAnswerRequest) returns (stream PlannedAnswerResponse);
+
+    rpc GetSegment (SegmentRequest) returns (SegmentResponse);
+    rpc GetTrigger (TriggerRequest) returns (TriggerResponse);
+
+    rpc AutoQuery (AutoQueryRequest) returns (AutoQueryResponse);
 }
 
 enum OramaModel {
@@ -69,6 +74,8 @@ message PlannedAnswerRequest {
     string input = 1; // The user input
     string collection_id = 2; // ID of the collection
     Conversation conversation = 3; // All past messages
+    optional Segment segment = 4; // Optional segment
+    optional Trigger trigger = 5; // Optional trigger
 }
 
 message PlannedAnswerResponse {
@@ -81,7 +88,9 @@ message ChatRequest {
     LLMType model = 1;             // Which LLM to use
     string prompt = 2;             // Input prompt
     Conversation conversation = 3; // All past messages
-    optional string context = 4;
+    optional string context = 4;   // Optional context
+    optional Segment segment = 5;  // Optional segment
+    optional Trigger trigger = 6;  // Optional trigger
 }
 
 // Response message for LLM calls
@@ -103,4 +112,61 @@ message HealthCheckRequest {
 // Response message for health check
 message HealthCheckResponse {
     string status = 1;           // Service status
+}
+
+// ----------------------------------------------------------------
+// Segments
+// ----------------------------------------------------------------
+
+message Segment {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+    optional string goal = 4;
+}
+
+message SegmentRequest {
+    repeated Segment segments = 1;
+    Conversation conversation = 2;
+}
+
+message SegmentResponse {
+    string id = 1;
+    string name = 2;
+    float probability = 3;
+}
+
+// ----------------------------------------------------------------
+// Triggers
+// ----------------------------------------------------------------
+
+message Trigger {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+    string response = 4;
+}
+
+message TriggerRequest {
+    repeated Trigger triggers = 1;
+    Conversation conversation = 2;
+}
+
+message TriggerResponse {
+    string id = 1;
+    string name = 2;
+    string response = 3;
+    float probability = 4;
+}
+
+// ----------------------------------------------------------------
+// Auto Query
+// ----------------------------------------------------------------
+
+message AutoQueryRequest {
+    string query = 1;
+}
+
+message AutoQueryResponse {
+    string mode = 1;
 }

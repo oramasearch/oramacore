@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::{
@@ -88,8 +89,11 @@ impl StringField {
             .flat_map(|term_string_field| term_string_field.positions.iter())
             .max()
             .unwrap_or(&0);
+        // NB: the position is 0 based, so we need to add 1
+        let document_length = *max_position as u32 + 1;
+
         self.field_length_per_doc
-            .insert(document_id, *max_position as u32);
+            .insert(document_id, document_length);
 
         for (term, term_string_field) in terms {
             let k = term.0;
@@ -205,4 +209,17 @@ impl StringField {
     > + '_ {
         self.inner.inner.iter()
     }
+
+    pub fn get_stats(&self) -> StringUncommittedFieldStats {
+        StringUncommittedFieldStats {
+            key_count: self.inner.len(),
+            global_info: self.global_info(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct StringUncommittedFieldStats {
+    pub key_count: usize,
+    pub global_info: GlobalInfo,
 }

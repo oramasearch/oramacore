@@ -1,0 +1,176 @@
+---
+title: "User Segmentation"
+description: "An introduction to segments in OramaCore"
+---
+
+User Segments are an essential part of audience management in OramaCore. They allow you to define a set of rules to segment your users and target specific groups with slightly different answers, allowing you to personalize the user experience and drive engagement and conversion.
+
+We can think of a segment as a Persona. [Wikipedia](https://en.wikipedia.org/wiki/Persona_(user_experience)) defines Personas as follows:
+
+> A user persona is a representation of the goals and behavior of a hypothesized group of users.
+
+Let's make an example to better understand what a segment is and how it can be useful.
+
+## Example: Luxury Car Dealership
+
+![Luxury Car Dealership](/docs/segments/cars.webp)
+
+Imagine you are the owner of a luxury car dealership. Definitely not a market for everyone, right? There is a high chance that the group of users browsing your website is not homogeneous. For example, you may have the following groups:
+
+- **Exotic Car Lovers**: Users that are interested in exotic cars like Lamborghini, Ferrari, and Bugatti. They can't afford them, but they love to dream about them.
+- **Luxury Car Explorers**: Users that could afford a luxury car, but they are not sure yet. They are exploring the market and looking for the best deal.
+- **Luxury Car Buyers**: Users that are ready to buy a luxury car. They are looking for a deal and the best car for their needs.
+
+When performing answer sessions with OramaCore, you have the unique opportunity to segment your users, assigning them to one of the groups above. This way, you can provide them with the best answers based on their needs and interests by using [triggers](/docs/audience-management/triggers), the rules that define how to respond to a user based on their interaction with your application.
+
+## Creating a Segment
+
+To create a segment, you can either use the official SDKs or an API call.
+
+Every segment is composed of the following fields:
+
+| Field       | Description                                                                 | Mandatory |
+|-------------|-----------------------------------------------------------------------------|-----------|
+| `name`      | The name of the segment.                                                    | Yes       |
+| `description` | A natural language description of the user Persona.                       | Yes       |
+| `goal`      | The goal of the segment.                                                    | No        |  
+
+While the `goal` field is optional, we recommend you to always provide a goal for your segments. It will help you to better understand the purpose of the segment and to provide better answers to your users.
+
+<Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/insert \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write_api_key>' \
+  -d '{
+    "name": "Exotic Car Lovers",
+    "description": "Users that are interested in exotic cars like Lamborghini, Ferrari, and Bugatti. They can't afford them, but they love to dream about them."
+    "goal": "Help the user to configure their dream car and share it on social media."
+  }'
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  writeAPIKey: '<write_api_key>',
+})
+
+await collection.insertSegment({
+    name: 'Exotic Car Lovers',
+    description: 'Users that are interested in exotic cars like Lamborghini, Ferrari, and Bugatti. They can\'t afford them, but they love to dream about them.',
+    goal: 'Help the user to configure their dream car and share it on social media.'
+})
+```
+</Tabs>
+
+## Getting a Segment
+
+After inserting a segment, you'll receive its ID in the response. You can use this ID to retrieve the segment details.
+
+<Tabs groupId='get' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/get?id=<SEGMENT_ID>&api-key=<READ_API_KEY>
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  readAPIKey: '<read_api_key>',
+})
+
+await collection.getSegment("<SEGMENT_ID>")
+```
+</Tabs>
+
+## Listing all Segments
+
+When inserting one or more segments, you can list all of them to get an overview of your audience.
+
+<Tabs groupId='getall' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/all?api-key=<READ_API_KEY>
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  readAPIKey: '<read_api_key>',
+})
+
+await collection.getAllSegments()
+```
+</Tabs>
+
+## Update a Segment
+
+You can update a segment by providing the segment ID and the fields you want to update. The `update` operation is an alias for the `delete` + `insert` operations.
+
+<Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/update \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write_api_key>' \
+  -d '{
+    "id": "<SEGMENT_ID>",
+    "name": "Exotic Car Lovers",
+    "description": "Users that are interested in exotic cars like Lamborghini, Ferrari, and Bugatti. They can't afford them, but they love to dream about them."
+    "goal": "Help the user to configure their dream car and share it on social media."
+  }'
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  writeAPIKey: '<write_api_key>',
+})
+
+await collection.updateSegment({
+    id: '<SEGMENT_ID>',
+    name: 'Exotic Car Lovers',
+    description: 'Users that are interested in exotic cars like Lamborghini, Ferrari, and Bugatti. They can\'t afford them, but they love to dream about them.',
+    goal: 'Help the user to configure their dream car and share it on social media.'
+})
+```
+</Tabs>
+
+## Delete a Segment
+
+You can always delete a segment if you don't need it anymore. The segment will be removed from the collection, and you won't be able to retrieve it anymore.
+
+<Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/delete \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write_api_key>' \
+  -d '{ "id": "<SEGMENT_ID>" }'
+```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  writeAPIKey: '<write_api_key>',
+})
+
+await collection.deleteSegment({
+    id: '<SEGMENT_ID>'
+})
+```
+</Tabs>

@@ -13,21 +13,17 @@ use crate::{
     ai::OramaModel,
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
-        sides::hooks::{HookName, HooksRuntime},
-    },
-    metrics::{
-        Empty, StringCalculationLabels, EMBEDDING_REQUEST_GAUDGE, PENDING_EMBEDDING_REQUEST_GAUDGE,
-        STRING_CALCULATION_METRIC,
+        sides::{
+            hooks::{HookName, HooksRuntime},
+            CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
+            Term, TermStringField, WriteOperation,
+        },
     },
     nlp::{locales::Locale, TextParser},
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
 
-use super::{
-    embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput},
-    CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, Term, TermStringField,
-    WriteOperation,
-};
+use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
 
 pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
 
@@ -113,6 +109,15 @@ impl CollectionField {
     pub fn set_embedding_hook(&mut self, name: HookName) {
         if let CollectionField::Embedding(f) = self {
             f.document_fields = DocumentFields::Hook(name)
+        }
+    }
+
+    pub fn get_type(&self) -> &'static str {
+        match self {
+            CollectionField::Number(_) => "number",
+            CollectionField::Bool(_) => "bool",
+            CollectionField::String(_) => "string",
+            CollectionField::Embedding(_) => "embedding",
         }
     }
 
@@ -247,7 +252,9 @@ impl NumberField {
                 CollectionWriteOperation::Index(
                     doc_id,
                     self.field_id,
-                    DocumentFieldIndexOperation::IndexNumber { value },
+                    DocumentFieldIndexOperation::IndexNumber {
+                        value: NumberWrapper(value),
+                    },
                 ),
             );
             sender.send(op).await?;
@@ -363,11 +370,6 @@ impl StringField {
         doc: &FlattenDocument,
         sender: OperationSender,
     ) -> Result<()> {
-        let metric = STRING_CALCULATION_METRIC.create(StringCalculationLabels {
-            collection: self.collection_id.0.clone(),
-            field: self.field_name.to_string(),
-        });
-
         let value = doc.get(&self.field_name);
         let data = match value {
             None => return Ok(()),
@@ -440,8 +442,6 @@ impl StringField {
                 };
             }
         }
-
-        drop(metric);
 
         let op = WriteOperation::Collection(
             self.collection_id.clone(),
@@ -550,9 +550,6 @@ impl EmbeddingField {
         // - "too long": we should chunk it in a smart way
         // TODO: implement that logic
 
-        PENDING_EMBEDDING_REQUEST_GAUDGE
-            .create(Empty {})
-            .increment_by_one();
         self.embedding_sender
             .send(EmbeddingCalculationRequest {
                 model: self.model,
@@ -565,10 +562,6 @@ impl EmbeddingField {
                 },
             })
             .await?;
-        PENDING_EMBEDDING_REQUEST_GAUDGE
-            .create(Empty {})
-            .decrement_by_one();
-        EMBEDDING_REQUEST_GAUDGE.create(Empty {}).increment_by_one();
 
         Ok(())
     }

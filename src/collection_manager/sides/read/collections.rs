@@ -6,17 +6,19 @@ use std::{
 
 use crate::{
     ai::AIService,
-    collection_manager::{dto::ApiKey, sides::Offset},
+    collection_manager::{
+        dto::{ApiKey, LanguageDTO},
+        sides::Offset,
+    },
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
+    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
     nlp::NLPService,
-    offset_storage::OffsetStorage,
     types::CollectionId,
 };
 
 use anyhow::{Context, Result};
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, warn};
@@ -29,23 +31,60 @@ pub struct CollectionsReader {
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
-
-    offset_storage: OffsetStorage,
 }
 impl CollectionsReader {
-    pub fn try_new(
+    pub async fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
+        let data_dir = &indexes_config.data_dir;
+        info!("Loading collections from disk '{:?}'.", data_dir);
+
+        create_if_not_exists(data_dir).context("Cannot create data directory")?;
+
+        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
+            .and_then(|f| f.read_json_data())
+            .context("Cannot deserialize info.json file")
+        {
+            Ok(info) => info,
+            Err(e) => {
+                warn!(
+                    "Cannot read info.json file: {:?}. Skip loading collections",
+                    e
+                );
+                return Ok(Self {
+                    ai_service,
+                    nlp_service,
+
+                    collections: Default::default(),
+                    indexes_config,
+                });
+            }
+        };
+
+        let CollectionsInfo::V1(collections_info) = collections_info;
+
+        let base_dir_for_collections = data_dir.join("collections");
+        let mut collections: HashMap<CollectionId, CollectionReader> = Default::default();
+        for collection_id in collections_info.collection_ids {
+            let collection_dir = base_dir_for_collections.join(&collection_id.0);
+            info!("Loading collection {:?}", collection_dir);
+
+            let collection =
+                CollectionReader::try_load(ai_service.clone(), nlp_service.clone(), collection_dir)
+                    .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
+
+            collections.insert(collection_id, collection);
+        }
+
+        info!("Collections loaded from disk.");
+
         Ok(Self {
             ai_service,
             nlp_service,
-
-            collections: Default::default(),
+            collections: RwLock::new(collections),
             indexes_config,
-
-            offset_storage: OffsetStorage::new(),
         })
     }
 
@@ -65,58 +104,6 @@ impl CollectionsReader {
     }
 
     #[instrument(skip(self))]
-    pub async fn load(&mut self) -> Result<()> {
-        let data_dir = &self.indexes_config.data_dir;
-        info!("Loading collections from disk '{:?}'.", data_dir);
-
-        create_if_not_exists(data_dir).context("Cannot create data directory")?;
-
-        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot deserialize info.json file")
-        {
-            Ok(info) => info,
-            Err(e) => {
-                warn!(
-                    "Cannot read info.json file: {:?}. Skip loading collections",
-                    e
-                );
-                return Ok(());
-            }
-        };
-
-        let CollectionsInfo::V1(collections_info) = collections_info;
-
-        let base_dir_for_collections = data_dir.join("collections");
-
-        for collection_id in collections_info.collection_ids {
-            let collection_dir = base_dir_for_collections.join(&collection_id.0);
-            info!("Loading collection {:?}", collection_dir);
-
-            // We will replace the following values inside `load` method
-            let mut collection = CollectionReader::try_new(
-                collection_id.clone(),
-                ApiKey(Secret::new("".to_string())),
-                self.ai_service.clone(),
-                self.nlp_service.clone(),
-                self.indexes_config.clone(),
-            )?;
-
-            collection
-                .load(base_dir_for_collections.join(&collection.get_id().0))
-                .await
-                .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
-
-            let mut guard = self.collections.write().await;
-            guard.insert(collection_id, collection);
-        }
-
-        info!("Collections loaded from disk.");
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing collections");
 
@@ -126,17 +113,22 @@ impl CollectionsReader {
         let col = self.collections.read().await;
         let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
-        for (id, reader) in col {
+        for (id, collection) in col {
             let collection_dir = collections_dir.join(&id.0);
 
             create_if_not_exists_async(&collection_dir)
                 .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
-            reader
+            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+                collection: id.0.clone(),
+                side: "read",
+            });
+            collection
                 .commit(collection_dir)
                 .await
-                .with_context(|| format!("Cannot commit collection {:?}", reader.get_id()))?;
+                .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
+            drop(m);
         }
 
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
@@ -154,19 +146,22 @@ impl CollectionsReader {
 
     pub async fn create_collection(
         &self,
-        offset: Offset,
+        _offset: Offset,
         id: CollectionId,
+        description: Option<String>,
+        default_language: LanguageDTO,
         read_api_key: ApiKey,
     ) -> Result<()> {
-        info!(collection_id=?id, "Creating collection {:?}", id);
+        info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
-        let collection = CollectionReader::try_new(
+        let collection = CollectionReader::empty(
             id.clone(),
+            description,
+            default_language,
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
-            self.indexes_config.clone(),
-        )?;
+        );
 
         let mut guard = self.collections.write().await;
         if guard.contains_key(&id) {
@@ -174,10 +169,9 @@ impl CollectionsReader {
             return Err(anyhow::anyhow!("Collection already exists"));
         }
         guard.insert(id.clone(), collection);
-        self.offset_storage.set_offset(offset);
         drop(guard);
 
-        info!(collection_id=?id, "Creating collection {:?}", id);
+        info!(collection_id=?id, "Collection created {:?}", id);
 
         Ok(())
     }
