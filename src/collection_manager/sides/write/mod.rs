@@ -2,6 +2,7 @@ mod collection;
 mod collections;
 mod embedding;
 mod fields;
+mod document_storage;
 
 use std::{
     collections::HashMap,
@@ -22,6 +23,7 @@ use super::{
 };
 
 use anyhow::{bail, Context, Result};
+use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -77,6 +79,7 @@ pub struct WriteSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
+    document_storage: DocumentStorage,
     segments: SegmentInterface,
     triggers: TriggerInterface,
     kv: Arc<KV>,
@@ -143,9 +146,13 @@ impl WriteSide {
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
+        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
+            .context("Cannot create document storage")?;
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
+            document_storage,
             data_dir,
             hook_runtime,
             insert_batch_commit_size,
@@ -254,6 +261,10 @@ impl WriteSide {
             }
 
             let doc_id = DocumentId(doc_id);
+
+            self.document_storage.insert(doc_id, doc.clone()).await
+                .context("Cannot inser document into document storage")?;
+
             info!(?doc_id, "Inserting document");
             collection
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
