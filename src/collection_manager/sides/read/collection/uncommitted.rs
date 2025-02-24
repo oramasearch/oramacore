@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use bool::BoolField;
-use number::NumberField;
-use string::StringField;
+use bool::{BoolField, BoolUncommittedFieldStats};
+use number::{NumberField, NumberUncommittedFieldStats};
+use string::{StringField, StringUncommittedFieldStats};
 use tracing::trace;
-use vector::VectorField;
+use vector::{VectorField, VectorUncommittedFieldStats};
 
 use crate::{
     collection_manager::{
@@ -15,16 +15,16 @@ use crate::{
     types::DocumentId,
 };
 
-pub mod bool;
-pub mod number;
-pub mod string;
-pub mod vector;
+mod bool;
+mod number;
+mod string;
+mod vector;
 
 pub mod fields {
-    pub use super::bool::BoolField;
-    pub use super::number::NumberField;
-    pub use super::string::StringField;
-    pub use super::vector::VectorField;
+    pub use super::bool::{BoolField, BoolUncommittedFieldStats};
+    pub use super::number::{NumberField, NumberUncommittedFieldStats};
+    pub use super::string::{StringField, StringUncommittedFieldStats};
+    pub use super::vector::{VectorField, VectorUncommittedFieldStats};
 }
 
 pub use string::{Positions, TotalDocumentsWithTermInField};
@@ -101,6 +101,42 @@ impl UncommittedCollection {
                 .map(|(k, _)| *k)
                 .collect(),
         }
+    }
+
+    pub fn get_bool_stats(&self) -> HashMap<FieldId, BoolUncommittedFieldStats> {
+        let mut ret = HashMap::new();
+        for (field_id, field) in &self.bool_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
+    }
+
+    pub fn get_number_stats(&self) -> HashMap<FieldId, NumberUncommittedFieldStats> {
+        let mut ret = HashMap::new();
+        for (field_id, field) in &self.number_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
+    }
+
+    pub fn get_string_stats(&self) -> HashMap<FieldId, StringUncommittedFieldStats> {
+        let mut ret = HashMap::new();
+        for (field_id, field) in &self.string_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
+    }
+
+    pub fn get_vector_stats(&self) -> HashMap<FieldId, VectorUncommittedFieldStats> {
+        let mut ret = HashMap::new();
+        for (field_id, field) in &self.vector_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
     }
 
     pub fn vector_search(

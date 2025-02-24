@@ -8,7 +8,13 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use committed::CommittedCollection;
+use committed::{
+    fields::{
+        BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
+        VectorCommittedFieldStats,
+    },
+    CommittedCollection,
+};
 use dashmap::DashMap;
 use debug_panic::debug_panic;
 use dump::{CollectionInfo, CollectionInfoV1};
@@ -17,7 +23,13 @@ use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{join, sync::RwLock};
 use tracing::{debug, error, info, instrument, trace};
-use uncommitted::UncommittedCollection;
+use uncommitted::{
+    fields::{
+        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringUncommittedFieldStats,
+        VectorUncommittedFieldStats,
+    },
+    UncommittedCollection,
+};
 
 mod committed;
 mod merge;
@@ -27,7 +39,8 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchParams
+            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, LanguageDTO, Limit,
+            NumberFilter, Properties, SearchMode, SearchParams,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
@@ -160,7 +173,7 @@ impl CollectionReader {
             collection_info.string_field_infos,
             collection_info.vector_field_infos,
         )
-            .context("Cannot load committed collection")?;
+        .context("Cannot load committed collection")?;
         let committed_collection = RwLock::new(committed_collection);
 
         Ok(Self {
@@ -272,7 +285,7 @@ impl CollectionReader {
             info!("Uncommitted document deletion: commit every fields");
 
             let uncommitted_document_deletions = uncommitted_document_deletions.clone();
-            let info = committed.get_infos();
+            let info = committed.get_keys();
 
             uncommitted_infos.bool_fields.extend(info.bool_fields);
             uncommitted_infos.number_fields.extend(info.number_fields);
@@ -1228,10 +1241,168 @@ impl CollectionReader {
     }
 
     pub async fn stats(&self) -> Result<CollectionStats> {
+        let mut fields_stats = Vec::new();
+
+        let mut bools: HashMap<
+            FieldId,
+            (
+                Option<BoolCommittedFieldStats>,
+                Option<BoolUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let bool_committed_fields_stats =
+            self.committed_collection.read().await.get_bool_stats()?;
+        bools.extend(
+            bool_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let bool_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_bool_stats();
+        for (k, v) in bool_uncommitted_fields_stats {
+            let e = bools.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(bools.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Bool {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut numbers: HashMap<
+            FieldId,
+            (
+                Option<NumberCommittedFieldStats>,
+                Option<NumberUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let number_committed_fields_stats =
+            self.committed_collection.read().await.get_number_stats()?;
+        numbers.extend(
+            number_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let number_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_number_stats();
+        for (k, v) in number_uncommitted_fields_stats {
+            let e = numbers.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(numbers.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Number {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut strings: HashMap<
+            FieldId,
+            (
+                Option<StringCommittedFieldStats>,
+                Option<StringUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let string_committed_fields_stats =
+            self.committed_collection.read().await.get_string_stats()?;
+        strings.extend(
+            string_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let string_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_string_stats();
+        for (k, v) in string_uncommitted_fields_stats {
+            let e = strings.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(strings.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::String {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        let mut vectors: HashMap<
+            FieldId,
+            (
+                Option<VectorCommittedFieldStats>,
+                Option<VectorUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let vector_committed_fields_stats =
+            self.committed_collection.read().await.get_vector_stats()?;
+        vectors.extend(
+            vector_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let vector_uncommitted_fields_stats =
+            self.uncommitted_collection.read().await.get_vector_stats();
+        for (k, v) in vector_uncommitted_fields_stats {
+            let e = vectors.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        fields_stats.extend(vectors.into_iter().map(|(k, v)| {
+            let name = self
+                .fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .expect("Field not found")
+                .key()
+                .to_string();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::Vector {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
+        fields_stats.sort_by_key(|e| e.field_id.0);
+
         Ok(CollectionStats {
             id: self.get_id(),
             description: self.description.clone(),
             default_language: self.default_language,
+            document_count: self.document_count.load(Ordering::Relaxed),
+            fields_stats,
         })
     }
 }
@@ -1245,7 +1416,10 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{dto::{FieldId, LanguageDTO}, sides::OramaModelSerializable},
+        collection_manager::{
+            dto::{FieldId, LanguageDTO},
+            sides::OramaModelSerializable,
+        },
         nlp::locales::Locale,
         types::CollectionId,
     };
@@ -1400,8 +1574,49 @@ pub enum TypedField {
 }
 
 #[derive(Serialize)]
+pub struct FieldStats {
+    name: String,
+    field_id: FieldId,
+    #[serde(flatten)]
+    stats: FieldStatsType,
+}
+
+#[derive(Serialize)]
 pub struct CollectionStats {
-    id: CollectionId,
-    description: Option<String>,
-    default_language: LanguageDTO,
+    pub id: CollectionId,
+    pub description: Option<String>,
+    pub default_language: LanguageDTO,
+    pub document_count: u64,
+    pub fields_stats: Vec<FieldStats>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+pub enum FieldStatsType {
+    #[serde(rename = "bool")]
+    Bool {
+        uncommitted: Option<BoolUncommittedFieldStats>,
+        committed: Option<BoolCommittedFieldStats>,
+    },
+    #[serde(rename = "number")]
+    Number {
+        uncommitted: Option<NumberUncommittedFieldStats>,
+        committed: Option<NumberCommittedFieldStats>,
+    },
+    #[serde(rename = "string")]
+    String {
+        uncommitted: Option<StringUncommittedFieldStats>,
+        committed: Option<StringCommittedFieldStats>,
+    },
+    #[serde(rename = "vector")]
+    Vector {
+        uncommitted: Option<VectorUncommittedFieldStats>,
+        committed: Option<VectorCommittedFieldStats>,
+    },
+}
+
+#[derive(Serialize)]
+pub struct BoolFieldStats {
+    true_count: usize,
+    false_count: usize,
 }

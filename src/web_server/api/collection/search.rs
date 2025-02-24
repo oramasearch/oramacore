@@ -78,7 +78,10 @@ async fn stats(
     let collection_id = CollectionId(id);
     let read_api_key = query.api_key;
 
-    match read_side.collection_stats(read_api_key, collection_id).await {
+    match read_side
+        .collection_stats(read_api_key, collection_id)
+        .await
+    {
         Ok(data) => Ok(Json(data)),
         Err(e) => {
             error!("Error getting stats for collection: {}", e);

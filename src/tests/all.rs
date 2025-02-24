@@ -1941,6 +1941,52 @@ function foo() {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_stats() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "Today I want to listen only Max Pezzali.",
+        })],
+    )
+    .await?;
+
+    let stats_before = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await?;
+
+    assert_eq!(stats_before.document_count, 1);
+    // id, title, ___orama_auto_embedding
+    assert_eq!(stats_before.fields_stats.len(), 3);
+
+    read_side.commit().await?;
+
+    let stats_after = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await?;
+
+    assert_eq!(stats_after.document_count, 1);
+    // id, title, ___orama_auto_embedding
+    assert_eq!(stats_after.fields_stats.len(), 3);
+
+    Ok(())
+}
+
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side
         .create_collection(

@@ -204,7 +204,11 @@ impl ReadSide {
         })
     }
 
-    pub async fn collection_stats(&self, read_api_key: ApiKey, collection_id: CollectionId) -> Result<CollectionStats> {
+    pub async fn collection_stats(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionStats> {
         let collection = self
             .collections
             .get_collection(collection_id.clone())
@@ -234,15 +238,14 @@ impl ReadSide {
         }
 
         match op {
-            WriteOperation::CreateCollection { id, read_api_key, default_language, description } => {
+            WriteOperation::CreateCollection {
+                id,
+                read_api_key,
+                default_language,
+                description,
+            } => {
                 self.collections
-                    .create_collection(
-                        offset,
-                        id,
-                        description,
-                        default_language,
-                        read_api_key,
-                    )
+                    .create_collection(offset, id, description, default_language, read_api_key)
                     .await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {

@@ -477,6 +477,14 @@ impl StringField {
 
         Ok(())
     }
+
+    pub fn get_stats(&self) -> Result<StringCommittedFieldStats> {
+        let key_count = self.index.len();
+        Ok(StringCommittedFieldStats {
+            key_count,
+            global_info: self.global_info(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -585,4 +593,10 @@ pub struct StringFieldInfo {
     pub posting_id_storage_file_path: PathBuf,
     pub document_lengths_per_document_file_path: PathBuf,
     pub fst_file_path: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct StringCommittedFieldStats {
+    pub key_count: usize,
+    pub global_info: GlobalInfo,
 }

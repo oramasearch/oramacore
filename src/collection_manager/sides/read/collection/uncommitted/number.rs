@@ -3,6 +3,8 @@ use std::{
     ops::Bound,
 };
 
+use serde::Serialize;
+
 use crate::{
     collection_manager::dto::{Number, NumberFilter},
     types::DocumentId,
@@ -43,6 +45,24 @@ impl NumberField {
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
     }
+
+    pub fn get_stats(&self) -> NumberUncommittedFieldStats {
+        if self.inner.is_empty() {
+            return NumberUncommittedFieldStats {
+                min: Number::I32(0),
+                max: Number::I32(0),
+                count: 0,
+            };
+        }
+        let min = self.inner.first_key_value().unwrap().0.clone();
+        let max = self.inner.last_key_value().unwrap().0.clone();
+
+        NumberUncommittedFieldStats {
+            min,
+            max,
+            count: self.len(),
+        }
+    }
 }
 
 #[inline]
@@ -79,4 +99,11 @@ where
             .range((Bound::Included(min), Bound::Included(max)))
             .flat_map(flat_doc),
     }
+}
+
+#[derive(Serialize)]
+pub struct NumberUncommittedFieldStats {
+    pub min: Number,
+    pub max: Number,
+    pub count: usize,
 }

@@ -227,11 +227,22 @@ impl VectorField {
 
         Ok(())
     }
+
+    pub fn get_stats(&self) -> Result<VectorCommittedFieldStats> {
+        Ok(VectorCommittedFieldStats {
+            len: self.inner.len(),
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VectorFieldInfo {
     pub data_dir: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct VectorCommittedFieldStats {
+    pub len: usize,
 }
 
 #[cfg(test)]

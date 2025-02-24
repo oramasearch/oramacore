@@ -163,7 +163,7 @@ impl CollectionsWriter {
                 id: id.clone(),
                 read_api_key,
                 description,
-                default_language, 
+                default_language,
             })
             .await
             .context("Cannot send create collection")?;

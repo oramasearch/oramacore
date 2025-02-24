@@ -6,7 +6,10 @@ use std::{
 
 use crate::{
     ai::AIService,
-    collection_manager::{dto::{ApiKey, LanguageDTO}, sides::Offset},
+    collection_manager::{
+        dto::{ApiKey, LanguageDTO},
+        sides::Offset,
+    },
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
@@ -68,12 +71,9 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
-            let collection = CollectionReader::try_load(
-                ai_service.clone(),
-                nlp_service.clone(),
-                collection_dir,
-            )
-                .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
+            let collection =
+                CollectionReader::try_load(ai_service.clone(), nlp_service.clone(), collection_dir)
+                    .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
             collections.insert(collection_id, collection);
         }

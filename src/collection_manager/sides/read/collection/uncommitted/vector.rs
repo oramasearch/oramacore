@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
+use serde::Serialize;
 
 use crate::types::DocumentId;
 
@@ -86,6 +87,12 @@ impl VectorField {
             .iter()
             .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
     }
+
+    pub fn get_stats(&self) -> VectorUncommittedFieldStats {
+        VectorUncommittedFieldStats {
+            len: self.data.len(),
+        }
+    }
 }
 
 fn calculate_magnetude(vector: &[f32]) -> f32 {
@@ -115,6 +122,11 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
     let similarity = dot_product / (mag_1 * mag_2);
 
     Ok(similarity)
+}
+
+#[derive(Serialize)]
+pub struct VectorUncommittedFieldStats {
+    len: usize,
 }
 
 #[cfg(test)]
