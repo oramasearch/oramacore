@@ -85,7 +85,7 @@ const collection = new CollectionManager({
   readAPIKey: '<read_api_key>',
 })
 
-await collection.get("<SEGMENT_ID>")
+await collection.getSegment("<SEGMENT_ID>")
 ```
 </Tabs>
 
@@ -93,7 +93,7 @@ await collection.get("<SEGMENT_ID>")
 
 When inserting one or more segments, you can list all of them to get an overview of your audience.
 
-<Tabs groupId='get' persist items={['cURL', 'JavaScript']}>
+<Tabs groupId='getall' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
 curl http://localhost:8080/v1/collections/{COLLECTION_ID}/segments/all?api-key=<READ_API_KEY>
 ```
