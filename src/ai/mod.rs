@@ -156,7 +156,7 @@ impl AIService {
         &self,
         segments: Vec<crate::collection_manager::sides::segments::Segment>,
         conversation: Option<Vec<InteractionMessage>>,
-    ) -> Result<SegmentResponse> {
+    ) -> Result<Option<SegmentResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let grpc_segments = segments
@@ -179,6 +179,10 @@ impl AIService {
             .get_segment(request)
             .await
             .map(|response| response.into_inner())
+            .map(|segment| match segment.probability {
+                0.0 => None,
+                _ => Some(segment),
+            })
             .context("Cannot perform segment request")?;
 
         Ok(response)

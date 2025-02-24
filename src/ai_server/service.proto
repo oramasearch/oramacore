@@ -86,7 +86,9 @@ message ChatRequest {
     LLMType model = 1;             // Which LLM to use
     string prompt = 2;             // Input prompt
     Conversation conversation = 3; // All past messages
-    optional string context = 4;
+    optional string context = 4;   // Optional context
+    optional Segment segment = 5;  // Optional segment
+    optional Trigger trigger = 6;  // Optional trigger
 }
 
 // Response message for LLM calls

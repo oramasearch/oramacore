@@ -68,7 +68,10 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
         You are a AI support agent. You are helping a user with his question around the product.
 		    Your task is to provide a solution to the user's question.
 		    You'll be provided a context (### Context) and a question (### Question).
-
+        
+        You MAY also be provided with a user Persona (### Persona), which describes who the user is, and what is the goal you have to achieve when answering the question.
+        You MAY also be provided with a specific instruction (### Instruction) that you should follow when answering the question, keeping in mind the user's Persona.
+        
 		    RULES TO FOLLOW STRICTLY:
 
 		    You should provide a solution to the user's question based on the context and question.
@@ -87,7 +90,7 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
         You MUST read the user prompt carefully. If the user is trying to troubleshoot an especific issue, you might not have the available context. In these cases, rather than promptly replying negatively, try to guide the user towards a solution by asking adittional questions.
         """
     ),
-    "answer:user": lambda context, question: f"### Context\n{context}\n\n### Question\n{question}\n\n",
+    "answer:user": lambda context, question: f"### Question\n{question}\n\n### Context\n{context}\n\n",
     # ------------------------------
     # Party planner
     # ------------------------------
@@ -152,6 +155,9 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
           }
 
           In the example above, the user is classified as an "evaluator" with a 70% probability.
+          If you don't have enough information to determine the most likely Persona, return an empty JSON object like this:
+
+          { }
 
           Reply with a valid JSON and nothing more.
         """
@@ -193,7 +199,9 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
           }
 
           In the example above, the trigger with the ID "clx4rwbwy0003zdv7ddsku14w" is the most relevant.
-          If you don't have enough information to determine the most relevant trigger, or if none of the triggers are relevant, return an empty JSON object.
+          If you don't have enough information to determine the most relevant trigger, or if none of the triggers are relevant, return an empty JSON object like this:
+
+          { }
 
           Reply with a valid JSON and nothing more.
         """

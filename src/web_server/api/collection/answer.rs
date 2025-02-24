@@ -1,8 +1,10 @@
-use crate::ai::{LlmType, Segment, SegmentResponse, Trigger};
+use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, HybridMode, Interaction, InteractionMessage, Limit, SearchMode, SearchParams,
     SearchResult,
 };
+use crate::collection_manager::sides::segments::Segment;
+use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
 use axum::extract::Query;
@@ -46,6 +48,8 @@ enum SseMessage {
     Error { message: String },
     #[serde(rename = "response")]
     Response { message: String },
+    #[serde(rename = "message")]
+    Message { message: String },
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -158,7 +162,7 @@ async fn answer_v0(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let ai_service = read_side.get_ai_service();
+        let ai_service = read_side.clone().get_ai_service();
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -168,6 +172,31 @@ async fn answer_v0(
                 .unwrap(),
             )))
             .await;
+
+        let mut trigger: Option<Trigger> = None;
+        let mut segment: Option<Segment> = None;
+
+        let mut segments_and_triggers_stream = select_triggers_and_segments(
+            read_side.clone(),
+            read_api_key.clone(),
+            collection_id.clone(),
+            Some(conversation.clone()),
+        )
+        .await;
+
+        while let Some(result) = segments_and_triggers_stream.next().await {
+            match result {
+                AudienceManagementResult::Segment(s) => {
+                    segment = s;
+                }
+                AudienceManagementResult::ChosenSegment(s) => {
+                    unreachable!("Chosen segment should not be returned here");
+                }
+                AudienceManagementResult::Trigger(t) => {
+                    trigger = t;
+                }
+            }
+        }
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -284,7 +313,7 @@ enum AudienceManagementResult {
 }
 
 async fn select_triggers_and_segments(
-    read_side: Arc<ReadSide>,
+    read_side: State<Arc<ReadSide>>,
     read_api_key: ApiKey,
     collection_id: CollectionId,
     conversation: Option<Vec<InteractionMessage>>,
@@ -295,11 +324,6 @@ async fn select_triggers_and_segments(
         .get_all_segments_by_collection(read_api_key.clone(), collection_id.clone())
         .await
         .expect("Failed to get segments for the collection");
-
-    let all_triggers = read_side
-        .get_all_triggers_by_collection(read_api_key.clone(), collection_id.clone())
-        .await
-        .expect("Failed to get all triggers for the collection");
 
     let (tx, rx) = mpsc::channel(100);
 
@@ -316,41 +340,60 @@ async fn select_triggers_and_segments(
             .await
             .expect("Failed to get segment");
 
-        let full_segment = read_side
-            .get_segment(
-                read_api_key.clone(),
-                collection_id.clone(),
-                chosen_segment.id.clone(),
-            )
-            .await
-            .expect("Failed to get full segment");
+        match chosen_segment {
+            None => {
+                tx.send(AudienceManagementResult::ChosenSegment(None))
+                    .await
+                    .unwrap();
 
-        tx.send(AudienceManagementResult::Segment(full_segment))
-            .await
-            .unwrap();
+                tx.send(AudienceManagementResult::Segment(None))
+                    .await
+                    .unwrap();
 
-        let all_segments_triggers = read_side
-            .get_all_triggers_by_segment(
-                read_api_key.clone(),
-                collection_id.clone(),
-                chosen_segment.id.clone(),
-            )
-            .await
-            .expect("Failed to get triggers for the segment");
+                tx.send(AudienceManagementResult::Trigger(None))
+                    .await
+                    .unwrap();
 
-        let chosen_trigger = ai_service
-            .get_trigger(all_segments_triggers, conversation)
-            .await
-            .expect("Failed to get trigger");
+                return;
+            }
+            Some(segment) => {
+                let full_segment = read_side
+                    .get_segment(
+                        read_api_key.clone(),
+                        collection_id.clone(),
+                        segment.clone().id.clone(),
+                    )
+                    .await
+                    .expect("Failed to get full segment");
 
-        let full_trigger = read_side
-            .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
-            .await
-            .expect("Failed to get full trigger");
+                tx.send(AudienceManagementResult::Segment(full_segment.clone()))
+                    .await
+                    .unwrap();
 
-        tx.send(AudienceManagementResult::Trigger(full_trigger))
-            .await
-            .unwrap();
+                let all_segments_triggers = read_side
+                    .get_all_triggers_by_segment(
+                        read_api_key.clone(),
+                        collection_id.clone(),
+                        full_segment.unwrap().id.clone(),
+                    )
+                    .await
+                    .expect("Failed to get triggers for the segment");
+
+                let chosen_trigger = ai_service
+                    .get_trigger(all_segments_triggers, conversation)
+                    .await
+                    .expect("Failed to get trigger");
+
+                let full_trigger = read_side
+                    .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
+                    .await
+                    .expect("Failed to get full trigger");
+
+                tx.send(AudienceManagementResult::Trigger(full_trigger))
+                    .await
+                    .unwrap();
+            }
+        }
     });
 
     ReceiverStream::new(rx)

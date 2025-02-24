@@ -1,6 +1,7 @@
 import grpc
 import json
 import logging
+from textwrap import dedent
 from json_repair import repair_json
 from grpc_reflection.v1alpha import reflection
 from concurrent.futures import ThreadPoolExecutor
@@ -69,6 +70,26 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
+            if request.HasField("segment"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Persona
+                    - **Name**: {request.segment.name}
+                    - **Description**: {request.segment.description}
+                    - **Goal**: {request.segment.goal}                        
+                """
+                )
+
+            if request.HasField("trigger"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Trigger
+                    - **Name**: {request.trigger.name}
+                    - **Description**: {request.trigger.description}
+                    - **Response**: {request.trigger.response}
+                """
+                )
+
             response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt=request.prompt)
             return ChatResponse(text=response)
         except Exception as e:
@@ -91,6 +112,26 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 if request.conversation.messages
                 else []
             )
+
+            if request.HasField("segment"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Persona
+                    - **Name**: {request.segment.name}
+                    - **Description**: {request.segment.description}
+                    - **Goal**: {request.segment.goal}                        
+                """
+                )
+
+            if request.HasField("trigger"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Trigger
+                    - **Name**: {request.trigger.name}
+                    - **Description**: {request.trigger.description}
+                    - **Response**: {request.trigger.response}
+                """
+                )
 
             for text_chunk in self.models_manager.chat_stream(
                 model_id=model_name.lower(),
