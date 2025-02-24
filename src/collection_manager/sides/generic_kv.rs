@@ -187,14 +187,14 @@ impl KV {
         }
 
         let new_path = self.data_dir.join(format!("kv-{}.bin", current_offset));
-        BufferedFile::create(new_path.clone())
+        BufferedFile::create_or_overwrite(new_path.clone())
             .context("Cannot create previous kv info")?
             .write_json_data(&*data)
             .context("Cannot write previous kv info")?;
 
         let info = self.data_dir.join("info.json");
 
-        BufferedFile::create(info)
+        BufferedFile::create_or_overwrite(info)
             .context("Cannot create previous kv info")?
             .write_json_data(&KVInfo::V1(KVInfoV1 {
                 path_to_kv: new_path,
