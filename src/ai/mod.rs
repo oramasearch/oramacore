@@ -194,6 +194,8 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<ChatResponse> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
@@ -201,12 +203,34 @@ impl AIService {
             model: llm_type.as_str_name(),
         });
 
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
             conversation: Some(conversation),
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response = conn
@@ -226,6 +250,8 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<ChatStream> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
@@ -233,12 +259,34 @@ impl AIService {
             model: llm_type.as_str_name(),
         });
 
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
             conversation: Some(conversation),
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response: Response<Streaming<ChatStreamResponse>> = conn

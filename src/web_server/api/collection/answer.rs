@@ -190,7 +190,7 @@ async fn answer_v0(
                     segment = s;
                 }
                 AudienceManagementResult::ChosenSegment(s) => {
-                    unreachable!("Chosen segment should not be returned here");
+                    unreachable!();
                 }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t;
@@ -208,7 +208,14 @@ async fn answer_v0(
             .await;
 
         let optimized_query = ai_service
-            .chat(LlmType::GoogleQueryTranslator, query.clone(), None, None)
+            .chat(
+                LlmType::GoogleQueryTranslator,
+                query.clone(),
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -256,6 +263,8 @@ async fn answer_v0(
                 query,
                 Some(conversation),
                 Some(search_result_str),
+                segment,
+                trigger,
             )
             .await
             .unwrap();
