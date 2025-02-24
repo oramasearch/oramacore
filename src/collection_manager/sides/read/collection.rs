@@ -263,7 +263,7 @@ impl CollectionReader {
                 id: self.id.clone(),
                 description: self.description.clone(),
                 document_count: 0,
-                default_language: self.default_language.clone(),
+                default_language: self.default_language,
                 fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
                 used_models: Default::default(),

@@ -54,8 +54,8 @@ impl NumberField {
                 count: 0,
             };
         }
-        let min = self.inner.first_key_value().unwrap().0.clone();
-        let max = self.inner.last_key_value().unwrap().0.clone();
+        let min = *self.inner.first_key_value().unwrap().0;
+        let max = *self.inner.last_key_value().unwrap().0;
 
         NumberUncommittedFieldStats {
             min,

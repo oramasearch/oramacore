@@ -60,6 +60,10 @@ impl FSTIndex {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn file_path(&self) -> PathBuf {
         self.file_path.clone()
     }

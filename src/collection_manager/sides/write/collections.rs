@@ -127,7 +127,7 @@ impl CollectionsWriter {
             id.clone(),
             description.clone(),
             write_api_key,
-            default_language.clone(),
+            default_language,
             self.embedding_sender.clone(),
         );
 
