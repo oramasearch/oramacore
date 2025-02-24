@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use serde::Serialize;
+
 use crate::types::DocumentId;
 
 #[derive(Debug)]
@@ -26,6 +28,13 @@ impl BoolField {
         }
     }
 
+    pub fn get_stats(&self) -> BoolUncommittedFieldStats {
+        BoolUncommittedFieldStats {
+            false_count: self.inner.1.len(),
+            true_count: self.inner.0.len(),
+        }
+    }
+
     pub fn filter<'s, 'iter>(&'s self, value: bool) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
@@ -44,4 +53,10 @@ impl BoolField {
 
 fn f(d: &DocumentId) -> DocumentId {
     *d
+}
+
+#[derive(Serialize)]
+pub struct BoolUncommittedFieldStats {
+    pub false_count: usize,
+    pub true_count: usize,
 }

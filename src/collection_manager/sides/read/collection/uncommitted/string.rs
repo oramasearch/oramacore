@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::{
@@ -208,4 +209,17 @@ impl StringField {
     > + '_ {
         self.inner.inner.iter()
     }
+
+    pub fn get_stats(&self) -> StringUncommittedFieldStats {
+        StringUncommittedFieldStats {
+            key_count: self.inner.len(),
+            global_info: self.global_info(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct StringUncommittedFieldStats {
+    pub key_count: usize,
+    pub global_info: GlobalInfo,
 }

@@ -17,7 +17,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
     segments::{Segment, SegmentInterface},
-    triggers::{self, get_trigger_key, Trigger, TriggerInterface},
+    triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -170,6 +170,7 @@ impl WriteSide {
         info!("Committing write side");
 
         self.collections.commit().await?;
+        self.hook_runtime.commit().await?;
 
         self.kv.commit().await?;
 
@@ -317,6 +318,7 @@ impl WriteSide {
     ) -> Result<()> {
         self.hook_runtime
             .insert_hook(collection_id.clone(), name.clone(), code)
+            .await
             .context("Cannot insert hook")?;
 
         let collection = self
@@ -370,6 +372,7 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .get_hook(collection_id, name)
+            .await
             .map(|hook| hook.code))
     }
 
@@ -404,6 +407,7 @@ impl WriteSide {
         Ok(self
             .hook_runtime
             .list_hooks(collection_id)
+            .await
             .into_iter()
             .map(|(name, hook)| (name, hook.code))
             .collect())

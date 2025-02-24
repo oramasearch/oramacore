@@ -97,6 +97,9 @@ duration-str = "0.12.0"
 rabbitmq-stream-client = { version = "0.8", features = ["serde"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
 pin-project-lite = "0.2.16"
+parking_lot = "0.12.3"
+serde-big-array = "0.5.1"
+debug_panic = "0.2.1"
 dedent = "0.1.1"
 
 [build-dependencies]
@@ -115,6 +118,7 @@ assert_approx_eq = "1.1.0"
 fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
+fake = "4.0.0"
 
 [[bin]]
 name = "oramacore"

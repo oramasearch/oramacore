@@ -6,7 +6,7 @@ use serde_json::value::RawValue;
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, DocumentFields, FieldId, Number},
+        dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
         sides::{hooks::HookName, OramaModelSerializable},
     },
     nlp::locales::Locale,
@@ -201,8 +201,8 @@ pub enum WriteOperation {
             serialize_with = "serialize_api_key"
         )]
         read_api_key: ApiKey,
-        // Params here... but which ones?
-        // TODO: add params
+        description: Option<String>,
+        default_language: LanguageDTO,
     },
     Collection(CollectionId, CollectionWriteOperation),
 }
@@ -263,6 +263,8 @@ mod tests {
             WriteOperation::CreateCollection {
                 id: CollectionId("col".to_string()),
                 read_api_key: ApiKey(Secret::from("foo".to_string())),
+                description: Some("bar".to_string()),
+                default_language: LanguageDTO::English,
             },
             WriteOperation::Collection(
                 CollectionId("col".to_string()),
@@ -407,7 +409,6 @@ mod tests {
         ];
 
         for op in ops {
-            println!("{:?}", op);
             let serialized = bincode::serialize(&op).unwrap();
             let _: WriteOperation = bincode::deserialize(&serialized).unwrap();
         }

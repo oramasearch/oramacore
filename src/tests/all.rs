@@ -13,8 +13,8 @@ use tracing::info;
 use crate::{
     build_orama,
     collection_manager::{
-        dto::{ApiKey, InsertTriggerParams},
-        sides::{segments::Segment, ReadSide, WriteSide},
+        dto::ApiKey,
+        sides::{hooks::HookName, ReadSide, WriteSide},
     },
     tests::utils::{create_grpc_server, create_oramacore_config},
     types::{CollectionId, DocumentList},
@@ -938,8 +938,8 @@ async fn test_empty_term() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_vector_search_grpc() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
-
-    let (write_side, read_side) = create(create_oramacore_config()).await?;
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
     write_side
@@ -957,7 +957,6 @@ async fn test_vector_search_grpc() -> Result<()> {
             .try_into()?,
         )
         .await?;
-
     sleep(Duration::from_millis(100)).await;
 
     let mut docs = vec![
@@ -975,20 +974,37 @@ async fn test_vector_search_grpc() -> Result<()> {
         }),
     ];
     for i in 4..100 {
+        use fake::{Fake, Faker};
+        let s: String = Faker.fake();
         docs.push(json!({
             "id": i.to_string(),
-            "text": "foobar",
+            "text": s,
         }));
     }
-    write_side
-        .write(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        docs,
+    )
+    .await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
-            docs.try_into().unwrap(),
+            json!({
+                "mode": "vector",
+                "term": "The feline is napping comfortably indoors.",
+                "similarity": 0.6,
+            })
+            .try_into()?,
         )
         .await?;
+    assert_eq!(output.count, 2);
 
-    sleep(Duration::from_millis(500)).await;
+    read_side.commit().await?;
 
     let output = read_side
         .search(
@@ -997,10 +1013,12 @@ async fn test_vector_search_grpc() -> Result<()> {
             json!({
                 "mode": "vector",
                 "term": "The feline is napping comfortably indoors.",
+                "similarity": 0.6,
             })
             .try_into()?,
         )
         .await?;
+    assert_eq!(output.count, 2);
 
     // Due to the lack of a large enough dataset,
     // the search will not return 2 results as expected.
@@ -1009,7 +1027,6 @@ async fn test_vector_search_grpc() -> Result<()> {
     assert_ne!(output.count, 0);
     assert_ne!(output.hits.len(), 0);
     assert!(["1", "2"].contains(&output.hits[0].id.as_str()));
-
     Ok(())
 }
 
@@ -1305,6 +1322,7 @@ async fn test_commit_and_load2() -> Result<()> {
             json!({
                 "term": "Doe",
                 "mode": "vector",
+                "similarity": 0.0,
                 "where": {
                     "age": {
                         "eq": 20,
@@ -1803,6 +1821,214 @@ async fn test_simple() -> Result<()> {
     let after = output.hits[0].document.as_ref().unwrap().inner.get();
 
     assert_eq!(before, after);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_commit_hooks() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    let code = r#"
+function foo() {
+    return "The pen is on the table.";
+}
+"#;
+
+    write_side
+        .insert_javascript_hook(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            HookName::SelectEmbeddingsProperties,
+            code.to_string(),
+        )
+        .await?;
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "Today I want to listen only Max Pezzali.",
+        })],
+    )
+    .await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 1);
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "Today I want to listen only Max Pezzali.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 0);
+
+    read_side.commit().await?;
+    write_side.commit().await?;
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 1);
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 0);
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "My dog is barking.",
+        })],
+    )
+    .await?;
+    sleep(Duration::from_millis(500)).await;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 2);
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 0);
+
+    read_side.commit().await?;
+    write_side.commit().await?;
+
+    let (_, read_side) = create(config.clone()).await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 2);
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 0);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_stats() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "Today I want to listen only Max Pezzali.",
+        })],
+    )
+    .await?;
+
+    let stats_before = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await?;
+
+    assert_eq!(stats_before.document_count, 1);
+    // id, title, ___orama_auto_embedding
+    assert_eq!(stats_before.fields_stats.len(), 3);
+
+    read_side.commit().await?;
+
+    let stats_after = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await?;
+
+    assert_eq!(stats_after.document_count, 1);
+    // id, title, ___orama_auto_embedding
+    assert_eq!(stats_after.fields_stats.len(), 3);
 
     Ok(())
 }

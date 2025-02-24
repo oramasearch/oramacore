@@ -52,6 +52,21 @@ impl BoolField {
         }
     }
 
+    pub fn get_stats(&self) -> Result<BoolCommittedFieldStats> {
+        let false_count = self
+            .inner
+            .count(BoolWrapper::False)
+            .context("Cannot count false values")?;
+        let true_count = self
+            .inner
+            .count(BoolWrapper::True)
+            .context("Cannot count true values")?;
+        Ok(BoolCommittedFieldStats {
+            false_count,
+            true_count,
+        })
+    }
+
     pub fn filter<'s, 'iter>(
         &'s self,
         value: bool,
@@ -163,4 +178,10 @@ impl BoundedValue for BoolWrapper {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BoolFieldInfo {
     pub data_dir: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct BoolCommittedFieldStats {
+    pub false_count: usize,
+    pub true_count: usize,
 }

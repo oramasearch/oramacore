@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
-use bool::{BoolField, BoolFieldInfo};
-use number::{NumberField, NumberFieldInfo};
-use string::{StringField, StringFieldInfo};
-use vector::{VectorField, VectorFieldInfo};
+use anyhow::{Context, Result};
+use bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
+use number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
+use string::{StringCommittedFieldStats, StringField, StringFieldInfo};
+use vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
 
 use crate::{
     collection_manager::dto::{BM25Scorer, FieldId, GlobalInfo, NumberFilter},
@@ -17,10 +17,10 @@ mod string;
 mod vector;
 
 pub mod fields {
-    pub use super::bool::{BoolField, BoolFieldInfo};
-    pub use super::number::{NumberField, NumberFieldInfo};
-    pub use super::string::{StringField, StringFieldInfo};
-    pub use super::vector::{VectorField, VectorFieldInfo};
+    pub use super::bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
+    pub use super::number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
+    pub use super::string::{StringCommittedFieldStats, StringField, StringFieldInfo};
+    pub use super::vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
 
     pub use super::bool::BoolWrapper;
 }
@@ -34,40 +34,53 @@ pub struct CommittedCollection {
 }
 
 impl CommittedCollection {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
-            number_index: HashMap::new(),
-            bool_index: HashMap::new(),
-            string_index: HashMap::new(),
-            vector_index: HashMap::new(),
+            number_index: Default::default(),
+            bool_index: Default::default(),
+            string_index: Default::default(),
+            vector_index: Default::default(),
         }
     }
 
-    pub fn load(
-        &mut self,
+    pub fn try_load(
         number_field_infos: Vec<(FieldId, NumberFieldInfo)>,
         bool_field_infos: Vec<(FieldId, BoolFieldInfo)>,
         string_field_infos: Vec<(FieldId, StringFieldInfo)>,
         vector_field_infos: Vec<(FieldId, VectorFieldInfo)>,
-    ) -> Result<()> {
+    ) -> Result<Self> {
+        let mut number_index: HashMap<FieldId, NumberField> = Default::default();
+        let mut bool_index: HashMap<FieldId, BoolField> = Default::default();
+        let mut string_index: HashMap<FieldId, StringField> = Default::default();
+        let mut vector_index: HashMap<FieldId, VectorField> = Default::default();
+
         for (field_id, info) in number_field_infos {
-            let number_field = NumberField::load(info)?;
-            self.number_index.insert(field_id, number_field);
+            let number_field = NumberField::load(info)
+                .with_context(|| format!("Cannot load number {:?} field", field_id))?;
+            number_index.insert(field_id, number_field);
         }
         for (field_id, info) in bool_field_infos {
-            let bool_field = BoolField::load(info)?;
-            self.bool_index.insert(field_id, bool_field);
+            let bool_field = BoolField::load(info)
+                .with_context(|| format!("Cannot load bool {:?} field", field_id))?;
+            bool_index.insert(field_id, bool_field);
         }
         for (field_id, info) in string_field_infos {
-            let string_field = StringField::load(info)?;
-            self.string_index.insert(field_id, string_field);
+            let string_field = StringField::load(info)
+                .with_context(|| format!("Cannot load string {:?} field", field_id))?;
+            string_index.insert(field_id, string_field);
         }
         for (field_id, info) in vector_field_infos {
-            let vector_field = VectorField::load(info)?;
-            self.vector_index.insert(field_id, vector_field);
+            let vector_field = VectorField::load(info)
+                .with_context(|| format!("Cannot load vector {:?} field", field_id))?;
+            vector_index.insert(field_id, vector_field);
         }
 
-        Ok(())
+        Ok(Self {
+            number_index,
+            bool_index,
+            string_index,
+            vector_index,
+        })
     }
 
     pub fn global_info(&self, field_id: &FieldId) -> GlobalInfo {
@@ -77,8 +90,8 @@ impl CommittedCollection {
             .unwrap_or_default()
     }
 
-    pub fn get_infos(&self) -> CommittedInfo {
-        CommittedInfo {
+    pub fn get_keys(&self) -> CommittedKeys {
+        CommittedKeys {
             number_fields: self.number_index.keys().copied().collect(),
             string_fields: self.string_index.keys().copied().collect(),
             bool_fields: self.bool_index.keys().copied().collect(),
@@ -86,9 +99,47 @@ impl CommittedCollection {
         }
     }
 
+    pub fn get_bool_stats(&self) -> Result<HashMap<FieldId, BoolCommittedFieldStats>> {
+        let mut stats = HashMap::new();
+        for (field_id, field) in &self.bool_index {
+            let field_stats = field.get_stats()?;
+            stats.insert(*field_id, field_stats);
+        }
+        Ok(stats)
+    }
+
+    pub fn get_number_stats(&self) -> Result<HashMap<FieldId, NumberCommittedFieldStats>> {
+        let mut stats = HashMap::new();
+        for (field_id, field) in &self.number_index {
+            let field_stats = field.get_stats()?;
+            stats.insert(*field_id, field_stats);
+        }
+        Ok(stats)
+    }
+
+    pub fn get_string_stats(&self) -> Result<HashMap<FieldId, StringCommittedFieldStats>> {
+        let mut stats = HashMap::new();
+        for (field_id, field) in &self.string_index {
+            let field_stats = field.get_stats()?;
+            stats.insert(*field_id, field_stats);
+        }
+        Ok(stats)
+    }
+
+    pub fn get_vector_stats(&self) -> Result<HashMap<FieldId, VectorCommittedFieldStats>> {
+        let mut stats = HashMap::new();
+        for (field_id, field) in &self.vector_index {
+            let field_stats = field.get_stats()?;
+            stats.insert(*field_id, field_stats);
+        }
+        Ok(stats)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn vector_search(
         &self,
         target: &[f32],
+        similarity: f32,
         properties: &[FieldId],
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         limit: usize,
@@ -106,6 +157,7 @@ impl CommittedCollection {
             };
             vector_field.search(
                 target,
+                similarity,
                 limit,
                 filtered_doc_ids,
                 output,
@@ -185,7 +237,7 @@ impl CommittedCollection {
 }
 
 #[derive(Debug)]
-pub struct CommittedInfo {
+pub struct CommittedKeys {
     pub number_fields: HashSet<FieldId>,
     pub string_fields: HashSet<FieldId>,
     pub bool_fields: HashSet<FieldId>,

@@ -1,7 +1,7 @@
-use crate::ai::{LlmType, Segment, SegmentResponse, Trigger};
+use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, HybridMode, Interaction, InteractionMessage, Limit, SearchMode, SearchParams,
-    SearchResult,
+    SearchResult, Similarity,
 };
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
@@ -199,6 +199,7 @@ async fn answer_v0(
                 SearchParams {
                     mode: SearchMode::Hybrid(HybridMode {
                         term: optimized_query.text,
+                        similarity: Similarity(0.8),
                     }),
                     limit: Limit(5),
                     where_filter: HashMap::new(),

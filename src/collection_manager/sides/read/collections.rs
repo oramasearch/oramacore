@@ -6,7 +6,10 @@ use std::{
 
 use crate::{
     ai::AIService,
-    collection_manager::{dto::ApiKey, sides::Offset},
+    collection_manager::{
+        dto::{ApiKey, LanguageDTO},
+        sides::Offset,
+    },
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
@@ -16,7 +19,6 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, warn};
@@ -69,19 +71,9 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
-            // We will replace the following values inside `load` method
-            let mut collection = CollectionReader::try_new(
-                collection_id.clone(),
-                ApiKey(Secret::new("".to_string())),
-                ai_service.clone(),
-                nlp_service.clone(),
-                indexes_config.clone(),
-            )?;
-
-            collection
-                .load(base_dir_for_collections.join(&collection.get_id().0))
-                .await
-                .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
+            let collection =
+                CollectionReader::try_load(ai_service.clone(), nlp_service.clone(), collection_dir)
+                    .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
             collections.insert(collection_id, collection);
         }
@@ -156,17 +148,20 @@ impl CollectionsReader {
         &self,
         _offset: Offset,
         id: CollectionId,
+        description: Option<String>,
+        default_language: LanguageDTO,
         read_api_key: ApiKey,
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
-        let collection = CollectionReader::try_new(
+        let collection = CollectionReader::empty(
             id.clone(),
+            description,
+            default_language,
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
-            self.indexes_config.clone(),
-        )?;
+        );
 
         let mut guard = self.collections.write().await;
         if guard.contains_key(&id) {

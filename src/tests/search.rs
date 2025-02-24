@@ -2,6 +2,7 @@
 
 use crate::ai::{AIServiceConfig, OramaModel};
 use crate::collection_manager::dto::ApiKey;
+use crate::collection_manager::sides::hooks::HooksRuntimeConfig;
 use crate::collection_manager::sides::{
     CollectionsWriterConfig, InputSideChannelType, OramaModelSerializable, OutputSideChannelType,
     ReadSideConfig,
@@ -69,6 +70,10 @@ async fn start_server() {
             port: address.port(),
             api_key: None,
             max_connections: 1,
+        },
+        hooks: HooksRuntimeConfig {
+            channel_limit: 50,
+            data_dir: generate_new_path(),
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),

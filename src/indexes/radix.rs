@@ -25,6 +25,14 @@ impl<Value: Clone> RadixIndex<Value> {
         self.inner.insert(key, value);
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.iter().count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn search<'s, 'input>(&'s self, token: &'input str) -> Result<Vec<&'s Value>>
     where
         'input: 's,

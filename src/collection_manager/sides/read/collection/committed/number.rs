@@ -36,6 +36,17 @@ impl NumberField {
         }
     }
 
+    pub fn get_stats(&self) -> Result<NumberCommittedFieldStats> {
+        let (min, max) = self
+            .inner
+            .min_max()
+            .context("Cannot get min madn max key for number index")?;
+        Ok(NumberCommittedFieldStats {
+            min: min.0,
+            max: max.0,
+        })
+    }
+
     pub fn filter<'s, 'iter>(
         &'s self,
         filter_number: &NumberFilter,
@@ -88,4 +99,10 @@ impl BoundedValue for SerializableNumber {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NumberFieldInfo {
     pub data_dir: PathBuf,
+}
+
+#[derive(Serialize)]
+pub struct NumberCommittedFieldStats {
+    pub min: Number,
+    pub max: Number,
 }

@@ -21,8 +21,9 @@ use crate::{
     collection_manager::{
         dto::ApiKey,
         sides::{
-            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-            OutputSideChannelType, ReadSideConfig, WriteSideConfig,
+            hooks::HooksRuntimeConfig, CollectionsWriterConfig, IndexesConfig,
+            InputSideChannelType, OramaModelSerializable, OutputSideChannelType, ReadSideConfig,
+            WriteSideConfig,
         },
     },
     web_server::HttpConfig,
@@ -187,6 +188,10 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             api_key: None,
             max_connections: 1,
             scheme: Scheme::HTTP,
+        },
+        hooks: HooksRuntimeConfig {
+            channel_limit: 50,
+            data_dir: generate_new_path(),
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),

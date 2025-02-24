@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use tracing::debug;
 
 use crate::collection_manager::dto::SerializableNumber;
 use crate::file_utils::create_if_not_exists;
@@ -17,18 +16,26 @@ pub fn merge_number_field(
     committed: Option<&committed_fields::NumberField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<committed_fields::NumberField> {
-    let committed = match (uncommitted, committed) {
+) -> Result<Option<committed_fields::NumberField>> {
+    match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
         }
         (None, Some(committed)) => {
+            if uncommitted_document_deletions.is_empty() {
+                // No changes
+                return Ok(None);
+            }
+
             let committed_iter = committed.iter().map(|(k, mut d)| {
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
 
-            committed_fields::NumberField::from_iter(committed_iter, data_dir)?
+            Ok(Some(committed_fields::NumberField::from_iter(
+                committed_iter,
+                data_dir,
+            )?))
         }
         (Some(uncommitted), None) => {
             let iter = uncommitted
@@ -38,7 +45,9 @@ pub fn merge_number_field(
                     d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                     (k, d)
                 });
-            committed_fields::NumberField::from_iter(iter, data_dir)?
+            Ok(Some(committed_fields::NumberField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), Some(committed)) => {
             let uncommitted_iter = uncommitted.iter().map(|(n, v)| (SerializableNumber(n), v));
@@ -57,11 +66,11 @@ pub fn merge_number_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            committed_fields::NumberField::from_iter(iter, data_dir)?
+            Ok(Some(committed_fields::NumberField::from_iter(
+                iter, data_dir,
+            )?))
         }
-    };
-
-    Ok(committed)
+    }
 }
 
 pub fn merge_bool_field(
@@ -69,12 +78,17 @@ pub fn merge_bool_field(
     committed: Option<&committed_fields::BoolField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<committed_fields::BoolField> {
-    let new_committed_field = match (uncommitted, committed) {
+) -> Result<Option<committed_fields::BoolField>> {
+    match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
         }
         (None, Some(committed)) => {
+            if uncommitted_document_deletions.is_empty() {
+                // No changes
+                return Ok(None);
+            }
+
             let (true_docs, false_docs) = committed.clone_inner()?;
             let iter = vec![
                 (committed_fields::BoolWrapper::False, false_docs),
@@ -86,7 +100,9 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            committed_fields::BoolField::from_iter(iter, data_dir)?
+            Ok(Some(committed_fields::BoolField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), None) => {
             let (true_docs, false_docs) = uncommitted.clone_inner();
@@ -100,7 +116,9 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            committed_fields::BoolField::from_iter(iter, data_dir)?
+            Ok(Some(committed_fields::BoolField::from_iter(
+                iter, data_dir,
+            )?))
         }
         (Some(uncommitted), Some(committed)) => {
             let (uncommitted_true_docs, uncommitted_false_docs) = uncommitted.clone_inner();
@@ -109,15 +127,13 @@ pub fn merge_bool_field(
             committed_true_docs.extend(uncommitted_true_docs);
             committed_false_docs.extend(uncommitted_false_docs);
 
-            committed_fields::BoolField::from_data(
+            Ok(Some(committed_fields::BoolField::from_data(
                 committed_true_docs,
                 committed_false_docs,
                 data_dir,
-            )?
+            )?))
         }
-    };
-
-    Ok(new_committed_field)
+    }
 }
 
 pub fn merge_string_field(
@@ -125,34 +141,35 @@ pub fn merge_string_field(
     committed: Option<&committed_fields::StringField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<committed_fields::StringField> {
-    debug!(
-        "Merging string field. with_uncommitted {}. with_committed {}",
-        uncommitted.is_some(),
-        committed.is_some()
-    );
-
-    let new_committed_field = match (uncommitted, committed) {
+) -> Result<Option<committed_fields::StringField>> {
+    match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");
         }
-        (None, Some(committed)) => committed_fields::StringField::from_committed(
-            committed,
-            data_dir,
-            uncommitted_document_deletions,
-        )?,
+        (None, Some(committed)) => {
+            if uncommitted_document_deletions.is_empty() {
+                // No changes
+                return Ok(None);
+            }
+
+            Ok(Some(committed_fields::StringField::from_committed(
+                committed,
+                data_dir,
+                uncommitted_document_deletions,
+            )?))
+        }
         (Some(uncommitted), None) => {
             let length_per_documents = uncommitted.field_length_per_doc();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            committed_fields::StringField::from_iter(
+            Ok(Some(committed_fields::StringField::from_iter(
                 entries.into_iter(),
                 length_per_documents,
                 data_dir,
                 uncommitted_document_deletions,
-            )?
+            )?))
         }
         (Some(uncommitted), Some(committed)) => {
             let length_per_documents = uncommitted.field_length_per_doc();
@@ -161,18 +178,18 @@ pub fn merge_string_field(
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            committed_fields::StringField::from_iter_and_committed(
-                entries.into_iter(),
-                committed,
-                length_per_documents,
-                data_dir,
-                uncommitted_document_deletions,
-            )
-            .context("Failed to merge string field")?
+            Ok(Some(
+                committed_fields::StringField::from_iter_and_committed(
+                    entries.into_iter(),
+                    committed,
+                    length_per_documents,
+                    data_dir,
+                    uncommitted_document_deletions,
+                )
+                .context("Failed to merge string field")?,
+            ))
         }
-    };
-
-    Ok(new_committed_field)
+    }
 }
 
 pub fn merge_vector_field(
@@ -180,43 +197,49 @@ pub fn merge_vector_field(
     committed: Option<&committed_fields::VectorField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<committed_fields::VectorField> {
+) -> Result<Option<committed_fields::VectorField>> {
     create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
-    let new_committed_field = match (uncommitted, committed) {
+    match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed vector fields are None. Never should happen");
         }
         (None, Some(committed)) => {
-            committed
-                .clone_to(&data_dir)
-                .context("Failed to copy hnsw file")?;
-            committed_fields::VectorField::from_dump_and_iter(
-                data_dir,
-                std::iter::empty(),
-                uncommitted_document_deletions,
-            )?
+            if uncommitted_document_deletions.is_empty() {
+                // No changes
+                Ok(None)
+            } else {
+                let info = committed.get_field_info();
+                let new_field = committed_fields::VectorField::from_dump_and_iter(
+                    info.data_dir,
+                    std::iter::empty(),
+                    uncommitted_document_deletions,
+                    data_dir,
+                )?;
+                Ok(Some(new_field))
+            }
         }
-        (Some(uncommitted), None) => committed_fields::VectorField::from_iter(
-            uncommitted
-                .iter()
-                .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
-            uncommitted.dimension(),
-            data_dir,
-        )?,
-        (Some(uncommitted), Some(committed)) => {
-            committed
-                .clone_to(&data_dir)
-                .context("Failed to copy hnsw file")?;
-            committed_fields::VectorField::from_dump_and_iter(
+        (Some(uncommitted), None) => {
+            let new_field = committed_fields::VectorField::from_iter(
+                uncommitted
+                    .iter()
+                    .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
+                uncommitted.dimension(),
                 data_dir,
+            )?;
+            Ok(Some(new_field))
+        }
+        (Some(uncommitted), Some(committed)) => {
+            let info = committed.get_field_info();
+            let new_field = committed_fields::VectorField::from_dump_and_iter(
+                info.data_dir,
                 uncommitted.iter(),
                 uncommitted_document_deletions,
-            )?
+                data_dir,
+            )?;
+            Ok(Some(new_field))
         }
-    };
-
-    Ok(new_committed_field)
+    }
 }
 
 /*
