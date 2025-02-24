@@ -1,4 +1,5 @@
 import grpc
+import json
 import logging
 from json_repair import repair_json
 from grpc_reflection.v1alpha import reflection
@@ -17,10 +18,14 @@ from service_pb2 import (
     HealthCheckResponse,
     LLMType,
     PlannedAnswerResponse,
+    SegmentResponse as ProtoSegmentResponse,
+    TriggerResponse as ProtoTriggerResponse,
+    AutoQueryResponse as ProtoAutoQueryResponse,
 )
 from src.utils import OramaAIConfig
 from src.prompts.party_planner import PartyPlannerActions
 from src.actions.party_planner import PartyPlanner
+from src.prompts.main import PROMPT_TEMPLATES
 
 
 class LLMService(service_pb2_grpc.LLMServiceServicer):
@@ -133,6 +138,142 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Error in planned answer stream: {str(e)}")
             return PlannedAnswerResponse()
+
+    def GetSegment(self, request, context):
+
+        if not request.segments:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("At least one segment must be provided")
+            return ProtoSegmentResponse()
+
+        try:
+            model_name = "answer"  # @todo: make this configurable
+
+            full_conversation = ""
+            for message in request.conversation.messages:
+                role = ProtoRole.Name(message.role).lower()
+                full_conversation += f"Role: {role}\nContent: {message.content}\n"
+
+            segments_data = [
+                {
+                    "id": segment.id,
+                    "name": segment.name,
+                    "description": segment.description,
+                    "goal": segment.goal if segment.HasField("goal") else None,
+                }
+                for segment in request.segments
+            ]
+
+            history = [
+                {
+                    "role": "system",
+                    "content": PROMPT_TEMPLATES["segmenter:system"],
+                },
+                {
+                    "role": "user",
+                    "content": PROMPT_TEMPLATES["segmenter:user"](segments_data, full_conversation),
+                },
+            ]
+
+            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt="")
+
+            repaired_response = repair_json(response)
+            repaired_response_json = json.loads(repaired_response)
+
+            return ProtoSegmentResponse(
+                id=repaired_response_json.get("id", ""),
+                name=repaired_response_json.get("name", ""),
+                probability=repaired_response_json.get("probability", 0.0),
+            )
+
+        except Exception as e:
+            logging.error(f"Error in GetSegment: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error in segment classification: {str(e)}")
+            return ProtoSegmentResponse()
+
+    def GetTrigger(self, request, context):
+
+        if not request.triggers:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("At least one trigger must be provided")
+            return ProtoTriggerResponse()
+
+        try:
+            model_name = "answer"  # @todo: make this configurable
+
+            full_conversation = ""
+            for message in request.conversation.messages:
+                role = ProtoRole.Name(message.role).lower()
+                full_conversation += f"Role: {role}\nContent: {message.content}\n"
+
+            triggers_data = [
+                {
+                    "id": trigger.id,
+                    "name": trigger.name,
+                    "description": trigger.description,
+                    "response": trigger.response,
+                }
+                for trigger in request.triggers
+            ]
+
+            history = [
+                {
+                    "role": "system",
+                    "content": PROMPT_TEMPLATES["trigger:system"],
+                },
+                {
+                    "role": "user",
+                    "content": PROMPT_TEMPLATES["trigger:user"](triggers_data, full_conversation),
+                },
+            ]
+
+            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt="")
+
+            repaired_response = repair_json(response)
+            repaired_response_json = json.loads(repaired_response)
+
+            return ProtoTriggerResponse(
+                id=repaired_response_json.get("id", ""),
+                name=repaired_response_json.get("name", ""),
+                response=repaired_response_json.get("response", ""),
+                probability=repaired_response_json.get("probability", 0.0),
+            )
+
+        except Exception as e:
+            logging.error(f"Error in GetSegment: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error in segment classification: {str(e)}")
+            return ProtoTriggerResponse()
+
+    def AutoQuery(self, request, context):
+        try:
+            model_name = "answer"  # @todo: make this configurable
+
+            history = [
+                {
+                    "role": "system",
+                    "content": PROMPT_TEMPLATES["autoquery:system"],
+                },
+                {
+                    "role": "user",
+                    "content": PROMPT_TEMPLATES["autoquery:user"](query=request.query, _context=""),
+                },
+            ]
+
+            response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt="")
+            repaired_response = repair_json(response)
+            repaired_response_json = json.loads(repaired_response)
+
+            return ProtoAutoQueryResponse(
+                mode=repaired_response_json.get("mode", ""),
+            )
+
+        except Exception as e:
+            logging.error(f"Error in GetSegment: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Error in segment classification: {str(e)}")
+            return ProtoAutoQueryResponse()
 
 
 class AuthInterceptor(grpc.ServerInterceptor):

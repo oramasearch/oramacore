@@ -546,6 +546,7 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
     ) -> Result<()> {
+        println!("Loading collection from {:?}", path);
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()

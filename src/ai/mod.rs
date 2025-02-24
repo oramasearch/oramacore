@@ -120,6 +120,70 @@ impl AIService {
         self.embed(model, input, OramaIntent::Passage).await
     }
 
+    pub async fn get_trigger(
+        &self,
+        triggers: Vec<crate::collection_manager::sides::triggers::Trigger>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<TriggerResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let grpc_triggers = triggers
+            .iter()
+            .map(|trigger| Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            })
+            .collect();
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(TriggerRequest {
+            triggers: grpc_triggers,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_trigger(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform trigger request")?;
+
+        Ok(response)
+    }
+
+    pub async fn get_segment(
+        &self,
+        segments: Vec<crate::collection_manager::sides::segments::Segment>,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<SegmentResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let grpc_segments = segments
+            .iter()
+            .map(|segment| Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            })
+            .collect();
+
+        let conversation = self.get_grpc_conversation(conversation);
+        let request = Request::new(SegmentRequest {
+            segments: grpc_segments,
+            conversation: Some(conversation),
+        });
+
+        let response = conn
+            .get_segment(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform segment request")?;
+
+        Ok(response)
+    }
+
     pub async fn chat(
         &self,
         llm_type: LlmType,
@@ -219,6 +283,20 @@ impl AIService {
             .context("Cannot initiate chat stream request")?;
 
         Ok(response.into_inner())
+    }
+
+    pub async fn get_autoquery(&self, query: String) -> Result<AutoQueryResponse> {
+        let mut conn = self.pool.get().await.context("Cannot get connection")?;
+
+        let request = Request::new(AutoQueryRequest { query });
+
+        let response = conn
+            .auto_query(request)
+            .await
+            .map(|response| response.into_inner())
+            .context("Cannot perform autoquery request")?;
+
+        Ok(response)
     }
 
     fn get_grpc_conversation(&self, interactions: Option<Vec<InteractionMessage>>) -> Conversation {

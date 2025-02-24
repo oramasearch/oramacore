@@ -1,22 +1,35 @@
 import textwrap
-from typing import Dict, Callable, TypeAlias, Literal
+from typing import Dict, Callable, Any, Literal, TypeVar, Union
 
-PromptTemplate: TypeAlias = str | Callable[[str], str]
+Context = TypeVar("Context")
+
+PromptTemplate = Union[str, Callable[[str, Context], str]]
 
 TemplateKey = Literal[
     "vision_ecommerce:system",
     "vision_ecommerce:user",
     "vision_generic:system",
     "vision_generic:user",
+    "vision_tech_documentation:system",
+    "vision_tech_documentation:user",
+    "vision_code:system",
+    "vision_code:user",
     "google_query_translator:system",
     "google_query_translator:user",
     "answer:system",
     "answer:user",
     "party_planner:system",
     "party_planner:user",
+    "segmenter:system",
+    "segmenter:user",
+    "trigger:system",
+    "trigger:user",
+    "autoquery:system",
+    "autoquery:user",
 ]
 
-PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
+
+PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
     # ------------------------------
     # Vision eCommerce model
     # ------------------------------
@@ -100,7 +113,7 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
 
         Remember, each step will produce the input for the next one. So you must only combine actions that can work one after another.
         
-        You must return an JSON object that looks like this:
+        You must return a JSON object that looks like this:
 
         {
           "actions": [
@@ -115,4 +128,112 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate] = {
         """
     ),
     "party_planner:user": lambda input, actions: f"### Input\n{input}\n\n### Actions\n{actions}",
+    # ------------------------------
+    # Segmenter
+    # ------------------------------
+    "segmenter:system": textwrap.dedent(
+        """
+          You're a tool used to determine the Persona of a user based on the messages they send.
+          You'll receive a series of Personas (### Personas) in a JSON format, and a conversation (### Conversation) between a user and an AI assistant.
+          Your job is to return the most likely Persona for the user based on the messages they sent.
+
+          You must return a JSON object containing:
+
+          - id: The ID of the Persona
+          - name: The name of the Persona
+          - probability: The probability of the user being classified as this Persona
+
+          Here's an example:
+
+          {
+            "id": "clx4rwbwy0003zdv7ddsku14w",
+            "name": "evaluator",
+            "probability": 0.7
+          }
+
+          In the example above, the user is classified as an "evaluator" with a 70% probability.
+
+          Reply with a valid JSON and nothing more.
+        """
+    ),
+    "segmenter:user": lambda input, context: f"### Personas\n{context}\n\n### Conversation\n{input}",
+    # ------------------------------
+    # Trigger
+    # ------------------------------
+    "trigger:system": textwrap.dedent(
+        """
+          You are an AI assistant that helps determine which predefined trigger, if any, is most relevant to a given conversation.
+          You will be given a series of triggers (### Triggers) in a JSON format, and a conversation (### Conversation) between a user and an AI assistant.
+
+          Each trigger has the following structure:
+          
+          {
+            "id": "<trigger_id>",
+            "name": "<trigger_name>",
+            "description": "<trigger_description>",
+            "response": "<trigger_response>",
+          }
+
+          Based on the conversation history and the available triggers, which trigger do you think is most relevant?
+
+          You must return a JSON object containing:
+
+          - id: The ID of the selected trigger
+          - name: The name of the selected trigger
+          - response: The response of the selected trigger. 
+          - probability: The probability of the trigger being the most relevant
+
+          Here's an example:
+
+          {
+            "id": "<trigger_id>",
+            "name": "<trigger_name>",
+            "response": "<trigger_response>",
+            "probability": 0.7
+          }
+
+          In the example above, the trigger with the ID "clx4rwbwy0003zdv7ddsku14w" is the most relevant.
+          If you don't have enough information to determine the most relevant trigger, or if none of the triggers are relevant, return an empty JSON object.
+
+          Reply with a valid JSON and nothing more.
+        """
+    ),
+    "trigger:user": lambda input, context: f"### Triggers\n{context}\n\n### Conversation\n{input}",
+    # ------------------------------
+    # AutoQuery
+    # ------------------------------
+    "autoquery:system": textwrap.dedent(
+        """
+          You are an AI assistant tasked with selecting the most appropriate search mode for a given user query. The query will appear after the marker "### Query". Analyze the query carefully to determine which search mode best fits the user's needs.
+
+          Consider these criteria:
+
+          1. **Full-text search**
+            - **Ideal:** When the query demands exact keyword matching, such as structured database queries or when the query is highly specific with unambiguous terms.
+            - **Avoid:** When the query contains contextual details, troubleshooting language, or nuanced phrasing that requires understanding beyond literal keywords.
+
+          2. **Vector search**
+            - **Ideal:** When the query requires semantic understanding or involves conceptual language, such as troubleshooting issues, error descriptions, or broader contextual references.
+            - **Avoid:** When the query requires strict, literal keyword matches or if computational efficiency is a primary concern.
+
+          3. **Hybrid search**
+            - **Ideal:** When the query can benefit from both precise keyword matching and semantic understanding. Use this mode for queries that include both specific terms and broader contextual or conceptual elements.
+            - **Avoid:** When the query is extremely straightforward and narrowly defined, where the added complexity of combining methods isn't necessary.
+
+          Additional Guidance:
+          - If the query includes troubleshooting language (e.g., "doesn't work," "error," "failed," "problem," "issue," "tried multiple times"), lean towards vector or hybrid search.
+          - For queries that are purely about finding specific text without additional context, consider full-text search.
+
+          Return your decision as a valid JSON object with the following format:
+
+          {
+            "mode": "<search_mode>"
+          }
+
+          Where `<search_mode>` is one of: "fulltext", "vector", or "hybrid".
+
+          Reply with the JSON output only and nothing else.
+        """,
+    ),
+    "autoquery:user": lambda query, _context: f"### Query\n{query}",
 }

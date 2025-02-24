@@ -109,6 +109,27 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
     ) -> EchoResult<Self::PlannedAnswerStream> {
         todo!()
     }
+
+    async fn auto_query(
+        &self,
+        _req: tonic::Request<grpc_def::AutoQueryRequest>,
+    ) -> EchoResult<grpc_def::AutoQueryResponse> {
+        todo!()
+    }
+
+    async fn get_segment(
+        &self,
+        _req: tonic::Request<grpc_def::SegmentRequest>,
+    ) -> EchoResult<grpc_def::SegmentResponse> {
+        todo!()
+    }
+
+    async fn get_trigger(
+        &self,
+        _req: tonic::Request<grpc_def::TriggerRequest>,
+    ) -> EchoResult<grpc_def::TriggerResponse> {
+        todo!()
+    }
 }
 pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;

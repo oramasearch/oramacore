@@ -186,7 +186,14 @@ impl<'de> Deserialize<'de> for DocumentFieldsWrapper {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum KVWriteOperation {
+    Create(String, String),
+    Delete(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WriteOperation {
+    KV(KVWriteOperation),
     CreateCollection {
         id: CollectionId,
         #[serde(
@@ -214,6 +221,8 @@ impl WriteOperation {
                 "insert_document"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::Index(_, _, _)) => "index",
+            WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
+            WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
         }
     }
 }

@@ -293,11 +293,17 @@ pub struct HybridMode {
     pub similarity: Similarity,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AutoMode {
+    pub term: String,
+}
+
 #[derive(Debug, Clone, ToSchema)]
 pub enum SearchMode {
     FullText(#[schema(inline)] FulltextMode),
     Vector(#[schema(inline)] VectorMode),
     Hybrid(#[schema(inline)] HybridMode),
+    Auto(#[schema(inline)] AutoMode),
     Default(#[schema(inline)] FulltextMode),
 }
 
@@ -336,6 +342,7 @@ impl<'de> Deserialize<'de> for SearchMode {
                 similarity: mode.similarity.unwrap_or_default(),
             })),
             "default" => Ok(SearchMode::Default(FulltextMode { term: mode.term })),
+            "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
                 "Invalid search mode: {}",
                 m
@@ -358,7 +365,24 @@ impl SearchMode {
             SearchMode::FullText(_) => "fulltext",
             SearchMode::Vector(_) => "vector",
             SearchMode::Hybrid(_) => "hybrid",
+            SearchMode::Auto(_) => "auto",
             SearchMode::Default(_) => "fulltext",
+        }
+    }
+
+    pub fn from_str(s: &str, term: String) -> Self {
+        match s {
+            "fulltext" => SearchMode::FullText(FulltextMode { term }),
+            "vector" => SearchMode::Vector(VectorMode {
+                similarity: Similarity(0.8),
+                term,
+            }),
+            "hybrid" => SearchMode::Hybrid(HybridMode {
+                similarity: Similarity(0.8),
+                term,
+            }),
+            "auto" => SearchMode::Auto(AutoMode { term }),
+            _ => SearchMode::Default(FulltextMode { term }),
         }
     }
 }
@@ -531,6 +555,49 @@ pub struct DeleteHookParams {
 pub struct ExecuteActionPayload {
     pub name: String, // we're not using an enum here since users will be able to define their own actions
     pub context: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertSegmentParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub goal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteSegmentParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateSegmentParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub goal: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertTriggerParams {
+    pub name: String,
+    pub description: String,
+    pub response: String,
+    pub segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteTriggerParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateTriggerParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub response: String,
+    pub segment_id: Option<String>,
 }
 
 #[cfg(test)]

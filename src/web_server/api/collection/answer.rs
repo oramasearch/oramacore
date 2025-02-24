@@ -1,6 +1,7 @@
-use crate::ai::LlmType;
+use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
-    ApiKey, HybridMode, Interaction, Limit, SearchMode, SearchParams, SearchResult, Similarity,
+    ApiKey, HybridMode, Interaction, InteractionMessage, Limit, SearchMode, SearchParams,
+    SearchResult, Similarity,
 };
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
@@ -275,4 +276,83 @@ async fn answer_v0(
             .interval(Duration::from_secs(15))
             .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
     )
+}
+
+enum AudienceManagementResult {
+    Segment(Option<crate::collection_manager::sides::segments::Segment>),
+    ChosenSegment(Option<SegmentResponse>),
+    Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
+}
+
+async fn select_triggers_and_segments(
+    read_side: Arc<ReadSide>,
+    read_api_key: ApiKey,
+    collection_id: CollectionId,
+    conversation: Option<Vec<InteractionMessage>>,
+) -> impl Stream<Item = AudienceManagementResult> {
+    let ai_service = read_side.get_ai_service();
+
+    let all_segments = read_side
+        .get_all_segments_by_collection(read_api_key.clone(), collection_id.clone())
+        .await
+        .expect("Failed to get segments for the collection");
+
+    let all_triggers = read_side
+        .get_all_triggers_by_collection(read_api_key.clone(), collection_id.clone())
+        .await
+        .expect("Failed to get all triggers for the collection");
+
+    let (tx, rx) = mpsc::channel(100);
+
+    tokio::spawn(async move {
+        if all_segments.is_empty() {
+            tx.send(AudienceManagementResult::Segment(None))
+                .await
+                .unwrap();
+            return;
+        };
+
+        let chosen_segment = ai_service
+            .get_segment(all_segments, conversation.clone())
+            .await
+            .expect("Failed to get segment");
+
+        let full_segment = read_side
+            .get_segment(
+                read_api_key.clone(),
+                collection_id.clone(),
+                chosen_segment.id.clone(),
+            )
+            .await
+            .expect("Failed to get full segment");
+
+        tx.send(AudienceManagementResult::Segment(full_segment))
+            .await
+            .unwrap();
+
+        let all_segments_triggers = read_side
+            .get_all_triggers_by_segment(
+                read_api_key.clone(),
+                collection_id.clone(),
+                chosen_segment.id.clone(),
+            )
+            .await
+            .expect("Failed to get triggers for the segment");
+
+        let chosen_trigger = ai_service
+            .get_trigger(all_segments_triggers, conversation)
+            .await
+            .expect("Failed to get trigger");
+
+        let full_trigger = read_side
+            .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
+            .await
+            .expect("Failed to get full trigger");
+
+        tx.send(AudienceManagementResult::Trigger(full_trigger))
+            .await
+            .unwrap();
+    });
+
+    ReceiverStream::new(rx)
 }

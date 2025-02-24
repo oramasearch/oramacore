@@ -14,7 +14,10 @@ use std::{
 };
 
 use super::{
+    generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
+    segments::{Segment, SegmentInterface},
+    triggers::{self, get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -34,7 +37,9 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
+    collection_manager::dto::{
+        ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
+    },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
@@ -72,6 +77,9 @@ pub struct WriteSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
+    segments: SegmentInterface,
+    triggers: TriggerInterface,
+    kv: Arc<KV>,
     master_api_key: ApiKey,
 }
 
@@ -115,6 +123,7 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        println!("Loading collections {:#?}", collections_writer_config);
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
@@ -123,6 +132,16 @@ impl WriteSide {
         )
         .await
         .context("Cannot load collections")?;
+
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: Some(sender.clone()),
+        })
+        .context("Cannot load KV")?;
+
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
         let write_side = Self {
             document_count,
@@ -133,6 +152,9 @@ impl WriteSide {
             master_api_key,
             operation_counter: Default::default(),
             sender,
+            segments,
+            triggers,
+            kv,
         };
 
         let write_side = Arc::new(write_side);
@@ -149,6 +171,8 @@ impl WriteSide {
 
         self.collections.commit().await?;
         self.hook_runtime.commit().await?;
+
+        self.kv.commit().await?;
 
         let offset = self.sender.get_offset();
         // This load is not atomic with the commit.
@@ -389,10 +413,153 @@ impl WriteSide {
             .collect())
     }
 
+    async fn check_write_api_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(())
+    }
+
     fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
         if self.master_api_key != master_api_key {
             return Err(anyhow::anyhow!("Invalid master api key"));
         }
+
+        Ok(())
+    }
+
+    pub async fn insert_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .insert(collection_id.clone(), segment.clone())
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .delete(collection_id.clone(), segment_id.clone())
+            .await
+            .context("Cannot delete segment")
+    }
+
+    pub async fn update_segment(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment: Segment,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.segments
+            .delete(collection_id.clone(), segment.id.clone())
+            .await
+            .context("Cannot delete segment")?;
+        self.segments
+            .insert(collection_id, segment)
+            .await
+            .context("Cannot insert segment")?;
+
+        Ok(())
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger: InsertTriggerParams,
+        trigger_id: Option<String>,
+    ) -> Result<Trigger> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        let final_trigger_id = match trigger_id {
+            Some(id) => id,
+            None => {
+                let cuid = cuid2::create_id();
+                get_trigger_key(collection_id.clone(), cuid, trigger.segment_id.clone())
+            }
+        };
+
+        let trigger = Trigger {
+            id: final_trigger_id,
+            name: trigger.name,
+            description: trigger.description,
+            response: trigger.response,
+            segment_id: trigger.segment_id,
+        };
+
+        self.triggers
+            .insert(trigger.clone())
+            .await
+            .context("Cannot insert trigger")?;
+
+        Ok(trigger)
+    }
+
+    pub async fn delete_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.triggers
+            .delete(collection_id, trigger_id)
+            .await
+            .context("Cannot delete trigger")
+    }
+
+    pub async fn update_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger: Trigger,
+    ) -> Result<()> {
+        let updated_trigger = InsertTriggerParams {
+            name: trigger.name.clone(),
+            description: trigger.description.clone(),
+            response: trigger.response.clone(),
+            segment_id: trigger.segment_id.clone(),
+        };
+
+        self.insert_trigger(
+            write_api_key.clone(),
+            collection_id.clone(),
+            updated_trigger,
+            Some(trigger.id),
+        )
+        .await
+        .context("Cannot insert updated trigger")?;
 
         Ok(())
     }

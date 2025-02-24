@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
+use crate::collection_manager::dto::SearchMode;
+use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
+use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
@@ -29,6 +32,8 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
+use super::segments::Segment;
+use super::triggers::{Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -58,6 +63,10 @@ pub struct ReadSide {
     live_offset: RwLock<Offset>,
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
+
+    triggers: TriggerInterface,
+    segments: SegmentInterface,
+    kv: Arc<KV>,
 }
 
 impl ReadSide {
@@ -77,7 +86,7 @@ impl ReadSide {
         let data_dir = config.config.data_dir.clone();
 
         let collections_reader =
-            CollectionsReader::try_load(ai_service, nlp_service, config.config)
+            CollectionsReader::try_load(ai_service.clone(), nlp_service, config.config)
                 .await
                 .context("Cannot load collections")?;
         document_storage
@@ -96,6 +105,15 @@ impl ReadSide {
         };
         info!(offset=?last_offset, "Starting read side");
 
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: None,
+        })
+        .context("Cannot load KV")?;
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
+
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
@@ -104,6 +122,9 @@ impl ReadSide {
             data_dir,
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
+            segments,
+            triggers,
+            kv,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -125,6 +146,7 @@ impl ReadSide {
             .commit()
             .await
             .context("Cannot commit document storage")?;
+        self.kv.commit().await.context("Cannot commit KV")?;
 
         let offset: Offset = *(self.live_offset.read().await);
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
@@ -280,6 +302,9 @@ impl ReadSide {
                     collection.update(offset, collection_operation).await?;
                 }
             }
+            WriteOperation::KV(op) => {
+                self.kv.update(op).await.context("Cannot insert into KV")?;
+            }
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -315,6 +340,83 @@ impl ReadSide {
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
+    }
+
+    pub async fn get_segment(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Option<Segment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+        self.segments.get(collection_id, segment_id).await
+    }
+
+    pub async fn get_all_segments_by_collection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Segment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+        self.segments.list_by_collection(collection_id).await
+    }
+
+    pub async fn get_all_triggers_by_segment(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Vec<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+        self.triggers
+            .list_by_segment(collection_id, segment_id)
+            .await
+    }
+
+    pub async fn get_trigger(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Option<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+        self.triggers.get(trigger_id).await
+    }
+
+    pub async fn get_all_triggers_by_collection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.triggers.list_by_collection(collection_id).await
+    }
+
+    pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
+        let ai_service = self.get_ai_service();
+        let search_mode = ai_service.get_autoquery(query.clone()).await?;
+
+        Ok(SearchMode::from_str(&search_mode.mode, query))
+    }
+
+    async fn check_read_api_key(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_read_api_key(read_api_key)
     }
 }
 
