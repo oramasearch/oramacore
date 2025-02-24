@@ -152,7 +152,7 @@ impl AIService {
         Ok(response)
     }
 
-    pub async fn get_segments(
+    pub async fn get_segment(
         &self,
         segments: Vec<crate::collection_manager::sides::segments::Segment>,
         conversation: Option<Vec<InteractionMessage>>,

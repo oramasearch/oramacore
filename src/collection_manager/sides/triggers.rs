@@ -92,6 +92,21 @@ impl TriggerInterface {
         Ok(triggers_with_key)
     }
 
+    pub async fn list_by_segment(
+        &self,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Vec<Trigger>> {
+        let all_triggers = self.list_by_collection(collection_id).await?;
+
+        let triggers = all_triggers
+            .into_iter()
+            .filter(|trigger| trigger.segment_id == Some(segment_id.clone()))
+            .collect();
+
+        Ok(triggers)
+    }
+
     pub async fn perform_trigger_selection(
         &self,
         collection_id: CollectionId,

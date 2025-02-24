@@ -193,6 +193,7 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
           }
 
           In the example above, the trigger with the ID "clx4rwbwy0003zdv7ddsku14w" is the most relevant.
+          If you don't have enough information to determine the most relevant trigger, or if none of the triggers are relevant, return an empty JSON object.
 
           Reply with a valid JSON and nothing more.
         """

@@ -18,6 +18,17 @@ pub struct Segment {
     pub goal: Option<String>,
 }
 
+impl From<crate::ai::Segment> for Segment {
+    fn from(segment: crate::ai::Segment) -> Self {
+        Self {
+            id: segment.id,
+            name: segment.name,
+            description: segment.description,
+            goal: segment.goal,
+        }
+    }
+}
+
 pub struct SegmentInterface {
     kv: Arc<KV>,
     ai_service: Arc<AIService>,
@@ -87,7 +98,7 @@ impl SegmentInterface {
         conversation: Option<Vec<InteractionMessage>>,
     ) -> Result<crate::ai::SegmentResponse> {
         let segments = self.list_by_collection(collection_id).await?;
-        self.ai_service.get_segments(segments, conversation).await
+        self.ai_service.get_segment(segments, conversation).await
     }
 }
 

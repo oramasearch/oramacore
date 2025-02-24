@@ -342,6 +342,19 @@ impl ReadSide {
         self.segments.list_by_collection(collection_id).await
     }
 
+    pub async fn get_all_triggers_by_segment(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        segment_id: String,
+    ) -> Result<Vec<Trigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+        self.triggers
+            .list_by_segment(collection_id, segment_id)
+            .await
+    }
+
     pub async fn get_trigger(
         &self,
         read_api_key: ApiKey,
