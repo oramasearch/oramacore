@@ -17,7 +17,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
     segments::{Segment, SegmentInterface},
-    triggers::{self, get_trigger_key, Trigger, TriggerInterface},
+    triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
