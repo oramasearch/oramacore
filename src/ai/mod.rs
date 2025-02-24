@@ -156,7 +156,7 @@ impl AIService {
         &self,
         segments: Vec<crate::collection_manager::sides::segments::Segment>,
         conversation: Option<Vec<InteractionMessage>>,
-    ) -> Result<SegmentResponse> {
+    ) -> Result<Option<SegmentResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let grpc_segments = segments
@@ -179,6 +179,10 @@ impl AIService {
             .get_segment(request)
             .await
             .map(|response| response.into_inner())
+            .map(|segment| match segment.probability {
+                0.0 => None,
+                _ => Some(segment),
+            })
             .context("Cannot perform segment request")?;
 
         Ok(response)
@@ -190,6 +194,8 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<ChatResponse> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
@@ -197,12 +203,34 @@ impl AIService {
             model: llm_type.as_str_name(),
         });
 
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
             conversation: Some(conversation),
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response = conn
@@ -222,6 +250,8 @@ impl AIService {
         prompt: String,
         conversation: Option<Vec<InteractionMessage>>,
         context: Option<String>,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<ChatStream> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
@@ -229,12 +259,34 @@ impl AIService {
             model: llm_type.as_str_name(),
         });
 
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
+
         let conversation = self.get_grpc_conversation(conversation);
         let request = Request::new(ChatRequest {
             conversation: Some(conversation),
             prompt,
             model: llm_type as i32,
             context,
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         let response: Response<Streaming<ChatStreamResponse>> = conn
@@ -258,21 +310,42 @@ impl AIService {
         collection_id: String,
         conversation: Option<Vec<InteractionMessage>>,
         api_key: ApiKey,
+        segment: Option<crate::collection_manager::sides::segments::Segment>,
+        trigger: Option<crate::collection_manager::sides::triggers::Trigger>,
     ) -> Result<Streaming<PlannedAnswerResponse>> {
         let mut conn = self.pool.get().await.context("Cannot get connection")?;
 
         let conversation = self.get_grpc_conversation(conversation);
 
-        // let mut metadata = MetadataMap::new();
         let api_key_value =
             MetadataValue::from_str(api_key.0.expose_secret()).context("Invalid API key")?;
 
-        // metadata.insert("x-api-key", api_key_value.clone());
+        let full_segment = match segment {
+            Some(segment) => Some(Segment {
+                id: segment.id.clone(),
+                name: segment.name.clone(),
+                description: segment.description.clone(),
+                goal: segment.goal.clone(),
+            }),
+            None => None,
+        };
+
+        let full_trigger = match trigger {
+            Some(trigger) => Some(Trigger {
+                id: trigger.id.clone(),
+                name: trigger.name.clone(),
+                description: trigger.description.clone(),
+                response: trigger.response.clone(),
+            }),
+            None => None,
+        };
 
         let mut request = Request::new(PlannedAnswerRequest {
             input,
             collection_id,
             conversation: Some(conversation),
+            segment: full_segment,
+            trigger: full_trigger,
         });
 
         request.metadata_mut().append("x-api-key", api_key_value);

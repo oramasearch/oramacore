@@ -96,7 +96,7 @@ impl SegmentInterface {
         &self,
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
-    ) -> Result<crate::ai::SegmentResponse> {
+    ) -> Result<Option<crate::ai::SegmentResponse>> {
         let segments = self.list_by_collection(collection_id).await?;
         self.ai_service.get_segment(segments, conversation).await
     }
