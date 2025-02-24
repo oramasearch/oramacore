@@ -17,7 +17,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime},
     segments::{Segment, SegmentInterface},
-    triggers::{self, Trigger, TriggerInterface},
+    triggers::{self, get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -496,8 +496,16 @@ impl WriteSide {
         self.check_write_api_key(collection_id.clone(), write_api_key)
             .await?;
 
+        let final_trigger_id = match trigger_id {
+            Some(id) => id,
+            None => {
+                let cuid = cuid2::create_id();
+                get_trigger_key(collection_id.clone(), cuid, trigger.segment_id.clone())
+            }
+        };
+
         let trigger = Trigger {
-            id: trigger_id.unwrap_or(cuid2::create_id()),
+            id: final_trigger_id,
             name: trigger.name,
             description: trigger.description,
             response: trigger.response,
@@ -505,7 +513,7 @@ impl WriteSide {
         };
 
         self.triggers
-            .insert(collection_id.clone(), trigger.clone())
+            .insert(trigger.clone())
             .await
             .context("Cannot insert trigger")?;
 
@@ -533,7 +541,7 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger: Trigger,
     ) -> Result<()> {
-        let part_trigger = InsertTriggerParams {
+        let updated_trigger = InsertTriggerParams {
             name: trigger.name.clone(),
             description: trigger.description.clone(),
             response: trigger.response.clone(),
@@ -543,8 +551,8 @@ impl WriteSide {
         self.insert_trigger(
             write_api_key.clone(),
             collection_id.clone(),
-            part_trigger,
-            Some(trigger.id.clone()),
+            updated_trigger,
+            Some(trigger.id),
         )
         .await
         .context("Cannot insert updated trigger")?;

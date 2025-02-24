@@ -30,34 +30,16 @@ impl TriggerInterface {
         Self { kv, ai_service }
     }
 
-    pub async fn insert(&self, collection_id: CollectionId, trigger: Trigger) -> Result<String> {
-        let key = self.get_trigger_key(
-            collection_id,
-            trigger.id.clone(),
-            trigger.segment_id.clone(),
-        );
-
-        self.kv.insert(key.clone(), trigger).await?;
-        Ok(key)
+    pub async fn insert(&self, trigger: Trigger) -> Result<String> {
+        self.kv.insert(trigger.id.clone(), trigger.clone()).await?;
+        Ok(trigger.id)
     }
 
-    pub async fn get(
-        &self,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>> {
-        let trigger_id_parts = parse_trigger_id(trigger_id.clone());
-
-        let key = self.get_trigger_key(
-            collection_id,
-            trigger_id_parts.trigger_id,
-            trigger_id_parts.segment_id,
-        );
-
-        match self.kv.get(&key).await {
+    pub async fn get(&self, trigger_id: String) -> Result<Option<Trigger>> {
+        match self.kv.get(&trigger_id).await {
             None => Ok(None),
             Some(Err(e)) => Err(e),
-            Some(Ok(trigger)) => Ok(Some(Trigger { id: key, ..trigger })),
+            Some(Ok(trigger)) => Ok(Some(trigger)),
         }
     }
 
@@ -68,7 +50,7 @@ impl TriggerInterface {
     ) -> Result<Option<Trigger>> {
         let trigger_id_parts = parse_trigger_id(trigger_id.clone());
 
-        let key = self.get_trigger_key(
+        let key = get_trigger_key(
             collection_id,
             trigger_id_parts.trigger_id,
             trigger_id_parts.segment_id,
@@ -98,7 +80,7 @@ impl TriggerInterface {
         let triggers_with_key = triggers
             .into_iter()
             .map(|trigger| Trigger {
-                id: self.get_trigger_key(
+                id: get_trigger_key(
                     collection_id.clone(),
                     trigger.id.clone(),
                     trigger.segment_id.clone(),
@@ -118,20 +100,19 @@ impl TriggerInterface {
         let triggers = self.list_by_collection(collection_id).await?;
         self.ai_service.get_trigger(triggers, conversation).await
     }
+}
 
-    fn get_trigger_key(
-        &self,
-        collection_id: CollectionId,
-        trigger_id: String,
-        segment_id: Option<String>,
-    ) -> String {
-        match segment_id {
-            Some(segment_id) => format_key(
-                collection_id,
-                &format!("trigger:s_{}:t_{}", segment_id, trigger_id),
-            ),
-            None => format_key(collection_id, &format!("trigger:t_{}", trigger_id)),
-        }
+pub fn get_trigger_key(
+    collection_id: CollectionId,
+    trigger_id: String,
+    segment_id: Option<String>,
+) -> String {
+    match segment_id {
+        Some(segment_id) => format_key(
+            collection_id,
+            &format!("trigger:s_{}:t_{}", segment_id, trigger_id),
+        ),
+        None => format_key(collection_id, &format!("trigger:t_{}", trigger_id)),
     }
 }
 
@@ -182,8 +163,6 @@ mod tests {
         let trigger_interface =
             TriggerInterface::new(kv.clone(), Arc::new(AIService::new(ai_service_conf)));
 
-        let collection_id = CollectionId("test_collection".to_string());
-
         let trigger = Trigger {
             id: "test_trigger".to_string(),
             name: "Test Trigger".to_string(),
@@ -192,13 +171,10 @@ mod tests {
             segment_id: None,
         };
 
-        trigger_interface
-            .insert(collection_id.clone(), trigger.clone())
-            .await
-            .unwrap();
+        trigger_interface.insert(trigger.clone()).await.unwrap();
 
         let retrieved_trigger = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone())
+            .get(trigger.id.clone())
             .await
             .unwrap()
             .unwrap();
@@ -235,21 +211,15 @@ mod tests {
             segment_id: None,
         };
 
-        trigger_interface
-            .insert(collection_id.clone(), trigger.clone())
-            .await
-            .unwrap();
+        trigger_interface.insert(trigger.clone()).await.unwrap();
 
         let deleted_trigger = trigger_interface
-            .delete(collection_id.clone(), trigger.id.clone())
+            .delete(collection_id, trigger.id.clone())
             .await
             .unwrap()
             .unwrap();
 
-        let after_delete_result = trigger_interface
-            .get(collection_id.clone(), trigger.id.clone())
-            .await
-            .unwrap();
+        let after_delete_result = trigger_interface.get(trigger.id.clone()).await.unwrap();
 
         assert_eq!(trigger, deleted_trigger);
         assert!(after_delete_result.is_none());
@@ -293,12 +263,12 @@ mod tests {
         };
 
         trigger_interface
-            .insert(collection_id.clone(), trigger1.clone())
+            .insert(trigger1.clone())
             .await
             .context("Cannot insert trigger 1")
             .unwrap();
         trigger_interface
-            .insert(collection_id.clone(), trigger2.clone())
+            .insert(trigger2.clone())
             .await
             .context("Cannot insert trigger 2")
             .unwrap();

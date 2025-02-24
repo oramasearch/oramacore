@@ -16,7 +16,6 @@ use crate::{
     collection_manager::{
         dto::{ApiKey, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
         sides::{
-            segments::parse_segment_id_from_trigger,
             triggers::{parse_trigger_id, Trigger},
             ReadSide, WriteSide,
         },
@@ -33,14 +32,12 @@ struct ApiKeyQueryParams {
     api_key: ApiKey,
 }
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize, IntoParams, Debug)]
 struct GetTriggerQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
     #[serde(rename = "trigger_id")]
     trigger_id: String,
-    #[serde(rename = "segment_id")]
-    segment_id: Option<String>,
 }
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {

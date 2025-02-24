@@ -85,9 +85,9 @@ impl KV {
         key: &str,
     ) -> Option<Result<V>> {
         let read_ref = self.data.read().await;
+
         match read_ref.get(key.as_bytes().iter().cloned()) {
             Some(value) => {
-                println!("Value: {:?}", value);
                 let value = serde_json::from_str(value).context("Cannot deserialize value");
                 Some(value)
             }
