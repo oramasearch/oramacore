@@ -115,9 +115,10 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
+                            serde_json::to_string(&SseMessage::Message {
                                 message: json!({
-                                    "segment": s,
+                                    "action": "GET_SEGMENT",
+                                    "result": s,
                                 })
                                 .to_string(),
                             })
@@ -128,9 +129,10 @@ async fn planned_answer_v1(
                 AudienceManagementResult::ChosenSegment(s) => {
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
+                            serde_json::to_string(&SseMessage::Message {
                                 message: json!({
-                                    "segment_probability": s.unwrap_or(SegmentResponse {
+                                    "action": "GET_SEGMENT_PROBABILITY",
+                                    "result": s.unwrap_or(SegmentResponse {
                                         probability: 0.0,
                                         ..SegmentResponse::default()
                                     }).probability,
@@ -146,9 +148,10 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
+                            serde_json::to_string(&SseMessage::Message {
                                 message: json!({
-                                    "trigger": t,
+                                    "action": "SELECT_TRIGGER",
+                                    "result": t,
                                 })
                                 .to_string(),
                             })
