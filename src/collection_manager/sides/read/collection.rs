@@ -16,7 +16,7 @@ use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vect
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{join, sync::RwLock};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace};
 use uncommitted::UncommittedCollection;
 
 mod committed;
@@ -27,8 +27,7 @@ use crate::{
     ai::{AIService, OramaModel},
     collection_manager::{
         dto::{
-            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, Limit, NumberFilter,
-            Properties, SearchMode, SearchParams,
+            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchParams
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
@@ -46,11 +45,12 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::IndexesConfig;
-
 #[derive(Debug)]
 pub struct CollectionReader {
     id: CollectionId,
+    description: Option<String>,
+    default_language: LanguageDTO,
+
     read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
@@ -71,31 +71,119 @@ pub struct CollectionReader {
 }
 
 impl CollectionReader {
-    pub fn try_new(
+    pub fn empty(
         id: CollectionId,
+        description: Option<String>,
+        default_language: LanguageDTO,
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        _: IndexesConfig,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             id,
+            description,
+            default_language,
+
             read_api_key,
             ai_service,
             nlp_service,
             document_count: AtomicU64::new(0),
-            fields_per_model: Default::default(),
-            text_parser_per_field: Default::default(),
             fields: Default::default(),
 
             uncommitted_collection: RwLock::new(UncommittedCollection::new()),
-            committed_collection: RwLock::new(CommittedCollection::new()),
+            committed_collection: RwLock::new(CommittedCollection::empty()),
+            uncommitted_deleted_documents: Default::default(),
+
+            fields_per_model: Default::default(),
+
+            text_parser_per_field: Default::default(),
+
+            offset_storage: OffsetStorage::new(),
+        }
+    }
+
+    pub fn try_load(
+        ai_service: Arc<AIService>,
+        nlp_service: Arc<NLPService>,
+        data_dir: PathBuf,
+    ) -> Result<Self> {
+        info!("Loading collection from {:?}", data_dir);
+
+        let collection_info_path = data_dir.join("info.info");
+        let current_offset: Offset = BufferedFile::open(collection_info_path.clone())
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+            .context("Cannot read previous info")?;
+
+        info!("Current offset: {:?}", current_offset);
+
+        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
+        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
+            .context("Cannot open previous collection info")?
+            .read_json_data()
+            .context("Cannot read previous collection info")?;
+
+        let dump::CollectionInfo::V1(collection_info) = collection_info;
+        let read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
+
+        let fields: DashMap<String, (FieldId, TypedField)> = Default::default();
+        for (field_name, (field_id, field_type)) in collection_info.fields {
+            let typed_field: TypedField = match field_type {
+                dump::TypedField::Text(locale) => TypedField::Text(locale),
+                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
+                dump::TypedField::Number => TypedField::Number,
+                dump::TypedField::Bool => TypedField::Bool,
+            };
+            fields.insert(field_name, (field_id, typed_field));
+        }
+
+        let fields_per_model: DashMap<OramaModel, Vec<FieldId>> = Default::default();
+        for (orama_model, fields) in collection_info.used_models {
+            fields_per_model.insert(orama_model.0, fields);
+        }
+
+        let text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)> = fields
+            .iter()
+            .filter_map(|e| {
+                if let TypedField::Text(l) = e.1 {
+                    let locale = l;
+                    Some((e.0, (locale, nlp_service.get(locale))))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let committed_collection = CommittedCollection::try_load(
+            collection_info.number_field_infos,
+            collection_info.bool_field_infos,
+            collection_info.string_field_infos,
+            collection_info.vector_field_infos,
+        )
+            .context("Cannot load committed collection")?;
+        let committed_collection = RwLock::new(committed_collection);
+
+        Ok(Self {
+            id: collection_info.id,
+            description: collection_info.description,
+            default_language: collection_info.default_language,
+            read_api_key,
+            ai_service,
+            nlp_service,
+            document_count: AtomicU64::new(collection_info.document_count),
+            fields_per_model,
+            text_parser_per_field,
+            fields,
+
+            uncommitted_collection: RwLock::new(UncommittedCollection::new()),
+            committed_collection,
             uncommitted_deleted_documents: RwLock::new(HashSet::new()),
 
             offset_storage: OffsetStorage::new(),
         })
     }
 
+    #[inline]
     pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
         if api_key != self.read_api_key {
             return Err(anyhow!("Invalid read api key"));
@@ -122,70 +210,6 @@ impl CollectionReader {
             .get(field_name)
             .map(|v| v.clone())
             .ok_or_else(|| anyhow!("Field not found"))
-    }
-
-    pub async fn load(&mut self, data_dir: PathBuf) -> Result<()> {
-        info!("Loading collection from {:?}", data_dir);
-
-        let collection_info_path = data_dir.join("info.info");
-        let current_offset: Offset = match BufferedFile::open(collection_info_path.clone())
-            .context("Cannot open previous collection info")?
-            .read_json_data()
-        {
-            Ok(offset) => offset,
-            Err(e) => {
-                warn!("Cannot read previous collection info from {:?} due to {:?}. Skip loading collection", collection_info_path, e);
-                return Ok(());
-            }
-        };
-
-        info!("Current offset: {:?}", current_offset);
-
-        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
-        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
-            .context("Cannot open previous collection info")?
-            .read_json_data()
-            .context("Cannot read previous collection info")?;
-
-        let dump::CollectionInfo::V1(collection_info) = collection_info;
-        self.read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
-
-        for (field_name, (field_id, field_type)) in collection_info.fields {
-            let typed_field: TypedField = match field_type {
-                dump::TypedField::Text(locale) => TypedField::Text(locale),
-                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
-                dump::TypedField::Number => TypedField::Number,
-                dump::TypedField::Bool => TypedField::Bool,
-            };
-            self.fields.insert(field_name, (field_id, typed_field));
-        }
-
-        for (orama_model, fields) in collection_info.used_models {
-            self.fields_per_model.insert(orama_model.0, fields);
-        }
-
-        self.text_parser_per_field = self
-            .fields
-            .iter()
-            .filter_map(|e| {
-                if let TypedField::Text(l) = e.1 {
-                    let locale = l;
-                    Some((e.0, (locale, self.nlp_service.get(locale))))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut lock = self.committed_collection.write().await;
-        lock.load(
-            collection_info.number_field_infos,
-            collection_info.bool_field_infos,
-            collection_info.string_field_infos,
-            collection_info.vector_field_infos,
-        )?;
-
-        Ok(())
     }
 
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
@@ -223,9 +247,12 @@ impl CollectionReader {
         } else {
             debug!("No previous collection info found, creating a new one");
             CollectionInfoV1 {
+                id: self.id.clone(),
+                description: self.description.clone(),
+                document_count: 0,
+                default_language: self.default_language.clone(),
                 fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
-                id: self.id.clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
@@ -1199,6 +1226,14 @@ impl CollectionReader {
 
         Ok(Some(res_facets))
     }
+
+    pub async fn stats(&self) -> Result<CollectionStats> {
+        Ok(CollectionStats {
+            id: self.get_id(),
+            description: self.description.clone(),
+            default_language: self.default_language,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1210,7 +1245,7 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{dto::FieldId, sides::OramaModelSerializable},
+        collection_manager::{dto::{FieldId, LanguageDTO}, sides::OramaModelSerializable},
         nlp::locales::Locale,
         types::CollectionId,
     };
@@ -1227,6 +1262,9 @@ mod dump {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct CollectionInfoV1 {
         pub id: CollectionId,
+        pub description: Option<String>,
+        pub default_language: LanguageDTO,
+        pub document_count: u64,
         pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
@@ -1359,4 +1397,11 @@ pub enum TypedField {
     ArrayText(Locale),
     ArrayNumber,
     ArrayBoolean,
+}
+
+#[derive(Serialize)]
+pub struct CollectionStats {
+    id: CollectionId,
+    description: Option<String>,
+    default_language: LanguageDTO,
 }

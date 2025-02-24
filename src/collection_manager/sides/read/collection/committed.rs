@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bool::{BoolField, BoolFieldInfo};
 use number::{NumberField, NumberFieldInfo};
 use string::{StringField, StringFieldInfo};
@@ -34,40 +34,53 @@ pub struct CommittedCollection {
 }
 
 impl CommittedCollection {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
-            number_index: HashMap::new(),
-            bool_index: HashMap::new(),
-            string_index: HashMap::new(),
-            vector_index: HashMap::new(),
+            number_index: Default::default(),
+            bool_index: Default::default(),
+            string_index: Default::default(),
+            vector_index: Default::default(),
         }
     }
 
-    pub fn load(
-        &mut self,
+    pub fn try_load(
         number_field_infos: Vec<(FieldId, NumberFieldInfo)>,
         bool_field_infos: Vec<(FieldId, BoolFieldInfo)>,
         string_field_infos: Vec<(FieldId, StringFieldInfo)>,
         vector_field_infos: Vec<(FieldId, VectorFieldInfo)>,
-    ) -> Result<()> {
+    ) -> Result<Self> {
+        let mut number_index: HashMap<FieldId, NumberField> = Default::default();
+        let mut bool_index: HashMap<FieldId, BoolField> = Default::default();
+        let mut string_index: HashMap<FieldId, StringField> = Default::default();
+        let mut vector_index: HashMap<FieldId, VectorField> = Default::default();
+
         for (field_id, info) in number_field_infos {
-            let number_field = NumberField::load(info)?;
-            self.number_index.insert(field_id, number_field);
+            let number_field = NumberField::load(info)
+                .with_context(|| format!("Cannot load number {:?} field", field_id))?;
+            number_index.insert(field_id, number_field);
         }
         for (field_id, info) in bool_field_infos {
-            let bool_field = BoolField::load(info)?;
-            self.bool_index.insert(field_id, bool_field);
+            let bool_field = BoolField::load(info)
+                .with_context(|| format!("Cannot load bool {:?} field", field_id))?;
+            bool_index.insert(field_id, bool_field);
         }
         for (field_id, info) in string_field_infos {
-            let string_field = StringField::load(info)?;
-            self.string_index.insert(field_id, string_field);
+            let string_field = StringField::load(info)
+                .with_context(|| format!("Cannot load string {:?} field", field_id))?;
+            string_index.insert(field_id, string_field);
         }
         for (field_id, info) in vector_field_infos {
-            let vector_field = VectorField::load(info)?;
-            self.vector_index.insert(field_id, vector_field);
+            let vector_field = VectorField::load(info)
+                .with_context(|| format!("Cannot load vector {:?} field", field_id))?;
+            vector_index.insert(field_id, vector_field);
         }
 
-        Ok(())
+        Ok(Self {
+            number_index,
+            bool_index,
+            string_index,
+            vector_index,
+        })
     }
 
     pub fn global_info(&self, field_id: &FieldId) -> GlobalInfo {

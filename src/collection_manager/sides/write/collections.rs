@@ -121,11 +121,13 @@ impl CollectionsWriter {
 
         info!("Creating collection {:?}", id);
 
+        let default_language = language.unwrap_or(LanguageDTO::English);
+
         let collection = CollectionWriter::new(
             id.clone(),
-            description,
+            description.clone(),
             write_api_key,
-            language.unwrap_or(LanguageDTO::English),
+            default_language.clone(),
             self.embedding_sender.clone(),
         );
 
@@ -160,6 +162,8 @@ impl CollectionsWriter {
             .send(WriteOperation::CreateCollection {
                 id: id.clone(),
                 read_api_key,
+                description,
+                default_language, 
             })
             .await
             .context("Cannot send create collection")?;

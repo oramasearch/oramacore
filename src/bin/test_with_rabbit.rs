@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use oramacore::{
     collection_manager::{
-        dto::ApiKey,
+        dto::{ApiKey, LanguageDTO},
         sides::{
             channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset,
             OutputRabbitMQConfig, OutputSideChannelType, RabbitMQConsumerConfig,
@@ -60,6 +60,8 @@ async fn main2() -> Result<()> {
         .send(WriteOperation::CreateCollection {
             id: CollectionId("foo".to_string()),
             read_api_key: ApiKey(Secret::from("too".to_string())),
+            default_language: LanguageDTO::English,
+            description: None,
         })
         .await?;
 
