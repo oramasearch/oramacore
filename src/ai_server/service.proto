@@ -74,6 +74,8 @@ message PlannedAnswerRequest {
     string input = 1; // The user input
     string collection_id = 2; // ID of the collection
     Conversation conversation = 3; // All past messages
+    optional Segment segment = 4; // Optional segment
+    optional Trigger trigger = 5; // Optional trigger
 }
 
 message PlannedAnswerResponse {

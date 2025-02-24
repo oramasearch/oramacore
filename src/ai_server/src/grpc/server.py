@@ -163,6 +163,26 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
+            if request.HasField("segment"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Persona
+                    - **Name**: {request.segment.name}
+                    - **Description**: {request.segment.description}
+                    - **Goal**: {request.segment.goal}                        
+                """
+                )
+
+            if request.HasField("trigger"):
+                history[-1]["content"] += dedent(
+                    f"""
+                    ### Trigger
+                    - **Name**: {request.trigger.name}
+                    - **Description**: {request.trigger.description}
+                    - **Response**: {request.trigger.response}
+                """
+                )
+
             party_planner = PartyPlanner(self.config, self.models_manager, history)
 
             for message in party_planner.run(

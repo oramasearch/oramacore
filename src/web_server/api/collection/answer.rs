@@ -17,6 +17,7 @@ use axum::{
 };
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -54,10 +55,10 @@ enum SseMessage {
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .route("/v1/collections/{id}/answer", post(answer_v0))
+        .route("/v1/collections/{id}/answer", post(answer_v1))
         .route(
             "/v1/collections/{id}/planned_answer",
-            post(planned_answer_v0),
+            post(planned_answer_v1),
         )
         .with_state(read_side)
 }
@@ -68,13 +69,13 @@ struct AnswerQueryParams {
     api_key: ApiKey,
 }
 
-async fn planned_answer_v0(
+async fn planned_answer_v1(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId(id).0;
+    let collection_id = CollectionId(id.clone()).0;
     let read_side = read_side.clone();
 
     let query = interaction.query;
@@ -96,8 +97,77 @@ async fn planned_answer_v0(
             )))
             .await;
 
+        let mut trigger: Option<Trigger> = None;
+        let mut segment: Option<Segment> = None;
+
+        let mut segments_and_triggers_stream = select_triggers_and_segments(
+            read_side.clone(),
+            api_key.clone(),
+            CollectionId(id),
+            Some(conversation.clone()),
+        )
+        .await;
+
+        while let Some(result) = segments_and_triggers_stream.next().await {
+            match result {
+                AudienceManagementResult::Segment(s) => {
+                    segment = s.clone();
+
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Response {
+                                message: json!({
+                                    "segment": s,
+                                })
+                                .to_string(),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                }
+                AudienceManagementResult::ChosenSegment(s) => {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Response {
+                                message: json!({
+                                    "segment_probability": s.unwrap_or(SegmentResponse {
+                                        probability: 0.0,
+                                        ..SegmentResponse::default()
+                                    }).probability,
+                                })
+                                .to_string(),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                }
+                AudienceManagementResult::Trigger(t) => {
+                    trigger = t.clone();
+
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Response {
+                                message: json!({
+                                    "trigger": t,
+                                })
+                                .to_string(),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                }
+            }
+        }
+
         let mut stream = ai_service
-            .planned_answer_stream(query, collection_id, Some(conversation), api_key)
+            .planned_answer_stream(
+                query,
+                collection_id,
+                Some(conversation),
+                api_key,
+                segment,
+                trigger,
+            )
             .await
             .unwrap();
 
@@ -140,7 +210,7 @@ async fn planned_answer_v0(
 }
 
 // @todo: this function needs some cleaning. It works but it's not well structured.
-async fn answer_v0(
+async fn answer_v1(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
