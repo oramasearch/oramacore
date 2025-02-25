@@ -25,9 +25,10 @@ PARTY_PLANNER_SYSTEM_PROMPT = dedent(
 class Message:
     action: str | List[Dict[str, Any]]
     result: str
+    done: bool
 
     def to_json(self) -> str:
-        return json.dumps({"action": self.action, "result": self.result})
+        return json.dumps({"action": self.action, "result": self.result, "done": self.done})
 
 
 @dataclass
@@ -215,7 +216,7 @@ class PartyPlanner:
             give_reply_data = filter(lambda data: data["step"] == "GIVE_REPLY", DEFAULT_PARTY_PLANNER_ACTIONS)
             action_plan.append(next(give_reply_data))
 
-        yield Message(action="ACTION_PLAN", result=json.dumps(action_plan)).to_json()
+        yield Message(action="ACTION_PLAN", result=json.dumps(action_plan), done=True).to_json()
 
         for action in action_plan:
             self.history.append({"role": "user", "content": action["description"]})
@@ -225,7 +226,7 @@ class PartyPlanner:
             if step.is_orama_step:
                 # History is managed internally for Orama steps.
                 result = self._handle_orama_step(step=step, collection_id=collection_id, input=input, api_key=api_key)
-                yield Message(action=action["step"], result=result).to_json()
+                yield Message(action=action["step"], result=result, done=True).to_json()
 
             # Handle non-streaming and streaming steps.
             elif not step.should_stream:
@@ -236,7 +237,7 @@ class PartyPlanner:
                     history=self.history,
                 )
                 self.history.append({"role": "assistant", "content": result})
-                yield Message(action=action["step"], result=result).to_json()
+                yield Message(action=action["step"], result=result, done=True).to_json()
 
             # For streaming steps, yield each chunk.
             else:
@@ -247,7 +248,8 @@ class PartyPlanner:
                     description=step.description,
                     history=self.history,
                 ):
-                    yield Message(action=action["step"], result=chunk).to_json()
+                    yield Message(action=action["step"], result=chunk, done=False).to_json()
                     acc_result += chunk
 
+                yield Message(action=action["step"], result=acc_result, done=True).to_json()
                 self.history.append({"role": "assistant", "content": acc_result})

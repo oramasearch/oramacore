@@ -5,23 +5,24 @@ import warnings
 
 import service_pb2 as service__pb2
 
-GRPC_GENERATED_VERSION = '1.69.0'
+GRPC_GENERATED_VERSION = "1.69.0"
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
 try:
     from grpc._utilities import first_version_is_lower
+
     _version_not_supported = first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
 except ImportError:
     _version_not_supported = True
 
 if _version_not_supported:
     raise RuntimeError(
-        f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in service_pb2_grpc.py depends on'
-        + f' grpcio>={GRPC_GENERATED_VERSION}.'
-        + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
-        + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
+        f"The grpc package installed is at version {GRPC_VERSION},"
+        + f" but the generated code in service_pb2_grpc.py depends on"
+        + f" grpcio>={GRPC_GENERATED_VERSION}."
+        + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
+        + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
     )
 
 
@@ -35,45 +36,53 @@ class LLMServiceStub(object):
             channel: A grpc.Channel.
         """
         self.CheckHealth = channel.unary_unary(
-                '/orama_ai_service.LLMService/CheckHealth',
-                request_serializer=service__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=service__pb2.HealthCheckResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/CheckHealth",
+            request_serializer=service__pb2.HealthCheckRequest.SerializeToString,
+            response_deserializer=service__pb2.HealthCheckResponse.FromString,
+            _registered_method=True,
+        )
         self.GetEmbedding = channel.unary_unary(
-                '/orama_ai_service.LLMService/GetEmbedding',
-                request_serializer=service__pb2.EmbeddingRequest.SerializeToString,
-                response_deserializer=service__pb2.EmbeddingResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/GetEmbedding",
+            request_serializer=service__pb2.EmbeddingRequest.SerializeToString,
+            response_deserializer=service__pb2.EmbeddingResponse.FromString,
+            _registered_method=True,
+        )
         self.Chat = channel.unary_unary(
-                '/orama_ai_service.LLMService/Chat',
-                request_serializer=service__pb2.ChatRequest.SerializeToString,
-                response_deserializer=service__pb2.ChatResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/Chat",
+            request_serializer=service__pb2.ChatRequest.SerializeToString,
+            response_deserializer=service__pb2.ChatResponse.FromString,
+            _registered_method=True,
+        )
         self.ChatStream = channel.unary_stream(
-                '/orama_ai_service.LLMService/ChatStream',
-                request_serializer=service__pb2.ChatRequest.SerializeToString,
-                response_deserializer=service__pb2.ChatStreamResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/ChatStream",
+            request_serializer=service__pb2.ChatRequest.SerializeToString,
+            response_deserializer=service__pb2.ChatStreamResponse.FromString,
+            _registered_method=True,
+        )
         self.PlannedAnswer = channel.unary_stream(
-                '/orama_ai_service.LLMService/PlannedAnswer',
-                request_serializer=service__pb2.PlannedAnswerRequest.SerializeToString,
-                response_deserializer=service__pb2.PlannedAnswerResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/PlannedAnswer",
+            request_serializer=service__pb2.PlannedAnswerRequest.SerializeToString,
+            response_deserializer=service__pb2.PlannedAnswerResponse.FromString,
+            _registered_method=True,
+        )
         self.GetSegment = channel.unary_unary(
-                '/orama_ai_service.LLMService/GetSegment',
-                request_serializer=service__pb2.SegmentRequest.SerializeToString,
-                response_deserializer=service__pb2.SegmentResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/GetSegment",
+            request_serializer=service__pb2.SegmentRequest.SerializeToString,
+            response_deserializer=service__pb2.SegmentResponse.FromString,
+            _registered_method=True,
+        )
         self.GetTrigger = channel.unary_unary(
-                '/orama_ai_service.LLMService/GetTrigger',
-                request_serializer=service__pb2.TriggerRequest.SerializeToString,
-                response_deserializer=service__pb2.TriggerResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/GetTrigger",
+            request_serializer=service__pb2.TriggerRequest.SerializeToString,
+            response_deserializer=service__pb2.TriggerResponse.FromString,
+            _registered_method=True,
+        )
         self.AutoQuery = channel.unary_unary(
-                '/orama_ai_service.LLMService/AutoQuery',
-                request_serializer=service__pb2.AutoQueryRequest.SerializeToString,
-                response_deserializer=service__pb2.AutoQueryResponse.FromString,
-                _registered_method=True)
+            "/orama_ai_service.LLMService/AutoQuery",
+            request_serializer=service__pb2.AutoQueryRequest.SerializeToString,
+            response_deserializer=service__pb2.AutoQueryResponse.FromString,
+            _registered_method=True,
+        )
 
 
 class LLMServiceServicer(object):
@@ -82,120 +91,121 @@ class LLMServiceServicer(object):
     def CheckHealth(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetEmbedding(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def Chat(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def ChatStream(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def PlannedAnswer(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetSegment(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def GetTrigger(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
     def AutoQuery(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
 
 def add_LLMServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'CheckHealth': grpc.unary_unary_rpc_method_handler(
-                    servicer.CheckHealth,
-                    request_deserializer=service__pb2.HealthCheckRequest.FromString,
-                    response_serializer=service__pb2.HealthCheckResponse.SerializeToString,
-            ),
-            'GetEmbedding': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetEmbedding,
-                    request_deserializer=service__pb2.EmbeddingRequest.FromString,
-                    response_serializer=service__pb2.EmbeddingResponse.SerializeToString,
-            ),
-            'Chat': grpc.unary_unary_rpc_method_handler(
-                    servicer.Chat,
-                    request_deserializer=service__pb2.ChatRequest.FromString,
-                    response_serializer=service__pb2.ChatResponse.SerializeToString,
-            ),
-            'ChatStream': grpc.unary_stream_rpc_method_handler(
-                    servicer.ChatStream,
-                    request_deserializer=service__pb2.ChatRequest.FromString,
-                    response_serializer=service__pb2.ChatStreamResponse.SerializeToString,
-            ),
-            'PlannedAnswer': grpc.unary_stream_rpc_method_handler(
-                    servicer.PlannedAnswer,
-                    request_deserializer=service__pb2.PlannedAnswerRequest.FromString,
-                    response_serializer=service__pb2.PlannedAnswerResponse.SerializeToString,
-            ),
-            'GetSegment': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetSegment,
-                    request_deserializer=service__pb2.SegmentRequest.FromString,
-                    response_serializer=service__pb2.SegmentResponse.SerializeToString,
-            ),
-            'GetTrigger': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetTrigger,
-                    request_deserializer=service__pb2.TriggerRequest.FromString,
-                    response_serializer=service__pb2.TriggerResponse.SerializeToString,
-            ),
-            'AutoQuery': grpc.unary_unary_rpc_method_handler(
-                    servicer.AutoQuery,
-                    request_deserializer=service__pb2.AutoQueryRequest.FromString,
-                    response_serializer=service__pb2.AutoQueryResponse.SerializeToString,
-            ),
+        "CheckHealth": grpc.unary_unary_rpc_method_handler(
+            servicer.CheckHealth,
+            request_deserializer=service__pb2.HealthCheckRequest.FromString,
+            response_serializer=service__pb2.HealthCheckResponse.SerializeToString,
+        ),
+        "GetEmbedding": grpc.unary_unary_rpc_method_handler(
+            servicer.GetEmbedding,
+            request_deserializer=service__pb2.EmbeddingRequest.FromString,
+            response_serializer=service__pb2.EmbeddingResponse.SerializeToString,
+        ),
+        "Chat": grpc.unary_unary_rpc_method_handler(
+            servicer.Chat,
+            request_deserializer=service__pb2.ChatRequest.FromString,
+            response_serializer=service__pb2.ChatResponse.SerializeToString,
+        ),
+        "ChatStream": grpc.unary_stream_rpc_method_handler(
+            servicer.ChatStream,
+            request_deserializer=service__pb2.ChatRequest.FromString,
+            response_serializer=service__pb2.ChatStreamResponse.SerializeToString,
+        ),
+        "PlannedAnswer": grpc.unary_stream_rpc_method_handler(
+            servicer.PlannedAnswer,
+            request_deserializer=service__pb2.PlannedAnswerRequest.FromString,
+            response_serializer=service__pb2.PlannedAnswerResponse.SerializeToString,
+        ),
+        "GetSegment": grpc.unary_unary_rpc_method_handler(
+            servicer.GetSegment,
+            request_deserializer=service__pb2.SegmentRequest.FromString,
+            response_serializer=service__pb2.SegmentResponse.SerializeToString,
+        ),
+        "GetTrigger": grpc.unary_unary_rpc_method_handler(
+            servicer.GetTrigger,
+            request_deserializer=service__pb2.TriggerRequest.FromString,
+            response_serializer=service__pb2.TriggerResponse.SerializeToString,
+        ),
+        "AutoQuery": grpc.unary_unary_rpc_method_handler(
+            servicer.AutoQuery,
+            request_deserializer=service__pb2.AutoQueryRequest.FromString,
+            response_serializer=service__pb2.AutoQueryResponse.SerializeToString,
+        ),
     }
-    generic_handler = grpc.method_handlers_generic_handler(
-            'orama_ai_service.LLMService', rpc_method_handlers)
+    generic_handler = grpc.method_handlers_generic_handler("orama_ai_service.LLMService", rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('orama_ai_service.LLMService', rpc_method_handlers)
+    server.add_registered_method_handlers("orama_ai_service.LLMService", rpc_method_handlers)
 
 
- # This class is part of an EXPERIMENTAL API.
+# This class is part of an EXPERIMENTAL API.
 class LLMService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def CheckHealth(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def CheckHealth(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/CheckHealth',
+            "/orama_ai_service.LLMService/CheckHealth",
             service__pb2.HealthCheckRequest.SerializeToString,
             service__pb2.HealthCheckResponse.FromString,
             options,
@@ -206,23 +216,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def GetEmbedding(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def GetEmbedding(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/GetEmbedding',
+            "/orama_ai_service.LLMService/GetEmbedding",
             service__pb2.EmbeddingRequest.SerializeToString,
             service__pb2.EmbeddingResponse.FromString,
             options,
@@ -233,23 +246,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def Chat(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def Chat(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/Chat',
+            "/orama_ai_service.LLMService/Chat",
             service__pb2.ChatRequest.SerializeToString,
             service__pb2.ChatResponse.FromString,
             options,
@@ -260,23 +276,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def ChatStream(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def ChatStream(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/orama_ai_service.LLMService/ChatStream',
+            "/orama_ai_service.LLMService/ChatStream",
             service__pb2.ChatRequest.SerializeToString,
             service__pb2.ChatStreamResponse.FromString,
             options,
@@ -287,23 +306,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def PlannedAnswer(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def PlannedAnswer(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/orama_ai_service.LLMService/PlannedAnswer',
+            "/orama_ai_service.LLMService/PlannedAnswer",
             service__pb2.PlannedAnswerRequest.SerializeToString,
             service__pb2.PlannedAnswerResponse.FromString,
             options,
@@ -314,23 +336,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def GetSegment(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def GetSegment(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/GetSegment',
+            "/orama_ai_service.LLMService/GetSegment",
             service__pb2.SegmentRequest.SerializeToString,
             service__pb2.SegmentResponse.FromString,
             options,
@@ -341,23 +366,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def GetTrigger(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def GetTrigger(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/GetTrigger',
+            "/orama_ai_service.LLMService/GetTrigger",
             service__pb2.TriggerRequest.SerializeToString,
             service__pb2.TriggerResponse.FromString,
             options,
@@ -368,23 +396,26 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
 
     @staticmethod
-    def AutoQuery(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
+    def AutoQuery(
+        request,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/orama_ai_service.LLMService/AutoQuery',
+            "/orama_ai_service.LLMService/AutoQuery",
             service__pb2.AutoQueryRequest.SerializeToString,
             service__pb2.AutoQueryResponse.FromString,
             options,
@@ -395,4 +426,5 @@ class LLMService(object):
             wait_for_ready,
             timeout,
             metadata,
-            _registered_method=True)
+            _registered_method=True,
+        )
