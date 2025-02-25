@@ -29,9 +29,9 @@ class ModelsManager:
         self._model_refs: Dict[str, str] = {}
         self._lock = threading.Lock()
 
-        for config_name, config in self.model_configs.items():
-            if config is not None:
-                self._model_refs[config_name] = config.id
+        for config_name, model_config in self.model_configs.items():
+            if model_config is not None:
+                self._model_refs[config_name] = model_config.id
 
         unique_models = self._get_unique_model_ids()
         logger.info(f"Unique models to load: {unique_models}")

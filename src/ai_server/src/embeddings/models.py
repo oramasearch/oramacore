@@ -17,7 +17,7 @@ class EmbeddingsModels:
         self.selected_models = selected_models
         self.selected_model_names = [item.name for item in selected_models]
 
-        logger.info(f"Creating cache directory: {config.models_cache_dir}")
+        logger.info(f"Creating cache directory: {self.config.models_cache_dir}")
         os.makedirs(config.models_cache_dir, exist_ok=True)
 
         logger.info("Setting FastEmbed cache directory...")

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
 
-BASE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+BASE_MODEL = "microsoft/Phi-3.5-mini-instruct"
 
 DEFAULT_GENERAL_MODEL = BASE_MODEL
 DEFAULT_VISION_MODEL = BASE_MODEL

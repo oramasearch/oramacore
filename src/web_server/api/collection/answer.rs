@@ -82,6 +82,12 @@ async fn planned_answer_v1(
     let conversation = interaction.messages;
     let api_key = query_params.api_key;
 
+    read_side
+        .clone()
+        .check_read_api_key(CollectionId(id.clone()), api_key.clone())
+        .await
+        .expect("Invalid API key");
+
     let (tx, rx) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(rx);
 
@@ -221,12 +227,13 @@ async fn answer_v1(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId(id);
     let read_side = read_side.clone();
-
-    // This api key should be used to access the read side
-    // We should check it before doing anything
-    // For now, we just use it to access the read side
-    // TODO: implement the check as soon as possible
     let read_api_key = query.api_key;
+
+    read_side
+        .clone()
+        .check_read_api_key(collection_id.clone(), read_api_key.clone())
+        .await
+        .expect("Invalid API key");
 
     let query = interaction.query;
     let conversation = interaction.messages;

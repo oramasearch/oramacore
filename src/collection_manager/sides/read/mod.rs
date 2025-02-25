@@ -55,7 +55,7 @@ pub struct IndexesConfig {
 }
 
 pub struct ReadSide {
-    collections: CollectionsReader,
+    pub collections: CollectionsReader,
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
@@ -405,7 +405,7 @@ impl ReadSide {
         Ok(SearchMode::from_str(&search_mode.mode, query))
     }
 
-    async fn check_read_api_key(
+    pub async fn check_read_api_key(
         &self,
         collection_id: CollectionId,
         read_api_key: ApiKey,
