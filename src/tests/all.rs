@@ -13,7 +13,7 @@ use tracing::info;
 use crate::{
     build_orama,
     collection_manager::{
-        dto::ApiKey,
+        dto::{ApiKey, LanguageDTO, ReindexConfig},
         sides::{hooks::HookName, ReadSide, WriteSide},
     },
     tests::utils::{create_grpc_server, create_oramacore_config},
@@ -2029,6 +2029,69 @@ async fn test_stats() -> Result<()> {
     assert_eq!(stats_after.document_count, 1);
     // id, title, ___orama_auto_embedding
     assert_eq!(stats_after.fields_stats.len(), 3);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reindex() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title": "avvocata",
+        })],
+    )
+    .await?;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "avvocato",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 0);
+
+    write_side
+        .reindex(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            ReindexConfig {
+                description: None,
+                embeddings: None,
+                language: Some(LanguageDTO::Italian),
+            },
+        )
+        .await
+        .unwrap();
+
+    sleep(Duration::from_millis(300)).await;
+
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "avvocato",
+            })
+            .try_into()?,
+        )
+        .await?;
+    // We changed the language to Italian, so the search should return the document
+    // because the "avvocata" shares the same root of "avvocato"
+    assert_eq!(output.count, 1);
 
     Ok(())
 }

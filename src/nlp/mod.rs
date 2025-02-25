@@ -209,4 +209,23 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_lang_it() {
+        let parser = TextParser::from_locale(Locale::IT);
+
+        let t = "avvocato";
+        let output = parser.tokenize_and_stem(t);
+        assert_eq!(
+            output,
+            vec![("avvocato".to_string(), vec!["avvoc".to_string()])]
+        );
+
+        let t = "avvocata";
+        let output = parser.tokenize_and_stem(t);
+        assert_eq!(
+            output,
+            vec![("avvocata".to_string(), vec!["avvoc".to_string()])]
+        );
+    }
 }

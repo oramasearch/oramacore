@@ -32,6 +32,10 @@ impl DocIdStorage {
         }
     }
 
+    pub fn get_document_ids(&self) -> impl Iterator<Item = DocumentId> + '_ {
+        self.document_id.values().copied()
+    }
+
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {
         create_if_not_exists(&data_dir)
             .context("Cannot create the base directory for the doc id storage")?;

@@ -1,11 +1,14 @@
+use futures::Stream;
 use serde::{de::Unexpected, Deserialize, Serialize};
-use std::
-    path::PathBuf;
+use std::path::PathBuf;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
+use tracing::error;
 
 use crate::{
-    file_utils::{create_if_not_exists, create_or_overwrite},
+    file_utils::{create_if_not_exists, create_or_overwrite, read_file},
     types::{Document, DocumentId, RawJSONDocument},
 };
 
@@ -15,12 +18,9 @@ pub struct DocumentStorage {
 
 impl DocumentStorage {
     pub fn try_new(data_dir: PathBuf) -> Result<Self> {
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory")?;
+        create_if_not_exists(&data_dir).context("Cannot create data directory")?;
 
-        Ok(Self {
-            data_dir,
-        })
+        Ok(Self { data_dir })
     }
 
     pub async fn insert(&self, id: DocumentId, document: Document) -> Result<()> {
@@ -31,6 +31,40 @@ impl DocumentStorage {
             .await
             .context("Cannot write document data")?;
         Ok(())
+    }
+
+    pub async fn remove(&self, id: DocumentId) -> Result<()> {
+        let doc_path = self.data_dir.join(id.0.to_string());
+        tokio::fs::remove_file(doc_path)
+            .await
+            .context("Cannot remove document data")?;
+        Ok(())
+    }
+
+    pub async fn stream_documents(
+        &self,
+        ids: Vec<DocumentId>,
+    ) -> impl Stream<Item = (DocumentId, RawJSONDocument)> {
+        let (tx, rx) = mpsc::channel(100);
+
+        let data_dir = self.data_dir.clone();
+        tokio::spawn(async move {
+            for id in ids {
+                let doc_path = data_dir.join(id.0.to_string());
+                let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!("Cannot read document data: {:?}", e);
+                        continue;
+                    }
+                };
+                if let Err(_) = tx.send((id, data.0)).await {
+                    break;
+                }
+            }
+        });
+
+        ReceiverStream::new(rx)
     }
 }
 
@@ -97,5 +131,64 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
         }
 
         deserializer.deserialize_tuple(2, SerializableNumberVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use tokio_stream::StreamExt;
+
+    use crate::tests::utils::generate_new_path;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_save_and_stream() {
+        let document_storage = DocumentStorage::try_new(generate_new_path()).unwrap();
+
+        document_storage
+            .insert(
+                DocumentId(0),
+                json!({
+                    "id": "0",
+                })
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        document_storage
+            .insert(
+                DocumentId(1),
+                json!({
+                    "id": "1",
+                })
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        document_storage
+            .insert(
+                DocumentId(2),
+                json!({
+                    "id": "2",
+                })
+                .try_into()
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let stream = document_storage
+            .stream_documents(vec![DocumentId(0), DocumentId(2)])
+            .await;
+
+        let docs: Vec<_> = stream.collect().await;
+
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].0, DocumentId(0));
+        assert_eq!(docs[1].0, DocumentId(2));
     }
 }

@@ -61,7 +61,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct CollectionReader {
-    id: CollectionId,
+    pub(super) id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
 
@@ -1068,10 +1068,12 @@ impl CollectionReader {
                 None => return Err(anyhow!("No text parser for this field")),
                 Some(text_parser) => (text_parser.0, text_parser.1.clone()),
             };
-
-            let tokens = tokens_cache
-                .entry(locale)
-                .or_insert_with(|| text_parser.tokenize(term));
+            let tokens = tokens_cache.entry(locale).or_insert_with(|| {
+                let a = text_parser.tokenize_and_stem(term);
+                a.into_iter()
+                    .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
+                    .collect()
+            });
 
             let committed_global_info = committed_lock.global_info(&field_id);
             let uncommitted_global_info = uncommitted_lock.global_info(&field_id);

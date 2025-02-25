@@ -305,6 +305,14 @@ impl ReadSide {
             WriteOperation::KV(op) => {
                 self.kv.update(op).await.context("Cannot insert into KV")?;
             }
+            WriteOperation::SubstituteCollection {
+                subject_collection_id,
+                target_collection_id,
+            } => {
+                self.collections
+                    .substitute_collection(offset, target_collection_id, subject_collection_id)
+                    .await?;
+            }
         }
 
         let mut lock = self.operation_counter.write().await;
@@ -493,6 +501,11 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
                     tracing::error!(?e, "Cannot update read side");
                 }
             }
+
+            if !operation_receiver.should_reconnect() {
+                break;
+            }
+
             warn!("Operation receiver is closed. Reconnecting...");
 
             let arc = Arc::new(RwLock::new(&mut operation_receiver));

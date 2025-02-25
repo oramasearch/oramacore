@@ -94,6 +94,10 @@ impl RabbitOperationSender {
             WriteOperation::Collection(coll_id, _) => Some(coll_id.clone()),
             WriteOperation::CreateCollection { id, .. } => Some(id.clone()),
             WriteOperation::KV(_) => None,
+            WriteOperation::SubstituteCollection {
+                target_collection_id,
+                ..
+            } => Some(target_collection_id.clone()),
         };
 
         let op_type_id = operation.get_type_id();

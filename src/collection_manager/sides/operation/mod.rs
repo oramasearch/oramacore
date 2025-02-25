@@ -77,6 +77,10 @@ pub enum OperationReceiver {
 }
 
 impl OperationReceiver {
+    pub fn should_reconnect(&self) -> bool {
+        matches!(self, Self::RabbitMQ(_))
+    }
+
     pub async fn recv(&mut self) -> Option<Result<(Offset, WriteOperation)>> {
         match self {
             Self::InMemory { receiver } => {

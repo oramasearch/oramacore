@@ -175,6 +175,37 @@ impl CollectionsReader {
 
         Ok(())
     }
+
+    pub async fn substitute_collection(
+        &self,
+        _offset: Offset,
+        target_collection_id: CollectionId,
+        source_collection_id: CollectionId,
+    ) -> Result<()> {
+        info!(
+            target_collection_id=?target_collection_id,
+            source_collection_id=?source_collection_id,
+            "ReadSide: Substitute collection {:?} with {:?}", target_collection_id, source_collection_id
+        );
+
+        let mut guard = self.collections.write().await;
+        let mut source = guard
+            .remove(&source_collection_id)
+            .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
+        source.id = target_collection_id.clone();
+        // ignore return value
+        let _ = guard.remove(&target_collection_id);
+        guard.insert(target_collection_id.clone(), source);
+        drop(guard);
+
+        info!(
+            target_collection_id=?target_collection_id,
+            source_collection_id=?source_collection_id,
+            "Collection substituted {:?} with {:?}", target_collection_id, source_collection_id
+        );
+
+        Ok(())
+    }
 }
 
 pub struct CollectionReadLock<'guard> {

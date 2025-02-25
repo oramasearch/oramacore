@@ -19,8 +19,8 @@ use crate::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
             hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, DocumentFieldsWrapper, DocumentToInsert,
-            EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
+            CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
+            OperationSender, TypedFieldWrapper, WriteOperation,
         },
     },
     file_utils::BufferedFile,
@@ -100,6 +100,14 @@ impl CollectionWriter {
         }
     }
 
+    pub async fn get_document_ids(&self) -> Vec<DocumentId> {
+        self.doc_id_storage
+            .read()
+            .await
+            .get_document_ids()
+            .collect()
+    }
+
     pub async fn set_embedding_hook(&self, hook_name: HookName) -> Result<()> {
         let field_id_by_name = self.field_id_by_name.read().await;
         let field_id = field_id_by_name
@@ -145,20 +153,6 @@ impl CollectionWriter {
             return Ok(());
         }
         drop(doc_id_storage);
-
-        // We send the document to index *before* indexing it, so we can
-        // guarantee that the document is there during the search.
-        // Otherwise, we could find the document without having it yet.
-        sender
-            .send(WriteOperation::Collection(
-                self.id.clone(),
-                CollectionWriteOperation::InsertDocument {
-                    doc_id,
-                    doc: DocumentToInsert(doc.into_raw()?),
-                },
-            ))
-            .await
-            .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
 
         let fields_to_index = self
             .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
@@ -546,7 +540,6 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
     ) -> Result<()> {
-        println!("Loading collection from {:?}", path);
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
