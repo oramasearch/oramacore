@@ -2195,6 +2195,8 @@ async fn test_trigger() -> Result<()> {
         .await?;
     let trigger_id = trigger.id;
 
+    sleep(Duration::from_millis(100)).await;
+
     let trigger = write_side
         .get_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
