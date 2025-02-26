@@ -25,12 +25,15 @@ use tracing::{info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
+const LIMIT: usize = 100;
+
 #[derive(Debug)]
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
+    last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
 }
 impl CollectionsReader {
     pub async fn try_load(
@@ -59,6 +62,7 @@ impl CollectionsReader {
 
                     collections: Default::default(),
                     indexes_config,
+                    last_reindexed_collections: Default::default(),
                 });
             }
         };
@@ -85,6 +89,12 @@ impl CollectionsReader {
             nlp_service,
             collections: RwLock::new(collections),
             indexes_config,
+            last_reindexed_collections: RwLock::new(
+                collections_info
+                    .last_reindexed_collections
+                    .into_iter()
+                    .collect(),
+            ),
         })
     }
 
@@ -99,8 +109,9 @@ impl CollectionsReader {
     where
         's: 'coll,
     {
-        let r = self.collections.read().await;
-        CollectionReadLock::try_new(r, id)
+        let collections_lock = self.collections.read().await;
+        let last_reindexed_collections_lock = self.last_reindexed_collections.read().await;
+        CollectionReadLock::try_new(collections_lock, last_reindexed_collections_lock, id)
     }
 
     #[instrument(skip(self))]
@@ -125,15 +136,18 @@ impl CollectionsReader {
                 side: "read",
             });
             collection
-                .commit(collection_dir)
+                .commit(collection_dir, false)
                 .await
                 .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
             drop(m);
         }
 
+        let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
             collection_ids: collection_ids.into_iter().collect(),
+            last_reindexed_collections: guard.iter().cloned().collect(),
         });
+        drop(guard);
 
         create_or_overwrite(data_dir.join("info.json"), &collections_info)
             .await
@@ -175,6 +189,71 @@ impl CollectionsReader {
 
         Ok(())
     }
+
+    pub async fn substitute_collection(
+        &self,
+        _offset: Offset,
+        target_collection_id: CollectionId,
+        source_collection_id: CollectionId,
+    ) -> Result<()> {
+        info!(
+            target_collection_id=?target_collection_id,
+            source_collection_id=?source_collection_id,
+            "ReadSide: Substitute collection {:?} with {:?}", target_collection_id, source_collection_id
+        );
+
+        let mut guard = self.collections.write().await;
+        let mut source = guard
+            .remove(&source_collection_id)
+            .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
+        source.id = target_collection_id.clone();
+        // ignore return value
+        let _ = guard.remove(&target_collection_id);
+        guard.insert(target_collection_id.clone(), source);
+        drop(guard);
+
+        let mut guard = self.last_reindexed_collections.write().await;
+        guard.push((source_collection_id.clone(), target_collection_id.clone()));
+        if guard.len() > LIMIT {
+            guard.remove(0);
+        }
+        drop(guard);
+
+        let data_dir = &self.indexes_config.data_dir;
+        let collections_dir = data_dir.join("collections");
+
+        let collection_dir = collections_dir.join(&target_collection_id.0);
+        create_if_not_exists_async(&collection_dir)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot create directory for collection '{}'",
+                    target_collection_id.0
+                )
+            })?;
+
+        let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
+            collection: target_collection_id.0.clone(),
+            side: "read",
+        });
+        let collection = self
+            .get_collection(target_collection_id.clone())
+            .await
+            .context("Cannot get collection")?;
+        collection
+            .commit(collection_dir, true)
+            .await
+            .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
+        drop(m);
+
+        info!(
+            target_collection_id=?target_collection_id,
+            source_collection_id=?source_collection_id,
+            "Collection substituted {:?} with {:?}", target_collection_id, source_collection_id
+        );
+
+        Ok(())
+    }
 }
 
 pub struct CollectionReadLock<'guard> {
@@ -184,16 +263,41 @@ pub struct CollectionReadLock<'guard> {
 
 impl<'guard> CollectionReadLock<'guard> {
     pub fn try_new(
-        lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
+        collections_lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
+        last_reindexed_collections_lock: RwLockReadGuard<'guard, Vec<(CollectionId, CollectionId)>>,
         id: CollectionId,
     ) -> Option<Self> {
-        let guard = lock.get(&id);
+        let guard = collections_lock.get(&id);
         match &guard {
             Some(_) => {
                 let _ = guard;
-                Some(CollectionReadLock { lock, id })
+                Some(CollectionReadLock {
+                    lock: collections_lock,
+                    id,
+                })
             }
-            None => None,
+            None => {
+                let target_collection_id = last_reindexed_collections_lock
+                    .iter()
+                    .find(|(source, _)| source == &id)
+                    .map(|(_, target)| target);
+                match target_collection_id {
+                    None => None,
+                    Some(id) => {
+                        let guard = collections_lock.get(id);
+                        match &guard {
+                            Some(_) => {
+                                let _ = guard;
+                                Some(CollectionReadLock {
+                                    lock: collections_lock,
+                                    id: id.clone(),
+                                })
+                            }
+                            None => None,
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -217,4 +321,184 @@ enum CollectionsInfo {
 #[derive(Deserialize, Serialize)]
 struct CollectionsInfoV1 {
     collection_ids: HashSet<CollectionId>,
+    last_reindexed_collections: Vec<(CollectionId, CollectionId)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use http::uri::Scheme;
+    use redact::Secret;
+
+    use crate::{ai::AIServiceConfig, tests::utils::generate_new_path};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_last_reindex_collections_simple() {
+        let ai_service = Arc::new(AIService::new(AIServiceConfig {
+            api_key: None,
+            host: "127.0.0.0".parse().unwrap(),
+            scheme: Scheme::HTTP,
+            port: 80,
+            max_connections: 0,
+        }));
+        let nlp_service = Arc::new(NLPService::new());
+        let collections = CollectionsReader::try_load(
+            ai_service,
+            nlp_service,
+            IndexesConfig {
+                commit_interval: Duration::from_secs(1_000),
+                data_dir: generate_new_path(),
+                insert_batch_commit_size: 100_000,
+            },
+        )
+        .await
+        .unwrap();
+
+        let target_collection_id = CollectionId("target".to_string());
+        let tmp_collection_id = CollectionId("tmp".to_string());
+
+        // Target collection
+        collections
+            .create_collection(
+                Offset(1),
+                target_collection_id.clone(),
+                None,
+                LanguageDTO::English,
+                ApiKey(Secret::from("read".to_string())),
+            )
+            .await
+            .unwrap();
+
+        // TMP collection
+        collections
+            .create_collection(
+                Offset(1),
+                tmp_collection_id.clone(),
+                None,
+                LanguageDTO::English,
+                ApiKey(Secret::from("read".to_string())),
+            )
+            .await
+            .unwrap();
+
+        // Substitute target collection with tmp collection
+        collections
+            .substitute_collection(
+                Offset(2),
+                target_collection_id.clone(),
+                tmp_collection_id.clone(),
+            )
+            .await
+            .unwrap();
+
+        let collection = collections
+            .get_collection(target_collection_id.clone())
+            .await
+            .unwrap();
+        let collection = &*collection;
+        assert_eq!(collection.get_id(), target_collection_id);
+
+        let collection = collections
+            .get_collection(tmp_collection_id.clone())
+            .await
+            .unwrap();
+        let collection = &*collection;
+        assert_eq!(collection.get_id(), target_collection_id);
+    }
+
+    #[tokio::test]
+    async fn test_last_reindex_collections_limit() {
+        let ai_service = Arc::new(AIService::new(AIServiceConfig {
+            api_key: None,
+            host: "127.0.0.0".parse().unwrap(),
+            scheme: Scheme::HTTP,
+            port: 80,
+            max_connections: 0,
+        }));
+        let nlp_service = Arc::new(NLPService::new());
+        let collections = CollectionsReader::try_load(
+            ai_service,
+            nlp_service,
+            IndexesConfig {
+                commit_interval: Duration::from_secs(1_000),
+                data_dir: generate_new_path(),
+                insert_batch_commit_size: 100_000,
+            },
+        )
+        .await
+        .unwrap();
+
+        let couples: Vec<_> = (0..(LIMIT + 1))
+            .map(|i| {
+                let target_collection_id = CollectionId(format!("target-{}", i));
+                let tmp_collection_id = CollectionId(format!("tmp-{}", i));
+                (target_collection_id, tmp_collection_id)
+            })
+            .collect();
+
+        for (target_collection_id, tmp_collection_id) in &couples {
+            // Target collection
+            collections
+                .create_collection(
+                    Offset(1),
+                    target_collection_id.clone(),
+                    None,
+                    LanguageDTO::English,
+                    ApiKey(Secret::from("read".to_string())),
+                )
+                .await
+                .unwrap();
+
+            // TMP collection
+            collections
+                .create_collection(
+                    Offset(1),
+                    tmp_collection_id.clone(),
+                    None,
+                    LanguageDTO::English,
+                    ApiKey(Secret::from("read".to_string())),
+                )
+                .await
+                .unwrap();
+
+            // Substitute target collection with tmp collection
+            collections
+                .substitute_collection(
+                    Offset(2),
+                    target_collection_id.clone(),
+                    tmp_collection_id.clone(),
+                )
+                .await
+                .unwrap();
+
+            let collection = collections
+                .get_collection(target_collection_id.clone())
+                .await
+                .unwrap();
+            let collection = &*collection;
+            assert_eq!(collection.get_id(), target_collection_id.clone());
+
+            let collection = collections
+                .get_collection(tmp_collection_id.clone())
+                .await
+                .unwrap();
+            let collection = &*collection;
+            assert_eq!(collection.get_id(), target_collection_id.clone());
+        }
+
+        // All collections are there
+        for (target, _) in &couples {
+            let collection = collections.get_collection(target.clone()).await;
+            assert!(collection.is_some());
+        }
+
+        let collection = collections.get_collection(couples[0].0.clone()).await;
+        assert!(collection.is_some());
+        // But the first one tmp collection is not there
+        let collection = collections.get_collection(couples[0].1.clone()).await;
+        assert!(collection.is_none());
+    }
 }

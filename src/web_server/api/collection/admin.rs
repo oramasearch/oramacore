@@ -14,7 +14,7 @@ use tracing::{error, info};
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments},
+        dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, ReindexConfig},
         sides::WriteSide,
     },
     types::{CollectionId, DocumentList},
@@ -27,6 +27,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(create_collection())
         .add(add_documents())
         .add(delete_documents())
+        .add(reindex())
         .with_state(write_side)
 }
 
@@ -204,5 +205,43 @@ async fn delete_documents(
     Ok((
         StatusCode::OK,
         Json(json!({ "message": "documents deleted" })),
+    ))
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{id}/reindex",
+    description = "Reindex documents of a collection"
+)]
+async fn reindex(
+    Path(id): Path<String>,
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+    Json(json): Json<ReindexConfig>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let collection_id = CollectionId(id);
+
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    info!("Reindex collection {:?}", collection_id);
+    match write_side.reindex(write_api_key, collection_id, json).await {
+        Ok(_) => {
+            info!("Done");
+        }
+        Err(e) => {
+            error!("Error reindexing documents to collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("collection not found {}", e) })),
+            ));
+        }
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "message": "collection re-indexed" })),
     ))
 }

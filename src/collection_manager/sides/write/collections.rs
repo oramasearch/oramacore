@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
+use dashmap::DashMap;
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -28,6 +29,7 @@ pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+    pub(super) collection_options: DashMap<CollectionId, CreateCollection>,
 }
 
 impl CollectionsWriter {
@@ -44,7 +46,7 @@ impl CollectionsWriter {
 
         let info_path = data_dir.join("info.json");
         info!("Loading collections from disk from {:?}", info_path);
-        let collection_ids = match BufferedFile::open(info_path)
+        let collection_info = match BufferedFile::open(info_path)
             .and_then(|file| file.read_json_data::<CollectionsInfo>())
         {
             std::result::Result::Ok(CollectionsInfo::V1(info)) => info,
@@ -54,6 +56,7 @@ impl CollectionsWriter {
                     data_dir
                 );
                 return Ok(CollectionsWriter {
+                    collection_options: Default::default(),
                     collections: Default::default(),
                     config,
                     embedding_sender,
@@ -61,7 +64,7 @@ impl CollectionsWriter {
             }
         };
 
-        for collection_id in collection_ids {
+        for collection_id in collection_info.collection_ids {
             let collection_dir = data_dir.join(collection_id.0.clone());
 
             // All those values are replaced inside `load` method
@@ -83,6 +86,7 @@ impl CollectionsWriter {
             collections: RwLock::new(collections),
             config,
             embedding_sender,
+            collection_options: collection_info.collection_options.into_iter().collect(),
         };
 
         Ok(writer)
@@ -91,12 +95,12 @@ impl CollectionsWriter {
     pub async fn get_collection<'s, 'coll>(
         &'s self,
         id: CollectionId,
-    ) -> Option<CollectionWriteLock<'coll>>
+    ) -> Option<CollectionReadLock<'coll>>
     where
         's: 'coll,
     {
         let r = self.collections.read().await;
-        CollectionWriteLock::try_new(r, id)
+        CollectionReadLock::try_new(r, id)
     }
 
     pub async fn create_collection(
@@ -112,7 +116,7 @@ impl CollectionsWriter {
             embeddings,
             write_api_key,
             read_api_key,
-        } = collection_option;
+        } = collection_option.clone();
 
         info!("Creating collection {:?}", id);
 
@@ -167,9 +171,25 @@ impl CollectionsWriter {
             .await
             .context("Cannot register fields")?;
 
-        collections.insert(id, collection);
+        collections.insert(id.clone(), collection);
         drop(collections);
 
+        self.collection_options.insert(id, collection_option);
+
+        Ok(())
+    }
+
+    pub async fn replace(
+        &self,
+        collection_id_tmp: CollectionId,
+        collection_id: CollectionId,
+    ) -> Result<()> {
+        let mut collections = self.collections.write().await;
+        let mut collection_tmp = collections
+            .remove(&collection_id_tmp)
+            .ok_or_else(|| anyhow!("Collection not found"))?;
+        collection_tmp.id = collection_id.clone();
+        collections.insert(collection_id, collection_tmp);
         Ok(())
     }
 
@@ -205,9 +225,14 @@ impl CollectionsWriter {
         info!("Committing info at {:?}", info_path);
         BufferedFile::create_or_overwrite(info_path)
             .context("Cannot create info.json")?
-            .write_json_data(&CollectionsInfo::V1(
-                collections.keys().cloned().collect::<Vec<_>>(),
-            ))
+            .write_json_data(&CollectionsInfo::V1(CollectionsInfoV1 {
+                collection_ids: collections.keys().cloned().collect::<Vec<_>>(),
+                collection_options: self
+                    .collection_options
+                    .iter()
+                    .map(|e| (e.key().clone(), e.value().clone()))
+                    .collect(),
+            }))
             .context("Cannot write info.json")?;
 
         // Now it is safe to drop the lock
@@ -218,12 +243,12 @@ impl CollectionsWriter {
     }
 }
 
-pub struct CollectionWriteLock<'guard> {
+pub struct CollectionReadLock<'guard> {
     lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
     id: CollectionId,
 }
 
-impl<'guard> CollectionWriteLock<'guard> {
+impl<'guard> CollectionReadLock<'guard> {
     pub fn try_new(
         lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
         id: CollectionId,
@@ -232,14 +257,14 @@ impl<'guard> CollectionWriteLock<'guard> {
         match &guard {
             Some(_) => {
                 let _ = guard;
-                Some(CollectionWriteLock { lock, id })
+                Some(CollectionReadLock { lock, id })
             }
             None => None,
         }
     }
 }
 
-impl Deref for CollectionWriteLock<'_> {
+impl Deref for CollectionReadLock<'_> {
     type Target = CollectionWriter;
 
     fn deref(&self) -> &Self::Target {
@@ -250,8 +275,14 @@ impl Deref for CollectionWriteLock<'_> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct CollectionsInfoV1 {
+    collection_ids: Vec<CollectionId>,
+    collection_options: HashMap<CollectionId, CreateCollection>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 enum CollectionsInfo {
-    V1(Vec<CollectionId>),
+    V1(CollectionsInfoV1),
 }
 
 #[cfg(test)]

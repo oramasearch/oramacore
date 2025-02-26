@@ -1,5 +1,6 @@
 mod collection;
 mod collections;
+mod document_storage;
 mod embedding;
 mod fields;
 
@@ -21,13 +22,16 @@ use super::{
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::{
     sync::RwLock,
     time::{Instant, MissedTickBehavior},
 };
+use tokio_stream::StreamExt;
 use tracing::{debug, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
@@ -37,13 +41,17 @@ pub use fields::*;
 
 use crate::{
     ai::AIService,
-    collection_manager::dto::{
-        ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
+    collection_manager::{
+        dto::{
+            ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
+            ReindexConfig,
+        },
+        sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
-    types::{CollectionId, DocumentId, DocumentList},
+    types::{CollectionId, Document, DocumentId, DocumentList},
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -77,6 +85,7 @@ pub struct WriteSide {
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
+    document_storage: DocumentStorage,
     segments: SegmentInterface,
     triggers: TriggerInterface,
     kv: Arc<KV>,
@@ -123,7 +132,6 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
-        println!("Loading collections {:#?}", collections_writer_config);
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
@@ -143,9 +151,13 @@ impl WriteSide {
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
+        let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
+            .context("Cannot create document storage")?;
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
+            document_storage,
             data_dir,
             hook_runtime,
             insert_batch_commit_size,
@@ -254,11 +266,56 @@ impl WriteSide {
             }
 
             let doc_id = DocumentId(doc_id);
+
+            self.document_storage
+                .insert(doc_id, doc.clone())
+                .await
+                .context("Cannot inser document into document storage")?;
+
+            // We send the document to index *before* indexing it, so we can
+            // guarantee that the document is there during the search.
+            // Otherwise, we could find the document without having it yet.
+            self.sender
+                .send(WriteOperation::Collection(
+                    collection_id.clone(),
+                    CollectionWriteOperation::InsertDocument {
+                        doc_id,
+                        doc: DocumentToInsert(doc.into_raw()?),
+                    },
+                ))
+                .await
+                .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
+
             info!(?doc_id, "Inserting document");
-            collection
+            match collection
                 .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
                 .await
-                .context("Cannot process document")?;
+                .context("Cannot process document")
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    // If the document cannot be processed, we should remove it from the document storage
+                    // and from the read side
+                    // NB: check if the error handling is correct
+
+                    self.document_storage
+                        .remove(doc_id)
+                        .await
+                        .context("Cannot remove document from document storage")?;
+
+                    self.sender
+                        .send(WriteOperation::Collection(
+                            collection_id.clone(),
+                            CollectionWriteOperation::DeleteDocuments {
+                                doc_ids: vec![doc_id],
+                            },
+                        ))
+                        .await
+                        .context("Cannot send delete document operation")?;
+
+                    return Err(e);
+                }
+            };
             info!("Document inserted");
 
             drop(metric);
@@ -354,6 +411,103 @@ impl WriteSide {
             None => return Ok(None),
         };
         Ok(Some(collection.as_dto().await))
+    }
+
+    pub async fn reindex(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        reindex_config: ReindexConfig,
+    ) -> Result<()> {
+        info!("Reindexing collection {:?}", collection_id);
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await
+            .context("Check write api key fails")?;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        let collection_id_tmp = cuid2::create_id();
+        let collection_id_tmp = CollectionId(collection_id_tmp);
+
+        let mut option = self
+            .collections
+            .collection_options
+            .get(&collection_id)
+            .ok_or_else(|| anyhow!("Collection options not found"))?
+            .clone();
+        option.language = reindex_config.language.or(option.language);
+        option.embeddings = reindex_config.embeddings.or(option.embeddings);
+        option.id = collection_id_tmp.clone();
+
+        let document_ids = collection.get_document_ids().await;
+        drop(collection);
+
+        self.collections
+            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .await?;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id_tmp.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        let mut stream = self.document_storage.stream_documents(document_ids).await;
+        while let Some((doc_id, doc)) = stream.next().await {
+            debug!(?doc_id, "Reindexing document");
+
+            let inner = doc.inner;
+            let inner: Map<String, Value> =
+                serde_json::from_str(inner.get()).context("Cannot deserialize document")?;
+            let doc = Document { inner };
+            match collection
+                .process_new_document(doc_id, doc, self.sender.clone(), self.hook_runtime.clone())
+                .await
+                .context("Cannot process document")
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    // If the document cannot be processed, we should remove it from the document storage
+                    // and from the read side
+                    // NB: check if the error handling is correct
+
+                    self.sender
+                        .send(WriteOperation::Collection(
+                            collection_id.clone(),
+                            CollectionWriteOperation::DeleteDocuments {
+                                doc_ids: vec![doc_id],
+                            },
+                        ))
+                        .await
+                        .context("Cannot send delete document operation")?;
+
+                    return Err(e);
+                }
+            };
+            info!("Document reindexed");
+        }
+        drop(collection);
+
+        info!("Replacing collection");
+        self.collections
+            .replace(collection_id_tmp.clone(), collection_id.clone())
+            .await
+            .context("Cannot replace collection")?;
+        info!("Replaced");
+
+        info!("Substitute collection");
+        self.sender
+            .send(WriteOperation::SubstituteCollection {
+                subject_collection_id: collection_id_tmp,
+                target_collection_id: collection_id,
+            })
+            .await?;
+
+        Ok(())
     }
 
     pub async fn get_javascript_hook(

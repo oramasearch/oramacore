@@ -32,13 +32,77 @@ pub struct TokenScore {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema, PartialEq, Eq)]
 pub enum LanguageDTO {
+    Arabic,
+    Bulgarian,
+    Danish,
+    German,
+    Greek,
     English,
+    Estonian,
+    Spanish,
+    Finnish,
+    French,
+    Irish,
+    Hindi,
+    Hungarian,
+    Armenian,
+    Indonesian,
+    Italian,
+    Japanese,
+    Korean,
+    Lithuanian,
+    Nepali,
+    Dutch,
+    Norwegian,
+    Portuguese,
+    Romanian,
+    Russian,
+    Sanskrit,
+    Slovenian,
+    Serbian,
+    Swedish,
+    Tamil,
+    Turkish,
+    Ukrainian,
+    Chinese,
 }
 
 impl From<LanguageDTO> for Locale {
     fn from(language: LanguageDTO) -> Self {
         match language {
             LanguageDTO::English => Locale::EN,
+            LanguageDTO::Italian => Locale::IT,
+            LanguageDTO::Spanish => Locale::ES,
+            LanguageDTO::French => Locale::FR,
+            LanguageDTO::German => Locale::DE,
+            LanguageDTO::Portuguese => Locale::PT,
+            LanguageDTO::Dutch => Locale::NL,
+            LanguageDTO::Russian => Locale::RU,
+            LanguageDTO::Chinese => Locale::ZH,
+            LanguageDTO::Korean => Locale::KO,
+            LanguageDTO::Arabic => Locale::AR,
+            LanguageDTO::Bulgarian => Locale::BG,
+            LanguageDTO::Danish => Locale::DA,
+            LanguageDTO::Greek => Locale::EL,
+            LanguageDTO::Estonian => Locale::ET,
+            LanguageDTO::Finnish => Locale::FI,
+            LanguageDTO::Irish => Locale::GA,
+            LanguageDTO::Hindi => Locale::HI,
+            LanguageDTO::Hungarian => Locale::HU,
+            LanguageDTO::Armenian => Locale::HY,
+            LanguageDTO::Indonesian => Locale::ID,
+            LanguageDTO::Lithuanian => Locale::LT,
+            LanguageDTO::Nepali => Locale::NE,
+            LanguageDTO::Norwegian => Locale::NO,
+            LanguageDTO::Romanian => Locale::RO,
+            LanguageDTO::Sanskrit => Locale::SA,
+            LanguageDTO::Slovenian => Locale::SL,
+            LanguageDTO::Serbian => Locale::SR,
+            LanguageDTO::Swedish => Locale::SV,
+            LanguageDTO::Tamil => Locale::TA,
+            LanguageDTO::Turkish => Locale::TR,
+            LanguageDTO::Ukrainian => Locale::UK,
+            LanguageDTO::Japanese => Locale::JP,
         }
     }
 }
@@ -46,7 +110,38 @@ impl From<Locale> for LanguageDTO {
     fn from(language: Locale) -> Self {
         match language {
             Locale::EN => LanguageDTO::English,
-            _ => LanguageDTO::English,
+            Locale::IT => LanguageDTO::Italian,
+            Locale::ES => LanguageDTO::Spanish,
+            Locale::FR => LanguageDTO::French,
+            Locale::DE => LanguageDTO::German,
+            Locale::PT => LanguageDTO::Portuguese,
+            Locale::NL => LanguageDTO::Dutch,
+            Locale::RU => LanguageDTO::Russian,
+            Locale::ZH => LanguageDTO::Chinese,
+            Locale::KO => LanguageDTO::Korean,
+            Locale::AR => LanguageDTO::Arabic,
+            Locale::BG => LanguageDTO::Bulgarian,
+            Locale::DA => LanguageDTO::Danish,
+            Locale::EL => LanguageDTO::Greek,
+            Locale::ET => LanguageDTO::Estonian,
+            Locale::FI => LanguageDTO::Finnish,
+            Locale::GA => LanguageDTO::Irish,
+            Locale::HI => LanguageDTO::Hindi,
+            Locale::HU => LanguageDTO::Hungarian,
+            Locale::HY => LanguageDTO::Armenian,
+            Locale::ID => LanguageDTO::Indonesian,
+            Locale::LT => LanguageDTO::Lithuanian,
+            Locale::NE => LanguageDTO::Nepali,
+            Locale::NO => LanguageDTO::Norwegian,
+            Locale::RO => LanguageDTO::Romanian,
+            Locale::SA => LanguageDTO::Sanskrit,
+            Locale::SL => LanguageDTO::Slovenian,
+            Locale::SR => LanguageDTO::Serbian,
+            Locale::SV => LanguageDTO::Swedish,
+            Locale::TA => LanguageDTO::Tamil,
+            Locale::TR => LanguageDTO::Turkish,
+            Locale::UK => LanguageDTO::Ukrainian,
+            Locale::JP => LanguageDTO::Japanese,
         }
     }
 }
@@ -76,7 +171,7 @@ pub enum TypedField {
     ArrayBoolean,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct CreateCollectionEmbeddings {
     pub model: Option<OramaModelSerializable>,
     pub document_fields: Vec<String>,
@@ -107,14 +202,36 @@ impl PartialSchema for ApiKey {
 }
 impl ToSchema for ApiKey {}
 
-#[derive(Debug, Deserialize, ToSchema)]
+use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
 
+    #[serde(
+        deserialize_with = "deserialize_api_key",
+        serialize_with = "serialize_api_key"
+    )]
     pub read_api_key: ApiKey,
+    #[serde(
+        deserialize_with = "deserialize_api_key",
+        serialize_with = "serialize_api_key"
+    )]
     pub write_api_key: ApiKey,
 
+    #[schema(inline)]
+    pub language: Option<LanguageDTO>,
+    #[serde(default)]
+    #[schema(inline)]
+    pub embeddings: Option<CreateCollectionEmbeddings>,
+}
+
+#[derive(Debug, Deserialize, ToSchema, Clone)]
+pub struct ReindexConfig {
+    #[serde(default)]
+    pub description: Option<String>,
+
+    #[serde(default)]
     #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]

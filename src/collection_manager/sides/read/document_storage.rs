@@ -100,7 +100,6 @@ impl CommittedDiskDocumentStorage {
             let doc_path = self.path.join(format!("{}", doc_id.0));
 
             let doc = RawJSONDocumentWrapper(doc);
-
             create_or_overwrite(doc_path, &doc)
                 .await
                 .context("Cannot write document data")?;

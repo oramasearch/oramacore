@@ -205,6 +205,10 @@ pub enum WriteOperation {
         default_language: LanguageDTO,
     },
     Collection(CollectionId, CollectionWriteOperation),
+    SubstituteCollection {
+        subject_collection_id: CollectionId,
+        target_collection_id: CollectionId,
+    },
 }
 
 impl WriteOperation {
@@ -223,17 +227,18 @@ impl WriteOperation {
             WriteOperation::Collection(_, CollectionWriteOperation::Index(_, _, _)) => "index",
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
+            WriteOperation::SubstituteCollection { .. } => "substitute_collection",
         }
     }
 }
 
-fn serialize_api_key<S>(x: &ApiKey, s: S) -> Result<S::Ok, S::Error>
+pub fn serialize_api_key<S>(x: &ApiKey, s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::ser::Serializer,
 {
     s.serialize_str(x.0.expose_secret())
 }
-fn deserialize_api_key<'de, D>(deserializer: D) -> Result<ApiKey, D::Error>
+pub fn deserialize_api_key<'de, D>(deserializer: D) -> Result<ApiKey, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {

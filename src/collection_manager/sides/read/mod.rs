@@ -244,10 +244,10 @@ impl ReadSide {
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?op.0, "Updating read side");
 
+        let (offset, op) = op;
+
         // We stop commit operations while we are updating
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
-        let (offset, op) = op;
 
         let mut live_offset = self.live_offset.write().await;
         *live_offset = offset;
@@ -304,6 +304,14 @@ impl ReadSide {
             }
             WriteOperation::KV(op) => {
                 self.kv.update(op).await.context("Cannot insert into KV")?;
+            }
+            WriteOperation::SubstituteCollection {
+                subject_collection_id,
+                target_collection_id,
+            } => {
+                self.collections
+                    .substitute_collection(offset, target_collection_id, subject_collection_id)
+                    .await?;
             }
         }
 
@@ -491,8 +499,16 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
                 trace!(?op, "Received operation");
                 if let Err(e) = read_side.update(op).await {
                     tracing::error!(?e, "Cannot update read side");
+                    e.chain()
+                        .skip(1)
+                        .for_each(|cause| error!("because: {}", cause));
                 }
             }
+
+            if !operation_receiver.should_reconnect() {
+                break;
+            }
+
             warn!("Operation receiver is closed. Reconnecting...");
 
             let arc = Arc::new(RwLock::new(&mut operation_receiver));
