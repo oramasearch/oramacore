@@ -13,7 +13,7 @@ use tracing::info;
 use crate::{
     build_orama,
     collection_manager::{
-        dto::{ApiKey, LanguageDTO, ReindexConfig},
+        dto::{ApiKey, InsertTriggerParams, LanguageDTO, ReindexConfig},
         sides::{hooks::HookName, ReadSide, WriteSide},
     },
     tests::utils::{create_grpc_server, create_oramacore_config},
@@ -2165,6 +2165,78 @@ async fn test_reindex_field_reorder() -> Result<()> {
     // We changed the language to Italian, so the search should return the document
     // because the "avvocata" shares the same root of "avvocato"
     assert_eq!(output.count, 1);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+async fn test_trigger() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
+
+    let trigger_id = "my-trigger".to_string();
+
+    let trigger = write_side
+        .insert_trigger(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            InsertTriggerParams {
+                description: "My trigger".to_string(),
+                name: "my-trigger-name".to_string(),
+                response: "my-response".to_string(),
+                segment_id: None,
+            },
+            Some(trigger_id.clone()),
+        )
+        .await?;
+    let trigger_id = trigger.id;
+
+    let trigger = write_side
+        .get_trigger(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            trigger_id.clone(),
+        )
+        .await?;
+    assert_eq!(trigger.name, "my-trigger-name");
+
+    let trigger = read_side
+        .get_trigger(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            trigger_id.clone(),
+        )
+        .await?
+        .unwrap();
+    assert_eq!(trigger.name, "my-trigger-name");
+
+    write_side.commit().await?;
+    read_side.commit().await?;
+
+    let (write_side, read_side) = create(config.clone()).await?;
+
+    let trigger = write_side
+        .get_trigger(
+            ApiKey(Secret::new("my-write-api-key".to_string())),
+            collection_id.clone(),
+            trigger_id.clone(),
+        )
+        .await?;
+    assert_eq!(trigger.name, "my-trigger-name");
+
+    let trigger = read_side
+        .get_trigger(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            trigger_id.clone(),
+        )
+        .await?
+        .unwrap();
+    assert_eq!(trigger.name, "my-trigger-name");
 
     Ok(())
 }

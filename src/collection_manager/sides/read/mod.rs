@@ -303,7 +303,10 @@ impl ReadSide {
                 }
             }
             WriteOperation::KV(op) => {
-                self.kv.update(op).await.context("Cannot insert into KV")?;
+                self.kv
+                    .update(offset, op)
+                    .await
+                    .context("Cannot insert into KV")?;
             }
             WriteOperation::SubstituteCollection {
                 subject_collection_id,

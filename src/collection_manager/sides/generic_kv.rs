@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -12,7 +13,7 @@ use ptrie::Trie;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::{KVWriteOperation, OperationSender, WriteOperation};
+use super::{KVWriteOperation, Offset, OperationSender, WriteOperation};
 
 #[derive(Clone)]
 pub struct KVConfig {
@@ -34,7 +35,7 @@ impl KV {
         create_if_not_exists(&config.data_dir).context("Cannot create data directory")?;
 
         let info = config.data_dir.join("info.json");
-        let info = BufferedFile::open(info).and_then(|file| file.read_bincode_data::<KVInfo>());
+        let info = BufferedFile::open(info).and_then(|file| file.read_json_data::<KVInfo>());
         let (tree, offset) = match info {
             Ok(info) => {
                 let KVInfo::V1(info) = info;
@@ -69,9 +70,6 @@ impl KV {
 
         if let Some(sender) = self.sender.as_ref() {
             let op = WriteOperation::KV(KVWriteOperation::Create(key, value));
-
-            println!("Sending operation: {:?}", op);
-
             sender.send(op).await?;
         }
 
@@ -154,7 +152,9 @@ impl KV {
             .collect()
     }
 
-    pub async fn update(&self, op: KVWriteOperation) -> Result<()> {
+    pub async fn update(&self, offset: Offset, op: KVWriteOperation) -> Result<()> {
+        self.last_offset.store(offset.0, Ordering::Relaxed);
+
         match op {
             KVWriteOperation::Create(key, value) => {
                 self.data
@@ -189,7 +189,7 @@ impl KV {
         let new_path = self.data_dir.join(format!("kv-{}.bin", current_offset));
         BufferedFile::create_or_overwrite(new_path.clone())
             .context("Cannot create previous kv info")?
-            .write_json_data(&*data)
+            .write_bincode_data(&*data)
             .context("Cannot write previous kv info")?;
 
         let info = self.data_dir.join("info.json");
@@ -219,4 +219,24 @@ enum KVInfo {
 struct KVInfoV1 {
     path_to_kv: PathBuf,
     current_offset: u64,
+}
+
+impl Debug for KV {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let elements: Vec<_> = match self.data.try_read() {
+            Ok(inner) => inner
+                .iter()
+                .map(|(k, v)| (String::from_utf8_lossy(&k).to_string(), v))
+                .collect(),
+            Err(_) => vec![("<locked>".to_string(), "<locked>".to_string())],
+        };
+
+        f.debug_struct("KV")
+            .field("data", &elements)
+            .field("data_dir", &self.data_dir)
+            .field("sender", &"..")
+            .field("last_offset", &self.last_offset)
+            .field("committed_offset", &self.committed_offset)
+            .finish()
+    }
 }

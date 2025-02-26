@@ -443,8 +443,6 @@ async fn select_triggers_and_segments(
                 tx.send(AudienceManagementResult::Trigger(None))
                     .await
                     .unwrap();
-
-                return;
             }
             Some(segment) => {
                 let full_segment = read_side

@@ -315,6 +315,23 @@ impl CollectionReader {
 
         if uncommitted_infos.is_empty() {
             info!("No uncommitted data to commit");
+
+            // If we create a collection with no data, and a commit is triggered,
+            // we need to save the collection info file
+            if current_collection_info.fields.is_empty() {
+                let new_offset_collection_info_path =
+                    data_dir.join(format!("info-offset-{}.info", offset.0));
+                BufferedFile::create(new_offset_collection_info_path)
+                    .context("Cannot create previous collection info")?
+                    .write_json_data(&CollectionInfo::V1(current_collection_info))
+                    .context("Cannot write previous collection info")?;
+
+                BufferedFile::create_or_overwrite(collection_info_path)
+                    .context("Cannot create previous collection info")?
+                    .write_json_data(&offset)
+                    .context("Cannot write previous collection info")?;
+            }
+
             return Ok(());
         }
 
