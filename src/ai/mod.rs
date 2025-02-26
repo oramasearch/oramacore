@@ -390,7 +390,9 @@ impl Manager for GrpcManager {
             .with_context(move || format!("Cannot connect to {:?}", uri))?;
         info!("Connected to gRPC");
 
-        let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint);
+        let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint)
+            .max_decoding_message_size(16_777_216) // 16MB
+            .max_encoding_message_size(16_777_216); // 16MB
 
         Ok(client)
     }

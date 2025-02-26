@@ -2034,7 +2034,7 @@ async fn test_stats() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_reindex() -> Result<()> {
+async fn test_reindex_change_language() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
@@ -2096,48 +2096,78 @@ async fn test_reindex() -> Result<()> {
     Ok(())
 }
 
-// #[tokio::test(flavor = "multi_thread")]
-// async fn test_triggers() -> Result<()> {
-//     use crate::collection_manager::sides::triggers::Trigger;
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reindex_field_reorder() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
 
-//     let _ = tracing_subscriber::fmt::try_init();
-//     let config = create_oramacore_config();
-//     let (write_side, read_side) = create(config.clone()).await?;
+    let collection_id = CollectionId("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id.clone()).await?;
 
-//     let collection_id = CollectionId("test-collection".to_string());
+    insert_docs(
+        write_side.clone(),
+        ApiKey(Secret::new("my-write-api-key".to_string())),
+        collection_id.clone(),
+        vec![json!({
+            "title1": "title1",
+            "number1": 1,
+            "bool1": true,
+            "title2": "title2",
+            "number2": 2,
+            "bool2": false,
+            "title3": "title3",
+            "number3": 3,
+            "bool3": true,
+        })],
+    )
+    .await?;
 
-//     let new_trigger = InsertTriggerParams {
-//         name: "new_trigger".to_string(),
-//         description: "new_trigger description".to_string(),
-//         response: "new_trigger response".to_string(),
-//         segment_id: None,
-//     };
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "title1",
+            })
+            .try_into()?,
+        )
+        .await?;
+    assert_eq!(output.count, 1);
 
-//     let inserted_trigger = write_side
-//         .insert_trigger(collection_id.clone(), new_trigger.clone())
-//         .await?;
+    for _ in 0..50 {
+        write_side
+            .reindex(
+                ApiKey(Secret::new("my-write-api-key".to_string())),
+                collection_id.clone(),
+                ReindexConfig {
+                    description: None,
+                    embeddings: None,
+                    language: Some(LanguageDTO::Italian),
+                },
+            )
+            .await
+            .unwrap();
+    }
 
-//     assert!(inserted_trigger.name == new_trigger.name);
+    sleep(Duration::from_millis(300)).await;
 
-//     let updated_trigger = Trigger {
-//         id: inserted_trigger.id.clone(),
-//         name: "updated_trigger".to_string(),
-//         description: "updated_trigger description".to_string(),
-//         response: "updated_trigger response".to_string(),
-//         segment_id: None,
-//     };
+    let output = read_side
+        .search(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+            json!({
+                "term": "title1",
+            })
+            .try_into()?,
+        )
+        .await?;
+    // We changed the language to Italian, so the search should return the document
+    // because the "avvocata" shares the same root of "avvocato"
+    assert_eq!(output.count, 1);
 
-//     let updated_trigger_response = write_side
-//         .update_trigger(collection_id, updated_trigger.clone())
-//         .await?
-//         .unwrap();
-
-//     assert!(updated_trigger_response.name == updated_trigger.name);
-//     assert!(updated_trigger_response.description == updated_trigger.description);
-//     assert!(updated_trigger_response.response == updated_trigger.response);
-
-//     Ok(())
-// }
+    Ok(())
+}
 
 async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
     write_side

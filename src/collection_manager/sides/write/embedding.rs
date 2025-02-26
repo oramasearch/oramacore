@@ -31,7 +31,7 @@ async fn process<I>(ai_service: Arc<AIService>, cache: I)
 where
     I: Iterator<Item = (OramaModel, Vec<EmbeddingCalculationRequestInput>)>,
 {
-    info!("Process embedding batch");
+    info!("Processing embedding batch");
 
     for (model, inputs) in cache {
         let model_name = model.as_str_name();
@@ -76,7 +76,7 @@ where
         }
     }
 
-    debug!("Embedding batch processed");
+    info!("Embedding batch processed");
 }
 
 pub fn start_calculate_embedding_loop(

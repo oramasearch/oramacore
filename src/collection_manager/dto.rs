@@ -228,8 +228,10 @@ pub struct CreateCollection {
 
 #[derive(Debug, Deserialize, ToSchema, Clone)]
 pub struct ReindexConfig {
+    #[serde(default)]
     pub description: Option<String>,
 
+    #[serde(default)]
     #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]

@@ -430,7 +430,8 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
-        let collection_id_tmp = CollectionId("PIPPO".to_string());
+        let collection_id_tmp = cuid2::create_id();
+        let collection_id_tmp = CollectionId(collection_id_tmp);
 
         let mut option = self
             .collections
@@ -457,6 +458,8 @@ impl WriteSide {
 
         let mut stream = self.document_storage.stream_documents(document_ids).await;
         while let Some((doc_id, doc)) = stream.next().await {
+            debug!(?doc_id, "Reindexing document");
+
             let inner = doc.inner;
             let inner: Map<String, Value> =
                 serde_json::from_str(inner.get()).context("Cannot deserialize document")?;
@@ -485,8 +488,18 @@ impl WriteSide {
                     return Err(e);
                 }
             };
+            info!("Document reindexed");
         }
+        drop(collection);
 
+        info!("Replacing collection");
+        self.collections
+            .replace(collection_id_tmp.clone(), collection_id.clone())
+            .await
+            .context("Cannot replace collection")?;
+        info!("Replaced");
+
+        info!("Substitute collection");
         self.sender
             .send(WriteOperation::SubstituteCollection {
                 subject_collection_id: collection_id_tmp,

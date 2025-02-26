@@ -227,7 +227,7 @@ impl CollectionReader {
     }
 
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
-    pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+    pub async fn commit(&self, data_dir: PathBuf, force_new: bool) -> Result<()> {
         info!("Committing collection");
 
         let offset = self.offset_storage.get_offset();
@@ -245,7 +245,22 @@ impl CollectionReader {
         let previous_offset_collection_info_path = previous_offset.map(|previous_offset| {
             data_dir.join(format!("info-offset-{}.info", previous_offset.0))
         });
-        let mut current_collection_info = if let Some(previous_offset_collection_info_path) =
+        let mut current_collection_info = if force_new {
+            debug!("Force to create new new one");
+            CollectionInfoV1 {
+                id: self.id.clone(),
+                description: self.description.clone(),
+                document_count: 0,
+                default_language: self.default_language,
+                fields: Default::default(),
+                read_api_key: self.read_api_key.0.expose_secret().clone(),
+                used_models: Default::default(),
+                number_field_infos: Default::default(),
+                string_field_infos: Default::default(),
+                bool_field_infos: Default::default(),
+                vector_field_infos: Default::default(),
+            }
+        } else if let Some(previous_offset_collection_info_path) =
             previous_offset_collection_info_path
         {
             debug!("We will merge it with the current one");
@@ -1304,9 +1319,8 @@ impl CollectionReader {
                 .fields
                 .iter()
                 .find(|e| e.value().0 == k)
-                .expect("Field not found")
-                .key()
-                .to_string();
+                .map(|e| e.key().to_string())
+                .unwrap_or_default();
             FieldStats {
                 field_id: k,
                 name,
@@ -1342,9 +1356,8 @@ impl CollectionReader {
                 .fields
                 .iter()
                 .find(|e| e.value().0 == k)
-                .expect("Field not found")
-                .key()
-                .to_string();
+                .map(|e| e.key().to_string())
+                .unwrap_or_default();
             FieldStats {
                 field_id: k,
                 name,
@@ -1380,9 +1393,8 @@ impl CollectionReader {
                 .fields
                 .iter()
                 .find(|e| e.value().0 == k)
-                .expect("Field not found")
-                .key()
-                .to_string();
+                .map(|e| e.key().to_string())
+                .unwrap_or_default();
             FieldStats {
                 field_id: k,
                 name,

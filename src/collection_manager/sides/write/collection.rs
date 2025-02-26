@@ -38,7 +38,7 @@ mod doc_id_storage;
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 pub struct CollectionWriter {
-    id: CollectionId,
+    pub(super) id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
     fields: RwLock<HashMap<FieldId, (String, ValueType, CollectionField)>>,
