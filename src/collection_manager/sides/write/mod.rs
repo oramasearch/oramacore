@@ -678,6 +678,28 @@ impl WriteSide {
         Ok(trigger)
     }
 
+    pub async fn get_trigger(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        trigger_id: String,
+    ) -> Result<Trigger> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        let trigger = self
+            .triggers
+            .get(trigger_id)
+            .await
+            .context("Cannot insert trigger")?;
+        let trigger = match trigger {
+            Some(trigger) => trigger,
+            None => bail!("Trigger not found"),
+        };
+
+        Ok(trigger)
+    }
+
     pub async fn delete_trigger(
         &self,
         write_api_key: ApiKey,
