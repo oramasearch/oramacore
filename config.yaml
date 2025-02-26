@@ -80,8 +80,11 @@ ai_server:
             - CPUExecutionProvider
         total_threads: 8
     LLMs:
+        default_model:
+            id: "mistralai/Mistral-7B-Instruct-v0.2"
+
         content_expansion:
-            id: "microsoft/Phi-3.5-mini-instruct"
+            id: "mistralai/Mistral-7B-Instruct-v0.2"
             tensor_parallel_size: 1
             use_cpu: false
             sampling_params:
@@ -89,7 +92,7 @@ ai_server:
                 top_p: 0.95
                 max_tokens: 256
         google_query_translator:
-            id: "microsoft/Phi-3.5-mini-instruct"
+            id: "mistralai/Mistral-7B-Instruct-v0.2"
             tensor_parallel_size: 1
             use_cpu: false
             sampling_params:
@@ -97,7 +100,7 @@ ai_server:
                 top_p: 0.95
                 max_tokens: 20
         answer:
-            id: "microsoft/Phi-3.5-mini-instruct"
+            id: "mistralai/Mistral-7B-Instruct-v0.2"
             tensor_parallel_size: 1
             use_cpu: false
             sampling_params:
