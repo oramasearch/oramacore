@@ -32,38 +32,71 @@ pub struct TokenScore {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema, PartialEq, Eq)]
 pub enum LanguageDTO {
+    #[serde(rename = "arabic")]
     Arabic,
+    #[serde(rename = "bulgarian")]
     Bulgarian,
+    #[serde(rename = "danish")]
     Danish,
+    #[serde(rename = "german")]
     German,
+    #[serde(rename = "greek")]
     Greek,
+    #[serde(rename = "english")]
     English,
+    #[serde(rename = "estonian")]
     Estonian,
+    #[serde(rename = "spanish")]
     Spanish,
+    #[serde(rename = "finnish")]
     Finnish,
+    #[serde(rename = "french")]
     French,
+    #[serde(rename = "irish")]
     Irish,
+    #[serde(rename = "hindi")]
     Hindi,
+    #[serde(rename = "hungarian")]
     Hungarian,
+    #[serde(rename = "armenian")]
     Armenian,
+    #[serde(rename = "indonesian")]
     Indonesian,
+    #[serde(rename = "italian")]
     Italian,
+    #[serde(rename = "japanese")]
     Japanese,
+    #[serde(rename = "korean")]
     Korean,
+    #[serde(rename = "lithuanian")]
     Lithuanian,
+    #[serde(rename = "nepali")]
     Nepali,
+    #[serde(rename = "dutch")]
     Dutch,
+    #[serde(rename = "norwegian")]
     Norwegian,
+    #[serde(rename = "portuguese")]
     Portuguese,
+    #[serde(rename = "romanian")]
     Romanian,
+    #[serde(rename = "russian")]
     Russian,
+    #[serde(rename = "sanskrit")]
     Sanskrit,
+    #[serde(rename = "slovenian")]
     Slovenian,
+    #[serde(rename = "serbian")]
     Serbian,
+    #[serde(rename = "swedish")]
     Swedish,
+    #[serde(rename = "tamil")]
     Tamil,
+    #[serde(rename = "turkish")]
     Turkish,
+    #[serde(rename = "ukrainian")]
     Ukrainian,
+    #[serde(rename = "chinese")]
     Chinese,
 }
 
