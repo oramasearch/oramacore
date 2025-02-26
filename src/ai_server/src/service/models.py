@@ -29,9 +29,13 @@ class ModelsManager:
         self._model_refs: Dict[str, str] = {}
         self._lock = threading.Lock()
 
+        default_model = self.config.default_model
+
         for config_name, model_config in self.model_configs.items():
             if model_config is not None:
                 self._model_refs[config_name] = model_config.id
+            elif default_model:
+                self._model_refs[config_name] = default_model
 
         unique_models = self._get_unique_model_ids()
         logger.info(f"Unique models to load: {unique_models}")
@@ -40,7 +44,12 @@ class ModelsManager:
             self._preload_unique_model(model_id)
 
     def _get_unique_model_ids(self) -> Set[str]:
-        return {config.id for config in self.model_configs.values() if config is not None}
+        model_ids = {config.id for config in self.model_configs.values() if config is not None}
+
+        if self.config.default_model and len(self._model_refs) > len(model_ids):
+            model_ids.add(self.config.default_model)
+
+        return model_ids
 
     def _preload_unique_model(self, model_id: str) -> None:
         try:
