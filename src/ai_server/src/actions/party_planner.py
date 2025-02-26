@@ -194,15 +194,25 @@ class PartyPlanner:
                 return json.dumps({"error": str(e)})
         return json.dumps({"message": f"Skipping action {step.name} as it requires a missing OramaCore integration"})
 
-    def run(self, collection_id: str, input: str, api_key: str) -> Iterator[str]:
+    def run(
+        self, collection_id: str, input: str, api_key: str, segment: str | None, trigger: str | None
+    ) -> Iterator[str]:
         # Add a system prompt to the history if the first entry is not a system prompt.
         if len(self.history) > 0 and self.history[0]["role"] != "system":
             self.history.insert(0, {"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
         elif len(self.history) == 0:
             self.history.append({"role": "system", "content": PARTY_PLANNER_SYSTEM_PROMPT})
 
+        full_input = f"### User Input {input}"
+
+        if segment:
+            full_input += f"\n\n### Segment {segment}"
+
+        if trigger:
+            full_input += f"\n\n### Trigger {trigger}"
+
         # Use the input as the first history entry.
-        self.history.append({"role": "user", "content": input})
+        self.history.append({"role": "user", "content": full_input})
 
         # Create an action plan and store it in the executed steps.
         action_plan = self._get_action_plan(input)

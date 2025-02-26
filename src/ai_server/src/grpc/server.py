@@ -113,25 +113,13 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            if request.HasField("segment"):
-                history[-1]["content"] += dedent(
-                    f"""
-                    ### Persona
-                    - **Name**: {request.segment.name}
-                    - **Description**: {request.segment.description}
-                    - **Goal**: {request.segment.goal}                        
-                """
-                )
+            segment, trigger = get_segment_and_trigger(request)
 
-            if request.HasField("trigger"):
-                history[-1]["content"] += dedent(
-                    f"""
-                    ### Trigger
-                    - **Name**: {request.trigger.name}
-                    - **Description**: {request.trigger.description}
-                    - **Response**: {request.trigger.response}
-                """
-                )
+            if segment:
+                history[-1]["content"] += segment
+
+            if trigger:
+                history[-1]["content"] += trigger
 
             for text_chunk in self.models_manager.chat_stream(
                 model_id=model_name.lower(),
@@ -163,25 +151,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 else []
             )
 
-            if request.HasField("segment"):
-                history[-1]["content"] += dedent(
-                    f"""
-                    ### Persona
-                    - **Name**: {request.segment.name}
-                    - **Description**: {request.segment.description}
-                    - **Goal**: {request.segment.goal}                        
-                """
-                )
-
-            if request.HasField("trigger"):
-                history[-1]["content"] += dedent(
-                    f"""
-                    ### Trigger
-                    - **Name**: {request.trigger.name}
-                    - **Description**: {request.trigger.description}
-                    - **Response**: {request.trigger.response}
-                """
-                )
+            segment, trigger = get_segment_and_trigger(request)
 
             party_planner = PartyPlanner(self.config, self.models_manager, history)
 
@@ -189,6 +159,8 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 collection_id=request.collection_id,
                 input=request.input,
                 api_key=api_key,
+                segment=segment,
+                trigger=trigger,
             ):
                 yield PlannedAnswerResponse(data=message, finished=False)
 
@@ -241,10 +213,14 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             repaired_response = repair_json(response)
             repaired_response_json = json.loads(repaired_response)
 
+            selected_segment = (
+                repaired_response_json[0] if isinstance(repaired_response_json, list) else repaired_response
+            )
+
             return ProtoSegmentResponse(
-                id=repaired_response_json.get("id", ""),
-                name=repaired_response_json.get("name", ""),
-                probability=repaired_response_json.get("probability", 0.0),
+                id=selected_segment.get("id", ""),
+                name=selected_segment.get("name", ""),
+                probability=selected_segment.get("probability", 0.0),
             )
 
         except Exception as e:
@@ -294,11 +270,15 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             repaired_response = repair_json(response)
             repaired_response_json = json.loads(repaired_response)
 
+            selected_trigger = (
+                repaired_response_json[0] if isinstance(repaired_response_json, list) else repaired_response
+            )
+
             return ProtoTriggerResponse(
-                id=repaired_response_json.get("id", ""),
-                name=repaired_response_json.get("name", ""),
-                response=repaired_response_json.get("response", ""),
-                probability=repaired_response_json.get("probability", 0.0),
+                id=selected_trigger.get("id", ""),
+                name=selected_trigger.get("name", ""),
+                response=selected_trigger.get("response", ""),
+                probability=selected_trigger.get("probability", 0.0),
             )
 
         except Exception as e:
@@ -342,7 +322,7 @@ class AuthInterceptor(grpc.ServerInterceptor):
 
         # Health check and embeddings won't require authentication.
         # This server should never be exposed to the public and it's meant for internal use only.
-        allowed_methods = ["CheckHealth", "GetEmbedding", "ServerReflection"]
+        allowed_methods = ["CheckHealth", "GetEmbedding", "ServerReflection", "GetSegment", "GetTrigger"]
         if any(x in handler_call_details.method for x in allowed_methods):
             return continuation(handler_call_details)
 
@@ -354,6 +334,33 @@ class AuthInterceptor(grpc.ServerInterceptor):
                 lambda req, ctx: ctx.abort(grpc.StatusCode.UNAUTHENTICATED, "Missing API key")
             )
         return continuation(handler_call_details)
+
+
+def get_segment_and_trigger(request) -> tuple[str | None, str | None]:
+    segment = None
+    trigger = None
+
+    if request.HasField("segment"):
+        segment = dedent(
+            f"""
+            ### Persona
+            - **Name**: {request.segment.name}
+            - **Description**: {request.segment.description}
+            - **Goal**: {request.segment.goal}                        
+        """
+        )
+
+    if request.HasField("trigger"):
+        trigger = dedent(
+            f"""
+            ### Trigger
+            - **Name**: {request.trigger.name}
+            - **Description**: {request.trigger.description}
+            - **Response**: {request.trigger.response}
+        """
+        )
+
+    return segment, trigger
 
 
 def serve(config, embeddings_service, models_manager):

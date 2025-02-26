@@ -469,6 +469,13 @@ async fn select_triggers_and_segments(
                     .await
                     .expect("Failed to get triggers for the segment");
 
+                if all_segments_triggers.is_empty() {
+                    tx.send(AudienceManagementResult::Trigger(None))
+                        .await
+                        .unwrap();
+                    return;
+                }
+
                 let chosen_trigger = ai_service
                     .get_trigger(all_segments_triggers, conversation)
                     .await

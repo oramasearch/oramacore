@@ -77,19 +77,7 @@ impl TriggerInterface {
             collection_id.0
         ))?;
 
-        let triggers_with_key = triggers
-            .into_iter()
-            .map(|trigger| Trigger {
-                id: get_trigger_key(
-                    collection_id.clone(),
-                    trigger.id.clone(),
-                    trigger.segment_id.clone(),
-                ),
-                ..trigger
-            })
-            .collect();
-
-        Ok(triggers_with_key)
+        Ok(triggers)
     }
 
     pub async fn list_by_segment(
