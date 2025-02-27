@@ -9,69 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     file_utils::{create_if_not_exists, BufferedFile},
-    indexes::hnsw::{Builder, HnswMap, Point, Search},
+    indexes::hnsw2::HNSW2Index,
     types::DocumentId,
 };
 
-#[derive(Clone, Debug)]
-struct VectorPoint {
-    magnitude: f32,
-    point: Vec<f32>,
-}
-
-impl Serialize for VectorPoint {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.point.serialize(serializer)
-    }
-}
-impl<'de> Deserialize<'de> for VectorPoint {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Vec::<f32>::deserialize(deserializer).map(VectorPoint::new)
-    }
-}
-
-impl VectorPoint {
-    fn new(v: Vec<f32>) -> Self {
-        let magnitude = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let magnitude = magnitude.max(0.0001);
-        debug_assert!(magnitude > 0.0, "Magnitude is zero");
-
-        Self {
-            magnitude,
-            point: v,
-        }
-    }
-}
-impl Point for VectorPoint {
-    fn distance(&self, other: &Self) -> f32 {
-        let my_mag = self.magnitude;
-        let other_mag = other.magnitude;
-        let dot_product = self
-            .point
-            .iter()
-            .zip(other.point.iter())
-            .map(|(a, b)| a * b)
-            .sum::<f32>();
-        let similarity = dot_product / (my_mag * other_mag);
-
-        // cosine similarity is between 0 and 1.
-        // 1 = equal
-        // 0 = orthogonal
-        // Anyway the definition of distance (https://en.wikipedia.org/wiki/Distance#Mathematical_formalization)
-        // consider 0 = equal.
-        // So we need to invert the similarity to have a distance.
-        1.0 - similarity
-    }
-}
-
 pub struct VectorField {
-    inner: HnswMap<VectorPoint, DocumentId>,
+    inner: HNSW2Index,
     data_dir: PathBuf,
 }
 
@@ -86,17 +29,17 @@ impl Debug for VectorField {
 }
 
 impl VectorField {
-    pub fn from_iter<I>(iter: I, _dimension: usize, data_dir: PathBuf) -> Result<Self>
+    pub fn from_iter<I>(iter: I, dim: usize, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
-        let iter = iter.flat_map(|(doc_id, vectors)| {
-            vectors
-                .into_iter()
-                .map(move |vector| (VectorPoint::new(vector), doc_id))
-        });
-        let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
-        let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
+        let mut inner = HNSW2Index::new(dim);
+        for (doc_id, vectors) in iter {
+            for vector in vectors {
+                inner.add(&vector, doc_id).context("Cannot add vector")?;
+            }
+        }
+        inner.build().context("Cannot build hnsw index")?;
 
         create_if_not_exists(&data_dir).context("Cannot create data directory")?;
         BufferedFile::create(data_dir.join("index.hnsw"))
@@ -115,39 +58,34 @@ impl VectorField {
     ) -> Result<Self> {
         let dump_file_path = data_dir.join("index.hnsw");
 
-        let inner: HnswMap<VectorPoint, DocumentId> = BufferedFile::open(dump_file_path)
+        let inner: HNSW2Index = BufferedFile::open(dump_file_path)
             .context("Cannot open hnsw file")?
             .read_bincode_data()
             .context("Cannot read hnsw file")?;
-
-        // HnswMap exposes an `insert_multiple` method that is faster than building the index from scratch.
-        // We could implement some logic to use it here.
-        // NB: `insert_multuple` doens't change the internal structure of the HnswMap.
-        // Instead, building the index from scratch optimizes the structure.
-        // We should implement an heuristic to decide when to use `insert_multiple` and when to build the index from scratch.
-        // For now, we always build the index from scratch.
-        // TODO: implement the heuristic
+        let dim = inner.dim();
 
         let iter = iter
-            .flat_map(|(doc_id, vectors)| {
-                vectors
-                    .into_iter()
-                    .map(move |vector| (VectorPoint::new(vector), doc_id))
-            })
-            .chain(inner)
-            .filter(|(_, doc_id)| !uncommitted_document_deletions.contains(doc_id));
+            .flat_map(|(doc_id, vectors)| vectors.into_iter().map(move |vector| (doc_id, vector)))
+            .chain(inner.into_iter())
+            .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id));
 
-        let (points, values): (Vec<_>, Vec<_>) = iter.unzip();
-        let inner: HnswMap<VectorPoint, DocumentId> = Builder::default().build(points, values);
+        let mut new_inner = HNSW2Index::new(dim);
+
+        for (doc_id, vector) in iter {
+            new_inner
+                .add(&vector, doc_id)
+                .context("Cannot add vector")?;
+        }
+        new_inner.build().context("Cannot build hnsw index")?;
 
         create_if_not_exists(&new_data_dir).context("Cannot create data directory")?;
         BufferedFile::create(new_data_dir.join("index.hnsw"))
             .context("Cannot create hnsw file")?
-            .write_bincode_data(&inner)
+            .write_bincode_data(&new_inner)
             .context("Cannot write hnsw file")?;
 
         Ok(Self {
-            inner,
+            inner: new_inner,
             data_dir: new_data_dir,
         })
     }
@@ -155,7 +93,7 @@ impl VectorField {
     pub fn load(info: VectorFieldInfo) -> Result<Self> {
         let dump_file_path = info.data_dir.join("index.hnsw");
 
-        let inner: HnswMap<VectorPoint, DocumentId> = BufferedFile::open(dump_file_path)
+        let inner: HNSW2Index = BufferedFile::open(dump_file_path)
             .map_err(|e| anyhow!("Cannot open hnsw file: {}", e))?
             .read_bincode_data()
             .map_err(|e| anyhow!("Cannot read hnsw file: {}", e))?;
@@ -181,18 +119,24 @@ impl VectorField {
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let mut search = Search::default();
-        let cambridge_blue = VectorPoint::new(target.to_vec());
-        let iter_results = self.inner.search(&cambridge_blue, &mut search);
+        // We filtered matches by:
+        // - `filtered_doc_ids`: removed by `search` method
+        // - `uncommitted_deleted_documents`: removed by `document deletion` method
+        // - `similarity` threshold: removed by `search` method
+        // If there're not uncomitted deletions or the user doesn't filter, the limit is ok:
+        // HNSW returns the most probable matches first, so we can stop when we reach the limit.
+        // Otherwise, we should continue the search till reach the limit.
+        // Anyway, the implementation below returns a Vec, so we should redo the search till reach the limit.
+        // For now, we just double the limit.
+        // TODO: implement a better way to handle this.
+        let limit = if filtered_doc_ids.is_none() && uncommitted_deleted_documents.is_empty() {
+            limit
+        } else {
+            limit * 2
+        };
+        let data = self.inner.search(target.to_vec(), limit * 2);
 
-        let mut skipped = 0;
-        let mut found = 0;
-        for r in iter_results {
-            let distance = r.distance;
-            // See comment above
-            let score = 1.0 - distance;
-            let doc_id = *r.value;
-
+        for (doc_id, score) in data {
             if filtered_doc_ids.map_or(false, |ids| !ids.contains(&doc_id)) {
                 continue;
             }
@@ -200,28 +144,9 @@ impl VectorField {
                 continue;
             }
 
-            // HNSW returns the results but it does not guarantee the order of the results.
-            // We count the number of the skipped documents due to the similarity.
-            // If we filtered 100 documents due to the similarity, we stop the search.
-            // This is a heuristic to stop the loop hopping the HNSW graph returns the relevant documents before.
-            // Should we put this `100` as a parameter?
-            // TODO: think about it
-            if skipped > 100 {
-                break;
-            }
-
             if score >= similarity {
                 let v = output.entry(doc_id).or_insert(0.0);
                 *v += score;
-
-                found += 1;
-
-                // Reach the number of documents we want to return
-                if found > limit {
-                    break;
-                }
-            } else {
-                skipped += 1;
             }
         }
 
@@ -266,6 +191,7 @@ mod tests {
         index
             .search(&[0.1, 0.1, 0.1], 0.6, 5, None, &mut output, &HashSet::new())
             .unwrap();
+        println!("output: {:?}", output);
         assert_eq!(
             HashSet::from([DocumentId(1), DocumentId(0),]),
             output.keys().cloned().collect()
