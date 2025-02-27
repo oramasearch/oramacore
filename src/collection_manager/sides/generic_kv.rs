@@ -93,7 +93,6 @@ impl KV {
         }
     }
 
-    #[must_use]
     pub async fn remove(&self, key: &str) -> Result<Option<()>> {
         let data = self
             .data
@@ -109,7 +108,7 @@ impl KV {
         Ok(data.map(|_| ()))
     }
 
-    #[must_use]
+    #[must_use = "Use `remove` if you want to get the value back"]
     pub async fn remove_and_get<V: Clone + Serialize + DeserializeOwned>(
         &self,
         key: &str,

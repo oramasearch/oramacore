@@ -40,11 +40,15 @@ impl HNSW2Index {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn dim(&self) -> usize {
         self.dim
     }
 
-    pub fn into_iter(self) -> impl Iterator<Item = (DocumentId, Vec<f32>)> {
+    pub fn into_data(self) -> impl Iterator<Item = (DocumentId, Vec<f32>)> {
         self.inner
             .into_data()
             .map(|(v, DocumentIdWrapper(id))| (id, v))
@@ -76,7 +80,7 @@ impl HNSW2Index {
             // Anyway, it is good for ranking purposes
             // 1 means the vectors are equal
             // 0 means the vectors are orthogonal
-            let score = real_cosine_similarity(&n, &target)
+            let score = real_cosine_similarity(n, &target)
                 .expect("real_cosine_similarity should not return an error");
 
             let id = match node.idx() {
@@ -102,7 +106,7 @@ mod tests {
     #[test]
     fn test_hnsw2() {
         let dim = 3;
-        let points = vec![
+        let points = [
             vec![255.0, 0.0, 0.0],
             vec![0.0, 255.0, 0.0],
             vec![0.0, 0.0, 255.0],

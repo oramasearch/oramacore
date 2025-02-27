@@ -1,14 +1,13 @@
 use criterion::Criterion;
 use criterion::{black_box, criterion_group, criterion_main};
 
-use hnsw2::core::metrics::Metric;
 use oramacore::indexes::hnsw::Search;
 use oramacore::{
     indexes::{
         hnsw::{Builder, HnswMap, Point},
         hnsw2::HNSW2Index,
     },
-    types::{Document, DocumentId},
+    types::DocumentId,
 };
 use rand::distr::{Distribution, Uniform};
 use serde::{Deserialize, Serialize};
@@ -48,7 +47,7 @@ fn build_hnsw(_dim: usize, data: Vec<Vec<f32>>) -> HnswMap<PPoint, DocumentId> {
     let values = (0..data.len())
         .map(|x| DocumentId(x as u64))
         .collect::<Vec<DocumentId>>();
-    let points = data.into_iter().map(|x| PPoint(x)).collect::<Vec<PPoint>>();
+    let points = data.into_iter().map(PPoint).collect::<Vec<PPoint>>();
 
     let map: HnswMap<PPoint, DocumentId> = Builder::default().build(points, values);
 
