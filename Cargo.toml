@@ -69,7 +69,6 @@ tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 http = "1.2.0"
 axum-openapi3 = { version = "0.2", features = ["derive"] }
 
-hora = { version = "0.1.1" }
 strum_macros = "0.26.4"
 
 # Tracing
@@ -101,6 +100,7 @@ parking_lot = "0.12.3"
 serde-big-array = "0.5.1"
 debug_panic = "0.2.1"
 dedent = "0.1.1"
+hnsw2 = { path = "./crates/hnsw2" }
 
 [build-dependencies]
 cc = "1"
@@ -131,6 +131,10 @@ path = "src/bin/embeddings/embeddings.rs"
 # name = "phrase_match"
 # harness = false
 
+[[bench]]
+name = "hnsw"
+harness = false
+
 [features]
 default = ["writer", "reader"]
 no_auto_embedding_field_on_creation = []
@@ -138,4 +142,4 @@ writer = []
 reader = []
 
 [workspace]
-members = []
+members = ["crates/hnsw2"]

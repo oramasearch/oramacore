@@ -49,12 +49,13 @@ jobs:
         cargo --version
     - name: Check & Fmt & Clippy
       run: |
+        cargo check -p hnsw2 --target x86_64-unknown-linux-gnu
         cargo check --all-features --target x86_64-unknown-linux-gnu
-        cargo fmt -- --check
+        cargo fmt --all -- --check
         cargo clippy --target x86_64-unknown-linux-gnu
     - name: Test
       run: |
-        cargo test --target x86_64-unknown-linux-gnu
+        cargo test --all --target x86_64-unknown-linux-gnu
     - name: Build
       run: |
         cargo build --target x86_64-unknown-linux-gnu
