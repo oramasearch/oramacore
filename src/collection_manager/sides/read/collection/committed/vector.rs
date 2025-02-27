@@ -66,7 +66,7 @@ impl VectorField {
 
         let iter = iter
             .flat_map(|(doc_id, vectors)| vectors.into_iter().map(move |vector| (doc_id, vector)))
-            .chain(inner.into_iter())
+            .chain(inner.into_data())
             .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id));
 
         let mut new_inner = HNSW2Index::new(dim);

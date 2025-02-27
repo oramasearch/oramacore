@@ -3,10 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 use ai::{AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    channel_creator,
-    hooks::{HooksRuntime, HooksRuntimeConfig},
-    InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide,
-    WriteSideConfig,
+    channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
+    WriteSide, WriteSideConfig,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
@@ -50,7 +48,6 @@ pub struct OramacoreConfig {
     pub log: LogConfig,
     pub http: HttpConfig,
     pub ai_server: AIServiceConfig,
-    pub hooks: HooksRuntimeConfig,
     #[cfg(any(test, feature = "writer"))]
     pub writer_side: WriteSideConfig,
     #[cfg(any(test, feature = "reader"))]
@@ -90,12 +87,6 @@ pub async fn build_orama(
     let ai_service = AIService::new(config.ai_server);
     let ai_service = Arc::new(ai_service);
 
-    info!("Building hooks_runtime");
-    let hooks_runtime = HooksRuntime::try_load(config.hooks)
-        .await
-        .context("Cannot create hooks runtime")?;
-    let hooks_runtime = Arc::new(hooks_runtime);
-
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());
@@ -121,7 +112,6 @@ pub async fn build_orama(
             sender_creator,
             config.writer_side,
             ai_service.clone(),
-            hooks_runtime,
             nlp_service.clone(),
         )
         .await

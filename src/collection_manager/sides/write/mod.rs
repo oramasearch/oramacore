@@ -64,7 +64,7 @@ pub struct CollectionsWriterConfig {
     #[serde(default = "default_insert_batch_commit_size")]
     pub insert_batch_commit_size: u64,
     #[serde(default = "javascript_queue_limit_default")]
-    pub javascript_queue_limit: u32,
+    pub javascript_queue_limit: usize,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
 }
@@ -97,7 +97,6 @@ impl WriteSide {
         sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
-        hook_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
@@ -132,6 +131,18 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        let kv = KV::try_load(KVConfig {
+            data_dir: data_dir.join("kv"),
+            sender: Some(sender.clone()),
+        })
+        .context("Cannot load KV")?;
+        let kv = Arc::new(kv);
+        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
+        let hook =
+            HooksRuntime::new(kv.clone(), collections_writer_config.javascript_queue_limit).await;
+        let hook_runtime = Arc::new(hook);
+
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
@@ -140,16 +151,6 @@ impl WriteSide {
         )
         .await
         .context("Cannot load collections")?;
-
-        let kv = KV::try_load(KVConfig {
-            data_dir: data_dir.join("kv"),
-            sender: Some(sender.clone()),
-        })
-        .context("Cannot load KV")?;
-
-        let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
 
         let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
             .context("Cannot create document storage")?;
@@ -182,7 +183,6 @@ impl WriteSide {
         info!("Committing write side");
 
         self.collections.commit().await?;
-        self.hook_runtime.commit().await?;
 
         self.kv.commit().await?;
 
@@ -562,6 +562,7 @@ impl WriteSide {
             .hook_runtime
             .list_hooks(collection_id)
             .await
+            .context("Cannot list hooks")?
             .into_iter()
             .map(|(name, hook)| (name, hook.code))
             .collect())
@@ -781,7 +782,7 @@ struct WriteSideInfoV1 {
 fn embedding_queue_limit_default() -> u32 {
     50
 }
-fn javascript_queue_limit_default() -> u32 {
+fn javascript_queue_limit_default() -> usize {
     50
 }
 

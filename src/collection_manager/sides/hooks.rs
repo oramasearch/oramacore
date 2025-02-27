@@ -11,17 +11,22 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
 use std::str::FromStr;
-use tokio::sync::RwLock;
+use std::sync::Arc;
+use tracing::warn;
 
-use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::js::deno::{JavaScript, Operation};
 use crate::types::CollectionId;
+
+use super::generic_kv::KV;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct HookValue {
     pub code: String,
     pub created_at: i64,
 }
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct HookPair(HookName, HookValue);
 
 impl HookValue {
     pub fn to_string(&self) -> Result<String, serde_json::Error> {
@@ -54,55 +59,92 @@ impl Display for HookName {
     }
 }
 
-#[derive(Debug)]
-struct HookStorage {
-    hooks_map: RwLock<HashMap<CollectionId, HashMap<HookName, HookValue>>>,
+#[inline]
+fn prefix(collection_id: &CollectionId) -> String {
+    format!("hook:{}:", collection_id.0)
+}
+#[inline]
+fn hook_key(collection_id: &CollectionId, name: &HookName) -> String {
+    format!("{}{}", prefix(collection_id), name)
 }
 
-impl HookStorage {
-    fn try_load(data_dir: PathBuf) -> Result<Self> {
-        let hooks_path = data_dir.join("hooks.bin");
-        let hooks_map = BufferedFile::open(hooks_path)
-            .and_then(|f| f.read_bincode_data())
-            .unwrap_or_default();
+#[derive(Clone, Deserialize, Serialize)]
+pub struct HooksRuntimeConfig {
+    pub channel_limit: usize,
+    pub data_dir: PathBuf,
+}
 
-        Ok(Self {
-            hooks_map: RwLock::new(hooks_map),
-        })
+pub struct HooksRuntime {
+    kv: Arc<KV>,
+    javascript_runtime: JavaScript,
+}
+
+impl HooksRuntime {
+    pub async fn new(kv: Arc<KV>, limit: usize) -> Self {
+        Self {
+            kv,
+            javascript_runtime: JavaScript::new(limit).await,
+        }
     }
 
-    async fn has_hook(&self, collection_id: CollectionId, name: HookName) -> bool {
-        let hooks_map = self.hooks_map.read().await;
-        hooks_map
-            .get(&collection_id)
-            .map(|hooks| hooks.contains_key(&name))
-            .unwrap_or(false)
+    pub async fn has_hook(&self, collection_id: CollectionId, name: HookName) -> bool {
+        self.get_hook(collection_id, name).await.is_some()
     }
 
-    async fn get_hook(&self, collection_id: CollectionId, name: HookName) -> Option<HookValue> {
-        let hooks_map = self.hooks_map.read().await;
-        hooks_map
-            .get(&collection_id)
-            .and_then(|hooks| hooks.get(&name).cloned())
+    pub async fn get_hook(&self, collection_id: CollectionId, name: HookName) -> Option<HookValue> {
+        let key = hook_key(&collection_id, &name);
+
+        let k = self.kv.get::<HookPair>(&key).await;
+
+        match k {
+            Some(Ok(v)) => Some(v.1),
+            None => None,
+            Some(Err(e)) => {
+                warn!("Error getting hook: {}. Ignored", e);
+                None
+            }
+        }
     }
 
-    async fn list_hooks(&self, collection_id: CollectionId) -> HashMap<HookName, HookValue> {
-        let hooks_map = self.hooks_map.read().await;
-        hooks_map.get(&collection_id).cloned().unwrap_or_default()
+    pub async fn list_hooks(
+        &self,
+        collection_id: CollectionId,
+    ) -> Result<HashMap<HookName, HookValue>> {
+        let pairs = self
+            .kv
+            .prefix_scan::<HookPair>(&prefix(&collection_id))
+            .await
+            .context("Error listing hooks")?;
+        let ret = pairs
+            .into_iter()
+            .map(|HookPair(name, value)| (name, value))
+            .collect();
+        Ok(ret)
     }
 
-    async fn delete_hook(
+    pub async fn delete_hook(
         &self,
         collection_id: CollectionId,
         name: HookName,
     ) -> Option<(String, HookValue)> {
-        let mut hooks_map = self.hooks_map.write().await;
-        hooks_map
-            .get_mut(&collection_id)
-            .and_then(|hooks| hooks.remove(&name).map(|value| (name.to_string(), value)))
+        let key = hook_key(&collection_id, &name);
+        let a = self.kv.remove_and_get::<HookPair>(&key).await;
+
+        match a {
+            Ok(Some(Ok(v))) => Some((v.0.to_string(), v.1)),
+            Ok(None) => None,
+            Ok(Some(Err(e))) => {
+                warn!("Error deleting hook: {}. Ignored", e);
+                None
+            }
+            Err(e) => {
+                warn!("Error deleting hook: {}. Ignored", e);
+                None
+            }
+        }
     }
 
-    async fn insert_hook(
+    pub async fn insert_hook(
         &self,
         collection_id: CollectionId,
         name: HookName,
@@ -116,93 +158,10 @@ impl HookStorage {
             code,
             created_at: Utc::now().timestamp(),
         };
+        let pair = HookPair(name.clone(), hook);
 
-        let mut hooks_map = self.hooks_map.write().await;
-        hooks_map
-            .entry(collection_id)
-            .or_default()
-            .insert(name, hook);
-
-        Ok(())
-    }
-
-    // @todo: make this more robust and possibly check arguments and returning types via AST
-    fn is_valid_js(&self, code: &str) -> bool {
-        let allocator = Allocator::default();
-        let source_type = SourceType::default();
-        let parser = Parser::new(&allocator, code, source_type);
-
-        let result = parser.parse();
-
-        result.errors.is_empty()
-    }
-
-    async fn commit(&self, data_dir: PathBuf) -> Result<()> {
-        let hooks_map = self.hooks_map.write().await;
-
-        create_if_not_exists(&data_dir).context("Cannot create hook dir")?;
-
-        let hooks_path = data_dir.join("hooks.bin");
-        BufferedFile::create_or_overwrite(hooks_path)
-            .context("Cannot create hooks file")?
-            .write_bincode_data(&hooks_map.clone())
-            .context("Cannot serialize hooks file")?;
-
-        Ok(())
-    }
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-pub struct HooksRuntimeConfig {
-    pub channel_limit: usize,
-    pub data_dir: PathBuf,
-}
-
-pub struct HooksRuntime {
-    data_dir: PathBuf,
-    hooks: HookStorage,
-    javascript_runtime: JavaScript,
-}
-
-impl HooksRuntime {
-    pub async fn try_load(config: HooksRuntimeConfig) -> Result<Self> {
-        let storage =
-            HookStorage::try_load(config.data_dir.clone()).context("Cannot load hooks")?;
-
-        Ok(Self {
-            data_dir: config.data_dir,
-            hooks: storage,
-            javascript_runtime: JavaScript::new(config.channel_limit).await,
-        })
-    }
-
-    pub async fn has_hook(&self, collection_id: CollectionId, name: HookName) -> bool {
-        self.hooks.has_hook(collection_id, name).await
-    }
-
-    pub async fn get_hook(&self, collection_id: CollectionId, name: HookName) -> Option<HookValue> {
-        self.hooks.get_hook(collection_id, name).await
-    }
-
-    pub async fn list_hooks(&self, collection_id: CollectionId) -> HashMap<HookName, HookValue> {
-        self.hooks.list_hooks(collection_id).await
-    }
-
-    pub async fn delete_hook(
-        &self,
-        collection_id: CollectionId,
-        name: HookName,
-    ) -> Option<(String, HookValue)> {
-        self.hooks.delete_hook(collection_id, name).await
-    }
-
-    pub async fn insert_hook(
-        &self,
-        collection_id: CollectionId,
-        name: HookName,
-        code: String,
-    ) -> Result<()> {
-        self.hooks.insert_hook(collection_id, name, code).await
+        let key = hook_key(&collection_id, &name);
+        self.kv.insert(key, pair).await
     }
 
     pub async fn eval<T: Serialize, R: DeserializeOwned>(
@@ -211,7 +170,7 @@ impl HooksRuntime {
         name: HookName,
         input: T,
     ) -> Option<Result<R>> {
-        let hook = self.hooks.get_hook(collection_id, name).await?;
+        let hook = self.get_hook(collection_id, name).await?;
 
         let operation = match name {
             HookName::SelectEmbeddingsProperties => Operation::SelectEmbeddingsProperties,
@@ -225,16 +184,78 @@ impl HooksRuntime {
         Some(result)
     }
 
-    pub async fn commit(&self) -> Result<()> {
-        self.hooks.commit(self.data_dir.clone()).await
+    // @todo: make this more robust and possibly check arguments and returning types via AST
+    fn is_valid_js(&self, code: &str) -> bool {
+        let allocator = Allocator::default();
+        let source_type = SourceType::default();
+        let parser = Parser::new(&allocator, code, source_type);
+
+        let result = parser.parse();
+
+        result.errors.is_empty()
     }
 }
 
 impl Debug for HooksRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HooksRuntime")
-            .field("hooks", &self.hooks)
+            .field("hooks", &"...")
             .field("javascript_runtime", &"...")
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{collection_manager::sides::generic_kv::KVConfig, tests::utils::generate_new_path};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_hook_crud() {
+        let hook_runtime = HooksRuntime::new(
+            Arc::new(
+                KV::try_load(KVConfig {
+                    data_dir: generate_new_path(),
+                    sender: None,
+                })
+                .unwrap(),
+            ),
+            10,
+        )
+        .await;
+
+        let collection_id = CollectionId("1".to_string());
+        hook_runtime
+            .insert_hook(
+                collection_id.clone(),
+                HookName::SelectEmbeddingsProperties,
+                "function the_hook() { return 1; }".to_string(),
+            )
+            .await
+            .unwrap();
+
+        let hook = hook_runtime
+            .get_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .await
+            .unwrap();
+        assert_eq!(hook.code, "function the_hook() { return 1; }");
+
+        let hooks = hook_runtime
+            .list_hooks(collection_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(hooks.len(), 1);
+
+        let hook = hook_runtime
+            .delete_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .await
+            .unwrap();
+        assert_eq!(hook.0, "selectEmbeddingProperties");
+
+        let hook = hook_runtime
+            .get_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .await;
+        assert!(hook.is_none());
     }
 }

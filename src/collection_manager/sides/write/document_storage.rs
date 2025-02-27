@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use anyhow::{Context, Result};
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{
     file_utils::{create_if_not_exists, create_or_overwrite, read_file},
@@ -58,7 +58,8 @@ impl DocumentStorage {
                         continue;
                     }
                 };
-                if let Err(_) = tx.send((id, data.0)).await {
+                if let Err(e) = tx.send((id, data.0)).await {
+                    warn!("Cannot send document data: {:?}. Stopped", e);
                     break;
                 }
             }

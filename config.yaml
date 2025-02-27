@@ -8,10 +8,6 @@ log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
 
-hooks:
-    channel_limit: 500
-    data_dir: ./.data/hooks
-
 writer_side:
     output:
         type: in-memory
