@@ -106,9 +106,11 @@ mod tests {
     #[test]
     fn test_hnsw2() {
         let dim = 3;
-        let points = [vec![255.0, 0.0, 0.0],
+        let points = [
+            vec![255.0, 0.0, 0.0],
             vec![0.0, 255.0, 0.0],
-            vec![0.0, 0.0, 255.0]];
+            vec![0.0, 0.0, 255.0],
+        ];
 
         let mut index = HNSW2Index::new(dim);
         for (id, point) in points.iter().enumerate() {
