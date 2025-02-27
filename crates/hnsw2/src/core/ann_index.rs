@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 ///
 /// Example:
 ///
-/// ```
+/// ```ignore
 /// let mut bf_idx = Box::new(bf::bf::BruteForceIndex::<f32, usize>::new()); // use BruteForceIndex
 /// for i in 0..embs.len() {
 ///    bf_idx.add_node(&core::node::Node::<E, usize>::new_with_idx(&embs[i], i)); // add index
@@ -129,7 +129,7 @@ pub trait ANNIndex<E: node::FloatElement, T: node::IdxType>: Send + Sync {
 ///
 /// Example:
 ///
-/// ```
+/// ```ignore
 /// let mut bf_idx = Box::new(bf::bf::BruteForceIndex::<f32, usize>::new()); // use BruteForceIndex
 /// for i in 0..embs.len() {
 ///    bf_idx.add_node(&core::node::Node::<E, usize>::new_with_idx(&embs[i], i)); // add index
