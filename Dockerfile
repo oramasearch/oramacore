@@ -65,10 +65,6 @@ RUN apt-get update && apt-get install -y \
 # Copy flash-attention from builder
 COPY --from=flash-builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 
-# Install grpcurl
-RUN curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin && \
-  chmod +x /usr/local/bin/grpcurl
-
 WORKDIR /app
 
 # Copy requirements first to leverage caching
@@ -86,12 +82,6 @@ RUN mkdir -p /root/.cache/huggingface
 
 RUN echo '#!/bin/bash\n\
   cd ai_server && python server.py &\n\
-  \n\
-  until grpcurl -plaintext localhost:50051 orama_ai_service.LLMService/CheckHealth 2>/dev/null | grep -q "\"status\": \"OK\""; do\n\
-  echo "Waiting for Python gRPC server..."\n\
-  sleep 5\n\
-  done\n\
-  \n\
   cd /app && ./oramacore\n\
   ' > /app/start.sh
 

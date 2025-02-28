@@ -13,7 +13,6 @@ target
 docs
 .git
 tests
-benches
 otel
 .embeddings_models_cache
 ./src/ai_server/.env
