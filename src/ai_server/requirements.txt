@@ -4,7 +4,7 @@ numpy
 grpcio-tools
 grpcio
 python-dotenv
-fastembed-gpu
+fastembed-gpu==0.5.1
 nvidia-cudnn-cu12
 grpcio-reflection
 argparse
