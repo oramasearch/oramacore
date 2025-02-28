@@ -1,4 +1,5 @@
 # Set default CUDA version that can be overridden during build
+# Version should match available options at https://hub.docker.com/r/nvidia/cuda/tags
 ARG CUDA_VERSION=12.4.1
 
 # Stage 1: Rust builder
@@ -29,50 +30,51 @@ WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release
 
-# Stage 2: Final runtime
+# Stage 2: Flash-attention builder
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu22.04 AS flash-builder
+
+RUN apt-get update && apt-get install -y \
+  python3 \
+  python3-pip \
+  python3-dev \
+  build-essential \
+  ninja-build
+
+# Install build dependencies first
+RUN pip install --upgrade pip \
+  && pip install packaging \
+  && pip install torch \
+  && pip install --no-cache-dir --no-build-isolation flash-attn \
+  && rm -rf /root/.cache/pip
+
+# Stage 3: Final runtime
 FROM nvidia/cuda:${CUDA_VERSION}-cudnn-runtime-ubuntu22.04
 
-# Set non-interactive and timezone to avoid prompts during build
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
-
-# Install Python 3.11 and other dependencies
+# Install Python and other dependencies
 RUN apt-get update && apt-get install -y \
-  software-properties-common \
-  curl \
+  python3 \
+  python3-pip \
+  python3-dev \
   build-essential \
-  tzdata \
-  && ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime \
-  && dpkg-reconfigure --frontend noninteractive tzdata \
-  && add-apt-repository -y ppa:deadsnakes/ppa \
-  && apt-get update \
-  && apt-get install -y \
-  python3.11 \
-  python3.11-dev \
-  python3.11-distutils \
-  python3.11-venv \
-  && apt-get clean \
+  curl \
+  && rm -f /usr/bin/python /usr/bin/pip \
+  && ln -s /usr/bin/python3 /usr/bin/python \
+  && ln -s /usr/bin/pip3 /usr/bin/pip \
   && rm -rf /var/lib/apt/lists/*
 
-# Install pip for Python 3.11
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py \
-  && python3.11 get-pip.py \
-  && rm get-pip.py
+# Copy flash-attention from builder
+COPY --from=flash-builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 
-# Set Python 3.11 as the default
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
-  && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-
-# Create a virtual environment for better isolation
-RUN python3.11 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install grpcurl
+RUN curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | tar -xz -C /usr/local/bin && \
+  chmod +x /usr/local/bin/grpcurl
 
 WORKDIR /app
 
 # Copy requirements first to leverage caching
 COPY src/ai_server/requirements.txt /app/requirements.txt
 
-# Install Python dependencies
+# Install Python dependencies (excluding flash-attn since we copied it)
 RUN pip install --upgrade pip && \
   pip install --no-cache-dir -r requirements.txt && \
   rm -rf /root/.cache/pip
