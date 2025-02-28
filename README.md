@@ -64,7 +64,7 @@ import { CollectionManager } from "@orama/core";
 const collection = new CollectionManager({
     url: "http://localhost:8080",
     collectionID: "<COLLECTION_ID>",
-    writeAPI: "<write_api_key>",
+    writeAPIKey: "<write_api_key>",
 });
 
 // You can insert a single document

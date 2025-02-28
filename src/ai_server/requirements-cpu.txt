@@ -4,7 +4,7 @@ numpy
 grpcio-tools
 grpcio
 python-dotenv
-fastembed
+fastembed==0.5.1
 grpcio-reflection
 argparse
 --extra-index-url https://download.pytorch.org/whl/cu124
