@@ -3,12 +3,6 @@ title: Configuration
 description: Learn how to configure OramaCore
 ---
 
-<Callout type='warn'>
-OramaCore is currently under active development. Our goal is to release the first Beta version (**v0.1.0**) on **Jan 31st, 2025**, and the first stable version (**v1.0.0**) on **Feb 28th, 2025**.
-
-While the system is already quite stable, please note that APIs will undergo changes in **v0.1.0** and **v1.0.0**.
-</Callout>
-
 ## Configuring OramaCore
 
 OramaCore uses a straightforward `config.yaml` file for configuration and customization.
@@ -22,28 +16,42 @@ http:
     allow_cors: true
     with_prometheus: true
 
+log:
+    # Comment the following line to disable the logging
+    file_path: "./log.log"
+
 writer_side:
-    output: in-memory
+    output:
+        type: in-memory
+
     # Replace the following value with your own API key
-    master_api_key: foobar
+    master_api_key: my-master-api-key
     config:
         data_dir: ./.data/writer
         # The maximum number of embeddings that can be stored in the queue
         # before the writer starts to be blocked
-        # NB: the elements are in memory, so be careful with this value
+        # Note: the elements are in memory, so be careful with this value
         embedding_queue_limit: 50000
         # The number of the document insertions after the write side will commit the changes
-        insert_batch_commit_size: 50000
+        insert_batch_commit_size: 50000000
         # The default embedding model used to calculate the embeddings
         # if not specified in the collection creation
-        default_embedding_model: MultilingualE5Small
+        default_embedding_model: BGESmall
+        # The maximum number of request to javascript runtime that can be stored in the queue
+        # Note: the elements are in memory, so be careful with this value
+        javascript_queue_limit: 500000
+        # Set interval for commiting the changes to the disk
+        commit_interval: 1m
 
 reader_side:
-    input: in-memory
+    input:
+        type: in-memory
     config:
         data_dir: ./.data/reader
         # The number of the write operation after the read side will commit the changes
-        insert_batch_commit_size: 50000
+        insert_batch_commit_size: 50000000
+        # Set interval for commiting the changes to the disk
+        commit_interval: 1m
 
 ai_server:
     scheme: http
@@ -54,12 +62,16 @@ ai_server:
     total_threads: 12
 
     embeddings:
-        default_model_group: multilingual
+        default_model_group: small
         dynamically_load_models: false
         execution_providers:
             - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
+
+    LLMs:
+        default_model:
+            id: "microsoft/Phi-3.5-mini-instruct"
 ```
 
 All the options above are optional, and you can customize them as needed.
@@ -113,3 +125,7 @@ The `embeddings` section configures the embeddings calculation. Here are the ava
 - `dynamically_load_models`: Whether to dynamically load the models. By default, it's set to `false`.
 - `execution_providers`: The execution providers used to calculate the embeddings. By default, it's set to `CUDAExecutionProvider` and `CPUExecutionProvider`.
 - `total_threads`: The total number of threads used to calculate the embeddings. By default, it's set to `8`.
+
+The `LLMs` section configures the Language Models. Here are the available options:
+
+- `default_model`: The default model used to perform the Language Model operations. By default, it's set to `microsoft/Phi-3.5-mini-instruct`. You can set it to any model available in the [Hugging Face Model Hub](https://huggingface.co/models).

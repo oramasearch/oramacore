@@ -61,9 +61,10 @@ You can customize the system to fit your specific needs. Check out the [configur
 To import data into OramaCore, you need to create a collection. A collection is a group of documents that you can search and interact with. You can create a collection by sending a POST request to the `/collections` endpoint with the collection name and the API Keys to secure it.
 The request should include an Authorization header with the master API key. Learn more about [API Keys](/docs/guide/api-keys).
 
-```sh
+<Tabs groupId='create' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections \
+  http://localhost:8080/v1/collections/create \
   -H 'Authorization: Bearer <master-api-key>' \
   -d '{
     "id": "products",
@@ -72,33 +73,95 @@ curl -X POST \
   }'
 ```
 
+```js tab="JavaScript"
+import { OramaCoreManager } from '@orama/core'
+
+const orama = new OramaCoreManager({
+  url: 'http://localhost:8080',
+  masterAPIKey: '<master-api-key>'
+})
+
+const newCollection = await orama.createCollection({
+  id: 'products',
+  writeAPIKey: 'my-write-api-key',
+  readAPIKey: 'my-read-api-key'
+})
+```
+</Tabs>
+
 ### Add documents
 
 Once you have created a collection, you can add documents to it. A document is a JSON object that contains the data you want to search. You can add a document by sending a POST request to the `/collections/:collection_id/documents` endpoint with the document data.
 
-```sh
-curl -X PATCH \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+<Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+curl -X POST \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/insert \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <write_api_key>' \
-  -d '{
-    "id": "1",
+  -d '[{
     "title": "My first document",
-    "content": "The quick brown fox jumps over the lazy dog."
-  }'
+    "content": "This is the content of my first document."
+  }]'
 ```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>'
+  writeAPI: '<write_api_key>',
+})
+
+// You can insert a single document
+await collection.insert({
+  title: 'My first document',
+  content: 'This is the content of my first document.'
+})
+
+// Or you can insert multiple documents by passing an array of objects
+await collection.insert([
+  {
+    title: 'My first document',
+    content: 'This is the content of my first document.'
+  },
+  {
+    title: 'My second document',
+    content: 'This is the content of my second document.'
+  }
+])
+```
+</Tabs>
+
 You can explore more about [documents](/docs/apis/insert-documents) and how to insert documents into a collection.
 
 ### Search
 
 Now that you have added documents to your collection, you can perform your first search query using the `/search` endpoint. You can send a POST request to the `/search` endpoint with the search query and the collection ID to get the results.
 
-```sh
+<Tabs groupId='search' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
   -H 'Content-Type: application/json' \
   -d '{ "term": "The quick brown fox" }'
 ```
+
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>',
+  readAPIKey: '<read_api_key>',
+})
+
+const results = await collection.search({
+  term: 'The quick brown fox'
+})
+```
+</Tabs>
 
 You can now perform unlimited, fast searches on your data using OramaCore! Check out the supported [Search Parameters](/docs/apis/search-documents#search-parameters) to learn more about how to customize your search queries results.
 

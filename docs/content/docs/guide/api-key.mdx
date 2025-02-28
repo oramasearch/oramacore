@@ -40,18 +40,19 @@ Example:
 <Tabs groupId='create' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections \
-  -H 'Content-Type: application/json' \
+  http://localhost:8080/v1/collections/create \
   -H 'Authorization: Bearer <master-api-key>' \
-  -d '{ 
+  -d '{
     "id": "products",
-    "read_api_key": "my-read-api-key",
-    "write_api_key": "my-write-api-key"
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key"
   }'
 ```
 </Tabs>
 
 As you can see, when creating a new collection, you will need to create the `read_api_key` and `write_api_key` as well. You will them use them to perform read and write operations on the collection.
+
+When using the JavaScript client, OramaCore will automatically set the correct API key for you. If you're connecting to your OramaCore instance from a web browser, please make sure to never expose the master API key to the client.
 
 ## Write API Key
 
@@ -76,18 +77,18 @@ Example:
 
 <Tabs groupId='insert' persist items={['cURL']}>
 ```bash tab="cURL"
-curl -X PATCH \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/documents \
+curl -X POST \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/insert \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <write-api-key>' \
-  -d '[
-    {
-      "title": "My first document",
-      "content": "This is the content of my first document."
-    }
-  ]'
+  -H 'Authorization: Bearer <write_api_key>' \
+  -d '[{
+    "title": "My first document",
+    "content": "This is the content of my first document."
+  }]'
 ```
 </Tabs>
+
+Like with the master API key, when using the JavaScript client, OramaCore will automatically set the correct API key for you. If you're connecting to your OramaCore instance from a web browser, please make sure to never expose the write API key to the client.
 
 ## Read API Key
 
@@ -112,9 +113,10 @@ Example:
 <Tabs groupId='search' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v0/collections/{COLLECTION_ID}/search?api-key=<read-api-key> \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/search?api-key=<read_api_key> \
   -H 'Content-Type: application/json' \
-  -d '{ "term": "How to insert documents in OramaCore?" }'
+  -d '{ "term": "The quick brown fox" }'
 ```
 </Tabs>
 
+If you're using the JavaScript client, you can share the read API key with the client, as it only allows read operations.

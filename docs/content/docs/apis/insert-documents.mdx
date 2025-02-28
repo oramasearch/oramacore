@@ -15,7 +15,7 @@ Once you have a collection, you can start inserting documents using the followin
 
 <Tabs groupId='insert' persist items={['cURL', 'JavaScript']}>
 ```bash tab="cURL"
-curl -X PATCH \
+curl -X POST \
   http://localhost:8080/v1/collections/{COLLECTION_ID}/insert \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <write_api_key>' \
