@@ -85,6 +85,9 @@ pub async fn build_orama(
 ) -> Result<(Option<Arc<WriteSide>>, Option<Arc<ReadSide>>)> {
     info!("Building ai_service");
     let ai_service = AIService::new(config.ai_server);
+
+    ai_service.wait_ready().await?;
+
     let ai_service = Arc::new(ai_service);
 
     #[cfg(feature = "writer")]

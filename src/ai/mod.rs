@@ -1,5 +1,6 @@
-use std::{net::IpAddr, pin::Pin, str::FromStr, task::Poll};
+use std::{net::IpAddr, pin::Pin, str::FromStr, task::Poll, time::Duration};
 
+use backoff::ExponentialBackoff;
 use futures::Stream;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
@@ -9,7 +10,7 @@ use serde::Deserialize;
 
 use anyhow::{anyhow, Context, Result};
 use tonic::{metadata::MetadataValue, transport::Channel, Request, Response, Status, Streaming};
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 use crate::{
     collection_manager::dto::{ApiKey, InteractionMessage},
@@ -59,6 +60,21 @@ impl AIService {
         let pool = Pool::builder().max_open(15).build(GrpcManager { config });
 
         Self { pool }
+    }
+
+    pub async fn wait_ready(&self) -> Result<()> {
+        loop {
+            match self.pool.get().await {
+                Ok(_) => {
+                    info!("AI service is ready");
+                    break Ok(());
+                }
+                Err(err) => {
+                    info!("AI service is not ready: {}. Waiting again...", err);
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
     }
 
     async fn embed(
@@ -437,6 +453,7 @@ impl Stream for ChatStream {
     }
 }
 
+#[derive(Debug)]
 struct GrpcManager {
     config: AIServiceConfig,
 }
@@ -454,16 +471,36 @@ impl Manager for GrpcManager {
             .authority(format!("{}:{}", self.config.host, self.config.port))
             .path_and_query("/")
             .build()
-            .unwrap();
+            .context("Cannot build URI")?;
 
         info!("Connecting to gRPC");
-        let endpoint: tonic::transport::Channel = tonic::transport::Endpoint::new(uri.clone())?
-            .connect()
-            .await
-            .with_context(move || format!("Cannot connect to {:?}", uri))?;
-        info!("Connected to gRPC");
+        use backoff::{future::retry, Error};
+        use tonic::transport::{Channel, Endpoint};
 
-        let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(endpoint)
+        let uri = &uri;
+        let channel: std::result::Result<Channel, backoff::Error<anyhow::Error>> =
+            retry(ExponentialBackoff::default(), || async {
+                debug!("Trying to connect to {:?}", uri);
+                let endpoint: Endpoint = Endpoint::new(uri.clone())
+                    .context("Cannot create endpoint")
+                    .map_err(Error::permanent)?;
+
+                let channel: Channel = endpoint
+                    .connect()
+                    .await
+                    .with_context(move || format!("Cannot connect to {:?}", uri))
+                    .map_err(Error::transient)?;
+
+                Ok(channel)
+            })
+            .await;
+
+        let channel = match channel {
+            Ok(channel) => channel,
+            Err(err) => return Err(anyhow!("Cannot connect to gRPC: {}", err)),
+        };
+
+        let client: LlmServiceClient<tonic::transport::Channel> = LlmServiceClient::new(channel)
             .max_decoding_message_size(16_777_216) // 16MB
             .max_encoding_message_size(16_777_216); // 16MB
 
