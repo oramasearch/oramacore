@@ -1,4 +1,4 @@
-# OramaCore
+![OramaCore](/docs/public/oramacore.png)
 
 **OramaCore** is the AI runtime you need for your projects, answer engines,
 copilots, and search.
