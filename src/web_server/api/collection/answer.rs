@@ -1,6 +1,6 @@
 use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
-    ApiKey, HybridMode, Interaction, InteractionMessage, Limit, SearchMode, SearchParams,
+    ApiKey, HybridMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
     SearchResult, Similarity,
 };
 use crate::collection_manager::sides::segments::Segment;
@@ -106,11 +106,21 @@ async fn planned_answer_v1(
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
 
+        // Always make sure that the conversation is not empty, or else the AI will not be able to
+        // determine the segment and trigger.
+        let segments_and_triggers_conversation = match conversation.len() {
+            0 => Some(vec![InteractionMessage {
+                role: Role::User,
+                content: query.clone(),
+            }]),
+            _ => Some(conversation.clone()),
+        };
+
         let mut segments_and_triggers_stream = select_triggers_and_segments(
             read_side.clone(),
             api_key.clone(),
             CollectionId(id),
-            Some(conversation.clone()),
+            segments_and_triggers_conversation,
         )
         .await;
 
@@ -256,11 +266,21 @@ async fn answer_v1(
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
 
+        // Always make sure that the conversation is not empty, or else the AI will not be able to
+        // determine the segment and trigger.
+        let segments_and_triggers_conversation = match conversation.len() {
+            0 => Some(vec![InteractionMessage {
+                role: Role::User,
+                content: query.clone(),
+            }]),
+            _ => Some(conversation.clone()),
+        };
+
         let mut segments_and_triggers_stream = select_triggers_and_segments(
             read_side.clone(),
             read_api_key.clone(),
             collection_id.clone(),
-            Some(conversation.clone()),
+            segments_and_triggers_conversation,
         )
         .await;
 
@@ -269,7 +289,7 @@ async fn answer_v1(
                 AudienceManagementResult::Segment(s) => {
                     segment = s;
                 }
-                AudienceManagementResult::ChosenSegment(s) => {
+                AudienceManagementResult::ChosenSegment(_s) => {
                     unreachable!();
                 }
                 AudienceManagementResult::Trigger(t) => {

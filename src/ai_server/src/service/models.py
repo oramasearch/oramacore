@@ -96,6 +96,7 @@ class ModelsManager:
         tokenizer = model_config["tokenizer"]
 
         action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
+        max_tokens = action_data.get("max_tokens", 1024)
 
         local_history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
         local_history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
@@ -106,7 +107,7 @@ class ModelsManager:
         inputs = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
         inputs = {key: tensor.to(self.device) for key, tensor in inputs.items()}
 
-        outputs = model.generate(**inputs, max_new_tokens=512, temperature=0.1)
+        outputs = model.generate(**inputs, max_new_tokens=max_tokens, temperature=0.1)
         decoded_output = tokenizer.decode(outputs[0][inputs["input_ids"].size(1) :], skip_special_tokens=True)
 
         if action_data["returns"] == RETURN_TYPE_JSON:
@@ -123,6 +124,7 @@ class ModelsManager:
         tokenizer = model_config["tokenizer"]
 
         action_data = DEFAULT_PARTY_PLANNER_ACTIONS_DATA[action]
+        max_tokens = action_data.get("max_tokens", 1024)
 
         local_history.insert(0, {"role": "system", "content": action_data["prompt:system"]})
         local_history.append({"role": "user", "content": action_data["prompt:user"](input, description)})
@@ -137,7 +139,7 @@ class ModelsManager:
 
         generation_kwargs = dict(
             **inputs,
-            max_new_tokens=512,
+            max_new_tokens=max_tokens,
             temperature=0.1,
             do_sample=True,
             use_cache=True,

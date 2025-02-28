@@ -51,6 +51,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
         "stream": False,
+        "max_tokens": 128,
     },
     "GENERATE_QUERIES": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -74,11 +75,13 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
         "stream": False,
+        "max_tokens": 256,
     },
     "PERFORM_ORAMA_SEARCH": {
         "side": EXECUTION_SIDE_ORAMACORE,
         "returns": RETURN_TYPE_JSON,
         "stream": False,
+        "max_tokens": -1,
     },
     "DESCRIBE_INPUT_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -104,6 +107,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_JSON,
         "stream": False,
+        "max_tokens": 512,
     },
     "IMPROVE_INPUT": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -119,6 +123,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_TEXT,
         "stream": False,
+        "max_tokens": 4096,
     },
     "CREATE_CODE": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -138,6 +143,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": "JSON",
         "stream": True,
+        "max_tokens": 4096,
     },
     "ASK_FOLLOWUP": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -150,6 +156,7 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": COMMON_USER_PROMPT,
         "returns": RETURN_TYPE_TEXT,
         "stream": True,
+        "max_tokens": 256,
     },
     "GIVE_REPLY": {
         "side": EXECUTION_SIDE_PYTHON,
@@ -179,5 +186,6 @@ DEFAULT_PARTY_PLANNER_ACTIONS_DATA = {
         "prompt:user": lambda input, context: f"### Question\n{input}\n\n### Context\n{context}",
         "returns": RETURN_TYPE_TEXT,
         "stream": True,
+        "max_tokens": 4096,
     },
 }

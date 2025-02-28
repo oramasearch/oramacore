@@ -28,6 +28,7 @@ TemplateKey = Literal[
     "autoquery:user",
 ]
 
+newline = "\n"
 
 PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
     # ------------------------------
@@ -162,7 +163,14 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
           Reply with a valid JSON and nothing more.
         """
     ),
-    "segmenter:user": lambda input, context: f"### Personas\n{context}\n\n### Conversation\n{input}",
+    "segmenter:user": lambda input, context: textwrap.dedent(
+        f"""### Personas
+          {input}
+
+          ### Conversation
+          {context}
+        """
+    ),
     # ------------------------------
     # Trigger
     # ------------------------------
@@ -206,7 +214,14 @@ PROMPT_TEMPLATES: Dict[TemplateKey, PromptTemplate[Any]] = {
           Reply with a valid JSON and nothing more.
         """
     ),
-    "trigger:user": lambda input, context: f"### Triggers\n{context}\n\n### Conversation\n{input}",
+    "trigger:user": lambda input, context: textwrap.dedent(
+        f"""### Triggers
+          {input}
+
+          ### Conversation
+          {context}
+        """
+    ),
     # ------------------------------
     # AutoQuery
     # ------------------------------

@@ -78,4 +78,4 @@ ai_server:
 
     LLMs:
         default_model:
-            id: "meta-llama/Llama-3.2-3B-Instruct"
+            id: "microsoft/Phi-3.5-mini-instruct"

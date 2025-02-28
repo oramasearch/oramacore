@@ -185,7 +185,7 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             full_conversation = ""
             for message in request.conversation.messages:
                 role = ProtoRole.Name(message.role).lower()
-                full_conversation += f"Role: {role}\nContent: {message.content}\n"
+                full_conversation += f"**{role}**: {message.content}\n"
 
             segments_data = [
                 {
@@ -208,6 +208,8 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
                 },
             ]
 
+            print(json.dumps(history, indent=2))
+
             response = self.models_manager.chat(model_id=model_name.lower(), history=history, prompt="")
 
             repaired_response = repair_json(response)
@@ -216,6 +218,14 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             selected_segment = (
                 repaired_response_json[0] if isinstance(repaired_response_json, list) else repaired_response
             )
+
+            # Could not determine a valid segment
+            if not selected_segment:
+                return ProtoSegmentResponse(
+                    selected_segment="",
+                    name="",
+                    probability=0.0,
+                )
 
             return ProtoSegmentResponse(
                 id=selected_segment.get("id", ""),
@@ -273,6 +283,15 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             selected_trigger = (
                 repaired_response_json[0] if isinstance(repaired_response_json, list) else repaired_response
             )
+
+            # Could not determine a valid trigger
+            if not selected_trigger:
+                return ProtoTriggerResponse(
+                    selected_trigger="",
+                    name="",
+                    response="",
+                    probability=0.0,
+                )
 
             return ProtoTriggerResponse(
                 id=selected_trigger.get("id", ""),
