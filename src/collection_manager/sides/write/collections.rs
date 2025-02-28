@@ -150,6 +150,7 @@ impl CollectionsWriter {
         };
 
         let mut collections = self.collections.write().await;
+
         if collections.contains_key(&id) {
             // This error should be typed.
             // TODO: create a custom error type

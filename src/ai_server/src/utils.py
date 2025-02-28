@@ -4,15 +4,9 @@ from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
 
-BASE_MODEL = "microsoft/Phi-3.5-mini-instruct"
-
+BASE_MODEL = "Qwen/Qwen2.5-3B"
 DEFAULT_GENERAL_MODEL = BASE_MODEL
-DEFAULT_VISION_MODEL = BASE_MODEL
-DEFAULT_CONTENT_EXPANSION_MODEL = BASE_MODEL
-DEFAULT_GOOGLE_QUERY_TRANSLATOR_MODEL = BASE_MODEL
-DEFAULT_ANSWER_MODEL = BASE_MODEL
-DEFAULT_ANSWER_PLANNING_MODEL = BASE_MODEL
-DEFAULT_ACTION_MODEL = BASE_MODEL
+DEFAULT_CONFIG_PATH = "../../config.yaml"
 
 
 @dataclass
@@ -80,10 +74,12 @@ class OramaAIConfig:
     default_model: Optional[str] = BASE_MODEL
 
     def __post_init__(self):
-        if Path("../../config.yaml").exists():
+        if Path(DEFAULT_CONFIG_PATH).exists():
             self.update_from_yaml()
+        elif Path("../../config.yml").exists():
+            self.update_from_yaml("../../config.yml")
 
-    def update_from_yaml(self, path: str = "../../config.yaml"):
+    def update_from_yaml(self, path: str = DEFAULT_CONFIG_PATH):
         with open(path) as f:
             config = yaml.safe_load(f)
             config = config.get("ai_server")
