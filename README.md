@@ -11,7 +11,7 @@ run your own custom agents on yoru data, and many more utilities.
 
 Pull the Docker image:
 
-```bash
+```sh
 docker pull oramasearch/oramacore:latest
 ```
 
@@ -19,7 +19,7 @@ Then compile your
 [configuration file](https://docs.oramacore.com/docs/guide/configuration) and
 run it:
 
-```bash
+```sh
 docker run \
   -p 8080:8080 \
   -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
@@ -59,31 +59,31 @@ const newCollection = await orama.createCollection({
 Then, insert some data:
 
 ```js
-import { CollectionManager } from '@orama/core'
- 
+import { CollectionManager } from "@orama/core";
+
 const collection = new CollectionManager({
-  url: 'http://localhost:8080',
-  collectionID: '<COLLECTION_ID>'
-  writeAPI: '<write_api_key>',
-})
- 
+    url: "http://localhost:8080",
+    collectionID: "<COLLECTION_ID>",
+    writeAPI: "<write_api_key>",
+});
+
 // You can insert a single document
 await collection.insert({
-  title: 'My first document',
-  content: 'This is the content of my first document.'
-})
- 
+    title: "My first document",
+    content: "This is the content of my first document.",
+});
+
 // Or you can insert multiple documents by passing an array of objects
 await collection.insert([
-  {
-    title: 'My first document',
-    content: 'This is the content of my first document.'
-  },
-  {
-    title: 'My second document',
-    content: 'This is the content of my second document.'
-  }
-])
+    {
+        title: "My first document",
+        content: "This is the content of my first document.",
+    },
+    {
+        title: "My second document",
+        content: "This is the content of my second document.",
+    },
+]);
 ```
 
 OramaCore will automatically generate highly optimized embeddings for you and
