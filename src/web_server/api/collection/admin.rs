@@ -14,7 +14,10 @@ use tracing::{error, info};
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, ReindexConfig},
+        dto::{
+            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
+            ReindexConfig, SwapCollections,
+        },
         sides::WriteSide,
     },
     types::{CollectionId, DocumentList},
@@ -28,6 +31,8 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(add_documents())
         .add(delete_documents())
         .add(reindex())
+        .add(create_collection_from())
+        .add(swap_collections())
         .with_state(write_side)
 }
 
@@ -165,6 +170,68 @@ async fn add_documents(
         StatusCode::OK,
         Json(json!({ "message": "documents added" })),
     ))
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/create-from",
+    description = "Create a collection with same configuration as another collection"
+)]
+async fn create_collection_from(
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+    Json(json): Json<CreateCollectionFrom>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    match write_side.create_collection_from(write_api_key, json).await {
+        Ok(collection_id) => Ok((
+            StatusCode::OK,
+            Json(json!({ "collection_id": collection_id })),
+        )),
+        Err(e) => {
+            error!("{e:?}");
+            error!("Error creating collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("{}", e) })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/swap",
+    description = "Swap two collections"
+)]
+async fn swap_collections(
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+    Json(json): Json<SwapCollections>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    match write_side.swap_collections(write_api_key, json).await {
+        Ok(collection_id) => Ok((
+            StatusCode::OK,
+            Json(json!({ "collection_id": collection_id })),
+        )),
+        Err(e) => {
+            error!("{e:?}");
+            error!("Error swapping collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("{}", e) })),
+            ))
+        }
+    }
 }
 
 #[endpoint(

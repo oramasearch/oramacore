@@ -272,6 +272,24 @@ pub struct ReindexConfig {
     pub embeddings: Option<CreateCollectionEmbeddings>,
 }
 
+#[derive(Debug, Deserialize, ToSchema, Clone)]
+pub struct CreateCollectionFrom {
+    pub r#from: CollectionId,
+
+    #[serde(default)]
+    #[schema(inline)]
+    pub language: Option<LanguageDTO>,
+    #[serde(default)]
+    #[schema(inline)]
+    pub embeddings: Option<CreateCollectionEmbeddings>,
+}
+
+#[derive(Debug, Deserialize, ToSchema, Clone)]
+pub struct SwapCollections {
+    pub from: CollectionId,
+    pub to: CollectionId,
+}
+
 impl TryFrom<serde_json::Value> for CreateCollection {
     type Error = anyhow::Error;
 
