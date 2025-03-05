@@ -43,8 +43,8 @@ use crate::{
     ai::AIService,
     collection_manager::{
         dto::{
-            ApiKey, CollectionDTO, CreateCollection, DeleteDocuments, InsertTriggerParams,
-            ReindexConfig,
+            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
+            InsertTriggerParams, ReindexConfig, SwapCollections,
         },
         sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
@@ -413,22 +413,15 @@ impl WriteSide {
         Ok(Some(collection.as_dto().await))
     }
 
-    pub async fn reindex(
+    pub async fn create_collection_from(
         &self,
         write_api_key: ApiKey,
-        collection_id: CollectionId,
-        reindex_config: ReindexConfig,
-    ) -> Result<()> {
-        info!("Reindexing collection {:?}", collection_id);
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        request: CreateCollectionFrom,
+    ) -> Result<CollectionId> {
+        info!("create temporary collection");
+        self.check_write_api_key(request.from.clone(), write_api_key)
             .await
             .context("Check write api key fails")?;
-
-        let collection = self
-            .collections
-            .get_collection(collection_id.clone())
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
         let collection_id_tmp = cuid2::create_id();
         let collection_id_tmp = CollectionId(collection_id_tmp);
@@ -436,19 +429,77 @@ impl WriteSide {
         let mut option = self
             .collections
             .collection_options
-            .get(&collection_id)
+            .get(&request.from)
             .ok_or_else(|| anyhow!("Collection options not found"))?
             .clone();
-        option.language = reindex_config.language.or(option.language);
-        option.embeddings = reindex_config.embeddings.or(option.embeddings);
+        option.language = request.language.or(option.language);
+        option.embeddings = request.embeddings.or(option.embeddings);
         option.id = collection_id_tmp.clone();
-
-        let document_ids = collection.get_document_ids().await;
-        drop(collection);
 
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
+
+        Ok(collection_id_tmp)
+    }
+
+    pub async fn swap_collections(
+        &self,
+        write_api_key: ApiKey,
+        request: SwapCollections,
+    ) -> Result<()> {
+        info!("Replacing collection");
+        self.check_write_api_key(request.from.clone(), write_api_key.clone())
+            .await
+            .context("Check write api key fails")?;
+        self.check_write_api_key(request.to.clone(), write_api_key)
+            .await
+            .context("Check write api key fails")?;
+
+        self.collections
+            .replace(request.from.clone(), request.from.clone())
+            .await
+            .context("Cannot replace collection")?;
+        info!("Replaced");
+
+        info!("Substitute collection");
+        self.sender
+            .send(WriteOperation::SubstituteCollection {
+                subject_collection_id: request.from,
+                target_collection_id: request.to,
+            })
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn reindex(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        reindex_config: ReindexConfig,
+    ) -> Result<()> {
+        info!("Reindexing collection {:?}", collection_id);
+        let collection_id_tmp = self
+            .create_collection_from(
+                write_api_key.clone(),
+                CreateCollectionFrom {
+                    from: collection_id.clone(),
+                    embeddings: reindex_config.embeddings.clone(),
+                    language: reindex_config.language,
+                },
+            )
+            .await
+            .context("Cannot create temporary collection")?;
+
+        let collection = self
+            .collections
+            .get_collection(collection_id.clone())
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        let document_ids = collection.get_document_ids().await;
+        drop(collection);
 
         let collection = self
             .collections
@@ -492,20 +543,15 @@ impl WriteSide {
         }
         drop(collection);
 
-        info!("Replacing collection");
-        self.collections
-            .replace(collection_id_tmp.clone(), collection_id.clone())
-            .await
-            .context("Cannot replace collection")?;
-        info!("Replaced");
-
-        info!("Substitute collection");
-        self.sender
-            .send(WriteOperation::SubstituteCollection {
-                subject_collection_id: collection_id_tmp,
-                target_collection_id: collection_id,
-            })
-            .await?;
+        self.swap_collections(
+            write_api_key,
+            SwapCollections {
+                from: collection_id_tmp.clone(),
+                to: collection_id.clone(),
+            },
+        )
+        .await
+        .context("Cannot swap collections")?;
 
         Ok(())
     }
