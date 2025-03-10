@@ -78,4 +78,4 @@ ai_server:
 
     LLMs:
         default_model:
-            id: "microsoft/Phi-3.5-mini-instruct"
+            id: "Qwen/Qwen2.5-1.5B-Instruct"

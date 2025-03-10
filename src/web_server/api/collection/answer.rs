@@ -1,9 +1,10 @@
+use crate::ai::party_planner::PartyPlanner;
 use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, HybridMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
     SearchResult, Similarity,
 };
-use crate::collection_manager::sides::segments::{Segment, SegmentInterface};
+use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::triggers::{SelectedTrigger, Trigger};
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
@@ -26,8 +27,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-
-use super::segments;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -81,8 +80,8 @@ async fn planned_answer_v1(
     let collection_id = CollectionId(id.clone()).0;
     let read_side = read_side.clone();
 
-    let query = interaction.query;
-    let conversation = interaction.messages;
+    let query = interaction.query.clone();
+    let conversation = interaction.messages.clone();
     let api_key = query_params.api_key;
 
     read_side
@@ -95,8 +94,6 @@ async fn planned_answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let ai_service = read_side.get_ai_service();
-
         let _ = tx
             .send(Ok(Event::default().data(
                 serde_json::to_string(&SseMessage::Acknowledge {
@@ -200,46 +197,28 @@ async fn planned_answer_v1(
             }
         }
 
-        let mut stream = ai_service
-            .planned_answer_stream(
-                query,
-                collection_id,
-                Some(conversation),
-                api_key,
-                segment,
-                trigger,
-            )
-            .await
-            .unwrap();
+        let mut party_planner_stream = PartyPlanner::run(
+            collection_id.clone(),
+            api_key.clone(),
+            interaction.query.clone(),
+            interaction.messages.clone(),
+            segment.clone(),
+            trigger.clone(),
+        );
 
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(response) => {
-                    if tx
-                        .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: response.data,
-                            })
-                            .unwrap(),
-                        )))
-                        .await
-                        .is_err()
-                    {
-                        break; // Client disconnected
-                    }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Error {
-                                message: format!("Error during streaming: {}", e),
-                            })
-                            .unwrap(),
-                        )))
-                        .await;
-                    break;
-                }
-            }
+        while let Some(message) = party_planner_stream.next().await {
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    serde_json::to_string(&SseMessage::Message {
+                        message: json!({
+                            "action": message.action,
+                            "result": message.result,
+                        })
+                        .to_string(),
+                    })
+                    .unwrap(),
+                )))
+                .await;
         }
     });
 

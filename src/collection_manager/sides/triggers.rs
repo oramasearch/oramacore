@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TriggerIdContent {
@@ -22,6 +22,17 @@ pub struct Trigger {
     pub description: String,
     pub response: String,
     pub segment_id: Option<String>,
+}
+
+impl fmt::Display for Trigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let displayed = format!(
+            "**name**: {}\n**description**: {}\n**response**: {}",
+            self.name, self.description, self.response
+        );
+
+        write!(f, "{}", displayed)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

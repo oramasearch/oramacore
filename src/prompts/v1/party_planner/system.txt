@@ -22,10 +22,10 @@ You must return a JSON object that looks like this:
 
 {
     "actions": [
-    {
-        "step": "action_name",
-        "description": "Specific description of how and why to apply this action"
-    }
+        {
+            "step": "action_name",
+            "description": "Specific description of how and why to apply this action"
+        }
     ]
 }
 

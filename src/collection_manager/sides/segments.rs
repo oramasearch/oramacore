@@ -7,6 +7,7 @@ use crate::{
     types::CollectionId,
 };
 use anyhow::{Context, Result};
+use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -16,6 +17,21 @@ pub struct Segment {
     pub name: String,
     pub description: String,
     pub goal: Option<String>,
+}
+
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut displayed = format!(
+            "**name**: {}\n**description**: {}",
+            self.name, self.description
+        );
+
+        if let Some(goal) = &self.goal {
+            displayed.push_str(&format!("\n**goal**: {}", goal));
+        }
+
+        write!(f, "{}", displayed)
+    }
 }
 
 impl From<crate::ai::Segment> for Segment {
