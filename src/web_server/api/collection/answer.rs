@@ -3,7 +3,7 @@ use crate::collection_manager::dto::{
     ApiKey, HybridMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
     SearchResult, Similarity,
 };
-use crate::collection_manager::sides::segments::Segment;
+use crate::collection_manager::sides::segments::{Segment, SegmentInterface};
 use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
@@ -25,6 +25,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+
+use super::segments;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -445,10 +447,14 @@ async fn select_triggers_and_segments(
             return;
         };
 
-        let chosen_segment = ai_service
-            .get_segment(all_segments, conversation.clone())
+        let chosen_segment = read_side
+            .perform_segment_selection(
+                read_api_key.clone(),
+                collection_id.clone(),
+                conversation.clone(),
+            )
             .await
-            .expect("Failed to get segment");
+            .expect("Failed to get chosen segment");
 
         match chosen_segment {
             None => {

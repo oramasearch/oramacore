@@ -23,6 +23,8 @@ use crate::{
     },
 };
 
+pub mod vllm;
+
 tonic::include_proto!("orama_ai_service");
 
 impl OramaModel {
