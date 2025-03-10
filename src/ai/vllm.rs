@@ -71,6 +71,8 @@ pub fn run_known_prompt(prompt: KnownPrompts, variables: Vec<(String, String)>) 
         },
     ];
 
+    dbg!(&messages);
+
     let response = client
         .chat_completion_create(&ChatBody {
             model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
@@ -87,6 +89,8 @@ pub fn run_known_prompt(prompt: KnownPrompts, variables: Vec<(String, String)>) 
             user: None,
         })
         .expect("Failed to get response");
+
+    dbg!(&response);
 
     match response.choices.first() {
         Some(choice) => match &choice.message {

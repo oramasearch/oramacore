@@ -1,5 +1,9 @@
 use super::generic_kv::{format_key, KV};
-use crate::{ai::AIService, collection_manager::dto::InteractionMessage, types::CollectionId};
+use crate::{
+    ai::{vllm, AIService},
+    collection_manager::dto::InteractionMessage,
+    types::CollectionId,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -18,6 +22,14 @@ pub struct Trigger {
     pub description: String,
     pub response: String,
     pub segment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectedTrigger {
+    pub id: String,
+    pub name: String,
+    pub response: String,
+    pub probability: f32,
 }
 
 pub struct TriggerInterface {
@@ -97,11 +109,35 @@ impl TriggerInterface {
 
     pub async fn perform_trigger_selection(
         &self,
-        collection_id: CollectionId,
+        _collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
-    ) -> Result<crate::ai::TriggerResponse> {
-        let triggers = self.list_by_collection(collection_id).await?;
-        self.ai_service.get_trigger(triggers, conversation).await
+        triggers: Vec<Trigger>,
+    ) -> Result<Option<SelectedTrigger>> {
+        let response = vllm::run_known_prompt(
+            vllm::KnownPrompts::Trigger,
+            vec![
+                ("triggers".to_string(), serde_json::to_string(&triggers)?),
+                (
+                    "conversation".to_string(),
+                    serde_json::to_string(&conversation)?,
+                ),
+            ],
+        )
+        .context(
+            "Unable to retrieve a trigger for the conversation. Will Fallback to an empty object.",
+        )
+        .unwrap_or("{}".to_string());
+
+        let repaired = repair_json::repair(response)?;
+
+        // @todo: improve this.
+        if repaired == "{}" {
+            return Ok(None);
+        }
+
+        let deserialized = serde_json::from_str::<SelectedTrigger>(&repaired)?;
+
+        Ok(Some(deserialized))
     }
 }
 

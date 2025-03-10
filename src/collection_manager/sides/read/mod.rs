@@ -33,7 +33,7 @@ use crate::{
 };
 
 use super::segments::{Segment, SelectedSegment};
-use super::triggers::{Trigger, TriggerInterface};
+use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -385,6 +385,21 @@ impl ReadSide {
 
         self.segments
             .perform_segment_selection(collection_id, conversation)
+            .await
+    }
+
+    pub async fn perform_trigger_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+        triggers: Vec<Trigger>,
+    ) -> Result<Option<SelectedTrigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.triggers
+            .perform_trigger_selection(collection_id, conversation, triggers)
             .await
     }
 

@@ -4,9 +4,10 @@ use crate::collection_manager::dto::{
     SearchResult, Similarity,
 };
 use crate::collection_manager::sides::segments::{Segment, SegmentInterface};
-use crate::collection_manager::sides::triggers::Trigger;
+use crate::collection_manager::sides::triggers::{SelectedTrigger, Trigger};
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
+use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -177,6 +178,25 @@ async fn planned_answer_v1(
                         )))
                         .await;
                 }
+                AudienceManagementResult::ChosenTrigger(t) => {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Message {
+                                message: json!({
+                                    "action": "SELECT_TRIGGER_PROBABILITY",
+                                    "result": t.unwrap_or(SelectedTrigger {
+                                        id: "".to_string(),
+                                        name: "".to_string(),
+                                        response: "".to_string(),
+                                        probability: 0.0,
+                                    }).probability,
+                                })
+                                .to_string(),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                }
             }
         }
 
@@ -296,6 +316,9 @@ async fn answer_v1(
                 }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t;
+                }
+                AudienceManagementResult::ChosenTrigger(_t) => {
+                    unreachable!();
                 }
             }
         }
@@ -422,6 +445,7 @@ enum AudienceManagementResult {
     Segment(Option<crate::collection_manager::sides::segments::Segment>),
     ChosenSegment(Option<SegmentResponse>),
     Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
+    ChosenTrigger(Option<SelectedTrigger>),
 }
 
 async fn select_triggers_and_segments(
@@ -454,7 +478,7 @@ async fn select_triggers_and_segments(
                 conversation.clone(),
             )
             .await
-            .expect("Failed to get chosen segment");
+            .expect("Failed to choose a segment.");
 
         match chosen_segment {
             None => {
@@ -500,19 +524,36 @@ async fn select_triggers_and_segments(
                     return;
                 }
 
-                let chosen_trigger = ai_service
-                    .get_trigger(all_segments_triggers, conversation)
+                let chosen_trigger = read_side
+                    .perform_trigger_selection(
+                        read_api_key.clone(),
+                        collection_id.clone(),
+                        conversation,
+                        all_segments_triggers,
+                    )
                     .await
-                    .expect("Failed to get trigger");
+                    .context(
+                        "Failed to choose a trigger for the given segment. Will fall back to None.",
+                    )
+                    .unwrap_or(None);
 
-                let full_trigger = read_side
-                    .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
-                    .await
-                    .expect("Failed to get full trigger");
+                match chosen_trigger {
+                    None => {
+                        tx.send(AudienceManagementResult::ChosenTrigger(None))
+                            .await
+                            .unwrap();
+                    }
+                    Some(chosen_trigger) => {
+                        let full_trigger = read_side
+                            .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
+                            .await
+                            .expect("Failed to get full trigger");
 
-                tx.send(AudienceManagementResult::Trigger(full_trigger))
-                    .await
-                    .unwrap();
+                        tx.send(AudienceManagementResult::Trigger(full_trigger))
+                            .await
+                            .unwrap();
+                    }
+                }
             }
         }
     });

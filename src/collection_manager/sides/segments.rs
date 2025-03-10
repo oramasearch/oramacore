@@ -118,13 +118,12 @@ impl SegmentInterface {
                 ),
             ],
         )
-        .expect("Failed to get response"); // @todo: handle error
-
-        dbg!(&response);
+        .context("Unable to select a segment. Will fall back to an empty object.")
+        .unwrap_or("{}".to_string());
 
         let repaired = repair_json::repair(response)?;
 
-        // @todo: remove this
+        // @todo: improve this.
         if repaired == "{}" {
             return Ok(None);
         }
