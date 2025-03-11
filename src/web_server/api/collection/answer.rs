@@ -198,6 +198,7 @@ async fn planned_answer_v1(
         }
 
         let mut party_planner_stream = PartyPlanner::run(
+            read_side.clone(),
             collection_id.clone(),
             api_key.clone(),
             interaction.query.clone(),
