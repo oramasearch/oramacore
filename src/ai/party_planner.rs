@@ -166,6 +166,16 @@ impl PartyPlanner {
                         })
                         .await
                         .unwrap();
+
+                // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
+                // so we need to handle them here.
+                } else if !step.should_stream {
+                    let result = Self::execute_non_streaming_step(
+                        action.clone(),
+                        input.clone(),
+                        step.clone(),
+                        history.clone(),
+                    );
                 }
             }
         });
@@ -246,6 +256,14 @@ impl PartyPlanner {
             .await?;
 
         Ok(results)
+    }
+
+    fn execute_non_streaming_step(
+        action: Action,
+        input: String,
+        step: Step,
+        history: Vec<InteractionMessage>,
+    ) -> String {
     }
 }
 

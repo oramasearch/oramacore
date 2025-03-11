@@ -134,10 +134,7 @@ impl TriggerInterface {
                 ),
             ],
         )
-        .context(
-            "Unable to retrieve a trigger for the conversation. Will Fallback to an empty object.",
-        )
-        .unwrap_or("{}".to_string());
+        .await;
 
         let repaired = repair_json::repair(response)?;
 

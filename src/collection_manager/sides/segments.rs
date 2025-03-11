@@ -134,8 +134,7 @@ impl SegmentInterface {
                 ),
             ],
         )
-        .context("Unable to select a segment. Will fall back to an empty object.")
-        .unwrap_or("{}".to_string());
+        .await;
 
         let repaired = repair_json::repair(response)?;
 
