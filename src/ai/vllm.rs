@@ -372,8 +372,6 @@ pub async fn run_party_planner_prompt_stream(
             .into(),
     );
 
-    dbg!(&full_history);
-
     let request = CreateChatCompletionRequestArgs::default()
         .model("Qwen/Qwen2.5-3B-Instruct")
         .max_tokens(hyperparameters.max_tokens)

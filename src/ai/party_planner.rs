@@ -225,7 +225,7 @@ impl PartyPlanner {
                                 let _ = tx
                                     .send(PartyPlannerMessage {
                                         action: step.name.clone(),
-                                        result: acc.clone(),
+                                        result: m,
                                         done: false,
                                     })
                                     .await
