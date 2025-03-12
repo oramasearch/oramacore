@@ -51,8 +51,6 @@ enum SseMessage {
     Error { message: String },
     #[serde(rename = "response")]
     Response { message: String },
-    #[serde(rename = "message")]
-    Message { message: String },
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -131,10 +129,11 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "GET_SEGMENT",
                                     "result": s,
+                                    "done": true,
                                 })
                                 .to_string(),
                             })
@@ -145,9 +144,10 @@ async fn planned_answer_v1(
                 AudienceManagementResult::ChosenSegment(s) => {
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "GET_SEGMENT_PROBABILITY",
+                                    "done": true,
                                     "result": s.unwrap_or(SegmentResponse {
                                         probability: 0.0,
                                         ..SegmentResponse::default()
@@ -164,10 +164,11 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "SELECT_TRIGGER",
                                     "result": t,
+                                    "done": true,
                                 })
                                 .to_string(),
                             })
@@ -178,9 +179,10 @@ async fn planned_answer_v1(
                 AudienceManagementResult::ChosenTrigger(t) => {
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "SELECT_TRIGGER_PROBABILITY",
+                                    "done": true,
                                     "result": t.unwrap_or(SelectedTrigger {
                                         id: "".to_string(),
                                         name: "".to_string(),
@@ -210,7 +212,7 @@ async fn planned_answer_v1(
         while let Some(message) = party_planner_stream.next().await {
             let _ = tx
                 .send(Ok(Event::default().data(
-                    serde_json::to_string(&SseMessage::Message {
+                    serde_json::to_string(&SseMessage::Response {
                         message: json!({
                             "action": message.action,
                             "result": message.result,
@@ -434,8 +436,6 @@ async fn select_triggers_and_segments(
     collection_id: CollectionId,
     conversation: Option<Vec<InteractionMessage>>,
 ) -> impl Stream<Item = AudienceManagementResult> {
-    let ai_service = read_side.get_ai_service();
-
     let all_segments = read_side
         .get_all_segments_by_collection(read_api_key.clone(), collection_id.clone())
         .await
