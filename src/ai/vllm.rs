@@ -2,20 +2,14 @@ use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
-        CreateChatCompletionStreamResponse,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        CreateChatCompletionRequestArgs,
     },
 };
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-
-use openai_api_rust::{
-    chat::{ChatApi, ChatBody},
-    Auth, Message, OpenAI, Role,
-};
 
 pub enum KnownPrompts {
     Answer,
@@ -59,17 +53,10 @@ impl TryFrom<&str> for PartyPlannerPrompt {
 
 pub struct PartyPlannerPromptHyperParams {
     pub model: String,
-    pub messages: Vec<Message>,
-    pub max_tokens: Option<i32>,
-    pub stream: Option<bool>,
-    pub temperature: Option<f32>,
-    pub frequency_penalty: Option<f32>,
-    pub logit_bias: Option<HashMap<String, f32>>,
-    pub n: Option<i32>,
-    pub presence_penalty: Option<f32>,
-    pub stop: Option<Vec<String>>,
-    pub top_p: Option<f32>,
-    pub user: Option<String>,
+    pub system: String,
+    pub user: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
 }
 
 impl KnownPrompts {
@@ -117,26 +104,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(256),
-                    stream: Some(true),
-                    temperature: Some(0.3),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 256,
+                    temperature: 0.3,
                 }
             }
             PartyPlannerPrompt::OptimizeQuery => {
@@ -149,26 +120,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(256),
-                    stream: Some(false),
-                    temperature: Some(0.3),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 256,
+                    temperature: 0.3,
                 }
             }
             PartyPlannerPrompt::GenerateQueries => {
@@ -181,26 +136,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(512),
-                    stream: Some(false),
-                    temperature: Some(0.3),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 512,
+                    temperature: 0.3,
                 }
             }
             PartyPlannerPrompt::DescribeInputCode => {
@@ -215,26 +154,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(512),
-                    stream: Some(true),
-                    temperature: Some(0.1),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 512,
+                    temperature: 0.1,
                 }
             }
             PartyPlannerPrompt::ImproveInput => {
@@ -247,26 +170,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(1024),
-                    stream: Some(true),
-                    temperature: Some(0.2),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 1024,
+                    temperature: 0.2,
                 }
             }
             PartyPlannerPrompt::CreateCode => {
@@ -278,26 +185,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(2048),
-                    stream: Some(true),
-                    temperature: Some(0.1),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 2048,
+                    temperature: 0.1,
                 }
             }
             PartyPlannerPrompt::GiveReply => {
@@ -309,26 +200,10 @@ impl PartyPlannerPrompt {
 
                 PartyPlannerPromptHyperParams {
                     model: "Qwen/Qwen2.5-3B-Instruct".to_string(),
-                    messages: vec![
-                        Message {
-                            role: Role::System,
-                            content: system,
-                        },
-                        Message {
-                            role: Role::User,
-                            content: format_prompt(user, variables_map),
-                        },
-                    ],
-                    max_tokens: Some(4096),
-                    stream: Some(true),
-                    temperature: Some(0.1),
-                    frequency_penalty: None,
-                    logit_bias: None,
-                    n: None,
-                    presence_penalty: None,
-                    stop: None,
-                    top_p: None,
-                    user: None,
+                    system: system,
+                    user: format_prompt(user, variables_map),
+                    max_tokens: 4096,
+                    temperature: 0.1,
                 }
             }
         }
@@ -344,26 +219,34 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
 }
 
 pub fn get_openai_client() -> async_openai::Client<OpenAIConfig> {
-    async_openai::Client::with_config(
-        OpenAIConfig::new().with_api_base("http://localhost:8000/v1/"),
-    )
+    async_openai::Client::with_config(OpenAIConfig::new().with_api_base("http://localhost:8000/v1"))
 }
 
-pub async fn run_known_prompt(prompt: KnownPrompts, variables: Vec<(String, String)>) -> String {
+pub async fn run_known_prompt(
+    prompt: KnownPrompts,
+    variables: Vec<(String, String)>,
+) -> Result<String> {
     let mut acc = String::new();
     let mut stream = run_known_prompt_stream(prompt, variables).await;
 
     while let Some(msg) = stream.next().await {
-        acc += &msg;
+        match msg {
+            Ok(m) => {
+                acc += &m;
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
     }
 
-    acc
+    Ok(acc)
 }
 
 pub async fn run_known_prompt_stream(
     prompt: KnownPrompts,
     variables: Vec<(String, String)>,
-) -> impl Stream<Item = String> {
+) -> impl Stream<Item = Result<String>> {
     let client = get_openai_client();
 
     let prompts = prompt.get_prompts();
@@ -411,6 +294,71 @@ pub async fn run_known_prompt_stream(
                         .as_ref()
                         .unwrap();
 
+                    tx.send(Ok(chunk.to_string())).await.unwrap();
+                }
+                Err(e) => {
+                    let error_message = format!("An error occurred while processing the response from the remote LLM instance: {:?}", e);
+                    tx.send(Err(anyhow::Error::msg(error_message)))
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+    });
+
+    ReceiverStream::new(rx)
+}
+
+pub async fn run_party_planner_prompt_stream(
+    step_name: String,
+    variables: Vec<(String, String)>,
+) -> impl Stream<Item = String> {
+    let client = get_openai_client();
+    let party_planner_prompt = PartyPlannerPrompt::try_from(step_name.as_str()).unwrap();
+    let hyperparameters = party_planner_prompt.get_hyperparameters(variables);
+
+    let request = CreateChatCompletionRequestArgs::default()
+        .model("Qwen/Qwen2.5-3B-Instruct")
+        .max_tokens(hyperparameters.max_tokens)
+        .stream(true)
+        .messages([
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(hyperparameters.system)
+                .build()
+                .unwrap()
+                .into(),
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(hyperparameters.user)
+                .build()
+                .unwrap()
+                .into(),
+        ])
+        .build()
+        .context("Unable to build KnownPrompt LLM request body")
+        .unwrap();
+
+    let mut response_stream = client
+        .chat()
+        .create_stream(request)
+        .await
+        .context("An error occurred while initializing the stream from remote LLM instance")
+        .unwrap();
+
+    let (tx, rx) = mpsc::channel(100);
+
+    tokio::spawn(async move {
+        while let Some(result) = response_stream.next().await {
+            match result {
+                Ok(response) => {
+                    let chunk = response
+                        .choices
+                        .first()
+                        .unwrap()
+                        .delta
+                        .content
+                        .as_ref()
+                        .unwrap();
+
                     tx.send(chunk.to_string()).await.unwrap();
                 }
                 Err(e) => {
@@ -424,48 +372,16 @@ pub async fn run_known_prompt_stream(
     ReceiverStream::new(rx)
 }
 
-pub fn run_party_planner_prompt(
+pub async fn run_party_planner_prompt(
     step_name: String,
     variables: Vec<(String, String)>,
-) -> impl Stream<Item = Result<String>> {
-    let client = OpenAI::new(Auth::new(""), "http://localhost:8000/v1/");
-    let party_planner_prompt = PartyPlannerPrompt::try_from(step_name.as_str()).unwrap();
-    let hyperparameters = party_planner_prompt.get_hyperparameters(variables);
+) -> String {
+    let mut acc = String::new();
+    let mut stream = run_party_planner_prompt_stream(step_name, variables).await;
 
-    let (tx, rx) = mpsc::channel(100);
+    while let Some(msg) = stream.next().await {
+        acc += &msg;
+    }
 
-    tokio::spawn(async move {
-        let response = client
-            .chat_completion_create(&ChatBody {
-                model: hyperparameters.model,
-                messages: hyperparameters.messages,
-                max_tokens: hyperparameters.max_tokens,
-                stream: hyperparameters.stream,
-                temperature: hyperparameters.temperature,
-                frequency_penalty: hyperparameters.frequency_penalty,
-                logit_bias: None,
-                n: hyperparameters.n,
-                presence_penalty: hyperparameters.presence_penalty,
-                stop: hyperparameters.stop,
-                top_p: hyperparameters.top_p,
-                user: hyperparameters.user,
-            })
-            .expect("Failed to get response");
-
-        match response.choices.first() {
-            Some(choice) => match &choice.message {
-                Some(message) => {
-                    tx.send(Ok(message.content.clone())).await.unwrap();
-                }
-                None => {
-                    tx.send(Ok("{}".to_string())).await.unwrap();
-                }
-            },
-            None => {
-                tx.send(Ok("{}".to_string())).await.unwrap();
-            }
-        }
-    });
-
-    ReceiverStream::new(rx)
+    acc
 }

@@ -101,7 +101,6 @@ serde-big-array = "0.5.1"
 debug_panic = "0.2.1"
 dedent = "0.1.1"
 hnsw2 = { path = "./crates/hnsw2" }
-openai_api_rust = "0.1.9"
 repair_json = "0.1.0"
 async-openai = "0.28.0"
 

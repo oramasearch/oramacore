@@ -18,7 +18,7 @@ use crate::{
     types::CollectionId,
 };
 
-use super::vllm::{run_known_prompt, KnownPrompts};
+use super::vllm::{run_known_prompt, run_party_planner_prompt, KnownPrompts};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Action {
@@ -26,6 +26,7 @@ pub struct Action {
     description: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Step {
     name: String,
     description: String,
@@ -91,7 +92,7 @@ impl PartyPlanner {
         tokio::spawn(async move {
             // Get the action plan from the AI service.
             // If there is an error, send an error message to the caller and exit early.
-            let action_plan = match Self::get_action_plan(full_input) {
+            let action_plan = match Self::get_action_plan(full_input).await {
                 Ok(plan) => plan,
                 Err(e) => {
                     tx.send(PartyPlannerMessage {
@@ -140,7 +141,7 @@ impl PartyPlanner {
                     content: action.description.clone(),
                 });
 
-                let step = Self::create_step(action);
+                let step = Self::create_step(action.clone());
 
                 // From now on, different steps could be handled at different places.
                 // In this case, we may need to perform search inside the search index as part of the RAG pipeline.
@@ -170,12 +171,13 @@ impl PartyPlanner {
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
                 } else if !step.should_stream {
-                    let result = Self::execute_non_streaming_step(
-                        action.clone(),
-                        input.clone(),
-                        step.clone(),
-                        history.clone(),
-                    );
+                    dbg!(step);
+                    // let result = Self::execute_non_streaming_step(
+                    //     action.clone(),
+                    //     input.clone(),
+                    //     step.clone(),
+                    //     history.clone(),
+                    // ).await;
                 }
             }
         });
@@ -183,11 +185,12 @@ impl PartyPlanner {
         ReceiverStream::new(rx)
     }
 
-    fn get_action_plan(input: String) -> Result<Vec<Action>> {
+    async fn get_action_plan(input: String) -> Result<Vec<Action>> {
         let action_plan = run_known_prompt(
             KnownPrompts::PartyPlanner,
             vec![("input".to_string(), input)],
-        )?;
+        )
+        .await?;
 
         let repaired = repair_json::repair(action_plan)?;
         let action_plan_deser: ActionPlanResponse = serde_json::from_str(&repaired)?;
@@ -258,12 +261,14 @@ impl PartyPlanner {
         Ok(results)
     }
 
-    fn execute_non_streaming_step(
+    async fn execute_non_streaming_step(
         action: Action,
         input: String,
         step: Step,
         history: Vec<InteractionMessage>,
     ) -> String {
+        // let step_result = run_party_planner_prompt(step.name, variables).await;
+        todo!();
     }
 }
 

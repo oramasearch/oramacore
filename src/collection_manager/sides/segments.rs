@@ -134,7 +134,7 @@ impl SegmentInterface {
                 ),
             ],
         )
-        .await;
+        .await?;
 
         let repaired = repair_json::repair(response)?;
 
