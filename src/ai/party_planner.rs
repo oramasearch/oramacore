@@ -245,6 +245,19 @@ impl PartyPlanner {
                         }
                     }
 
+                    // Send the last message specifying `done: true`.
+                    // This will be used on the front-end to determine if the step is done.
+                    let _ = tx
+                        .send(PartyPlannerMessage {
+                            action: step.name.clone(),
+                            result: acc.clone(),
+                            done: true,
+                        })
+                        .await
+                        .unwrap();
+
+                    // Push the accumulated messages to the history. This will be used
+                    // as an additional context for subsequent steps.
                     history.push(InteractionMessage {
                         role: Role::Assistant,
                         content: acc,

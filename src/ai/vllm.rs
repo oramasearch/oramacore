@@ -315,9 +315,9 @@ pub async fn run_party_planner_prompt_stream(
     let step_name = step.name.as_str();
 
     let variables = match step_name {
-        "OPTIMIZE_QUERY" => vec![
-            ("input".to_string(), input.clone()),
-            ("description".to_string(), step.description),
+        "GIVE_REPLY" => vec![
+            ("question".to_string(), input.clone()),
+            ("context".to_string(), step.description),
         ],
         _ => vec![
             ("input".to_string(), input.clone()),
@@ -338,6 +338,7 @@ pub async fn run_party_planner_prompt_stream(
     for message in history {
         match message.role {
             crate::collection_manager::dto::Role::System => {
+                // @todo: make sure there are no multiple system messages in the history
                 // return Err(anyhow::Error::msg(
                 //     "Found multiple system messages in Party Planner chat history",
                 // ));
