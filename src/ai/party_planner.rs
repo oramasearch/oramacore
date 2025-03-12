@@ -88,6 +88,11 @@ impl PartyPlanner {
             full_input.push_str(&format!("\n\n### Trigger\n{}", trigger));
         }
 
+        history.push(InteractionMessage {
+            role: Role::User,
+            content: full_input.clone(),
+        });
+
         // Now it's time to create a channel for the AI service to send messages to the caller.
         let (tx, rx) = mpsc::channel(100);
 

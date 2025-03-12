@@ -338,9 +338,9 @@ pub async fn run_party_planner_prompt_stream(
     for message in history {
         match message.role {
             crate::collection_manager::dto::Role::System => {
-                return Err(anyhow::Error::msg(
-                    "Found multiple system messages in Party Planner chat history",
-                ));
+                // return Err(anyhow::Error::msg(
+                //     "Found multiple system messages in Party Planner chat history",
+                // ));
             }
             crate::collection_manager::dto::Role::User => {
                 full_history.push(
@@ -370,6 +370,8 @@ pub async fn run_party_planner_prompt_stream(
             .unwrap()
             .into(),
     );
+
+    dbg!(&full_history);
 
     let request = CreateChatCompletionRequestArgs::default()
         .model("Qwen/Qwen2.5-3B-Instruct")
