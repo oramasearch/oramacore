@@ -677,7 +677,7 @@ pub struct RelatedRequest {
     format: Option<RelatedQueriesFormat>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
 pub enum Role {
     System,
     Assistant,

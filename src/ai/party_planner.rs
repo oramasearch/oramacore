@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use axum::extract::State;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
@@ -18,7 +18,9 @@ use crate::{
     types::CollectionId,
 };
 
-use super::vllm::{run_known_prompt, run_party_planner_prompt, KnownPrompts};
+use super::vllm::{
+    run_known_prompt, run_party_planner_prompt, run_party_planner_prompt_stream, KnownPrompts,
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Action {
@@ -28,10 +30,10 @@ pub struct Action {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Step {
-    name: String,
-    description: String,
-    returns_json: bool,
-    should_stream: bool,
+    pub name: String,
+    pub description: String,
+    pub returns_json: bool,
+    pub should_stream: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -171,13 +173,77 @@ impl PartyPlanner {
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
                 } else if !step.should_stream {
-                    dbg!(step);
-                    // let result = Self::execute_non_streaming_step(
-                    //     action.clone(),
-                    //     input.clone(),
-                    //     step.clone(),
-                    //     history.clone(),
-                    // ).await;
+                    let result = run_party_planner_prompt(step.clone(), &input, &history)
+                        .await
+                        .context(format!(
+                            "Unable to run party planner prompt for step: {}",
+                            step.name
+                        ))
+                        .unwrap();
+
+                    let value = match step.returns_json {
+                        true => {
+                            let repaired = repair_json::repair(result.clone())
+                                .context(format!(
+                                    "Unable to repair JSON for step: {}.\nOriginal value:\n{}",
+                                    step.name, result
+                                ))
+                                .unwrap();
+                            repaired
+                        }
+                        false => result,
+                    };
+
+                    let _ = tx.send(PartyPlannerMessage {
+                        action: step.name.clone(),
+                        result: value.clone(),
+                        done: true,
+                    });
+
+                    history.push(InteractionMessage {
+                        role: Role::Assistant,
+                        content: value,
+                    });
+                }
+                // Just like we did with non-streaming steps, we need to handle streaming steps here.
+                else if step.clone().should_stream {
+                    let mut acc = String::new();
+                    let mut stream =
+                        run_party_planner_prompt_stream(step.clone(), &input, &history)
+                            .await
+                            .unwrap();
+
+                    while let Some(msg) = stream.next().await {
+                        match msg {
+                            Ok(m) => {
+                                acc += &m;
+                                let _ = tx
+                                    .send(PartyPlannerMessage {
+                                        action: step.name.clone(),
+                                        result: acc.clone(),
+                                        done: false,
+                                    })
+                                    .await
+                                    .unwrap();
+                            }
+                            Err(e) => {
+                                let _ = tx
+                                    .send(PartyPlannerMessage {
+                                        action: step.name.clone(),
+                                        result: format!("{:?}", e),
+                                        done: true,
+                                    })
+                                    .await
+                                    .unwrap();
+                                break;
+                            }
+                        }
+                    }
+
+                    history.push(InteractionMessage {
+                        role: Role::Assistant,
+                        content: acc,
+                    });
                 }
             }
         });
@@ -231,7 +297,7 @@ impl PartyPlanner {
         let as_md = json_to_md(&plan_as_value, 0);
 
         return format!(
-            r"Alright! Here's the action plan I've come up with based on your request:\n\n{}\n\nAsk me to proceed with the next step, one step at a time when you're ready.",
+            "Alright! Here's the action plan I've come up with based on your request:\n\n{}\n\nAsk me to proceed with the next step, one step at a time when you're ready.",
             as_md
         )
         .to_string();
@@ -259,16 +325,6 @@ impl PartyPlanner {
             .await?;
 
         Ok(results)
-    }
-
-    async fn execute_non_streaming_step(
-        action: Action,
-        input: String,
-        step: Step,
-        history: Vec<InteractionMessage>,
-    ) -> String {
-        // let step_result = run_party_planner_prompt(step.name, variables).await;
-        todo!();
     }
 }
 
