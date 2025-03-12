@@ -1,12 +1,14 @@
+use crate::ai::party_planner::PartyPlanner;
 use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, HybridMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
     SearchResult, Similarity,
 };
 use crate::collection_manager::sides::segments::Segment;
-use crate::collection_manager::sides::triggers::Trigger;
+use crate::collection_manager::sides::triggers::{SelectedTrigger, Trigger};
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
+use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -49,8 +51,6 @@ enum SseMessage {
     Error { message: String },
     #[serde(rename = "response")]
     Response { message: String },
-    #[serde(rename = "message")]
-    Message { message: String },
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -78,8 +78,8 @@ async fn planned_answer_v1(
     let collection_id = CollectionId(id.clone()).0;
     let read_side = read_side.clone();
 
-    let query = interaction.query;
-    let conversation = interaction.messages;
+    let query = interaction.query.clone();
+    let conversation = interaction.messages.clone();
     let api_key = query_params.api_key;
 
     read_side
@@ -92,8 +92,6 @@ async fn planned_answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let ai_service = read_side.get_ai_service();
-
         let _ = tx
             .send(Ok(Event::default().data(
                 serde_json::to_string(&SseMessage::Acknowledge {
@@ -131,10 +129,11 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "GET_SEGMENT",
                                     "result": s,
+                                    "done": true,
                                 })
                                 .to_string(),
                             })
@@ -145,9 +144,10 @@ async fn planned_answer_v1(
                 AudienceManagementResult::ChosenSegment(s) => {
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "GET_SEGMENT_PROBABILITY",
+                                    "done": true,
                                     "result": s.unwrap_or(SegmentResponse {
                                         probability: 0.0,
                                         ..SegmentResponse::default()
@@ -164,10 +164,31 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Message {
+                            serde_json::to_string(&SseMessage::Response {
                                 message: json!({
                                     "action": "SELECT_TRIGGER",
                                     "result": t,
+                                    "done": true,
+                                })
+                                .to_string(),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                }
+                AudienceManagementResult::ChosenTrigger(t) => {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Response {
+                                message: json!({
+                                    "action": "SELECT_TRIGGER_PROBABILITY",
+                                    "done": true,
+                                    "result": t.unwrap_or(SelectedTrigger {
+                                        id: "".to_string(),
+                                        name: "".to_string(),
+                                        response: "".to_string(),
+                                        probability: 0.0,
+                                    }).probability,
                                 })
                                 .to_string(),
                             })
@@ -178,46 +199,29 @@ async fn planned_answer_v1(
             }
         }
 
-        let mut stream = ai_service
-            .planned_answer_stream(
-                query,
-                collection_id,
-                Some(conversation),
-                api_key,
-                segment,
-                trigger,
-            )
-            .await
-            .unwrap();
+        let mut party_planner_stream = PartyPlanner::run(
+            read_side.clone(),
+            collection_id.clone(),
+            api_key.clone(),
+            interaction.query.clone(),
+            interaction.messages.clone(),
+            segment.clone(),
+            trigger.clone(),
+        );
 
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(response) => {
-                    if tx
-                        .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: response.data,
-                            })
-                            .unwrap(),
-                        )))
-                        .await
-                        .is_err()
-                    {
-                        break; // Client disconnected
-                    }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Error {
-                                message: format!("Error during streaming: {}", e),
-                            })
-                            .unwrap(),
-                        )))
-                        .await;
-                    break;
-                }
-            }
+        while let Some(message) = party_planner_stream.next().await {
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    serde_json::to_string(&SseMessage::Response {
+                        message: json!({
+                            "action": message.action,
+                            "result": message.result,
+                        })
+                        .to_string(),
+                    })
+                    .unwrap(),
+                )))
+                .await;
         }
     });
 
@@ -294,6 +298,9 @@ async fn answer_v1(
                 }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t;
+                }
+                AudienceManagementResult::ChosenTrigger(_t) => {
+                    unreachable!();
                 }
             }
         }
@@ -420,6 +427,7 @@ enum AudienceManagementResult {
     Segment(Option<crate::collection_manager::sides::segments::Segment>),
     ChosenSegment(Option<SegmentResponse>),
     Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
+    ChosenTrigger(Option<SelectedTrigger>),
 }
 
 async fn select_triggers_and_segments(
@@ -428,8 +436,6 @@ async fn select_triggers_and_segments(
     collection_id: CollectionId,
     conversation: Option<Vec<InteractionMessage>>,
 ) -> impl Stream<Item = AudienceManagementResult> {
-    let ai_service = read_side.get_ai_service();
-
     let all_segments = read_side
         .get_all_segments_by_collection(read_api_key.clone(), collection_id.clone())
         .await
@@ -445,10 +451,14 @@ async fn select_triggers_and_segments(
             return;
         };
 
-        let chosen_segment = ai_service
-            .get_segment(all_segments, conversation.clone())
+        let chosen_segment = read_side
+            .perform_segment_selection(
+                read_api_key.clone(),
+                collection_id.clone(),
+                conversation.clone(),
+            )
             .await
-            .expect("Failed to get segment");
+            .expect("Failed to choose a segment.");
 
         match chosen_segment {
             None => {
@@ -494,19 +504,36 @@ async fn select_triggers_and_segments(
                     return;
                 }
 
-                let chosen_trigger = ai_service
-                    .get_trigger(all_segments_triggers, conversation)
+                let chosen_trigger = read_side
+                    .perform_trigger_selection(
+                        read_api_key.clone(),
+                        collection_id.clone(),
+                        conversation,
+                        all_segments_triggers,
+                    )
                     .await
-                    .expect("Failed to get trigger");
+                    .context(
+                        "Failed to choose a trigger for the given segment. Will fall back to None.",
+                    )
+                    .unwrap_or(None);
 
-                let full_trigger = read_side
-                    .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
-                    .await
-                    .expect("Failed to get full trigger");
+                match chosen_trigger {
+                    None => {
+                        tx.send(AudienceManagementResult::ChosenTrigger(None))
+                            .await
+                            .unwrap();
+                    }
+                    Some(chosen_trigger) => {
+                        let full_trigger = read_side
+                            .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
+                            .await
+                            .expect("Failed to get full trigger");
 
-                tx.send(AudienceManagementResult::Trigger(full_trigger))
-                    .await
-                    .unwrap();
+                        tx.send(AudienceManagementResult::Trigger(full_trigger))
+                            .await
+                            .unwrap();
+                    }
+                }
             }
         }
     });

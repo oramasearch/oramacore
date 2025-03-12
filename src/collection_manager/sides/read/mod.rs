@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
-use crate::collection_manager::dto::SearchMode;
+use crate::collection_manager::dto::{InteractionMessage, SearchMode};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
@@ -32,8 +32,8 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::segments::Segment;
-use super::triggers::{Trigger, TriggerInterface};
+use super::segments::{Segment, SelectedSegment};
+use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -372,6 +372,35 @@ impl ReadSide {
         self.check_read_api_key(collection_id.clone(), read_api_key)
             .await?;
         self.segments.list_by_collection(collection_id).await
+    }
+
+    pub async fn perform_segment_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<Option<SelectedSegment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.segments
+            .perform_segment_selection(collection_id, conversation)
+            .await
+    }
+
+    pub async fn perform_trigger_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+        triggers: Vec<Trigger>,
+    ) -> Result<Option<SelectedTrigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.triggers
+            .perform_trigger_selection(collection_id, conversation, triggers)
+            .await
     }
 
     pub async fn get_all_triggers_by_segment(

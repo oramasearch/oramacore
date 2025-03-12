@@ -23,6 +23,9 @@ use crate::{
     },
 };
 
+pub mod party_planner;
+pub mod vllm;
+
 tonic::include_proto!("orama_ai_service");
 
 impl OramaModel {
