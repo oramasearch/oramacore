@@ -23,7 +23,7 @@ use tokio::time::sleep;
 
 use crate::web_server::{HttpConfig, WebServer};
 
-use super::utils::{create_grpc_server, generate_new_path};
+use super::utils::{create_grpc_server, generate_new_path, hooks_runtime_config};
 
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 8080;
@@ -73,6 +73,7 @@ async fn start_server() {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
             output: OutputSideChannelType::InMemory { capacity: 100 },
+            hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,

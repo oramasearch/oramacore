@@ -60,6 +60,7 @@ create_label_struct!(SearchCollectionLabels, {
 });
 create_label_struct!(JSOperationLabels, {
     operation: &'static str,
+    collection: SharedString,
 });
 
 pub mod ai {

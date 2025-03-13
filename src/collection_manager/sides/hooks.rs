@@ -1,21 +1,23 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use axum_openapi3::utoipa::ToSchema;
 use axum_openapi3::utoipa::{self};
 use chrono::Utc;
+use duration_string::DurationString;
+use orama_js_pool::{JSExecutorPoolConfig, OramaJSPool, OramaJSPoolConfig};
 use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::warn;
 
-use crate::js::deno::{JavaScript, Operation};
-use crate::types::CollectionId;
+use crate::metrics::js::JS_CALCULATION_TIME;
+use crate::metrics::JSOperationLabels;
+use crate::types::{CollectionId, FlattenDocument};
 
 use super::generic_kv::KV;
 
@@ -69,21 +71,46 @@ fn hook_key(collection_id: &CollectionId, name: &HookName) -> String {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
+pub struct SelectEmbeddingsPropertiesHooksRuntimeConfig {
+    pub check_interval: DurationString,
+    pub max_idle_time: DurationString,
+    pub instances_count_per_code: usize,
+    pub queue_capacity: usize,
+    pub max_execution_time: DurationString,
+    pub max_startup_time: DurationString,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 pub struct HooksRuntimeConfig {
-    pub channel_limit: usize,
-    pub data_dir: PathBuf,
+    pub select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig,
 }
 
 pub struct HooksRuntime {
     kv: Arc<KV>,
-    javascript_runtime: JavaScript,
+    embedding_js_runtime: OramaJSPool<Value, SelectEmbeddingPropertiesReturnType>,
 }
 
 impl HooksRuntime {
-    pub async fn new(kv: Arc<KV>, limit: usize) -> Self {
+    pub async fn new(kv: Arc<KV>, config: HooksRuntimeConfig) -> Self {
         Self {
             kv,
-            javascript_runtime: JavaScript::new(limit).await,
+            embedding_js_runtime: OramaJSPool::new(OramaJSPoolConfig {
+                check_interval: *config.select_embeddings_properties.check_interval,
+                max_idle_time: *config.select_embeddings_properties.max_idle_time,
+                pool_config: JSExecutorPoolConfig {
+                    instances_count_per_code: config
+                        .select_embeddings_properties
+                        .instances_count_per_code,
+                    queue_capacity: config.select_embeddings_properties.queue_capacity,
+                    executor_config: orama_js_pool::JSExecutorConfig {
+                        allowed_hosts: vec![],
+                        function_name: "selectEmbeddingsProperties".to_string(),
+                        is_async: false,
+                        max_execution_time: *config.select_embeddings_properties.max_execution_time,
+                        max_startup_time: *config.select_embeddings_properties.max_startup_time,
+                    },
+                },
+            }),
         }
     }
 
@@ -164,24 +191,30 @@ impl HooksRuntime {
         self.kv.insert(key, pair).await
     }
 
-    pub async fn eval<T: Serialize, R: DeserializeOwned>(
+    pub async fn calculate_text_for_embedding(
         &self,
         collection_id: CollectionId,
-        name: HookName,
-        input: T,
-    ) -> Option<Result<R>> {
-        let hook = self.get_hook(collection_id, name).await?;
-
-        let operation = match name {
-            HookName::SelectEmbeddingsProperties => Operation::SelectEmbeddingsProperties,
+        doc: FlattenDocument,
+    ) -> Option<Result<SelectEmbeddingPropertiesReturnType>> {
+        let key = hook_key(&collection_id, &HookName::SelectEmbeddingsProperties);
+        let code = match self.kv.get::<HookPair>(&key).await {
+            None => return None,
+            Some(Err(e)) => return Some(Err(e)),
+            Some(Ok(pair)) => pair.1.code,
         };
 
-        let result = self
-            .javascript_runtime
-            .eval(operation, hook.code, input)
-            .await;
+        let m = JS_CALCULATION_TIME.create(JSOperationLabels {
+            operation: "selectEmbeddingsProperties",
+            collection: collection_id.0.clone().into(),
+        });
+        let output = self
+            .embedding_js_runtime
+            .execute(&code, serde_json::Value::Object(doc.into_inner()))
+            .await
+            .map_err(|e| anyhow!("Error in evaluate the embedding script: {:?}", e));
+        drop(m);
 
-        Some(result)
+        Some(output)
     }
 
     // @todo: make this more robust and possibly check arguments and returning types via AST
@@ -211,6 +244,19 @@ mod tests {
 
     use super::*;
 
+    fn config() -> HooksRuntimeConfig {
+        HooksRuntimeConfig {
+            select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
+                check_interval: DurationString::from_str("1s").unwrap(),
+                max_idle_time: DurationString::from_str("1s").unwrap(),
+                instances_count_per_code: 1,
+                queue_capacity: 1,
+                max_execution_time: DurationString::from_str("1s").unwrap(),
+                max_startup_time: DurationString::from_str("1s").unwrap(),
+            },
+        }
+    }
+
     #[tokio::test]
     async fn test_hook_crud() {
         let hook_runtime = HooksRuntime::new(
@@ -221,7 +267,7 @@ mod tests {
                 })
                 .unwrap(),
             ),
-            10,
+            config(),
         )
         .await;
 
@@ -258,4 +304,11 @@ mod tests {
             .await;
         assert!(hook.is_none());
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SelectEmbeddingPropertiesReturnType {
+    Properties(Vec<String>),
+    Text(String),
 }
