@@ -1835,8 +1835,11 @@ async fn test_commit_hooks() -> Result<()> {
     create_collection(write_side.clone(), collection_id.clone()).await?;
 
     let code = r#"
-function foo() {
+function selectEmbeddingsProperties() {
     return "The pen is on the table.";
+}
+export default {
+    selectEmbeddingsProperties
 }
 "#;
 
@@ -1859,6 +1862,8 @@ function foo() {
     )
     .await?;
 
+    sleep(Duration::from_millis(500)).await;
+
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1866,6 +1871,7 @@ function foo() {
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
+                "similarity": 0.001,
             })
             .try_into()?,
         )

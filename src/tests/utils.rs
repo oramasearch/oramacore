@@ -3,10 +3,12 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     pin::Pin,
+    str::FromStr,
     time::Duration,
 };
 
 use anyhow::{Context, Result};
+use duration_string::DurationString;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use grpc_def::{ChatStreamResponse, Embedding, PlannedAnswerResponse};
 use http::uri::Scheme;
@@ -21,6 +23,7 @@ use crate::{
     collection_manager::{
         dto::ApiKey,
         sides::{
+            hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
             CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
             OutputSideChannelType, ReadSideConfig, WriteSideConfig,
         },
@@ -35,6 +38,19 @@ pub fn generate_new_path() -> PathBuf {
     let dir = tmp_dir.path().to_path_buf();
     fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
+}
+
+pub fn hooks_runtime_config() -> HooksRuntimeConfig {
+    HooksRuntimeConfig {
+        select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
+            check_interval: DurationString::from_str("1s").unwrap(),
+            max_idle_time: DurationString::from_str("1s").unwrap(),
+            instances_count_per_code: 1,
+            queue_capacity: 1,
+            max_execution_time: DurationString::from_str("1s").unwrap(),
+            max_startup_time: DurationString::from_str("1s").unwrap(),
+        },
+    }
 }
 
 pub mod grpc_def {
@@ -191,6 +207,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
             output: OutputSideChannelType::InMemory { capacity: 100 },
+            hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,

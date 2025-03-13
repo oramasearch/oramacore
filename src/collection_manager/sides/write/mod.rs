@@ -16,7 +16,7 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime},
+    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
@@ -72,6 +72,7 @@ pub struct CollectionsWriterConfig {
 #[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
+    pub hooks: HooksRuntimeConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
 }
@@ -139,8 +140,7 @@ impl WriteSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
-        let hook =
-            HooksRuntime::new(kv.clone(), collections_writer_config.javascript_queue_limit).await;
+        let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
         let collections_writer = CollectionsWriter::try_load(

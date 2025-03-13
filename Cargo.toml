@@ -59,7 +59,7 @@ num-traits = "0.2"
 futures = "0.3.31"
 
 itertools = "0.14"
-duration-string = "0.5.2"
+duration-string = { version = "0.5.2", features = ["serde"] }
 chrono = "0.4.39"
 
 # Webserver
@@ -76,8 +76,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # JS
-deno_core = "0.330.0"
-serde_v8 = "0.239.0"
 oxc_parser = "0.47.1"
 oxc_allocator = "0.47.1"
 oxc_span = "0.47.1"
@@ -101,6 +99,8 @@ serde-big-array = "0.5.1"
 debug_panic = "0.2.1"
 dedent = "0.1.1"
 hnsw2 = { path = "./crates/hnsw2" }
+
+orama-js-pool = "0.1.0"
 
 [build-dependencies]
 cc = "1"
