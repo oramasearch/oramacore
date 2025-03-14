@@ -55,7 +55,7 @@ fn f(d: &DocumentId) -> DocumentId {
     *d
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BoolUncommittedFieldStats {
     pub false_count: usize,
     pub true_count: usize,

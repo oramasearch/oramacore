@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -8,34 +7,15 @@ use anyhow::Result;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
-use tracing::info;
 
 use crate::{
-    build_orama,
     collection_manager::{
         dto::{ApiKey, InsertTriggerParams, LanguageDTO, ReindexConfig},
-        sides::{hooks::HookName, ReadSide, WriteSide},
+        sides::hooks::HookName,
     },
-    tests::utils::{create_grpc_server, create_oramacore_config},
-    types::{CollectionId, DocumentList},
-    OramacoreConfig,
+    tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
+    types::CollectionId,
 };
-
-async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
-    if config.ai_server.port == 0 {
-        let address = create_grpc_server().await?;
-        config.ai_server.host = address.ip();
-        config.ai_server.port = address.port();
-        info!("AI server started on {}", address);
-    }
-
-    let (write_side, read_side) = build_orama(config).await?;
-
-    let write_side = write_side.unwrap();
-    let read_side = read_side.unwrap();
-
-    Ok((write_side, read_side))
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_simple_text_search() -> Result<()> {
@@ -2245,44 +2225,6 @@ async fn test_trigger() -> Result<()> {
         .await?
         .unwrap();
     assert_eq!(trigger.name, "my-trigger-name");
-
-    Ok(())
-}
-
-async fn create_collection(write_side: Arc<WriteSide>, collection_id: CollectionId) -> Result<()> {
-    write_side
-        .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
-            json!({
-                "id": collection_id.0.clone(),
-                "read_api_key": "my-read-api-key",
-                "write_api_key": "my-write-api-key",
-            })
-            .try_into()?,
-        )
-        .await?;
-    sleep(Duration::from_millis(100)).await;
-
-    Ok(())
-}
-
-async fn insert_docs<I>(
-    write_side: Arc<WriteSide>,
-    write_api_key: ApiKey,
-    collection_id: CollectionId,
-    docs: I,
-) -> Result<()>
-where
-    I: IntoIterator<Item = serde_json::Value>,
-{
-    let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
-    let document_list: DocumentList = document_list.try_into()?;
-
-    write_side
-        .write(write_api_key, collection_id, document_list)
-        .await?;
-
-    sleep(Duration::from_millis(1_000)).await;
 
     Ok(())
 }

@@ -101,7 +101,7 @@ pub struct NumberFieldInfo {
     pub data_dir: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct NumberCommittedFieldStats {
     pub min: Number,
     pub max: Number,

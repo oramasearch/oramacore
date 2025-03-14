@@ -242,6 +242,23 @@ impl CollectionsWriter {
 
         Ok(())
     }
+
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> bool {
+        let mut collections = self.collections.write().await;
+        let collection = collections.remove(&collection_id);
+
+        let collection = match collection {
+            None => return false,
+            Some(coll) => coll,
+        };
+
+        let data_dir = &self.config.data_dir.join("collections");
+        let collection_dir = data_dir.join(collection_id.0.clone());
+
+        collection.remove_from_fs(collection_dir).await;
+
+        true
+    }
 }
 
 pub struct CollectionReadLock<'guard> {

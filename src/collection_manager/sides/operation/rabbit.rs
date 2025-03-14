@@ -92,6 +92,7 @@ impl RabbitOperationSender {
     pub async fn send(&self, operation: &WriteOperation) -> Result<()> {
         let coll_id: Option<CollectionId> = match operation {
             WriteOperation::Collection(coll_id, _) => Some(coll_id.clone()),
+            WriteOperation::DeleteCollection(id) => Some(id.clone()),
             WriteOperation::CreateCollection { id, .. } => Some(id.clone()),
             WriteOperation::KV(_) => None,
             WriteOperation::SubstituteCollection {

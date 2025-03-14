@@ -149,7 +149,10 @@ async fn add_documents(
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     info!("Adding documents to collection {:?}", collection_id);
-    match write_side.write(write_api_key, collection_id, json).await {
+    match write_side
+        .insert_documents(write_api_key, collection_id, json)
+        .await
+    {
         Ok(_) => {
             info!("Documents added to collection");
         }

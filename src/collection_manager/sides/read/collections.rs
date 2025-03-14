@@ -35,6 +35,7 @@ pub struct CollectionsReader {
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
 }
+
 impl CollectionsReader {
     pub async fn try_load(
         ai_service: Arc<AIService>,
@@ -186,6 +187,36 @@ impl CollectionsReader {
         drop(guard);
 
         info!(collection_id=?id, "Collection created {:?}", id);
+
+        Ok(())
+    }
+
+    pub async fn remove_collection(&self, id: CollectionId) -> Option<CollectionReader> {
+        info!(collection_id=?id, "Removing collection {:?}", id);
+
+        let mut guard = self.collections.write().await;
+        guard.remove(&id)
+    }
+
+    pub async fn clean_fs_for_collection(&self, collection: CollectionReader) -> Result<()> {
+        info!(collection_id=?collection.id, "Cleaning FS collection");
+
+        let data_dir = &self.indexes_config.data_dir;
+        let collections_dir = data_dir.join("collections");
+
+        let collection_dir = collections_dir.join(&collection.id.0);
+        if collection_dir.exists() {
+            tokio::fs::remove_dir_all(&collection_dir)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Cannot remove directory for collection '{}'",
+                        collection.id.0
+                    )
+                })?;
+        }
+
+        info!("FS cleaned");
 
         Ok(())
     }

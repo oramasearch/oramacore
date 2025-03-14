@@ -124,7 +124,7 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
     Ok(similarity)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct VectorUncommittedFieldStats {
     len: usize,
 }

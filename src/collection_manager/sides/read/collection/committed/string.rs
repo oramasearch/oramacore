@@ -595,7 +595,7 @@ pub struct StringFieldInfo {
     pub fst_file_path: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct StringCommittedFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,

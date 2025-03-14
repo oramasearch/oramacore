@@ -204,6 +204,7 @@ pub enum WriteOperation {
         description: Option<String>,
         default_language: LanguageDTO,
     },
+    DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
     SubstituteCollection {
         subject_collection_id: CollectionId,
@@ -215,6 +216,7 @@ impl WriteOperation {
     pub fn get_type_id(&self) -> &'static str {
         match self {
             WriteOperation::CreateCollection { .. } => "create_collection",
+            WriteOperation::DeleteCollection(_) => "delete_collection",
             WriteOperation::Collection(_, CollectionWriteOperation::CreateField { .. }) => {
                 "create_field"
             }
