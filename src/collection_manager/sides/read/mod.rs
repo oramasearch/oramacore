@@ -271,6 +271,11 @@ impl ReadSide {
                     .await?;
             }
             WriteOperation::DeleteCollection(coll_id) => {
+                // The order of those operations are important:
+                // 1. Remove collection from the hashmap
+                // 2. Commit
+                // 3. Clean the fs
+                // otherwise, if something crashed, we loose the collection.
                 let collection = self.collections.remove_collection(coll_id).await;
                 if let Some(collection) = collection {
                     self.commit()
