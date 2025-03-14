@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
     pin::Pin,
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -13,6 +14,7 @@ use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use grpc_def::{ChatStreamResponse, Embedding, PlannedAnswerResponse};
 use http::uri::Scheme;
 use redact::Secret;
+use serde_json::json;
 use tokio::time::sleep;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Response, Status};
@@ -20,14 +22,16 @@ use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
+    build_orama,
     collection_manager::{
         dto::ApiKey,
         sides::{
             hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
             CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-            OutputSideChannelType, ReadSideConfig, WriteSideConfig,
+            OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
         },
     },
+    types::{CollectionId, DocumentList},
     web_server::HttpConfig,
     OramacoreConfig,
 };
@@ -51,6 +55,63 @@ pub fn hooks_runtime_config() -> HooksRuntimeConfig {
             max_startup_time: DurationString::from_str("1s").unwrap(),
         },
     }
+}
+
+pub async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
+    if config.ai_server.port == 0 {
+        let address = create_grpc_server().await?;
+        config.ai_server.host = address.ip();
+        config.ai_server.port = address.port();
+        info!("AI server started on {}", address);
+    }
+
+    let (write_side, read_side) = build_orama(config).await?;
+
+    let write_side = write_side.unwrap();
+    let read_side = read_side.unwrap();
+
+    Ok((write_side, read_side))
+}
+
+pub async fn create_collection(
+    write_side: Arc<WriteSide>,
+    collection_id: CollectionId,
+) -> Result<()> {
+    write_side
+        .create_collection(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
+            json!({
+                "id": collection_id.0.clone(),
+                "read_api_key": "my-read-api-key",
+                "write_api_key": "my-write-api-key",
+            })
+            .try_into()?,
+        )
+        .await?;
+    sleep(Duration::from_millis(100)).await;
+
+    Ok(())
+}
+
+pub async fn insert_docs<I>(
+    write_side: Arc<WriteSide>,
+    write_api_key: ApiKey,
+    collection_id: CollectionId,
+    docs: I,
+) -> Result<()>
+where
+    I: IntoIterator<Item = serde_json::Value>,
+{
+    let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
+    let document_list: DocumentList = document_list.try_into()?;
+
+    write_side
+        .insert_documents(write_api_key, collection_id, document_list)
+        .await?;
+
+    sleep(Duration::from_millis(1_000)).await;
+
+    Ok(())
 }
 
 pub mod grpc_def {

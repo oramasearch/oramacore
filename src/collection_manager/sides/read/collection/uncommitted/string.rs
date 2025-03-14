@@ -218,7 +218,7 @@ impl StringField {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct StringUncommittedFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,

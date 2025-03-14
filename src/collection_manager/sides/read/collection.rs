@@ -1638,7 +1638,7 @@ pub enum TypedField {
     ArrayBoolean,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct FieldStats {
     name: String,
     field_id: FieldId,
@@ -1646,7 +1646,7 @@ pub struct FieldStats {
     stats: FieldStatsType,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct CollectionStats {
     pub id: CollectionId,
     pub description: Option<String>,
@@ -1655,7 +1655,7 @@ pub struct CollectionStats {
     pub fields_stats: Vec<FieldStats>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 pub enum FieldStatsType {
     #[serde(rename = "bool")]

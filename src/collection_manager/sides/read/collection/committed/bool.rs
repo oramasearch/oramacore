@@ -180,7 +180,7 @@ pub struct BoolFieldInfo {
     pub data_dir: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BoolCommittedFieldStats {
     pub false_count: usize,
     pub true_count: usize,

@@ -165,7 +165,7 @@ pub struct VectorFieldInfo {
     pub data_dir: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct VectorCommittedFieldStats {
     pub len: usize,
 }
