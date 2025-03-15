@@ -112,7 +112,7 @@ impl ReadSide {
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
+        let triggers = TriggerInterface::new(kv.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,

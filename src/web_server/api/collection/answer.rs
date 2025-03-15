@@ -1,5 +1,5 @@
 use crate::ai::party_planner::PartyPlanner;
-use crate::ai::{vllm, LlmType, SegmentResponse};
+use crate::ai::{vllm, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
@@ -303,21 +303,16 @@ async fn answer_v1(
             )))
             .await;
 
-        let optimized_query = ai_service
-            .chat(
-                LlmType::GoogleQueryTranslator,
-                query.clone(),
-                None,
-                None,
-                None,
-                None,
-            )
-            .await
-            .unwrap();
+        let optimized_query_variables = vec![("input".to_string(), query.clone())];
+
+        let optimized_query =
+            vllm::run_known_prompt(vllm::KnownPrompts::OptimizeQuery, optimized_query_variables)
+                .await
+                .unwrap_or(query.clone()); // fallback to the original query if the optimization fails
 
         let _ = tx
             .send(Ok(Event::default().data(
-                serialize_response("OPTIMIZING_QUERY", &optimized_query.text, true).unwrap(),
+                serialize_response("OPTIMIZING_QUERY", &optimized_query, true).unwrap(),
             )))
             .await;
 
@@ -328,7 +323,7 @@ async fn answer_v1(
                 collection_id,
                 SearchParams {
                     mode: SearchMode::Auto(AutoMode {
-                        term: optimized_query.text,
+                        term: optimized_query,
                     }),
                     limit: Limit(5),
                     where_filter: HashMap::new(),

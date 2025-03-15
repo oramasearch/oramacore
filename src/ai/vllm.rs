@@ -19,6 +19,7 @@ use super::party_planner::Step;
 pub enum KnownPrompts {
     Answer,
     Autoquery,
+    OptimizeQuery,
     PartyPlanner,
     Segmenter,
     Trigger,
@@ -85,6 +86,10 @@ impl KnownPrompts {
             KnownPrompts::Trigger => KnownPrompt {
                 system: include_str!("../prompts/v1/trigger/system.txt").to_string(),
                 user: include_str!("../prompts/v1/trigger/user.txt").to_string(),
+            },
+            KnownPrompts::OptimizeQuery => KnownPrompt {
+                system: include_str!("../prompts/v1/optimize_query/system.txt").to_string(),
+                user: include_str!("../prompts/v1/optimize_query/user.txt").to_string(),
             },
         }
     }

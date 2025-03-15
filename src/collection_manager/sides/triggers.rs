@@ -45,12 +45,11 @@ pub struct SelectedTrigger {
 
 pub struct TriggerInterface {
     kv: Arc<KV>,
-    ai_service: Arc<AIService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>, ai_service: Arc<AIService>) -> Self {
-        Self { kv, ai_service }
+    pub fn new(kv: Arc<KV>) -> Self {
+        Self { kv }
     }
 
     pub async fn insert(&self, trigger: Trigger) -> Result<String> {
@@ -183,11 +182,8 @@ pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
 
 #[cfg(test)]
 mod tests {
+    use crate::collection_manager::sides::generic_kv::KVConfig;
     use std::path::PathBuf;
-
-    use http::uri::Scheme;
-
-    use crate::{ai::AIServiceConfig, collection_manager::sides::generic_kv::KVConfig};
 
     use super::*;
 
@@ -198,17 +194,8 @@ mod tests {
             sender: None,
         };
 
-        let ai_service_conf = AIServiceConfig {
-            scheme: Scheme::HTTP,
-            max_connections: 1,
-            port: 8080,
-            api_key: None,
-            host: std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-        };
-
         let kv = Arc::new(KV::try_load(kv_config).unwrap());
-        let trigger_interface =
-            TriggerInterface::new(kv.clone(), Arc::new(AIService::new(ai_service_conf)));
+        let trigger_interface = TriggerInterface::new(kv.clone());
 
         let trigger = Trigger {
             id: "test_trigger".to_string(),
