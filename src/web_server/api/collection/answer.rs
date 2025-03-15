@@ -1,8 +1,7 @@
 use crate::ai::party_planner::PartyPlanner;
 use crate::ai::{LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
-    ApiKey, HybridMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
-    SearchResult, Similarity,
+    ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
 use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::triggers::{SelectedTrigger, Trigger};
@@ -39,14 +38,6 @@ struct MessageChunk {
 enum SseMessage {
     #[serde(rename = "acknowledgement")]
     Acknowledge { message: String },
-    #[serde(rename = "optimizing-query")]
-    OptimizingQuery { message: String },
-    #[serde(rename = "optimized-query")]
-    OptimizedQuery { message: String },
-    #[serde(rename = "sources")]
-    Sources { message: SearchResult },
-    #[serde(rename = "answer_chunk")]
-    AnswerChunk { message: MessageChunk },
     #[serde(rename = "error")]
     Error { message: String },
     #[serde(rename = "response")]
@@ -129,32 +120,30 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: json!({
-                                    "action": "GET_SEGMENT",
-                                    "result": s,
-                                    "done": true,
-                                })
-                                .to_string(),
-                            })
+                            serialize_response(
+                                "GET_SEGMENT",
+                                &serde_json::to_string(&s).unwrap(),
+                                true,
+                            )
                             .unwrap(),
                         )))
                         .await;
                 }
                 AudienceManagementResult::ChosenSegment(s) => {
+                    let probability = s
+                        .unwrap_or(SegmentResponse {
+                            probability: 0.0,
+                            ..SegmentResponse::default()
+                        })
+                        .probability;
+
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: json!({
-                                    "action": "GET_SEGMENT_PROBABILITY",
-                                    "done": true,
-                                    "result": s.unwrap_or(SegmentResponse {
-                                        probability: 0.0,
-                                        ..SegmentResponse::default()
-                                    }).probability,
-                                })
-                                .to_string(),
-                            })
+                            serialize_response(
+                                "GET_SEGMENT_PROBABILITY",
+                                probability.to_string().as_str(),
+                                true,
+                            )
                             .unwrap(),
                         )))
                         .await;
@@ -164,34 +153,32 @@ async fn planned_answer_v1(
 
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: json!({
-                                    "action": "SELECT_TRIGGER",
-                                    "result": t,
-                                    "done": true,
-                                })
-                                .to_string(),
-                            })
+                            serialize_response(
+                                "GET_TRIGGER",
+                                &serde_json::to_string(&t).unwrap(),
+                                true,
+                            )
                             .unwrap(),
                         )))
                         .await;
                 }
                 AudienceManagementResult::ChosenTrigger(t) => {
+                    let probability = t
+                        .unwrap_or(SelectedTrigger {
+                            id: "".to_string(),
+                            name: "".to_string(),
+                            response: "".to_string(),
+                            probability: 0.0,
+                        })
+                        .probability;
+
                     let _ = tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::Response {
-                                message: json!({
-                                    "action": "SELECT_TRIGGER_PROBABILITY",
-                                    "done": true,
-                                    "result": t.unwrap_or(SelectedTrigger {
-                                        id: "".to_string(),
-                                        name: "".to_string(),
-                                        response: "".to_string(),
-                                        probability: 0.0,
-                                    }).probability,
-                                })
-                                .to_string(),
-                            })
+                            serialize_response(
+                                "GET_TRIGGER_PROBABILITY",
+                                probability.to_string().as_str(),
+                                true,
+                            )
                             .unwrap(),
                         )))
                         .await;
@@ -307,9 +294,11 @@ async fn answer_v1(
 
         let _ = tx
             .send(Ok(Event::default().data(
-                serde_json::to_string(&SseMessage::OptimizingQuery {
-                    message: "Optimizing query".to_string(),
-                })
+                serialize_response(
+                    "GET_SEGMENT",
+                    &serde_json::to_string(&segment).unwrap(),
+                    true,
+                )
                 .unwrap(),
             )))
             .await;
@@ -328,10 +317,7 @@ async fn answer_v1(
 
         let _ = tx
             .send(Ok(Event::default().data(
-                serde_json::to_string(&SseMessage::OptimizedQuery {
-                    message: optimized_query.text.to_string(),
-                })
-                .unwrap(),
+                serialize_response("OPTIMIZING_QUERY", &optimized_query.text, true).unwrap(),
             )))
             .await;
 
@@ -340,9 +326,8 @@ async fn answer_v1(
                 read_api_key,
                 collection_id,
                 SearchParams {
-                    mode: SearchMode::Hybrid(HybridMode {
+                    mode: SearchMode::Auto(AutoMode {
                         term: optimized_query.text,
-                        similarity: Similarity(0.8),
                     }),
                     limit: Limit(5),
                     where_filter: HashMap::new(),
@@ -356,9 +341,11 @@ async fn answer_v1(
 
         let _ = tx
             .send(Ok(Event::default().data(
-                serde_json::to_string(&SseMessage::Sources {
-                    message: search_results.clone(),
-                })
+                serialize_response(
+                    "SEARCH_RESULTS",
+                    &serde_json::to_string(&search_results.hits).unwrap(),
+                    true,
+                )
                 .unwrap(),
             )))
             .await;
@@ -388,7 +375,7 @@ async fn answer_v1(
 
                     if tx
                         .send(Ok(Event::default().data(
-                            serde_json::to_string(&SseMessage::AnswerChunk { message: chunk })
+                            serialize_response("STREAMING_RESPONSE", &chunk.text, chunk.is_final)
                                 .unwrap(),
                         )))
                         .await
@@ -539,4 +526,15 @@ async fn select_triggers_and_segments(
     });
 
     ReceiverStream::new(rx)
+}
+
+fn serialize_response(action: &str, result: &str, done: bool) -> serde_json::Result<String> {
+    serde_json::to_string(&SseMessage::Response {
+        message: json!({
+            "action": action,
+            "result": result,
+            "done": done,
+        })
+        .to_string(),
+    })
 }
