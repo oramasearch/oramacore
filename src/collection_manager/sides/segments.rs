@@ -53,12 +53,11 @@ pub struct SelectedSegment {
 
 pub struct SegmentInterface {
     kv: Arc<KV>,
-    ai_service: Arc<AIService>,
 }
 
 impl SegmentInterface {
-    pub fn new(kv: Arc<KV>, ai_service: Arc<AIService>) -> Self {
-        Self { kv, ai_service }
+    pub fn new(kv: Arc<KV>) -> Self {
+        Self { kv }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {

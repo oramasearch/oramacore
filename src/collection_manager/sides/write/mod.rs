@@ -137,7 +137,7 @@ impl WriteSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
+        let segments = SegmentInterface::new(kv.clone());
         let triggers = TriggerInterface::new(kv.clone());
         let hook =
             HooksRuntime::new(kv.clone(), collections_writer_config.javascript_queue_limit).await;
