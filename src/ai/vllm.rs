@@ -68,28 +68,28 @@ impl KnownPrompts {
     pub fn get_prompts(&self) -> KnownPrompt {
         match self {
             KnownPrompts::Answer => KnownPrompt {
-                system: include_str!("../prompts/v1/answer/system.txt").to_string(),
-                user: include_str!("../prompts/v1/answer/user.txt").to_string(),
+                system: include_str!("../prompts/v1/answer/system.md").to_string(),
+                user: include_str!("../prompts/v1/answer/user.md").to_string(),
             },
             KnownPrompts::Autoquery => KnownPrompt {
-                system: include_str!("../prompts/v1/autoquery/system.txt").to_string(),
-                user: include_str!("../prompts/v1/autoquery/user.txt").to_string(),
+                system: include_str!("../prompts/v1/autoquery/system.md").to_string(),
+                user: include_str!("../prompts/v1/autoquery/user.md").to_string(),
             },
             KnownPrompts::PartyPlanner => KnownPrompt {
-                system: include_str!("../prompts/v1/party_planner/system.txt").to_string(),
-                user: include_str!("../prompts/v1/party_planner/user.txt").to_string(),
+                system: include_str!("../prompts/v1/party_planner/system.md").to_string(),
+                user: include_str!("../prompts/v1/party_planner/user.md").to_string(),
             },
             KnownPrompts::Segmenter => KnownPrompt {
-                system: include_str!("../prompts/v1/segmenter/system.txt").to_string(),
-                user: include_str!("../prompts/v1/segmenter/user.txt").to_string(),
+                system: include_str!("../prompts/v1/segmenter/system.md").to_string(),
+                user: include_str!("../prompts/v1/segmenter/user.md").to_string(),
             },
             KnownPrompts::Trigger => KnownPrompt {
-                system: include_str!("../prompts/v1/trigger/system.txt").to_string(),
-                user: include_str!("../prompts/v1/trigger/user.txt").to_string(),
+                system: include_str!("../prompts/v1/trigger/system.md").to_string(),
+                user: include_str!("../prompts/v1/trigger/user.md").to_string(),
             },
             KnownPrompts::OptimizeQuery => KnownPrompt {
-                system: include_str!("../prompts/v1/optimize_query/system.txt").to_string(),
-                user: include_str!("../prompts/v1/optimize_query/user.txt").to_string(),
+                system: include_str!("../prompts/v1/optimize_query/system.md").to_string(),
+                user: include_str!("../prompts/v1/optimize_query/user.md").to_string(),
             },
         }
     }
@@ -105,11 +105,10 @@ impl PartyPlannerPrompt {
         match self {
             PartyPlannerPrompt::AskFollowup => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/ask_followup_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/ask_followup_system.md")
                         .to_string();
-                let user =
-                    include_str!("../prompts/v1/party_planner/actions/ask_followup_user.txt")
-                        .to_string();
+                let user = include_str!("../prompts/v1/party_planner/actions/ask_followup_user.md")
+                    .to_string();
 
                 PartyPlannerPromptHyperParams {
                     system_prompt: system,
@@ -120,10 +119,10 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::OptimizeQuery => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/optimize_query_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/optimize_query_system.md")
                         .to_string();
                 let user =
-                    include_str!("../prompts/v1/party_planner/actions/optimize_query_user.txt")
+                    include_str!("../prompts/v1/party_planner/actions/optimize_query_user.md")
                         .to_string();
 
                 PartyPlannerPromptHyperParams {
@@ -135,10 +134,10 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::GenerateQueries => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/generate_queries_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/generate_queries_system.md")
                         .to_string();
                 let user =
-                    include_str!("../prompts/v1/party_planner/actions/generate_queries_user.txt")
+                    include_str!("../prompts/v1/party_planner/actions/generate_queries_user.md")
                         .to_string();
 
                 PartyPlannerPromptHyperParams {
@@ -150,13 +149,12 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::DescribeInputCode => {
                 let system = include_str!(
-                    "../prompts/v1/party_planner/actions/describe_input_code_system.txt"
+                    "../prompts/v1/party_planner/actions/describe_input_code_system.md"
                 )
                 .to_string();
-                let user = include_str!(
-                    "../prompts/v1/party_planner/actions/describe_input_code_user.txt"
-                )
-                .to_string();
+                let user =
+                    include_str!("../prompts/v1/party_planner/actions/describe_input_code_user.md")
+                        .to_string();
 
                 PartyPlannerPromptHyperParams {
                     system_prompt: system,
@@ -167,10 +165,10 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::ImproveInput => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/improve_input_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/improve_input_system.md")
                         .to_string();
                 let user =
-                    include_str!("../prompts/v1/party_planner/actions/improve_input_user.txt")
+                    include_str!("../prompts/v1/party_planner/actions/improve_input_user.md")
                         .to_string();
 
                 PartyPlannerPromptHyperParams {
@@ -182,9 +180,9 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::CreateCode => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/create_code_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/create_code_system.md")
                         .to_string();
-                let user = include_str!("../prompts/v1/party_planner/actions/create_code_user.txt")
+                let user = include_str!("../prompts/v1/party_planner/actions/create_code_user.md")
                     .to_string();
 
                 PartyPlannerPromptHyperParams {
@@ -196,9 +194,9 @@ impl PartyPlannerPrompt {
             }
             PartyPlannerPrompt::GiveReply => {
                 let system =
-                    include_str!("../prompts/v1/party_planner/actions/give_reply_system.txt")
+                    include_str!("../prompts/v1/party_planner/actions/give_reply_system.md")
                         .to_string();
-                let user = include_str!("../prompts/v1/party_planner/actions/give_reply_user.txt")
+                let user = include_str!("../prompts/v1/party_planner/actions/give_reply_user.md")
                     .to_string();
 
                 PartyPlannerPromptHyperParams {
