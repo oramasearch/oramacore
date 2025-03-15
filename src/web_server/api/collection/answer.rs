@@ -1,5 +1,5 @@
 use crate::ai::party_planner::PartyPlanner;
-use crate::ai::{vllm, SegmentResponse};
+use crate::ai::vllm;
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
@@ -129,25 +129,6 @@ async fn planned_answer_v1(
                         )))
                         .await;
                 }
-                AudienceManagementResult::ChosenSegment(s) => {
-                    let probability = s
-                        .unwrap_or(SegmentResponse {
-                            probability: 0.0,
-                            ..SegmentResponse::default()
-                        })
-                        .probability;
-
-                    let _ = tx
-                        .send(Ok(Event::default().data(
-                            serialize_response(
-                                "GET_SEGMENT_PROBABILITY",
-                                probability.to_string().as_str(),
-                                true,
-                            )
-                            .unwrap(),
-                        )))
-                        .await;
-                }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t.clone();
 
@@ -156,27 +137,6 @@ async fn planned_answer_v1(
                             serialize_response(
                                 "GET_TRIGGER",
                                 &serde_json::to_string(&t).unwrap(),
-                                true,
-                            )
-                            .unwrap(),
-                        )))
-                        .await;
-                }
-                AudienceManagementResult::ChosenTrigger(t) => {
-                    let probability = t
-                        .unwrap_or(SelectedTrigger {
-                            id: "".to_string(),
-                            name: "".to_string(),
-                            response: "".to_string(),
-                            probability: 0.0,
-                        })
-                        .probability;
-
-                    let _ = tx
-                        .send(Ok(Event::default().data(
-                            serialize_response(
-                                "GET_TRIGGER_PROBABILITY",
-                                probability.to_string().as_str(),
                                 true,
                             )
                             .unwrap(),
@@ -280,14 +240,8 @@ async fn answer_v1(
                 AudienceManagementResult::Segment(s) => {
                     segment = s;
                 }
-                AudienceManagementResult::ChosenSegment(_s) => {
-                    unreachable!();
-                }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t;
-                }
-                AudienceManagementResult::ChosenTrigger(_t) => {
-                    unreachable!();
                 }
             }
         }
@@ -396,9 +350,7 @@ async fn answer_v1(
 
 enum AudienceManagementResult {
     Segment(Option<crate::collection_manager::sides::segments::Segment>),
-    ChosenSegment(Option<SegmentResponse>),
     Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
-    ChosenTrigger(Option<SelectedTrigger>),
 }
 
 async fn select_triggers_and_segments(
@@ -433,10 +385,6 @@ async fn select_triggers_and_segments(
 
         match chosen_segment {
             None => {
-                tx.send(AudienceManagementResult::ChosenSegment(None))
-                    .await
-                    .unwrap();
-
                 tx.send(AudienceManagementResult::Segment(None))
                     .await
                     .unwrap();
@@ -490,7 +438,7 @@ async fn select_triggers_and_segments(
 
                 match chosen_trigger {
                     None => {
-                        tx.send(AudienceManagementResult::ChosenTrigger(None))
+                        tx.send(AudienceManagementResult::Trigger(None))
                             .await
                             .unwrap();
                     }

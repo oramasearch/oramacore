@@ -34,16 +34,6 @@ impl fmt::Display for Segment {
     }
 }
 
-impl From<crate::ai::Segment> for Segment {
-    fn from(segment: crate::ai::Segment) -> Self {
-        Self {
-            id: segment.id,
-            name: segment.name,
-            description: segment.description,
-            goal: segment.goal,
-        }
-    }
-}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SelectedSegment {
     pub id: String,

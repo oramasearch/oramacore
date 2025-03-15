@@ -27,7 +27,9 @@ pillow==10.4.0
 pytest==8.3.4
 pytest-mock==3.14.0
 
-onnxruntime-gpu==1.20.1
+onnxruntime-gpu==1.20.1 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 accelerate==1.2.1
 einops==0.8.0
 bitsandbytes==0.45.0
+
+vllm==0.7.3

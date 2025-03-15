@@ -466,6 +466,11 @@ pub struct AutoMode {
     pub term: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SearchModeResult {
+    pub mode: String,
+}
+
 #[derive(Debug, Clone, ToSchema)]
 pub enum SearchMode {
     FullText(#[schema(inline)] FulltextMode),
