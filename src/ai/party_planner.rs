@@ -65,7 +65,7 @@ impl PartyPlanner {
         // Add a system prompt to the history if the first entry is not a system prompt.
         let system_prompt = InteractionMessage {
             role: Role::System,
-            content: include_str!("../prompts/v1/party_planner/system_short.txt").to_string(),
+            content: include_str!("../prompts/v1/party_planner/system_short.md").to_string(),
         };
 
         if history.is_empty()
