@@ -1,5 +1,5 @@
 use crate::ai::party_planner::PartyPlanner;
-use crate::ai::{LlmType, SegmentResponse};
+use crate::ai::{vllm, LlmType, SegmentResponse};
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
@@ -321,6 +321,7 @@ async fn answer_v1(
             )))
             .await;
 
+        // @todo: derive limit, boost, and where filters depending on the schema and the input query
         let search_results = read_side
             .search(
                 read_api_key,
@@ -352,41 +353,23 @@ async fn answer_v1(
 
         let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
 
-        let stream = ai_service
-            .chat_stream(
-                LlmType::Answer,
-                query,
-                Some(conversation),
-                Some(search_result_str),
-                segment,
-                trigger,
-            )
-            .await
-            .unwrap();
+        let variables = vec![
+            ("question".to_string(), query.clone()),
+            ("context".to_string(), search_result_str.clone()),
+        ];
 
-        let mut stream = stream;
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(response) => {
-                    let chunk = MessageChunk {
-                        text: response.text_chunk,
-                        is_final: response.is_final,
-                    };
+        let mut answer_stream =
+            vllm::run_known_prompt_stream(vllm::KnownPrompts::Answer, variables).await;
 
-                    if tx
+        while let Some(resp) = answer_stream.next().await {
+            match resp {
+                Ok(chunk) => {
+                    let _ = tx
                         .send(Ok(Event::default().data(
-                            serialize_response("STREAMING_RESPONSE", &chunk.text, chunk.is_final)
-                                .unwrap(),
+                            serialize_response("ANSWER_RESPONSE", &chunk, false).unwrap(),
                         )))
                         .await
-                        .is_err()
-                    {
-                        break; // Client disconnected
-                    }
-
-                    if response.is_final {
-                        break;
-                    }
+                        .unwrap();
                 }
                 Err(e) => {
                     let _ = tx
@@ -401,6 +384,12 @@ async fn answer_v1(
                 }
             }
         }
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serialize_response("ANSWER_RESPONSE", "", true).unwrap(),
+            )))
+            .await;
     });
 
     Sse::new(rx_stream).keep_alive(

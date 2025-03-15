@@ -251,7 +251,7 @@ pub async fn run_known_prompt_stream(
 
     let request = CreateChatCompletionRequestArgs::default()
         .model("Qwen/Qwen2.5-3B-Instruct")
-        .max_tokens(512 as u32)
+        .max_tokens(512u32)
         .stream(true)
         .messages([
             ChatCompletionRequestSystemMessageArgs::default()
