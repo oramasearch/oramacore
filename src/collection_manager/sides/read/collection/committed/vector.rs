@@ -137,7 +137,7 @@ impl VectorField {
         let data = self.inner.search(target.to_vec(), limit * 2);
 
         for (doc_id, score) in data {
-            if filtered_doc_ids.map_or(false, |ids| !ids.contains(&doc_id)) {
+            if filtered_doc_ids.is_some_and(|ids| !ids.contains(&doc_id)) {
                 continue;
             }
             if uncommitted_deleted_documents.contains(&doc_id) {
@@ -165,7 +165,7 @@ pub struct VectorFieldInfo {
     pub data_dir: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct VectorCommittedFieldStats {
     pub len: usize,
 }

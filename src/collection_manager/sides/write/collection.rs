@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, bail, Context, Ok, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use doc_id_storage::DocIdStorage;
 use redact::Secret;
 use serde::{Deserialize, Serialize};
@@ -484,6 +484,15 @@ impl CollectionWriter {
             .fetch_sub(doc_ids_len as u64, std::sync::atomic::Ordering::Relaxed);
 
         Ok(())
+    }
+
+    pub async fn remove_from_fs(self, path: PathBuf) {
+        match std::fs::remove_dir_all(&path) {
+            Ok(_) => {}
+            Err(e) => {
+                warn!(coll_id= ?self.id, "Cannot remove collection directory. Ignored: {:?}", e);
+            }
+        };
     }
 
     pub async fn commit(&self, path: PathBuf) -> Result<()> {

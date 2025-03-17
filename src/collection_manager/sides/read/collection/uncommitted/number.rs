@@ -101,7 +101,7 @@ where
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct NumberUncommittedFieldStats {
     pub min: Number,
     pub max: Number,

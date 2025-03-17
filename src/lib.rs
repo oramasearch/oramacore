@@ -24,7 +24,6 @@ pub mod collection_manager;
 pub mod web_server;
 
 mod capped_heap;
-pub mod js;
 
 mod metrics;
 

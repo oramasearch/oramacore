@@ -36,7 +36,7 @@ impl VectorField {
         let magnetude = calculate_magnetude(target);
 
         for (id, vectors) in &self.data {
-            if filtered_doc_ids.map_or(false, |ids| !ids.contains(id)) {
+            if filtered_doc_ids.is_some_and(|ids| !ids.contains(id)) {
                 continue;
             }
             if uncommitted_deleted_documents.contains(id) {
@@ -124,7 +124,7 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
     Ok(similarity)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct VectorUncommittedFieldStats {
     len: usize,
 }

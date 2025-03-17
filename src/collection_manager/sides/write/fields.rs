@@ -14,7 +14,7 @@ use crate::{
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
         sides::{
-            hooks::{HookName, HooksRuntime},
+            hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
             CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
             Term, TermStringField, WriteOperation,
         },
@@ -511,10 +511,10 @@ impl EmbeddingField {
                     value
                 })
                 .collect(),
-            DocumentFields::Hook(hook_name) => {
+            DocumentFields::Hook(_) => {
                 let hook_exec_result = self
                     .hooks_runtime
-                    .eval(self.collection_id.clone(), hook_name.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
+                    .calculate_text_for_embedding(self.collection_id.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
                     .await;
 
                 let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
@@ -572,11 +572,4 @@ impl EmbeddingField {
             self.document_fields.clone(),
         )
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-enum SelectEmbeddingPropertiesReturnType {
-    Properties(Vec<String>),
-    Text(String),
 }

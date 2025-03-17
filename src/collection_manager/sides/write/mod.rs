@@ -16,7 +16,7 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime},
+    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
@@ -72,6 +72,7 @@ pub struct CollectionsWriterConfig {
 #[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
+    pub hooks: HooksRuntimeConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
 }
@@ -218,7 +219,7 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn write(
+    pub async fn insert_documents(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
@@ -362,6 +363,31 @@ impl WriteSide {
         collection
             .delete_documents(document_ids_to_delete, self.sender.clone())
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_collection(
+        &self,
+        master_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<()> {
+        self.check_master_api_key(master_api_key).unwrap();
+
+        let deleted = self
+            .collections
+            .delete_collection(collection_id.clone())
+            .await;
+        if deleted {
+            self.commit()
+                .await
+                .context("Cannot commit collections after collection deletion")?;
+
+            self.sender
+                .send(WriteOperation::DeleteCollection(collection_id))
+                .await
+                .context("Cannot send delete collection operation")?;
+        }
 
         Ok(())
     }

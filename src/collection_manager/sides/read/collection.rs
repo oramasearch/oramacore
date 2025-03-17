@@ -321,7 +321,7 @@ impl CollectionReader {
             if current_collection_info.fields.is_empty() {
                 let new_offset_collection_info_path =
                     data_dir.join(format!("info-offset-{}.info", offset.0));
-                BufferedFile::create(new_offset_collection_info_path)
+                BufferedFile::create_or_overwrite(new_offset_collection_info_path)
                     .context("Cannot create previous collection info")?
                     .write_json_data(&CollectionInfo::V1(current_collection_info))
                     .context("Cannot write previous collection info")?;
@@ -1636,7 +1636,7 @@ pub enum TypedField {
     ArrayBoolean,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct FieldStats {
     name: String,
     field_id: FieldId,
@@ -1644,7 +1644,7 @@ pub struct FieldStats {
     stats: FieldStatsType,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct CollectionStats {
     pub id: CollectionId,
     pub description: Option<String>,
@@ -1653,7 +1653,7 @@ pub struct CollectionStats {
     pub fields_stats: Vec<FieldStats>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 pub enum FieldStatsType {
     #[serde(rename = "bool")]

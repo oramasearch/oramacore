@@ -5,7 +5,7 @@ copilots, and search.
 
 It includes a fully-fledged full-text search engine, vector database, LLM
 interface with action planning and reasoning, a JavaScript runtime to write and
-run your own custom agents on yoru data, and many more utilities.
+run your own custom agents on your data, and many more utilities.
 
 ## Getting Started
 

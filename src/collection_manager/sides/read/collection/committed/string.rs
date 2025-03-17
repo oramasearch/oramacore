@@ -324,7 +324,7 @@ impl StringField {
                         .iter()
                         .filter(|(doc_id, _)| {
                             filtered_doc_ids
-                                .map_or(true, |filtered_doc_ids| filtered_doc_ids.contains(doc_id))
+                                .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
                         .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
                         .map(move |(doc_id, positions)| {
@@ -395,7 +395,7 @@ impl StringField {
                         .iter()
                         .filter(|(doc_id, _)| {
                             filtered_doc_ids
-                                .map_or(true, |filtered_doc_ids| filtered_doc_ids.contains(doc_id))
+                                .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
                         .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
                         .map(move |(doc_id, positions)| {
@@ -595,7 +595,7 @@ pub struct StringFieldInfo {
     pub fst_file_path: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct StringCommittedFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
