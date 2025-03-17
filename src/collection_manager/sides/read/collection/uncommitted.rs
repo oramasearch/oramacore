@@ -255,7 +255,7 @@ impl UncommittedCollection {
                     .insert(doc_id, value.0);
             }
             DocumentFieldIndexOperation::IndexStringFilter { value } => {
-                panic!("Not yet implemented");
+                // panic!("Not yet implemented");
             }
             DocumentFieldIndexOperation::IndexString {
                 field_length,

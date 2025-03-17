@@ -2,7 +2,6 @@ use anyhow::Result;
 use dircpy::copy_dir;
 use redact::Secret;
 use serde_json::json;
-use tokio::time::sleep;
 
 use crate::{
     collection_manager::dto::ApiKey,
@@ -62,16 +61,17 @@ async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
             json!({
                 "term": "d",
                 "where": {
-                    "number": { "gt": 1 },
-                    "numbers": { "gt": 1 },
-                    "bool": true,
-                    "bools": true,
+                    "number": { "eq": 3 },
+                    "numbers": { "eq": 3 },
+                    "bool": false,
+                    "bools": false,
                 }
             })
             .try_into()?,
         )
-        .await;
-    assert_eq!(output.is_ok(), true);
+        .await
+        .unwrap();
+    assert_eq!(output.count, 1);
 
     write_side.commit().await?;
     read_side.commit().await?;
@@ -84,16 +84,17 @@ async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
             json!({
                 "term": "d",
                 "where": {
-                    "number": { "gt": 1 },
-                    "numbers": { "gt": 1 },
-                    "bool": true,
-                    "bools": true,
+                    "number": { "eq": 3 },
+                    "numbers": { "eq": 3 },
+                    "bool": false,
+                    "bools": false,
                 }
             })
             .try_into()?,
         )
-        .await;
-    assert_eq!(output.is_ok(), true);
+        .await
+        .unwrap();
+    assert_eq!(output.count, 1);
 
     Ok(())
 }

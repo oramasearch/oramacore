@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use backoff::default;
 use committed::{
     fields::{
         BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
@@ -72,7 +73,8 @@ pub struct CollectionReader {
 
     document_count: AtomicU64,
 
-    fields: DashMap<String, (FieldId, TypedField)>,
+    score_fields: DashMap<String, (FieldId, TypedField)>,
+    filter_fields: DashMap<String, (FieldId, TypedField)>,
 
     uncommitted_collection: RwLock<UncommittedCollection>,
     committed_collection: RwLock<CommittedCollection>,
@@ -104,7 +106,8 @@ impl CollectionReader {
             ai_service,
             nlp_service,
             document_count: AtomicU64::new(0),
-            fields: Default::default(),
+            filter_fields: Default::default(),
+            score_fields: Default::default(),
 
             uncommitted_collection: RwLock::new(UncommittedCollection::new()),
             committed_collection: RwLock::new(CommittedCollection::empty()),
@@ -139,18 +142,32 @@ impl CollectionReader {
             .read_json_data()
             .context("Cannot read previous collection info")?;
 
-        let dump::CollectionInfo::V1(collection_info) = collection_info;
+        let collection_info: dump::CollectionInfoV2 = match collection_info {
+            dump::CollectionInfo::V1(info) => dump::migrate_v1_to_v2(info),
+            dump::CollectionInfo::V2(info) => info,
+        };
         let read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
 
-        let fields: DashMap<String, (FieldId, TypedField)> = Default::default();
-        for (field_name, (field_id, field_type)) in collection_info.fields {
+        let score_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
+        for (field_name, (field_id, field_type)) in collection_info.score_fields {
             let typed_field: TypedField = match field_type {
                 dump::TypedField::Text(locale) => TypedField::Text(locale),
                 dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
+                dump::TypedField::Number => continue,
+                dump::TypedField::Bool => continue,
+            };
+            score_fields.insert(field_name, (field_id, typed_field));
+        }
+
+        let filter_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
+        for (field_name, (field_id, field_type)) in collection_info.filter_fields {
+            let typed_field: TypedField = match field_type {
+                dump::TypedField::Text(_) => continue,
+                dump::TypedField::Embedding(_) => continue,
                 dump::TypedField::Number => TypedField::Number,
                 dump::TypedField::Bool => TypedField::Bool,
             };
-            fields.insert(field_name, (field_id, typed_field));
+            filter_fields.insert(field_name, (field_id, typed_field));
         }
 
         let fields_per_model: DashMap<OramaModel, Vec<FieldId>> = Default::default();
@@ -158,7 +175,7 @@ impl CollectionReader {
             fields_per_model.insert(orama_model.0, fields);
         }
 
-        let text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)> = fields
+        let text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)> = score_fields
             .iter()
             .filter_map(|e| {
                 if let TypedField::Text(l) = e.1 {
@@ -190,7 +207,8 @@ impl CollectionReader {
             document_count: AtomicU64::new(collection_info.document_count),
             fields_per_model,
             text_parser_per_field,
-            fields,
+            filter_fields,
+            score_fields,
 
             uncommitted_collection: RwLock::new(UncommittedCollection::new()),
             committed_collection,
@@ -221,22 +239,6 @@ impl CollectionReader {
         self.id.clone()
     }
 
-    pub fn get_field_id(&self, field_name: String) -> Result<FieldId> {
-        let field_id = self.fields.get(&field_name);
-
-        match field_id {
-            Some(field_id) => Ok(field_id.0),
-            None => Err(anyhow!("Field not found")),
-        }
-    }
-
-    pub fn get_field_id_with_type(&self, field_name: &str) -> Result<(FieldId, TypedField)> {
-        self.fields
-            .get(field_name)
-            .map(|v| v.clone())
-            .ok_or_else(|| anyhow!("Field not found"))
-    }
-
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
     pub async fn commit(&self, data_dir: PathBuf, force_new: bool) -> Result<()> {
         info!("Committing collection");
@@ -258,13 +260,14 @@ impl CollectionReader {
         });
         let mut current_collection_info = if force_new {
             debug!("Force to create new new one");
-            CollectionInfoV1 {
+            dump::CollectionInfoV2 {
                 id: self.id.clone(),
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
                 default_language: self.default_language,
-                fields: Default::default(),
+                filter_fields: Default::default(),
+                score_fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
@@ -283,17 +286,19 @@ impl CollectionReader {
                     .context("Cannot read previous collection info")?;
 
             match previous_collection_info {
-                CollectionInfo::V1(info) => info,
+                CollectionInfo::V1(info) => dump::migrate_v1_to_v2(info),
+                CollectionInfo::V2(info) => info,
             }
         } else {
             debug!("No previous collection info found, creating a new one");
-            CollectionInfoV1 {
+            dump::CollectionInfoV2 {
                 id: self.id.clone(),
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
                 default_language: self.default_language,
-                fields: Default::default(),
+                filter_fields: Default::default(),
+                score_fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
@@ -331,12 +336,14 @@ impl CollectionReader {
 
             // If we create a collection with no data, and a commit is triggered,
             // we need to save the collection info file
-            if current_collection_info.fields.is_empty() {
+            if current_collection_info.score_fields.is_empty()
+                && current_collection_info.filter_fields.is_empty()
+            {
                 let new_offset_collection_info_path =
                     data_dir.join(format!("info-offset-{}.info", offset.0));
                 BufferedFile::create_or_overwrite(new_offset_collection_info_path)
                     .context("Cannot create previous collection info")?
-                    .write_json_data(&CollectionInfo::V1(current_collection_info))
+                    .write_json_data(&CollectionInfo::V2(current_collection_info))
                     .context("Cannot write previous collection info")?;
 
                 BufferedFile::create_or_overwrite(collection_info_path)
@@ -401,7 +408,7 @@ impl CollectionReader {
             number_fields.insert(field_id, new_committed_number_index);
 
             let field = current_collection_info
-                .fields
+                .filter_fields
                 .iter_mut()
                 .find(|(_, (f, _))| f == &field_id);
             match field {
@@ -416,13 +423,13 @@ impl CollectionReader {
                 }
                 None => {
                     let field_name = self
-                        .fields
+                        .filter_fields
                         .iter()
                         .find(|e| e.0 == field_id)
                         .context("Number field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
-                        .fields
+                        .filter_fields
                         .push((field_name, (field_id, dump::TypedField::Number)));
                 }
             }
@@ -486,7 +493,7 @@ impl CollectionReader {
                 .map(|e| e.0)
                 .context("String field not registered")?;
             let field = current_collection_info
-                .fields
+                .score_fields
                 .iter_mut()
                 .find(|(_, (f, _))| f == &field_id);
             match field {
@@ -501,13 +508,13 @@ impl CollectionReader {
                 }
                 None => {
                     let field_name = self
-                        .fields
+                        .score_fields
                         .iter()
                         .find(|e| e.0 == field_id)
                         .context("String field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
-                        .fields
+                        .score_fields
                         .push((field_name, (field_id, dump::TypedField::Text(field_locale))));
                 }
             }
@@ -561,7 +568,7 @@ impl CollectionReader {
                 .push((field_id, field_info));
 
             let field = current_collection_info
-                .fields
+                .filter_fields
                 .iter_mut()
                 .find(|(_, (f, _))| f == &field_id);
             match field {
@@ -576,13 +583,13 @@ impl CollectionReader {
                 }
                 None => {
                     let field_name = self
-                        .fields
+                        .filter_fields
                         .iter()
                         .find(|e| e.0 == field_id)
                         .context("Bool field not registered")?;
                     let field_name = field_name.key().to_string();
                     current_collection_info
-                        .fields
+                        .filter_fields
                         .push((field_name, (field_id, dump::TypedField::Bool)));
                 }
             }
@@ -640,7 +647,7 @@ impl CollectionReader {
                 .push((field_id, field_info));
 
             let field = current_collection_info
-                .fields
+                .score_fields
                 .iter_mut()
                 .find(|(_, (f, _))| f == &field_id);
             match field {
@@ -649,7 +656,7 @@ impl CollectionReader {
                 }
                 None => {
                     let field_name = self
-                        .fields
+                        .score_fields
                         .iter()
                         .find(|e| e.0 == field_id)
                         .context("Vector field not registered - 1")?;
@@ -675,7 +682,7 @@ impl CollectionReader {
                             .push((serializable_orama_model.clone(), vec![field_id]));
                     }
 
-                    current_collection_info.fields.push((
+                    current_collection_info.score_fields.push((
                         field_name,
                         (
                             field_id,
@@ -722,7 +729,7 @@ impl CollectionReader {
             data_dir.join(format!("info-offset-{}.info", offset.0));
         BufferedFile::create(new_offset_collection_info_path)
             .context("Cannot create previous collection info")?
-            .write_json_data(&CollectionInfo::V1(current_collection_info))
+            .write_json_data(&CollectionInfo::V2(current_collection_info))
             .context("Cannot write previous collection info")?;
 
         BufferedFile::create_or_overwrite(collection_info_path)
@@ -769,35 +776,52 @@ impl CollectionReader {
             } => {
                 trace!(collection_id=?self.id, ?field_id, ?field_name, ?typed_field, "Creating field");
 
-                let typed_field = match typed_field {
-                    TypedFieldWrapper::Embedding(model) => TypedField::Embedding(model.model.0),
-                    TypedFieldWrapper::Text(locale) => TypedField::Text(locale),
-                    TypedFieldWrapper::Number => TypedField::Number,
-                    TypedFieldWrapper::Bool => TypedField::Bool,
-                    TypedFieldWrapper::ArrayText(locale) => TypedField::ArrayText(locale),
-                    TypedFieldWrapper::ArrayNumber => TypedField::ArrayNumber,
-                    TypedFieldWrapper::ArrayBoolean => TypedField::ArrayBoolean,
-                };
-
-                self.fields
-                    .insert(field_name.clone(), (field_id, typed_field.clone()));
-
-                self.offset_storage.set_offset(offset);
-
                 match typed_field {
-                    TypedField::Embedding(model) => {
+                    TypedFieldWrapper::Embedding(model) => {
                         self.fields_per_model
-                            .entry(model)
+                            .entry(model.model.0.clone())
                             .or_default()
                             .push(field_id);
+                        self.score_fields.insert(
+                            field_name.clone(),
+                            (field_id, TypedField::Embedding(model.model.0)),
+                        );
                     }
-                    TypedField::Text(locale) | TypedField::ArrayText(locale) => {
+                    TypedFieldWrapper::Text(locale) => {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
-                            .insert(field_id, (locale, text_parser));
+                            .insert(field_id, (locale.clone(), text_parser));
+                        self.score_fields
+                            .insert(field_name.clone(), (field_id, TypedField::Text(locale)));
                     }
-                    _ => {}
-                }
+                    TypedFieldWrapper::ArrayText(locale) => {
+                        let text_parser = self.nlp_service.get(locale);
+                        self.text_parser_per_field
+                            .insert(field_id, (locale.clone(), text_parser));
+                        self.score_fields
+                            .insert(field_name.clone(), (field_id, TypedField::Text(locale)));
+                    }
+                    TypedFieldWrapper::Number => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::Number));
+                    }
+                    TypedFieldWrapper::ArrayNumber => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::ArrayNumber));
+                    }
+                    TypedFieldWrapper::Bool => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::Bool));
+                    }
+                    TypedFieldWrapper::ArrayBoolean => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::ArrayBoolean));
+                    }
+                    TypedFieldWrapper::ArrayString => {}
+                    TypedFieldWrapper::String => {}
+                };
+
+                self.offset_storage.set_offset(offset);
 
                 trace!("Field created");
             }
@@ -889,6 +913,7 @@ impl CollectionReader {
         let token_scores = match search_mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
+                println!("properties: {:?}", properties);
                 self.search_full_text(
                     &search_params.term,
                     properties,
@@ -982,7 +1007,7 @@ impl CollectionReader {
         boost
             .into_iter()
             .filter_map(|(field_name, boost)| {
-                let field_id = self.get_field_id(field_name).ok()?;
+                let field_id = self.score_fields.get(&field_name)?.0;
                 Some((field_id, boost))
             })
             .collect()
@@ -1013,9 +1038,14 @@ impl CollectionReader {
                 // We could return a formatted message to http
                 // so, the user can understand what is wrong
                 // TODO: do it
-                self.get_field_id_with_type(&field_name)
+                self.filter_fields
+                    .get(&field_name)
                     .with_context(|| format!("Cannot filter by \"{}\": unknown field", &field_name))
-                    .map(|(field_id, field_type)| (field_name, field_id, field_type, value))
+                    .map(|e| {
+                        let field_name = e.key().clone();
+                        let (field_id, field_type) = e.value();
+                        (field_name, *field_id, field_type.clone(), value)
+                    })
             })
             .collect();
         let mut filters = filters?;
@@ -1030,7 +1060,7 @@ impl CollectionReader {
 
         let mut doc_ids = get_filtered_document(
             self,
-            field_name,
+            &field_name,
             field_id,
             &field_type,
             filter,
@@ -1040,7 +1070,7 @@ impl CollectionReader {
         for (field_name, field_id, field_type, filter) in filters {
             let doc_ids_for_field = get_filtered_document(
                 self,
-                field_name,
+                &field_name,
                 field_id,
                 &field_type,
                 filter,
@@ -1062,7 +1092,7 @@ impl CollectionReader {
             Properties::Specified(properties) => {
                 let mut r = Vec::with_capacity(properties.len());
                 for field_name in properties {
-                    let field = self.fields.get(&field_name);
+                    let field = self.score_fields.get(&field_name);
                     let field = match field {
                         None => return Err(anyhow!("Unknown field name {}", field_name)),
                         Some(field) => field,
@@ -1075,8 +1105,8 @@ impl CollectionReader {
                 r
             }
             Properties::None | Properties::Star => {
-                let mut r = Vec::with_capacity(self.fields.len());
-                for field in &self.fields {
+                let mut r = Vec::with_capacity(self.score_fields.len());
+                for field in &self.score_fields {
                     if !matches!(field.1, TypedField::Text(_) | TypedField::ArrayText(_)) {
                         continue;
                     }
@@ -1208,7 +1238,11 @@ impl CollectionReader {
 
         let mut res_facets: HashMap<String, FacetResult> = HashMap::new();
         for (field_name, facet) in facets {
-            let field_id = self.get_field_id(field_name.clone())?;
+            let field_id = self.filter_fields.get(&field_name);
+            let field_id = match field_id {
+                None => return Err(anyhow!("Unknown field name {}", field_name)),
+                Some(field_id) => field_id.0,
+            };
 
             // This calculation is not efficient
             // we have the doc_ids that matches:
@@ -1344,7 +1378,7 @@ impl CollectionReader {
         }
         fields_stats.extend(bools.into_iter().map(|(k, v)| {
             let name = self
-                .fields
+                .filter_fields
                 .iter()
                 .find(|e| e.value().0 == k)
                 .map(|e| e.key().to_string())
@@ -1381,7 +1415,7 @@ impl CollectionReader {
         }
         fields_stats.extend(numbers.into_iter().map(|(k, v)| {
             let name = self
-                .fields
+                .filter_fields
                 .iter()
                 .find(|e| e.value().0 == k)
                 .map(|e| e.key().to_string())
@@ -1418,7 +1452,7 @@ impl CollectionReader {
         }
         fields_stats.extend(strings.into_iter().map(|(k, v)| {
             let name = self
-                .fields
+                .score_fields
                 .iter()
                 .find(|e| e.value().0 == k)
                 .map(|e| e.key().to_string())
@@ -1455,7 +1489,7 @@ impl CollectionReader {
         }
         fields_stats.extend(vectors.into_iter().map(|(k, v)| {
             let name = self
-                .fields
+                .score_fields
                 .iter()
                 .find(|e| e.value().0 == k)
                 .expect("Field not found")
@@ -1507,6 +1541,47 @@ mod dump {
     pub enum CollectionInfo {
         #[serde(rename = "1")]
         V1(CollectionInfoV1),
+        #[serde(rename = "2")]
+        V2(CollectionInfoV2),
+    }
+
+    pub fn migrate_v1_to_v2(info: CollectionInfoV1) -> CollectionInfoV2 {
+        println!("info: {:#?}", info);
+
+        let mut filter_fields: Vec<(String, (FieldId, TypedField))> = vec![];
+        let mut score_fields: Vec<(String, (FieldId, TypedField))> = vec![];
+        for (field_name, (field_id, field_type)) in info.fields {
+            match field_type {
+                TypedField::Text(locale) => {
+                    score_fields.push((field_name, (field_id, TypedField::Text(locale))));
+                }
+                TypedField::Embedding(embedding) => {
+                    score_fields.push((field_name, (field_id, TypedField::Embedding(embedding))));
+                }
+                TypedField::Number => {
+                    filter_fields.push((field_name, (field_id, TypedField::Number)));
+                }
+                TypedField::Bool => {
+                    filter_fields.push((field_name, (field_id, TypedField::Bool)));
+                }
+            }
+        }
+
+        CollectionInfoV2 {
+            id: info.id,
+            description: info.description,
+            document_count: info.document_count,
+            deleted: info.deleted,
+            default_language: info.default_language,
+            filter_fields,
+            score_fields,
+            read_api_key: info.read_api_key,
+            used_models: info.used_models,
+            number_field_infos: info.number_field_infos,
+            string_field_infos: info.string_field_infos,
+            bool_field_infos: info.bool_field_infos,
+            vector_field_infos: info.vector_field_infos,
+        }
     }
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -1519,6 +1594,24 @@ mod dump {
         pub document_count: u64,
         pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,
+        pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
+        pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,
+        pub string_field_infos: Vec<(FieldId, committed::fields::StringFieldInfo)>,
+        pub bool_field_infos: Vec<(FieldId, committed::fields::BoolFieldInfo)>,
+        pub vector_field_infos: Vec<(FieldId, committed::fields::VectorFieldInfo)>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct CollectionInfoV2 {
+        pub id: CollectionId,
+        pub description: Option<String>,
+        pub default_language: LanguageDTO,
+        #[serde(default)]
+        pub deleted: bool,
+        pub document_count: u64,
+        pub read_api_key: String,
+        pub score_fields: Vec<(String, (FieldId, TypedField))>,
+        pub filter_fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
         pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,
         pub string_field_infos: Vec<(FieldId, committed::fields::StringFieldInfo)>,
@@ -1606,7 +1699,7 @@ async fn get_number_filtered_document(
 
 async fn get_filtered_document(
     reader: &CollectionReader,
-    field_name: String,
+    field_name: &String,
     field_id: FieldId,
     field_type: &TypedField,
     filter: Filter,
@@ -1642,13 +1735,15 @@ async fn get_filtered_document(
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
-    Text(Locale),
     Embedding(OramaModel),
-    Number,
-    Bool,
+    Text(Locale),
     ArrayText(Locale),
+    Number,
     ArrayNumber,
+    Bool,
     ArrayBoolean,
+    String,
+    ArrayString,
 }
 
 #[derive(Serialize, Debug)]

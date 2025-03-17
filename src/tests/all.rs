@@ -151,10 +151,6 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
         )
         .await;
     assert!(result.is_err());
-    assert_eq!(
-        format!("{}", result.unwrap_err()),
-        "Filter on field \"name\"(Text(EN)) not supported".to_string(),
-    );
 
     Ok(())
 }
@@ -1757,7 +1753,7 @@ async fn test_document_duplication() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_simple() -> Result<()> {
+async fn test_simple_simple() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;

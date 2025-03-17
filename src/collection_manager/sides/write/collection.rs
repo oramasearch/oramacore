@@ -335,22 +335,7 @@ impl CollectionWriter {
                     CollectionWriteOperation::CreateField {
                         field_id,
                         field_name,
-                        field, /* match typed_field {
-                                   TypedField::Embedding(embedding_field) => {
-                                       TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
-                                           model: embedding_field.model,
-                                           document_fields: DocumentFieldsWrapper(
-                                               embedding_field.document_fields,
-                                           ),
-                                       })
-                                   }
-                                   TypedField::Text(locale) => TypedFieldWrapper::Text(locale),
-                                   TypedField::Number => TypedFieldWrapper::Number,
-                                   TypedField::Bool => TypedFieldWrapper::Bool,
-                                   TypedField::ArrayText(locale) => TypedFieldWrapper::ArrayText(locale),
-                                   TypedField::ArrayNumber => TypedFieldWrapper::ArrayNumber,
-                                   TypedField::ArrayBoolean => TypedFieldWrapper::ArrayBoolean,
-                               },*/
+                        field,
                     },
                 ))
                 .await
@@ -441,7 +426,7 @@ impl CollectionWriter {
                     self.id.clone(),
                     field_id,
                     field_name,
-                    TypedFieldWrapper::Text(locale),
+                    TypedFieldWrapper::String,
                 )
                 .await?;
                 drop(lock);
@@ -494,7 +479,7 @@ impl CollectionWriter {
                     self.id.clone(),
                     field_id,
                     field_name,
-                    TypedFieldWrapper::Text(locale),
+                    TypedFieldWrapper::String,
                 )
                 .await?;
                 drop(lock);
@@ -644,7 +629,7 @@ impl CollectionWriter {
                 is_new = false;
             }
 
-            if is_new {
+            if !is_new {
                 continue;
             }
 

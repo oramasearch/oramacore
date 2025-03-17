@@ -141,6 +141,8 @@ pub enum TypedFieldWrapper {
     ArrayText(Locale),
     ArrayNumber,
     ArrayBoolean,
+    String,
+    ArrayString,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
