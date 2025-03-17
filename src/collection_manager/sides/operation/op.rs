@@ -32,6 +32,9 @@ pub enum DocumentFieldIndexOperation {
     IndexEmbedding {
         value: Vec<f32>,
     },
+    IndexStringFilter {
+        value: String,
+    },
     IndexNumber {
         value: NumberWrapper,
     },

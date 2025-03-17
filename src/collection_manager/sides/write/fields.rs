@@ -25,17 +25,22 @@ use crate::{
 
 use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
 
-pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
+// pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
 
-pub enum CollectionField {
-    Number(NumberField),
-    Bool(BoolField),
-    String(StringField),
-    Embedding(EmbeddingField),
+pub enum CollectionFilterField {
+    Number(NumberFilterField),
+    Bool(BoolFilterField),
+    String(StringFilterField),
 }
-impl CollectionField {
+
+impl CollectionFilterField {
     pub fn new_number(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
-        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, false))
+        CollectionFilterField::Number(NumberFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            false,
+        ))
     }
 
     pub fn new_arr_number(
@@ -43,11 +48,21 @@ impl CollectionField {
         field_id: FieldId,
         field_name: String,
     ) -> Self {
-        CollectionField::Number(NumberField::new(collection_id, field_id, field_name, true))
+        CollectionFilterField::Number(NumberFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            true,
+        ))
     }
 
     pub fn new_bool(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
-        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, false))
+        CollectionFilterField::Bool(BoolFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            false,
+        ))
     }
 
     pub fn new_arr_bool(
@@ -55,16 +70,95 @@ impl CollectionField {
         field_id: FieldId,
         field_name: String,
     ) -> Self {
-        CollectionField::Bool(BoolField::new(collection_id, field_id, field_name, true))
+        CollectionFilterField::Bool(BoolFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            true,
+        ))
     }
 
+    pub fn new_string(collection_id: CollectionId, field_id: FieldId, field_name: String) -> Self {
+        CollectionFilterField::String(StringFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            false,
+        ))
+    }
+
+    pub fn new_arr_string(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+    ) -> Self {
+        CollectionFilterField::String(StringFilterField::new(
+            collection_id,
+            field_id,
+            field_name,
+            true,
+        ))
+    }
+
+    pub fn field_name(&self) -> String {
+        match self {
+            CollectionFilterField::Number(f) => f.field_name.clone(),
+            CollectionFilterField::Bool(f) => f.field_name.clone(),
+            CollectionFilterField::String(f) => f.field_name.clone(),
+        }
+    }
+
+    pub fn field_type(&self) -> ValueType {
+        match self {
+            CollectionFilterField::Number(_) => ValueType::Scalar(crate::types::ScalarType::Number),
+            CollectionFilterField::Bool(_) => ValueType::Scalar(crate::types::ScalarType::Boolean),
+            CollectionFilterField::String(_) => ValueType::Scalar(crate::types::ScalarType::String),
+        }
+    }
+
+    pub fn field_type_str(&self) -> &'static str {
+        match self {
+            CollectionFilterField::Number(_) => "number_filter",
+            CollectionFilterField::Bool(_) => "bool_filter",
+            CollectionFilterField::String(_) => "string_filter",
+        }
+    }
+
+    pub async fn get_write_operations(
+        &self,
+        doc_id: DocumentId,
+        doc: &FlattenDocument,
+        sender: OperationSender,
+    ) -> Result<()> {
+        match self {
+            CollectionFilterField::Number(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionFilterField::Bool(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionFilterField::String(f) => f.get_write_operations(doc_id, doc, sender).await,
+        }
+    }
+
+    pub fn serialized(&self) -> SerializedFieldIndexer {
+        match self {
+            CollectionFilterField::Number(f) => f.serialized(),
+            CollectionFilterField::Bool(f) => f.serialized(),
+            CollectionFilterField::String(f) => f.serialized(),
+        }
+    }
+}
+
+pub enum CollectionScoreField {
+    String(StringField),
+    Embedding(EmbeddingField),
+}
+
+impl CollectionScoreField {
     pub fn new_string(
         parser: Arc<TextParser>,
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
     ) -> Self {
-        CollectionField::String(StringField::new(
+        Self::String(StringField::new(
             parser,
             collection_id,
             field_id,
@@ -79,7 +173,7 @@ impl CollectionField {
         field_id: FieldId,
         field_name: String,
     ) -> Self {
-        CollectionField::String(StringField::new(
+        Self::String(StringField::new(
             parser,
             collection_id,
             field_id,
@@ -95,29 +189,45 @@ impl CollectionField {
         hooks_runtime: Arc<HooksRuntime>,
         collection_id: CollectionId,
         field_id: FieldId,
+        field_name: String,
     ) -> Self {
-        CollectionField::Embedding(EmbeddingField::new(
+        Self::Embedding(EmbeddingField::new(
             model,
             document_fields,
             embedding_sender,
             hooks_runtime,
             collection_id,
             field_id,
+            field_name,
         ))
     }
 
     pub fn set_embedding_hook(&mut self, name: HookName) {
-        if let CollectionField::Embedding(f) = self {
+        if let Self::Embedding(f) = self {
             f.document_fields = DocumentFields::Hook(name)
         }
     }
 
-    pub fn get_type(&self) -> &'static str {
+    pub fn field_name(&self) -> String {
         match self {
-            CollectionField::Number(_) => "number",
-            CollectionField::Bool(_) => "bool",
-            CollectionField::String(_) => "string",
-            CollectionField::Embedding(_) => "embedding",
+            CollectionScoreField::String(f) => f.field_name.clone(),
+            CollectionScoreField::Embedding(f) => f.field_name.clone(),
+        }
+    }
+
+    pub fn field_type_str(&self) -> &'static str {
+        match self {
+            CollectionScoreField::String(_) => "string",
+            CollectionScoreField::Embedding(_) => "embedding",
+        }
+    }
+
+    pub fn field_type(&self) -> ValueType {
+        match self {
+            CollectionScoreField::String(_) => ValueType::Scalar(crate::types::ScalarType::String),
+            CollectionScoreField::Embedding(_) => {
+                ValueType::Complex(crate::types::ComplexType::Embedding)
+            }
         }
     }
 
@@ -128,19 +238,15 @@ impl CollectionField {
         sender: OperationSender,
     ) -> Result<()> {
         match self {
-            CollectionField::Number(f) => f.get_write_operations(doc_id, doc, sender).await,
-            CollectionField::Bool(f) => f.get_write_operations(doc_id, doc, sender).await,
-            CollectionField::String(f) => f.get_write_operations(doc_id, doc, sender).await,
-            CollectionField::Embedding(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionScoreField::String(f) => f.get_write_operations(doc_id, doc, sender).await,
+            CollectionScoreField::Embedding(f) => f.get_write_operations(doc_id, doc, sender).await,
         }
     }
 
     pub fn serialized(&self) -> SerializedFieldIndexer {
         match self {
-            CollectionField::Number(f) => f.serialized(),
-            CollectionField::Bool(f) => f.serialized(),
-            CollectionField::String(f) => f.serialized(),
-            CollectionField::Embedding(f) => f.serialized(),
+            CollectionScoreField::String(f) => f.serialized(),
+            CollectionScoreField::Embedding(f) => f.serialized(),
         }
     }
 }
@@ -188,19 +294,20 @@ impl ToSchema for OramaModelSerializable {}
 pub enum SerializedFieldIndexer {
     Number,
     Bool,
+    StringFilter,
     String(Locale),
     Embedding(OramaModelSerializable, DocumentFields),
 }
 
 #[derive(Debug)]
-pub struct NumberField {
+pub struct NumberFilterField {
     collection_id: CollectionId,
     field_id: FieldId,
     field_name: String,
     is_array: bool,
 }
 
-impl NumberField {
+impl NumberFilterField {
     pub fn new(
         collection_id: CollectionId,
         field_id: FieldId,
@@ -216,7 +323,7 @@ impl NumberField {
     }
 }
 
-impl NumberField {
+impl NumberFilterField {
     async fn get_write_operations(
         &self,
         doc_id: DocumentId,
@@ -269,14 +376,14 @@ impl NumberField {
 }
 
 #[derive(Debug)]
-pub struct BoolField {
+pub struct BoolFilterField {
     collection_id: CollectionId,
     field_id: FieldId,
     field_name: String,
     is_array: bool,
 }
 
-impl BoolField {
+impl BoolFilterField {
     pub fn new(
         collection_id: CollectionId,
         field_id: FieldId,
@@ -336,6 +443,84 @@ impl BoolField {
 
     fn serialized(&self) -> SerializedFieldIndexer {
         SerializedFieldIndexer::Bool
+    }
+}
+
+#[derive(Debug)]
+pub struct StringFilterField {
+    collection_id: CollectionId,
+    field_id: FieldId,
+    field_name: String,
+    is_array: bool,
+}
+
+impl StringFilterField {
+    pub fn new(
+        collection_id: CollectionId,
+        field_id: FieldId,
+        field_name: String,
+        is_array: bool,
+    ) -> Self {
+        Self {
+            collection_id,
+            field_id,
+            field_name,
+            is_array,
+        }
+    }
+
+    async fn get_write_operations(
+        &self,
+        doc_id: DocumentId,
+        doc: &FlattenDocument,
+        sender: OperationSender,
+    ) -> Result<()> {
+        let value = doc.get(&self.field_name);
+        let data: Vec<String> = match value {
+            None => return Ok(()),
+            Some(value) => {
+                if self.is_array {
+                    match value.as_array() {
+                        None => return Ok(()),
+                        Some(value) => value
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect(),
+                    }
+                } else if let Some(v) = value.as_str() {
+                    vec![v.to_string()]
+                } else {
+                    // If the document has a field with the name `field_name` but the value isn't a string
+                    // we ignore it.
+                    // Should we bubble up an error?
+                    // TODO: think about it
+                    return Ok(());
+                }
+            }
+        };
+
+        for value in data {
+            // TODO: put this "25" in the collection config
+            if value.len() < 25 {
+                let op = WriteOperation::Collection(
+                    self.collection_id.clone(),
+                    CollectionWriteOperation::Index(
+                        doc_id,
+                        self.field_id,
+                        DocumentFieldIndexOperation::IndexStringFilter { value },
+                    ),
+                );
+
+                sender.send(op).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn serialized(&self) -> SerializedFieldIndexer {
+        SerializedFieldIndexer::StringFilter
     }
 }
 
@@ -469,6 +654,7 @@ impl StringField {
 pub struct EmbeddingField {
     collection_id: CollectionId,
     field_id: FieldId,
+    field_name: String,
 
     model: OramaModel,
     document_fields: DocumentFields,
@@ -484,6 +670,7 @@ impl EmbeddingField {
         hooks_runtime: Arc<HooksRuntime>,
         collection_id: CollectionId,
         field_id: FieldId,
+        field_name: String,
     ) -> Self {
         Self {
             model,
@@ -492,6 +679,7 @@ impl EmbeddingField {
             hooks_runtime,
             collection_id,
             field_id,
+            field_name,
         }
     }
 }
