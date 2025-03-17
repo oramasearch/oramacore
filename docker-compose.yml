@@ -57,6 +57,8 @@ services:
       - internal_network
     depends_on:
       - oramacore
+      - python-ai-server
+      - vllm
     restart: unless-stopped
 
 networks:

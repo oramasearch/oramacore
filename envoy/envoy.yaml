@@ -21,19 +21,19 @@ static_resources:
                         - match:
                             prefix: "/"
                           route:
-                            cluster: rust_service
+                            cluster: oramacore
                 http_filters:
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
-    - name: rust_service
-      connect_timeout: 0.25s
+    - name: oramacore
+      connect_timeout: 600s
       type: STRICT_DNS
       lb_policy: ROUND_ROBIN
       load_assignment:
-        cluster_name: rust_service
+        cluster_name: oramacore
         endpoints:
           - lb_endpoints:
               - endpoint:
@@ -41,6 +41,7 @@ static_resources:
                     socket_address:
                       address: rust-server
                       port_value: 8080
+
 admin:
   access_log_path: /tmp/admin_access.log
   address:

@@ -2,6 +2,7 @@ use std::{
     fs,
     net::{SocketAddr, TcpListener},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
