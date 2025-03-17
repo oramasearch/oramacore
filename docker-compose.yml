@@ -4,10 +4,12 @@ services:
   oramacore:
     build:
       context: .
+    environment:
+      - RUST_LOG=oramacore=trace,warn
+    volumes:
+      - ./config-docker.yaml:/app/config.yaml
     ports:
       - "8080:8080"
-    networks:
-      - internal_network
     depends_on:
       - python-ai-server
       - vllm
@@ -16,10 +18,10 @@ services:
   python-ai-server:
     build:
       context: ./src/ai_server
+    volumes:
+      - ./config-docker.yaml:/config.yaml
     ports:
       - "50051:50051"
-    networks:
-      - internal_network
     deploy:
       resources:
         reservations:
@@ -36,8 +38,6 @@ services:
       - "8000:8000"
     environment:
       - HF_TOKEN=${HF_TOKEN}
-    networks:
-      - internal_network
     deploy:
       resources:
         reservations:
@@ -54,14 +54,8 @@ services:
       - "9901:9901"
     volumes:
       - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml
-    networks:
-      - internal_network
     depends_on:
       - oramacore
       - python-ai-server
       - vllm
     restart: unless-stopped
-
-networks:
-  internal_network:
-    driver: bridge

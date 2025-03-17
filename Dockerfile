@@ -39,6 +39,8 @@ WORKDIR /app
 COPY --from=rust-builder /usr/src/app/target/release/oramacore /app/
 COPY --from=rust-builder /usr/src/app/config.yaml /app/
 
+ENV RUST_LOG=oramacore=trace
+
 EXPOSE 8080
 
 CMD ["./oramacore"]

@@ -65,7 +65,7 @@ async fn start_server() {
         },
         ai_server: AIServiceConfig {
             scheme: Scheme::HTTP,
-            host: address.ip(),
+            host: address.ip().to_string(),
             port: address.port(),
             api_key: None,
             max_connections: 1,

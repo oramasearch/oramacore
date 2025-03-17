@@ -38,7 +38,7 @@ pub struct AIServiceConfig {
     #[serde(deserialize_with = "deserialize_scheme")]
     #[serde(default = "default_scheme")]
     pub scheme: Scheme,
-    pub host: IpAddr,
+    pub host: String,
     pub port: u16,
     pub api_key: Option<String>,
     #[serde(default = "default_max_connections")]

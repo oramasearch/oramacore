@@ -58,7 +58,7 @@ pub fn hooks_runtime_config() -> HooksRuntimeConfig {
 pub async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
     if config.ai_server.port == 0 {
         let address = create_grpc_server().await?;
-        config.ai_server.host = address.ip();
+        config.ai_server.host = address.ip().to_string();
         config.ai_server.port = address.port();
         info!("AI server started on {}", address);
     }
