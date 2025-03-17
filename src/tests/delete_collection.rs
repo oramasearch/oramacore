@@ -11,10 +11,11 @@ use crate::{
     types::CollectionId,
 };
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
 async fn test_delete_collection() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
-    let (write_side, read_side) = create(create_oramacore_config()).await?;
+    let config = create_oramacore_config();
+    let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
     create_collection(write_side.clone(), collection_id.clone()).await?;
@@ -54,6 +55,9 @@ async fn test_delete_collection() -> Result<()> {
         )
         .await?;
 
+    sleep(Duration::from_millis(2_000)).await;
+
+    sleep(Duration::from_millis(200)).await;
     let stats = write_side
         .get_collection_dto(
             ApiKey(Secret::new("my-master-api-key".to_string())),
@@ -61,16 +65,45 @@ async fn test_delete_collection() -> Result<()> {
         )
         .await;
     assert!(matches!(stats, Ok(None)));
-
-    sleep(Duration::from_millis(200)).await;
-
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
             collection_id.clone(),
         )
         .await;
+    assert!(stats.is_err());
 
+    write_side.commit().await?;
+    read_side.commit().await?;
+
+    let result = create_collection(write_side.clone(), collection_id.clone()).await;
+    assert!(result.is_ok());
+
+    sleep(Duration::from_millis(600)).await;
+
+    let stats = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stats.document_count, 0);
+
+    let (write_side, read_side) = create(config.clone()).await?;
+    let stats = write_side
+        .get_collection_dto(
+            ApiKey(Secret::new("my-master-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await;
+    assert!(matches!(stats, Ok(None)));
+    let stats = read_side
+        .collection_stats(
+            ApiKey(Secret::new("my-read-api-key".to_string())),
+            collection_id.clone(),
+        )
+        .await;
     assert!(stats.is_err());
 
     Ok(())

@@ -64,6 +64,7 @@ pub struct CollectionReader {
     pub(super) id: CollectionId,
     description: Option<String>,
     default_language: LanguageDTO,
+    deleted: bool,
 
     read_api_key: ApiKey,
     ai_service: Arc<AIService>,
@@ -97,6 +98,7 @@ impl CollectionReader {
             id,
             description,
             default_language,
+            deleted: false,
 
             read_api_key,
             ai_service,
@@ -181,6 +183,7 @@ impl CollectionReader {
             id: collection_info.id,
             description: collection_info.description,
             default_language: collection_info.default_language,
+            deleted: false,
             read_api_key,
             ai_service,
             nlp_service,
@@ -195,6 +198,14 @@ impl CollectionReader {
 
             offset_storage: OffsetStorage::new(),
         })
+    }
+
+    pub fn mark_as_deleted(&mut self) {
+        self.deleted = true;
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
     }
 
     #[inline]
@@ -251,6 +262,7 @@ impl CollectionReader {
                 id: self.id.clone(),
                 description: self.description.clone(),
                 document_count: 0,
+                deleted: false,
                 default_language: self.default_language,
                 fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
@@ -279,6 +291,7 @@ impl CollectionReader {
                 id: self.id.clone(),
                 description: self.description.clone(),
                 document_count: 0,
+                deleted: false,
                 default_language: self.default_language,
                 fields: Default::default(),
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
@@ -1501,6 +1514,8 @@ mod dump {
         pub id: CollectionId,
         pub description: Option<String>,
         pub default_language: LanguageDTO,
+        #[serde(default)]
+        pub deleted: bool,
         pub document_count: u64,
         pub read_api_key: String,
         pub fields: Vec<(String, (FieldId, TypedField))>,

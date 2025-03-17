@@ -1,6 +1,6 @@
 mod search;
 
 mod all;
-mod delete_colleciton;
+mod delete_collection;
 
 pub mod utils;

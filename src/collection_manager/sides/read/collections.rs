@@ -73,6 +73,13 @@ impl CollectionsReader {
         let base_dir_for_collections = data_dir.join("collections");
         let mut collections: HashMap<CollectionId, CollectionReader> = Default::default();
         for collection_id in collections_info.collection_ids {
+            if collections_info
+                .deleted_collection_ids
+                .contains(&collection_id)
+            {
+                info!("Collection {:?} is deleted. Skip loading", collection_id);
+                continue;
+            }
             let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
@@ -112,6 +119,13 @@ impl CollectionsReader {
     {
         let collections_lock = self.collections.read().await;
         let last_reindexed_collections_lock = self.last_reindexed_collections.read().await;
+
+        if let Some(collection) = collections_lock.get(&id) {
+            if collection.is_deleted() {
+                return None;
+            }
+        }
+
         CollectionReadLock::try_new(collections_lock, last_reindexed_collections_lock, id)
     }
 
@@ -125,6 +139,7 @@ impl CollectionsReader {
         let col = self.collections.read().await;
         let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
+        let mut deleted_collection_ids = HashSet::new();
         for (id, collection) in col {
             let collection_dir = collections_dir.join(&id.0);
 
@@ -141,11 +156,16 @@ impl CollectionsReader {
                 .await
                 .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
             drop(m);
+
+            if collection.is_deleted() {
+                deleted_collection_ids.insert(id.clone());
+            }
         }
 
         let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
             collection_ids: collection_ids.into_iter().collect(),
+            deleted_collection_ids,
             last_reindexed_collections: guard.iter().cloned().collect(),
         });
         drop(guard);
@@ -179,10 +199,18 @@ impl CollectionsReader {
         );
 
         let mut guard = self.collections.write().await;
-        if guard.contains_key(&id) {
-            warn!(collection_id=?id, "Collection already exists");
-            return Err(anyhow::anyhow!("Collection already exists"));
+
+        if let Some(collection) = guard.get(&id) {
+            if !collection.is_deleted() {
+                warn!(collection_id=?id, "Collection already exists");
+                return Err(anyhow::anyhow!("Collection already exists"));
+            }
+
+            // If the collection is previously deleted, we ignore the previous data
+            // and clean the FS
+            self.clean_fs_for_collection(collection).await.ok();
         }
+
         guard.insert(id.clone(), collection);
         drop(guard);
 
@@ -191,14 +219,17 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub async fn remove_collection(&self, id: CollectionId) -> Option<CollectionReader> {
-        info!(collection_id=?id, "Removing collection {:?}", id);
-
+    pub async fn remove_collection(&self, id: CollectionId) -> Result<()> {
         let mut guard = self.collections.write().await;
-        guard.remove(&id)
+        if let Some(collection) = guard.get_mut(&id) {
+            collection.mark_as_deleted();
+            info!(collection_id=?id, "Collection marked as deleted {:?}", id);
+        }
+
+        Ok(())
     }
 
-    pub async fn clean_fs_for_collection(&self, collection: CollectionReader) -> Result<()> {
+    pub async fn clean_fs_for_collection(&self, collection: &CollectionReader) -> Result<()> {
         info!(collection_id=?collection.id, "Cleaning FS collection");
 
         let data_dir = &self.indexes_config.data_dir;
@@ -352,6 +383,8 @@ enum CollectionsInfo {
 #[derive(Deserialize, Serialize)]
 struct CollectionsInfoV1 {
     collection_ids: HashSet<CollectionId>,
+    #[serde(default)]
+    deleted_collection_ids: HashSet<CollectionId>,
     last_reindexed_collections: Vec<(CollectionId, CollectionId)>,
 }
 

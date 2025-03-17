@@ -15,7 +15,7 @@ use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use crate::ai::vllm;
 use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
@@ -242,12 +242,14 @@ impl ReadSide {
         collection.stats().await
     }
 
+    #[instrument(skip(self, op), fields(offset=?op.0))]
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?op.0, "Updating read side");
 
         let (offset, op) = op;
 
         // We stop commit operations while we are updating
+        // The lock is released at the end of this function
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
         let mut live_offset = self.live_offset.write().await;
@@ -277,19 +279,10 @@ impl ReadSide {
                 // 2. Commit
                 // 3. Clean the fs
                 // otherwise, if something crashed, we loose the collection.
-                let collection = self.collections.remove_collection(coll_id).await;
-                if let Some(collection) = collection {
-                    self.commit()
-                        .await
-                        .context("Cannot commit after deleting collection")?;
+                info!(collection=?coll_id, "Deleting collection");
+                self.collections.remove_collection(coll_id).await?;
 
-                    match self.collections.clean_fs_for_collection(collection).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("Cannot clean collection fs. Ignore error: {:?}", e);
-                        }
-                    }
-                }
+                info!("Collection deleted");
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
                 OPERATION_COUNT.track_usize(
@@ -544,6 +537,7 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
         info!("Starting operation receiver");
         loop {
             while let Some(op) = operation_receiver.recv().await {
+                info!("Received operation: {:?}", op);
                 let op = match op {
                     Ok(op) => op,
                     Err(e) => {
@@ -560,13 +554,16 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
                         .skip(1)
                         .for_each(|cause| error!("because: {}", cause));
                 }
+                info!("Operation applied");
             }
+
+            warn!("Operation receiver is closed.");
 
             if !operation_receiver.should_reconnect() {
                 break;
             }
 
-            warn!("Operation receiver is closed. Reconnecting...");
+            warn!("Reconnecting...");
 
             let arc = Arc::new(RwLock::new(&mut operation_receiver));
             let op = || async {

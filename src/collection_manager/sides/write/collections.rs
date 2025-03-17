@@ -239,6 +239,7 @@ impl CollectionsWriter {
         // Now it is safe to drop the lock
         // because we safe everything to disk
         drop(collections);
+        info!("Commit done");
 
         Ok(())
     }
