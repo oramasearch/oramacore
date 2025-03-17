@@ -426,7 +426,7 @@ pub async fn run_party_planner_prompt(
     history: &Vec<InteractionMessage>,
 ) -> Result<String> {
     let mut acc = String::new();
-    let mut stream = run_party_planner_prompt_stream(step, &input, &history).await?;
+    let mut stream = run_party_planner_prompt_stream(step, input, history).await?;
 
     while let Some(msg) = stream.next().await {
         match msg {

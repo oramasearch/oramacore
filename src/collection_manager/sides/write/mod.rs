@@ -140,8 +140,7 @@ impl WriteSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone());
         let triggers = TriggerInterface::new(kv.clone());
-        let hook =
-            HooksRuntime::new(kv.clone(), collections_writer_config.javascript_queue_limit).await;
+        let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
         let collections_writer = CollectionsWriter::try_load(

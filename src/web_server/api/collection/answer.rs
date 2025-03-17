@@ -4,7 +4,7 @@ use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
 use crate::collection_manager::sides::segments::Segment;
-use crate::collection_manager::sides::triggers::{SelectedTrigger, Trigger};
+use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
 use anyhow::Context;
@@ -313,12 +313,11 @@ async fn answer_v1(
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
-                    let _ = tx
-                        .send(Ok(Event::default().data(
-                            serialize_response("ANSWER_RESPONSE", &chunk, false).unwrap(),
-                        )))
-                        .await
-                        .unwrap();
+                    tx.send(Ok(Event::default().data(
+                        serialize_response("ANSWER_RESPONSE", &chunk, false).unwrap(),
+                    )))
+                    .await
+                    .unwrap();
                 }
                 Err(e) => {
                     let _ = tx

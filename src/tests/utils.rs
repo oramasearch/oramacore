@@ -13,6 +13,7 @@ use grpc_def::Embedding;
 use http::uri::Scheme;
 use redact::Secret;
 use serde_json::json;
+use std::str::FromStr;
 use tokio::time::sleep;
 use tonic::{transport::Server, Response, Status};
 use tracing::info;

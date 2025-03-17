@@ -1,9 +1,5 @@
 use super::generic_kv::{format_key, KV};
-use crate::{
-    ai::{vllm, AIService},
-    collection_manager::dto::InteractionMessage,
-    types::CollectionId,
-};
+use crate::{ai::vllm, collection_manager::dto::InteractionMessage, types::CollectionId};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc};

@@ -164,16 +164,15 @@ impl PartyPlanner {
                     .unwrap();
 
                     // Send the Orama search results as part of the "sources" for the RAG pipeline.
-                    let _ = tx
-                        .send(PartyPlannerMessage {
-                            action: "PERFORM_ORAMA_SEARCH".to_string(),
-                            result: serde_json::to_string(&result).expect(
-                                "Could not serialize Orama search results to a valid JSON string.",
-                            ),
-                            done: true,
-                        })
-                        .await
-                        .unwrap();
+                    tx.send(PartyPlannerMessage {
+                        action: "PERFORM_ORAMA_SEARCH".to_string(),
+                        result: serde_json::to_string(&result).expect(
+                            "Could not serialize Orama search results to a valid JSON string.",
+                        ),
+                        done: true,
+                    })
+                    .await
+                    .unwrap();
 
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
@@ -187,15 +186,12 @@ impl PartyPlanner {
                         .unwrap();
 
                     let value = match step.returns_json {
-                        true => {
-                            let repaired = repair_json::repair(result.clone())
-                                .context(format!(
-                                    "Unable to repair JSON for step: {}.\nOriginal value:\n{}",
-                                    step.name, result
-                                ))
-                                .unwrap();
-                            repaired
-                        }
+                        true => repair_json::repair(result.clone())
+                            .context(format!(
+                                "Unable to repair JSON for step: {}.\nOriginal value:\n{}",
+                                step.name, result
+                            ))
+                            .unwrap(),
                         false => result,
                     };
 
@@ -222,24 +218,22 @@ impl PartyPlanner {
                         match msg {
                             Ok(m) => {
                                 acc += &m;
-                                let _ = tx
-                                    .send(PartyPlannerMessage {
-                                        action: step.name.clone(),
-                                        result: m,
-                                        done: false,
-                                    })
-                                    .await
-                                    .unwrap();
+                                tx.send(PartyPlannerMessage {
+                                    action: step.name.clone(),
+                                    result: m,
+                                    done: false,
+                                })
+                                .await
+                                .unwrap();
                             }
                             Err(e) => {
-                                let _ = tx
-                                    .send(PartyPlannerMessage {
-                                        action: step.name.clone(),
-                                        result: format!("{:?}", e),
-                                        done: true,
-                                    })
-                                    .await
-                                    .unwrap();
+                                tx.send(PartyPlannerMessage {
+                                    action: step.name.clone(),
+                                    result: format!("{:?}", e),
+                                    done: true,
+                                })
+                                .await
+                                .unwrap();
                                 break;
                             }
                         }
@@ -247,14 +241,13 @@ impl PartyPlanner {
 
                     // Send the last message specifying `done: true`.
                     // This will be used on the front-end to determine if the step is done.
-                    let _ = tx
-                        .send(PartyPlannerMessage {
-                            action: step.name.clone(),
-                            result: acc.clone(),
-                            done: true,
-                        })
-                        .await
-                        .unwrap();
+                    tx.send(PartyPlannerMessage {
+                        action: step.name.clone(),
+                        result: acc.clone(),
+                        done: true,
+                    })
+                    .await
+                    .unwrap();
 
                     // Push the accumulated messages to the history. This will be used
                     // as an additional context for subsequent steps.
@@ -314,11 +307,11 @@ impl PartyPlanner {
         let plan_as_value = serde_json::to_value(plan).unwrap();
         let as_md = json_to_md(&plan_as_value, 0);
 
-        return format!(
+        format!(
             "Alright! Here's the action plan I've come up with based on your request:\n\n{}\n\nAsk me to proceed with the next step, one step at a time when you're ready.",
             as_md
         )
-        .to_string();
+        .to_string()
     }
 
     async fn handle_orama_search(
@@ -375,7 +368,7 @@ fn json_to_md(data: &Value, level: usize) -> String {
             for (key, value) in map {
                 md.push_str(&format!("{}- **{}**: ", indent, key));
                 if value.is_object() || value.is_array() {
-                    md.push_str("\n");
+                    md.push('\n');
                     md.push_str(&json_to_md(value, level + 1));
                 } else {
                     md.push_str(&format!("`{}`\n", value));
