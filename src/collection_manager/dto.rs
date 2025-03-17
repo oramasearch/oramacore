@@ -433,7 +433,6 @@ impl<'de> Deserialize<'de> for Similarity {
             where
                 V: de::MapAccess<'de>,
             {
-                println!("visit_map.....");
                 let k: Option<String> = visitor
                     .next_key()
                     .map_err(|e| de::Error::custom(format!("error: {}", e)))?;

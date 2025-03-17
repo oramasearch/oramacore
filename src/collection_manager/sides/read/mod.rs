@@ -537,7 +537,6 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
         info!("Starting operation receiver");
         loop {
             while let Some(op) = operation_receiver.recv().await {
-                info!("Received operation: {:?}", op);
                 let op = match op {
                     Ok(op) => op,
                     Err(e) => {
@@ -554,7 +553,6 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
                         .skip(1)
                         .for_each(|cause| error!("because: {}", cause));
                 }
-                info!("Operation applied");
             }
 
             warn!("Operation receiver is closed.");
