@@ -85,6 +85,7 @@ ai_server:
             - CPUExecutionProvider
         total_threads: 8
 
-    LLMs:
+    llm:
         port: 8000
-        model: "Qwen/Qwen2.5-1.5B-Instruct"
+        host: vllm
+        model: "microsoft/Phi-4"

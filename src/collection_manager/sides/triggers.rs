@@ -1,5 +1,9 @@
 use super::generic_kv::{format_key, KV};
-use crate::{ai::vllm, collection_manager::dto::InteractionMessage, types::CollectionId};
+use crate::{
+    ai::vllm::{self, VLLMService},
+    collection_manager::dto::InteractionMessage,
+    types::CollectionId,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fmt, sync::Arc};
@@ -41,11 +45,12 @@ pub struct SelectedTrigger {
 
 pub struct TriggerInterface {
     kv: Arc<KV>,
+    vllm_service: Arc<VLLMService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>) -> Self {
-        Self { kv }
+    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
+        Self { kv, vllm_service }
     }
 
     pub async fn insert(&self, trigger: Trigger) -> Result<String> {
@@ -119,17 +124,19 @@ impl TriggerInterface {
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
     ) -> Result<Option<SelectedTrigger>> {
-        let response = vllm::run_known_prompt(
-            vllm::KnownPrompts::Trigger,
-            vec![
-                ("triggers".to_string(), serde_json::to_string(&triggers)?),
-                (
-                    "conversation".to_string(),
-                    serde_json::to_string(&conversation)?,
-                ),
-            ],
-        )
-        .await?;
+        let response = self
+            .vllm_service
+            .run_known_prompt(
+                vllm::KnownPrompts::Trigger,
+                vec![
+                    ("triggers".to_string(), serde_json::to_string(&triggers)?),
+                    (
+                        "conversation".to_string(),
+                        serde_json::to_string(&conversation)?,
+                    ),
+                ],
+            )
+            .await?;
 
         let repaired = repair_json::repair(response)?;
 
@@ -191,7 +198,13 @@ mod tests {
         };
 
         let kv = Arc::new(KV::try_load(kv_config).unwrap());
-        let trigger_interface = TriggerInterface::new(kv.clone());
+        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
+            host: "localhost".to_string(),
+            port: 8000,
+            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+        }));
+
+        let trigger_interface = TriggerInterface::new(kv.clone(), vllm_service);
 
         let trigger = Trigger {
             id: "test_trigger".to_string(),

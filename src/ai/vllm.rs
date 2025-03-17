@@ -14,7 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::collection_manager::dto::InteractionMessage;
 
-use super::party_planner::Step;
+use super::{party_planner::Step, AIServiceLLMConfig};
 
 pub enum KnownPrompts {
     Answer,
@@ -218,226 +218,242 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
     result
 }
 
-pub fn get_openai_client() -> async_openai::Client<OpenAIConfig> {
-    async_openai::Client::with_config(OpenAIConfig::new().with_api_base("http://localhost:8000/v1"))
+#[derive(Debug)]
+pub struct VLLMService {
+    pub client: async_openai::Client<OpenAIConfig>,
+    pub model: String,
 }
 
-pub async fn run_known_prompt(
-    prompt: KnownPrompts,
-    variables: Vec<(String, String)>,
-) -> Result<String> {
-    let mut acc = String::new();
-    let mut stream = run_known_prompt_stream(prompt, variables).await;
+impl VLLMService {
+    pub fn new(conf: AIServiceLLMConfig) -> Self {
+        let url = format!("http://{}:{}/v1", conf.host, conf.port);
 
-    while let Some(msg) = stream.next().await {
-        match msg {
-            Ok(m) => {
-                acc += &m;
-            }
-            Err(e) => {
-                return Err(e);
-            }
+        Self {
+            client: async_openai::Client::with_config(OpenAIConfig::new().with_api_base(&url)),
+            model: conf.model,
         }
     }
 
-    Ok(acc)
-}
+    pub async fn run_known_prompt(
+        &self,
+        prompt: KnownPrompts,
+        variables: Vec<(String, String)>,
+    ) -> Result<String> {
+        let mut acc = String::new();
+        let mut stream = self.run_known_prompt_stream(prompt, variables).await;
 
-pub async fn run_known_prompt_stream(
-    prompt: KnownPrompts,
-    variables: Vec<(String, String)>,
-) -> impl Stream<Item = Result<String>> {
-    let client = get_openai_client();
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(m) => {
+                    acc += &m;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
 
-    let prompts = prompt.get_prompts();
-    let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
+        Ok(acc)
+    }
 
-    let request = CreateChatCompletionRequestArgs::default()
-        .model("Qwen/Qwen2.5-3B-Instruct")
-        .max_tokens(512u32)
-        .stream(true)
-        .messages([
-            ChatCompletionRequestSystemMessageArgs::default()
-                .content(prompts.system)
+    pub async fn run_known_prompt_stream(
+        &self,
+        prompt: KnownPrompts,
+        variables: Vec<(String, String)>,
+    ) -> impl Stream<Item = Result<String>> {
+        let prompts = prompt.get_prompts();
+        let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.model)
+            .max_tokens(512u32)
+            .stream(true)
+            .messages([
+                ChatCompletionRequestSystemMessageArgs::default()
+                    .content(prompts.system)
+                    .build()
+                    .unwrap()
+                    .into(),
+                ChatCompletionRequestUserMessageArgs::default()
+                    .content(format_prompt(prompts.user, variables_map))
+                    .build()
+                    .unwrap()
+                    .into(),
+            ])
+            .build()
+            .context("Unable to build KnownPrompt LLM request body")
+            .unwrap();
+
+        let mut response_stream = self
+            .client
+            .chat()
+            .create_stream(request)
+            .await
+            .context("An error occurred while initializing the stream from remote LLM instance")
+            .unwrap();
+
+        let (tx, rx) = mpsc::channel(100);
+
+        tokio::spawn(async move {
+            while let Some(result) = response_stream.next().await {
+                match result {
+                    Ok(response) => {
+                        let chunk = response
+                            .choices
+                            .first()
+                            .unwrap()
+                            .delta
+                            .content
+                            .as_ref()
+                            .unwrap();
+
+                        tx.send(Ok(chunk.to_string())).await.unwrap();
+                    }
+                    Err(e) => {
+                        let error_message = format!("An error occurred while processing the response from the remote LLM instance: {:?}", e);
+                        tx.send(Err(anyhow::Error::msg(error_message)))
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+        });
+
+        ReceiverStream::new(rx)
+    }
+
+    pub async fn run_party_planner_prompt_stream(
+        &self,
+        step: Step,
+        input: &String,
+        history: &Vec<InteractionMessage>,
+    ) -> Result<impl Stream<Item = Result<String>>> {
+        let step_name = step.name.as_str();
+
+        let variables = match step_name {
+            "GIVE_REPLY" => vec![
+                ("question".to_string(), input.clone()),
+                ("context".to_string(), step.description),
+            ],
+            _ => vec![
+                ("input".to_string(), input.clone()),
+                ("description".to_string(), step.description),
+            ],
+        };
+
+        let party_planner_prompt = PartyPlannerPrompt::try_from(step_name).unwrap();
+        let hyperparameters = party_planner_prompt.get_hyperparameters(variables);
+
+        let mut full_history: Vec<ChatCompletionRequestMessage> =
+            vec![ChatCompletionRequestSystemMessageArgs::default()
+                .content(hyperparameters.system_prompt)
                 .build()
                 .unwrap()
-                .into(),
+                .into()];
+
+        for message in history {
+            match message.role {
+                crate::collection_manager::dto::Role::System => {
+                    // @todo: make sure there are no multiple system messages in the history
+                    // return Err(anyhow::Error::msg(
+                    //     "Found multiple system messages in Party Planner chat history",
+                    // ));
+                }
+                crate::collection_manager::dto::Role::User => {
+                    full_history.push(
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(message.content.clone())
+                            .build()
+                            .unwrap()
+                            .into(),
+                    );
+                }
+                crate::collection_manager::dto::Role::Assistant => {
+                    full_history.push(
+                        ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(message.content.clone())
+                            .build()
+                            .unwrap()
+                            .into(),
+                    );
+                }
+            }
+        }
+
+        full_history.push(
             ChatCompletionRequestUserMessageArgs::default()
-                .content(format_prompt(prompts.user, variables_map))
+                .content(hyperparameters.user_prompt)
                 .build()
                 .unwrap()
                 .into(),
-        ])
-        .build()
-        .context("Unable to build KnownPrompt LLM request body")
-        .unwrap();
+        );
 
-    let mut response_stream = client
-        .chat()
-        .create_stream(request)
-        .await
-        .context("An error occurred while initializing the stream from remote LLM instance")
-        .unwrap();
-
-    let (tx, rx) = mpsc::channel(100);
-
-    tokio::spawn(async move {
-        while let Some(result) = response_stream.next().await {
-            match result {
-                Ok(response) => {
-                    let chunk = response
-                        .choices
-                        .first()
-                        .unwrap()
-                        .delta
-                        .content
-                        .as_ref()
-                        .unwrap();
-
-                    tx.send(Ok(chunk.to_string())).await.unwrap();
-                }
-                Err(e) => {
-                    let error_message = format!("An error occurred while processing the response from the remote LLM instance: {:?}", e);
-                    tx.send(Err(anyhow::Error::msg(error_message)))
-                        .await
-                        .unwrap();
-                }
-            }
-        }
-    });
-
-    ReceiverStream::new(rx)
-}
-
-pub async fn run_party_planner_prompt_stream(
-    step: Step,
-    input: &String,
-    history: &Vec<InteractionMessage>,
-) -> Result<impl Stream<Item = Result<String>>> {
-    let client = get_openai_client();
-    let step_name = step.name.as_str();
-
-    let variables = match step_name {
-        "GIVE_REPLY" => vec![
-            ("question".to_string(), input.clone()),
-            ("context".to_string(), step.description),
-        ],
-        _ => vec![
-            ("input".to_string(), input.clone()),
-            ("description".to_string(), step.description),
-        ],
-    };
-
-    let party_planner_prompt = PartyPlannerPrompt::try_from(step_name).unwrap();
-    let hyperparameters = party_planner_prompt.get_hyperparameters(variables);
-
-    let mut full_history: Vec<ChatCompletionRequestMessage> =
-        vec![ChatCompletionRequestSystemMessageArgs::default()
-            .content(hyperparameters.system_prompt)
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.model)
+            .max_tokens(hyperparameters.max_tokens)
+            .stream(true)
+            .messages(full_history)
             .build()
-            .unwrap()
-            .into()];
+            .context("Unable to build KnownPrompt LLM request body")?;
 
-    for message in history {
-        match message.role {
-            crate::collection_manager::dto::Role::System => {
-                // @todo: make sure there are no multiple system messages in the history
-                // return Err(anyhow::Error::msg(
-                //     "Found multiple system messages in Party Planner chat history",
-                // ));
+        let mut response_stream =
+            self.client.chat().create_stream(request).await.context(
+                "An error occurred while initializing the stream from remote LLM instance",
+            )?;
+
+        let (tx, rx) = mpsc::channel(100);
+
+        tokio::spawn(async move {
+            while let Some(result) = response_stream.next().await {
+                match result {
+                    Ok(response) => {
+                        let empty_str = &String::new();
+                        let chunk = response
+                            .choices
+                            .first()
+                            .unwrap()
+                            .delta
+                            .content
+                            .as_ref()
+                            .unwrap_or(empty_str);
+
+                        tx.send(Ok(chunk.to_string())).await.unwrap();
+                    }
+                    Err(e) => {
+                        let error_message = format!("An error occurred while processing the response from the remote Party Planner LLM instance: {:?}", e);
+                        tx.send(Err(anyhow::Error::msg(error_message)))
+                            .await
+                            .unwrap();
+                    }
+                }
             }
-            crate::collection_manager::dto::Role::User => {
-                full_history.push(
-                    ChatCompletionRequestUserMessageArgs::default()
-                        .content(message.content.clone())
-                        .build()
-                        .unwrap()
-                        .into(),
-                );
-            }
-            crate::collection_manager::dto::Role::Assistant => {
-                full_history.push(
-                    ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(message.content.clone())
-                        .build()
-                        .unwrap()
-                        .into(),
-                );
-            }
-        }
+        });
+
+        Ok(ReceiverStream::new(rx))
     }
 
-    full_history.push(
-        ChatCompletionRequestUserMessageArgs::default()
-            .content(hyperparameters.user_prompt)
-            .build()
-            .unwrap()
-            .into(),
-    );
+    pub async fn run_party_planner_prompt(
+        &self,
+        step: Step,
+        input: &String,
+        history: &Vec<InteractionMessage>,
+    ) -> Result<String> {
+        let mut acc = String::new();
+        let mut stream = self
+            .run_party_planner_prompt_stream(step, input, history)
+            .await?;
 
-    let request = CreateChatCompletionRequestArgs::default()
-        .model("Qwen/Qwen2.5-3B-Instruct")
-        .max_tokens(hyperparameters.max_tokens)
-        .stream(true)
-        .messages(full_history)
-        .build()
-        .context("Unable to build KnownPrompt LLM request body")?;
-
-    let mut response_stream = client
-        .chat()
-        .create_stream(request)
-        .await
-        .context("An error occurred while initializing the stream from remote LLM instance")?;
-
-    let (tx, rx) = mpsc::channel(100);
-
-    tokio::spawn(async move {
-        while let Some(result) = response_stream.next().await {
-            match result {
-                Ok(response) => {
-                    let empty_str = &String::new();
-                    let chunk = response
-                        .choices
-                        .first()
-                        .unwrap()
-                        .delta
-                        .content
-                        .as_ref()
-                        .unwrap_or(empty_str);
-
-                    tx.send(Ok(chunk.to_string())).await.unwrap();
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(m) => {
+                    acc += &m;
                 }
                 Err(e) => {
-                    let error_message = format!("An error occurred while processing the response from the remote Party Planner LLM instance: {:?}", e);
-                    tx.send(Err(anyhow::Error::msg(error_message)))
-                        .await
-                        .unwrap();
+                    return Err(e);
                 }
             }
         }
-    });
 
-    Ok(ReceiverStream::new(rx))
-}
-
-pub async fn run_party_planner_prompt(
-    step: Step,
-    input: &String,
-    history: &Vec<InteractionMessage>,
-) -> Result<String> {
-    let mut acc = String::new();
-    let mut stream = run_party_planner_prompt_stream(step, input, history).await?;
-
-    while let Some(msg) = stream.next().await {
-        match msg {
-            Ok(m) => {
-                acc += &m;
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        }
+        Ok(acc)
     }
-
-    Ok(acc)
 }

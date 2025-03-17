@@ -18,9 +18,7 @@ use crate::{
     types::CollectionId,
 };
 
-use super::vllm::{
-    run_known_prompt, run_party_planner_prompt, run_party_planner_prompt_stream, KnownPrompts,
-};
+use super::vllm::{KnownPrompts, VLLMService};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Action {
@@ -62,6 +60,8 @@ impl PartyPlanner {
         segment: Option<Segment>,
         trigger: Option<Trigger>,
     ) -> impl Stream<Item = PartyPlannerMessage> {
+        let vllm_service = read_side.get_vllm_service();
+
         // Add a system prompt to the history if the first entry is not a system prompt.
         let system_prompt = InteractionMessage {
             role: Role::System,
@@ -99,7 +99,7 @@ impl PartyPlanner {
         tokio::spawn(async move {
             // Get the action plan from the AI service.
             // If there is an error, send an error message to the caller and exit early.
-            let action_plan = match Self::get_action_plan(full_input).await {
+            let action_plan = match Self::get_action_plan(vllm_service.clone(), full_input).await {
                 Ok(plan) => plan,
                 Err(e) => {
                     tx.send(PartyPlannerMessage {
@@ -177,7 +177,8 @@ impl PartyPlanner {
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
                 } else if !step.should_stream {
-                    let result = run_party_planner_prompt(step.clone(), &input, &history)
+                    let result = vllm_service
+                        .run_party_planner_prompt(step.clone(), &input, &history)
                         .await
                         .context(format!(
                             "Unable to run party planner prompt for step: {}",
@@ -209,10 +210,10 @@ impl PartyPlanner {
                 // Just like we did with non-streaming steps, we need to handle streaming steps here.
                 else if step.clone().should_stream {
                     let mut acc = String::new();
-                    let mut stream =
-                        run_party_planner_prompt_stream(step.clone(), &input, &history)
-                            .await
-                            .unwrap();
+                    let mut stream = vllm_service
+                        .run_party_planner_prompt_stream(step.clone(), &input, &history)
+                        .await
+                        .unwrap();
 
                     while let Some(msg) = stream.next().await {
                         match msg {
@@ -262,12 +263,13 @@ impl PartyPlanner {
         ReceiverStream::new(rx)
     }
 
-    async fn get_action_plan(input: String) -> Result<Vec<Action>> {
-        let action_plan = run_known_prompt(
-            KnownPrompts::PartyPlanner,
-            vec![("input".to_string(), input)],
-        )
-        .await?;
+    async fn get_action_plan(vllm_service: Arc<VLLMService>, input: String) -> Result<Vec<Action>> {
+        let action_plan = vllm_service
+            .run_known_prompt(
+                KnownPrompts::PartyPlanner,
+                vec![("input".to_string(), input)],
+            )
+            .await?;
 
         let repaired = repair_json::repair(action_plan)?;
         let action_plan_deser: ActionPlanResponse = serde_json::from_str(&repaired)?;

@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    ai::AIService,
+    ai::{vllm::VLLMService, AIService},
     collection_manager::{
         dto::{ApiKey, LanguageDTO},
         sides::Offset,
@@ -31,6 +31,7 @@ const LIMIT: usize = 100;
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
+    vllm_service: Arc<VLLMService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
@@ -40,6 +41,7 @@ impl CollectionsReader {
     pub async fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
+        vllm_service: Arc<VLLMService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
@@ -60,6 +62,7 @@ impl CollectionsReader {
                 return Ok(Self {
                     ai_service,
                     nlp_service,
+                    vllm_service,
 
                     collections: Default::default(),
                     indexes_config,
@@ -83,9 +86,13 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(&collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
-            let collection =
-                CollectionReader::try_load(ai_service.clone(), nlp_service.clone(), collection_dir)
-                    .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
+            let collection = CollectionReader::try_load(
+                ai_service.clone(),
+                nlp_service.clone(),
+                vllm_service.clone(),
+                collection_dir,
+            )
+            .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
 
             collections.insert(collection_id, collection);
         }
@@ -95,6 +102,7 @@ impl CollectionsReader {
         Ok(Self {
             ai_service,
             nlp_service,
+            vllm_service,
             collections: RwLock::new(collections),
             indexes_config,
             last_reindexed_collections: RwLock::new(
@@ -196,6 +204,7 @@ impl CollectionsReader {
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
+            self.vllm_service.clone(),
         );
 
         let mut guard = self.collections.write().await;
@@ -407,11 +416,24 @@ mod tests {
             scheme: Scheme::HTTP,
             port: 80,
             max_connections: 0,
+            llm: crate::ai::AIServiceLLMConfig {
+                host: "localhost".to_string(),
+                port: 8000,
+                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+            },
         }));
+
+        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
+            host: "localhost".to_string(),
+            port: 8000,
+            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+        }));
+
         let nlp_service = Arc::new(NLPService::new());
         let collections = CollectionsReader::try_load(
             ai_service,
             nlp_service,
+            vllm_service,
             IndexesConfig {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),
@@ -481,11 +503,22 @@ mod tests {
             scheme: Scheme::HTTP,
             port: 80,
             max_connections: 0,
+            llm: crate::ai::AIServiceLLMConfig {
+                host: "localhost".to_string(),
+                port: 8000,
+                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+            },
         }));
         let nlp_service = Arc::new(NLPService::new());
+        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
+            host: "localhost".to_string(),
+            port: 8000,
+            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+        }));
         let collections = CollectionsReader::try_load(
             ai_service,
             nlp_service,
+            vllm_service,
             IndexesConfig {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),

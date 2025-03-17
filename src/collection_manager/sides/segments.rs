@@ -1,5 +1,5 @@
 use crate::{
-    ai::{vllm, vllm::KnownPrompts},
+    ai::vllm::{self, KnownPrompts, VLLMService},
     collection_manager::{
         dto::InteractionMessage,
         sides::generic_kv::{format_key, KV},
@@ -43,11 +43,12 @@ pub struct SelectedSegment {
 
 pub struct SegmentInterface {
     kv: Arc<KV>,
+    vllm_service: Arc<VLLMService>,
 }
 
 impl SegmentInterface {
-    pub fn new(kv: Arc<KV>) -> Self {
-        Self { kv }
+    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
+        Self { kv, vllm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {
@@ -110,20 +111,22 @@ impl SegmentInterface {
     ) -> Result<Option<SelectedSegment>> {
         let segments = self.list_by_collection(collection_id).await?;
 
-        let response = vllm::run_known_prompt(
-            KnownPrompts::Segmenter,
-            vec![
-                (
-                    "personas".to_string(),
-                    serde_json::to_string(&segments).unwrap(),
-                ),
-                (
-                    "conversation".to_string(),
-                    serde_json::to_string(&conversation).unwrap(),
-                ),
-            ],
-        )
-        .await?;
+        let response = self
+            .vllm_service
+            .run_known_prompt(
+                KnownPrompts::Segmenter,
+                vec![
+                    (
+                        "personas".to_string(),
+                        serde_json::to_string(&segments).unwrap(),
+                    ),
+                    (
+                        "conversation".to_string(),
+                        serde_json::to_string(&conversation).unwrap(),
+                    ),
+                ],
+            )
+            .await?;
 
         let repaired = repair_json::repair(response)?;
 

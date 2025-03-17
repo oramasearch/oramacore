@@ -69,6 +69,11 @@ async fn start_server() {
             port: address.port(),
             api_key: None,
             max_connections: 1,
+            llm: crate::ai::AIServiceLLMConfig {
+                port: 8000,
+                host: "localhost".to_string(),
+                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+            },
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
@@ -77,7 +82,7 @@ async fn start_server() {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                default_embedding_model: OramaModelSerializable(OramaModel::MultilingualE5Base),
                 insert_batch_commit_size: 10,
                 javascript_queue_limit: 10_000,
                 commit_interval: Duration::from_secs(3_000),

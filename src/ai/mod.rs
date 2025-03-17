@@ -34,6 +34,13 @@ impl OramaModel {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct AIServiceLLMConfig {
+    pub port: u16,
+    pub host: String,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceConfig {
     #[serde(deserialize_with = "deserialize_scheme")]
     #[serde(default = "default_scheme")]
@@ -43,6 +50,7 @@ pub struct AIServiceConfig {
     pub api_key: Option<String>,
     #[serde(default = "default_max_connections")]
     pub max_connections: u64,
+    pub llm: AIServiceLLMConfig,
 }
 
 #[derive(Debug)]

@@ -214,6 +214,11 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             api_key: None,
             max_connections: 1,
             scheme: Scheme::HTTP,
+            llm: crate::ai::AIServiceLLMConfig {
+                host: "localhost".to_string(),
+                port: 8000,
+                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+            },
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
