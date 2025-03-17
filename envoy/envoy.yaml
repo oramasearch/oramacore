@@ -39,7 +39,7 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: rust-server
+                      address: oramacore
                       port_value: 8080
 
 admin:
