@@ -2,7 +2,6 @@ use std::{
     fs,
     net::{SocketAddr, TcpListener},
     path::PathBuf,
-    pin::Pin,
     time::Duration,
 };
 
@@ -12,7 +11,6 @@ use grpc_def::Embedding;
 use http::uri::Scheme;
 use redact::Secret;
 use tokio::time::sleep;
-use tokio_stream::Stream;
 use tonic::{transport::Server, Response, Status};
 use tracing::info;
 

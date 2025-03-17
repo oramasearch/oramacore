@@ -77,5 +77,5 @@ ai_server:
         total_threads: 8
 
     LLMs:
-        default_model:
-            id: "Qwen/Qwen2.5-1.5B-Instruct"
+        port: 8000
+        model: "Qwen/Qwen2.5-1.5B-Instruct"
