@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
-use crate::ai::vllm;
+use crate::ai::vllm::{self, VLLMService};
 use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
@@ -68,6 +68,7 @@ pub struct ReadSide {
     triggers: TriggerInterface,
     segments: SegmentInterface,
     kv: Arc<KV>,
+    vllm_service: Arc<VLLMService>,
 }
 
 impl ReadSide {
@@ -75,6 +76,7 @@ impl ReadSide {
         operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
+        vllm_service: Arc<VLLMService>,
         config: ReadSideConfig,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
@@ -86,10 +88,14 @@ impl ReadSide {
         let commit_interval = config.config.commit_interval;
         let data_dir = config.config.data_dir.clone();
 
-        let collections_reader =
-            CollectionsReader::try_load(ai_service.clone(), nlp_service, config.config)
-                .await
-                .context("Cannot load collections")?;
+        let collections_reader = CollectionsReader::try_load(
+            ai_service.clone(),
+            nlp_service,
+            vllm_service.clone(),
+            config.config,
+        )
+        .await
+        .context("Cannot load collections")?;
         document_storage
             .load()
             .context("Cannot load document storage")?;
@@ -112,8 +118,8 @@ impl ReadSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone());
-        let triggers = TriggerInterface::new(kv.clone());
+        let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -126,6 +132,7 @@ impl ReadSide {
             segments,
             triggers,
             kv,
+            vllm_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -362,6 +369,12 @@ impl ReadSide {
         self.collections.get_ai_service()
     }
 
+    // This is wrong. We should not expose the vllm service to the read side.
+    // TODO: Remove this method.
+    pub fn get_vllm_service(&self) -> Arc<VLLMService> {
+        self.vllm_service.clone()
+    }
+
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
@@ -453,11 +466,13 @@ impl ReadSide {
     }
 
     pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
-        let search_mode = vllm::run_known_prompt(
-            vllm::KnownPrompts::Autoquery,
-            vec![("query".to_string(), query.clone())],
-        )
-        .await?;
+        let search_mode: String = self
+            .vllm_service
+            .run_known_prompt(
+                vllm::KnownPrompts::Autoquery,
+                vec![("query".to_string(), query.clone())],
+            )
+            .await?;
         let parsed_mode: SearchModeResult = serde_json::from_str(&search_mode)?;
 
         Ok(SearchMode::from_str(&parsed_mode.mode, query))

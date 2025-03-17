@@ -66,6 +66,7 @@ async fn planned_answer_v1(
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let vllm_service = read_side.get_vllm_service();
     let collection_id = CollectionId(id.clone()).0;
     let read_side = read_side.clone();
 
@@ -204,6 +205,7 @@ async fn answer_v1(
 
     tokio::spawn(async move {
         let ai_service = read_side.clone().get_ai_service();
+        let vllm_service = read_side.clone().get_vllm_service();
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -259,10 +261,10 @@ async fn answer_v1(
 
         let optimized_query_variables = vec![("input".to_string(), query.clone())];
 
-        let optimized_query =
-            vllm::run_known_prompt(vllm::KnownPrompts::OptimizeQuery, optimized_query_variables)
-                .await
-                .unwrap_or(query.clone()); // fallback to the original query if the optimization fails
+        let optimized_query = vllm_service
+            .run_known_prompt(vllm::KnownPrompts::OptimizeQuery, optimized_query_variables)
+            .await
+            .unwrap_or(query.clone()); // fallback to the original query if the optimization fails
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -307,8 +309,9 @@ async fn answer_v1(
             ("context".to_string(), search_result_str.clone()),
         ];
 
-        let mut answer_stream =
-            vllm::run_known_prompt_stream(vllm::KnownPrompts::Answer, variables).await;
+        let mut answer_stream = vllm_service
+            .run_known_prompt_stream(vllm::KnownPrompts::Answer, variables)
+            .await;
 
         while let Some(resp) = answer_stream.next().await {
             match resp {

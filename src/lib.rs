@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use ai::{AIService, AIServiceConfig};
+use ai::{vllm::VLLMService, AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
@@ -83,11 +83,13 @@ pub async fn build_orama(
     config: OramacoreConfig,
 ) -> Result<(Option<Arc<WriteSide>>, Option<Arc<ReadSide>>)> {
     info!("Building ai_service");
-    let ai_service = AIService::new(config.ai_server);
+    let ai_service = AIService::new(config.ai_server.clone());
 
     ai_service.wait_ready().await?;
 
     let ai_service = Arc::new(ai_service);
+
+    let vllm_service = Arc::new(VLLMService::new(config.ai_server.llm));
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
@@ -115,6 +117,7 @@ pub async fn build_orama(
             config.writer_side,
             ai_service.clone(),
             nlp_service.clone(),
+            vllm_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -135,6 +138,7 @@ pub async fn build_orama(
             receiver_creator,
             ai_service,
             nlp_service,
+            vllm_service,
             config.reader_side,
         )
         .await

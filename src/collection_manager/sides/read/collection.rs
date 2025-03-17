@@ -36,7 +36,10 @@ mod merge;
 mod uncommitted;
 
 use crate::{
-    ai::{vllm, AIService, OramaModel},
+    ai::{
+        vllm::{self, VLLMService},
+        AIService, OramaModel,
+    },
     collection_manager::{
         dto::{
             ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
@@ -69,6 +72,7 @@ pub struct CollectionReader {
     read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
+    vllm_service: Arc<VLLMService>,
 
     document_count: AtomicU64,
 
@@ -93,6 +97,7 @@ impl CollectionReader {
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
+        vllm_service: Arc<VLLMService>,
     ) -> Self {
         Self {
             id,
@@ -103,6 +108,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
+            vllm_service,
             document_count: AtomicU64::new(0),
             fields: Default::default(),
 
@@ -121,6 +127,7 @@ impl CollectionReader {
     pub fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
+        vllm_service: Arc<VLLMService>,
         data_dir: PathBuf,
     ) -> Result<Self> {
         info!("Loading collection from {:?}", data_dir);
@@ -187,6 +194,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
+            vllm_service,
             document_count: AtomicU64::new(collection_info.document_count),
             fields_per_model,
             text_parser_per_field,
@@ -858,11 +866,13 @@ impl CollectionReader {
         // wether to use full text search, vector search or hybrid search.
         let search_mode: SearchMode = match mode.clone() {
             SearchMode::Auto(mode_result) => {
-                let final_mode = vllm::run_known_prompt(
-                    vllm::KnownPrompts::Autoquery,
-                    vec![("query".to_string(), mode_result.term.clone())],
-                )
-                .await?;
+                let final_mode: String = self
+                    .vllm_service
+                    .run_known_prompt(
+                        vllm::KnownPrompts::Autoquery,
+                        vec![("query".to_string(), mode_result.term.clone())],
+                    )
+                    .await?;
 
                 let serilized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
 
