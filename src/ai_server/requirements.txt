@@ -1,29 +1,33 @@
 # Python 3.11 suggested
 
-numpy
-grpcio-tools
-grpcio
-python-dotenv
-fastembed-gpu==0.5.1
-nvidia-cudnn-cu12
-grpcio-reflection
-argparse
+numpy==2.2.2
+
+grpcio-tools==1.69.0
+grpcio==1.69.0
+grpcio-reflection== 1.69.0
+
+torch==2.5.1+cu124
 --extra-index-url https://download.pytorch.org/whl/cu124
-torch
-torchvision
-torchaudio
-opentelemetry-api
-opentelemetry-sdk
-pyyaml
-cachetools
-json-repair
-pillow
+torchvision==0.20.1+cu124
+torchaudio==2.5.1+cu124
 
-pytest
-pytest-mock
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
 
-onnxruntime-gpu
-transformers
-accelerate
-einops
-bitsandbytes
+python-dotenv==1.0.1
+fastembed-gpu==0.5.1
+nvidia-cudnn-cu12==9.1.0.70
+argparse==1.4.0
+
+pyyaml==6.0.2
+cachetools==5.5.0
+json-repair==0.35.0
+pillow==10.4.0
+
+pytest==8.3.4
+pytest-mock==3.14.0
+
+onnxruntime-gpu==1.20.1 --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
+accelerate==1.2.1
+einops==0.8.0
+bitsandbytes==0.45.0

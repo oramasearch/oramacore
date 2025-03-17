@@ -4,8 +4,6 @@ from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
 
-BASE_MODEL = "Qwen/Qwen2.5-3B"
-DEFAULT_GENERAL_MODEL = BASE_MODEL
 DEFAULT_CONFIG_PATH = "../../config.yaml"
 
 
@@ -43,35 +41,15 @@ class SamplingParams:
 
 
 @dataclass
-class ModelConfig:
-    id: str = DEFAULT_GENERAL_MODEL
-    tensor_parallel_size: int = 1
-    use_cpu: bool = False
-    sampling_params: SamplingParams = field(default_factory=SamplingParams)
-
-
-@dataclass
-class LLMConfig:
-    answer: Optional[ModelConfig] = None
-    content_expansion: Optional[ModelConfig] = None
-    google_query_translator: Optional[ModelConfig] = None
-    party_planner: Optional[ModelConfig] = None
-    action: Optional[ModelConfig] = None
-
-
-@dataclass
 class OramaAIConfig:
     models_cache_dir: Optional[str] = ".embeddings_models_cache"
     port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
-    LLMs: LLMConfig = field(default_factory=LLMConfig)
     total_threads: Optional[int] = 12
 
     rust_server_host: Optional[str] = "0.0.0.0"
     rust_server_port: Optional[int] = 8080
-
-    default_model: Optional[str] = BASE_MODEL
 
     def __post_init__(self):
         if Path(DEFAULT_CONFIG_PATH).exists():
@@ -93,46 +71,5 @@ class OramaAIConfig:
                 if hasattr(self, k):
                     if k == "embeddings" and v is not None:
                         self.embeddings = EmbeddingsConfig(**v)
-                    elif k == "LLMs" and v is not None:
-                        llm_configs = {}
-                        # Extract default_model if present
-                        default_model = None
-                        if "default_model" in v:
-                            default_model = v.pop("default_model")
-                            if isinstance(default_model, dict) and "id" in default_model:
-                                self.default_model = default_model["id"]
-
-                        for model_key, model_config in v.items():
-                            if model_config:
-                                sampling_params = SamplingParams(**model_config.pop("sampling_params", {}))
-                                llm_configs[model_key] = ModelConfig(**model_config, sampling_params=sampling_params)
-                        self.LLMs = LLMConfig(**llm_configs)
                     else:
                         setattr(self, k, v)
-
-
-def json_to_md(data, level=0) -> str:
-    if isinstance(data, str):
-        data = json.loads(data)
-
-    indent = "  " * level
-    md = ""
-
-    if isinstance(data, list) and data and isinstance(data[0], list):
-        data = data[0]
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            md += f"{indent}- **{key}**: "
-            if isinstance(value, (dict, list)):
-                md += "\n" + json_to_md(value, level + 1)
-            else:
-                md += f"`{value}`\n"
-    elif isinstance(data, list):
-        for item in data:
-            if isinstance(item, (dict, list)):
-                md += json_to_md(item, level)
-            else:
-                md += f"{indent}- `{item}`\n"
-
-    return md

@@ -2,21 +2,17 @@ use std::{
     fs,
     net::{SocketAddr, TcpListener},
     path::PathBuf,
-    pin::Pin,
-    str::FromStr,
-    sync::Arc,
     time::Duration,
 };
 
 use anyhow::{Context, Result};
 use duration_string::DurationString;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use grpc_def::{ChatStreamResponse, Embedding, PlannedAnswerResponse};
+use grpc_def::Embedding;
 use http::uri::Scheme;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
-use tokio_stream::Stream;
 use tonic::{transport::Server, Response, Status};
 use tracing::info;
 
@@ -123,15 +119,9 @@ pub struct GRPCServer {
 }
 
 type EchoResult<T> = Result<Response<T>, Status>;
-type ResponseStream = Pin<Box<dyn Stream<Item = Result<ChatStreamResponse, Status>> + Send>>;
-type PlannedAnswerResponseStream =
-    Pin<Box<dyn Stream<Item = Result<PlannedAnswerResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
 impl grpc_def::llm_service_server::LlmService for GRPCServer {
-    type ChatStreamStream = ResponseStream;
-    type PlannedAnswerStream = PlannedAnswerResponseStream;
-
     async fn check_health(
         &self,
         _req: tonic::Request<grpc_def::HealthCheckRequest>,
@@ -163,48 +153,6 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
                 .collect(),
             dimensions: 384,
         }))
-    }
-
-    async fn chat(
-        &self,
-        _req: tonic::Request<grpc_def::ChatRequest>,
-    ) -> Result<tonic::Response<grpc_def::ChatResponse>, Status> {
-        todo!()
-    }
-
-    async fn chat_stream(
-        &self,
-        _req: tonic::Request<grpc_def::ChatRequest>,
-    ) -> EchoResult<Self::ChatStreamStream> {
-        todo!()
-    }
-
-    async fn planned_answer(
-        &self,
-        _req: tonic::Request<grpc_def::PlannedAnswerRequest>,
-    ) -> EchoResult<Self::PlannedAnswerStream> {
-        todo!()
-    }
-
-    async fn auto_query(
-        &self,
-        _req: tonic::Request<grpc_def::AutoQueryRequest>,
-    ) -> EchoResult<grpc_def::AutoQueryResponse> {
-        todo!()
-    }
-
-    async fn get_segment(
-        &self,
-        _req: tonic::Request<grpc_def::SegmentRequest>,
-    ) -> EchoResult<grpc_def::SegmentResponse> {
-        todo!()
-    }
-
-    async fn get_trigger(
-        &self,
-        _req: tonic::Request<grpc_def::TriggerRequest>,
-    ) -> EchoResult<grpc_def::TriggerResponse> {
-        todo!()
     }
 }
 pub async fn create_grpc_server() -> Result<SocketAddr> {

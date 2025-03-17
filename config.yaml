@@ -86,5 +86,5 @@ ai_server:
         total_threads: 8
 
     LLMs:
-        default_model:
-            id: "microsoft/Phi-3.5-mini-instruct"
+        port: 8000
+        model: "Qwen/Qwen2.5-1.5B-Instruct"

@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
-use crate::collection_manager::dto::SearchMode;
+use crate::ai::vllm;
+use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
@@ -32,8 +33,8 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::segments::Segment;
-use super::triggers::{Trigger, TriggerInterface};
+use super::segments::{Segment, SelectedSegment};
+use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
     OperationReceiverCreator, WriteOperation,
@@ -111,8 +112,8 @@ impl ReadSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), ai_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), ai_service.clone());
+        let segments = SegmentInterface::new(kv.clone());
+        let triggers = TriggerInterface::new(kv.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -394,6 +395,35 @@ impl ReadSide {
         self.segments.list_by_collection(collection_id).await
     }
 
+    pub async fn perform_segment_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+    ) -> Result<Option<SelectedSegment>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.segments
+            .perform_segment_selection(collection_id, conversation)
+            .await
+    }
+
+    pub async fn perform_trigger_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Option<Vec<InteractionMessage>>,
+        triggers: Vec<Trigger>,
+    ) -> Result<Option<SelectedTrigger>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.triggers
+            .perform_trigger_selection(collection_id, conversation, triggers)
+            .await
+    }
+
     pub async fn get_all_triggers_by_segment(
         &self,
         read_api_key: ApiKey,
@@ -430,10 +460,14 @@ impl ReadSide {
     }
 
     pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
-        let ai_service = self.get_ai_service();
-        let search_mode = ai_service.get_autoquery(query.clone()).await?;
+        let search_mode = vllm::run_known_prompt(
+            vllm::KnownPrompts::Autoquery,
+            vec![("query".to_string(), query.clone())],
+        )
+        .await?;
+        let parsed_mode: SearchModeResult = serde_json::from_str(&search_mode)?;
 
-        Ok(SearchMode::from_str(&search_mode.mode, query))
+        Ok(SearchMode::from_str(&parsed_mode.mode, query))
     }
 
     pub async fn check_read_api_key(

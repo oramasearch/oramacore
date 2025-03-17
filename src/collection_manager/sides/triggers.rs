@@ -1,8 +1,12 @@
 use super::generic_kv::{format_key, KV};
-use crate::{ai::AIService, collection_manager::dto::InteractionMessage, types::CollectionId};
+use crate::{
+    ai::{vllm, AIService},
+    collection_manager::dto::InteractionMessage,
+    types::CollectionId,
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TriggerIdContent {
@@ -20,14 +24,32 @@ pub struct Trigger {
     pub segment_id: Option<String>,
 }
 
+impl fmt::Display for Trigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let displayed = format!(
+            "**name**: {}\n**description**: {}\n**response**: {}",
+            self.name, self.description, self.response
+        );
+
+        write!(f, "{}", displayed)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectedTrigger {
+    pub id: String,
+    pub name: String,
+    pub response: String,
+    pub probability: f32,
+}
+
 pub struct TriggerInterface {
     kv: Arc<KV>,
-    ai_service: Arc<AIService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>, ai_service: Arc<AIService>) -> Self {
-        Self { kv, ai_service }
+    pub fn new(kv: Arc<KV>) -> Self {
+        Self { kv }
     }
 
     pub async fn insert(&self, trigger: Trigger) -> Result<String> {
@@ -97,11 +119,32 @@ impl TriggerInterface {
 
     pub async fn perform_trigger_selection(
         &self,
-        collection_id: CollectionId,
+        _collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
-    ) -> Result<crate::ai::TriggerResponse> {
-        let triggers = self.list_by_collection(collection_id).await?;
-        self.ai_service.get_trigger(triggers, conversation).await
+        triggers: Vec<Trigger>,
+    ) -> Result<Option<SelectedTrigger>> {
+        let response = vllm::run_known_prompt(
+            vllm::KnownPrompts::Trigger,
+            vec![
+                ("triggers".to_string(), serde_json::to_string(&triggers)?),
+                (
+                    "conversation".to_string(),
+                    serde_json::to_string(&conversation)?,
+                ),
+            ],
+        )
+        .await?;
+
+        let repaired = repair_json::repair(response)?;
+
+        // @todo: improve this.
+        if repaired == "{}" {
+            return Ok(None);
+        }
+
+        let deserialized = serde_json::from_str::<SelectedTrigger>(&repaired)?;
+
+        Ok(Some(deserialized))
     }
 }
 
@@ -139,11 +182,8 @@ pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
 
 #[cfg(test)]
 mod tests {
+    use crate::collection_manager::sides::generic_kv::KVConfig;
     use std::path::PathBuf;
-
-    use http::uri::Scheme;
-
-    use crate::{ai::AIServiceConfig, collection_manager::sides::generic_kv::KVConfig};
 
     use super::*;
 
@@ -154,17 +194,8 @@ mod tests {
             sender: None,
         };
 
-        let ai_service_conf = AIServiceConfig {
-            scheme: Scheme::HTTP,
-            max_connections: 1,
-            port: 8080,
-            api_key: None,
-            host: std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-        };
-
         let kv = Arc::new(KV::try_load(kv_config).unwrap());
-        let trigger_interface =
-            TriggerInterface::new(kv.clone(), Arc::new(AIService::new(ai_service_conf)));
+        let trigger_interface = TriggerInterface::new(kv.clone());
 
         let trigger = Trigger {
             id: "test_trigger".to_string(),

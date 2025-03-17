@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  oramacore:
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    networks:
+      - internal_network
+    depends_on:
+      - python-ai-server
+      - vllm
+    restart: unless-stopped
+
+  python-ai-server:
+    build:
+      context: ./src/ai_server
+    ports:
+      - "50051:50051"
+    networks:
+      - internal_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:v0.7.3
+    command: --model Qwen/Qwen2.5-3B-Instruct --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    networks:
+      - internal_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+
+  envoy:
+    image: envoyproxy/envoy:v1.26-latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml
+    networks:
+      - internal_network
+    depends_on:
+      - oramacore
+    restart: unless-stopped
+
+networks:
+  internal_network:
+    driver: bridge

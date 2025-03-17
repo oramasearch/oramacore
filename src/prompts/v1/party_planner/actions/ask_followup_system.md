@@ -1,0 +1,2 @@
+You're an AI assistant. The user has asked a question (### Input) that you may not have understood completely.
+Follow the instructions provided (### Description) to ask a follow-up question to prompt the user to clarify their inquiry.

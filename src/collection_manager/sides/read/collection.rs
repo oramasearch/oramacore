@@ -36,12 +36,12 @@ mod merge;
 mod uncommitted;
 
 use crate::{
-    ai::{AIService, AutoQueryResponse, OramaModel},
+    ai::{vllm, AIService, OramaModel},
     collection_manager::{
         dto::{
             ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
-            HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchParams,
-            Similarity, VectorMode,
+            HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
+            SearchParams, Similarity, VectorMode,
         },
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
@@ -845,17 +845,15 @@ impl CollectionReader {
         // wether to use full text search, vector search or hybrid search.
         let search_mode: SearchMode = match mode.clone() {
             SearchMode::Auto(mode_result) => {
-                let final_mode = self
-                    .ai_service
-                    .get_autoquery(mode_result.term.clone())
-                    .await
-                    .unwrap_or(AutoQueryResponse {
-                        // By default, we can use the hybrid mode when something goes wrong
-                        // with the AI service. This is the most versatile mode.
-                        mode: "hybrid".to_string(),
-                    });
+                let final_mode = vllm::run_known_prompt(
+                    vllm::KnownPrompts::Autoquery,
+                    vec![("query".to_string(), mode_result.term.clone())],
+                )
+                .await?;
 
-                match final_mode.mode.as_str() {
+                let serilized_final_mode: SearchModeResult = serde_json::from_str(&final_mode)?;
+
+                match serilized_final_mode.mode.as_str() {
                     "fulltext" => SearchMode::FullText(FulltextMode {
                         term: mode_result.term,
                     }),
