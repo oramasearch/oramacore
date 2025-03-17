@@ -1,4 +1,4 @@
-FROM rust:1.84-slim-bookworm AS rust-builder
+FROM rust:1.85-slim-bookworm AS rust-builder
 
 RUN apt-get update && apt-get install -y \
   libssl3 \
