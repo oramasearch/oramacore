@@ -1,10 +1,12 @@
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
 use oramacore::{start, OramacoreConfig};
-use tracing::{instrument, Subscriber};
+use sentry::Integration;
+use tracing::instrument;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, EnvFilter, Registry};
 
@@ -31,8 +33,7 @@ fn load_config() -> Result<OramacoreConfig> {
     Ok(oramacore_config)
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let oramacore_config = match load_config() {
         Ok(config) => config,
         Err(e) => {
@@ -41,9 +42,49 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    if let Some(sentry_dsn) = oramacore_config.log.sentry_dsn.clone() {
+        let integration = sentry_debug_images::DebugImagesIntegration::new()
+            .filter(|event| event.level >= sentry::Level::Warning);
+        let integration: Arc<dyn Integration> = Arc::new(integration);
+
+        let _guard = sentry::init((
+            sentry_dsn,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                sample_rate: 1.0,
+                integrations: vec![integration],
+                ..Default::default()
+            },
+        ));
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async { run(oramacore_config).await })?;
+
+    Ok(())
+}
+
+async fn run(oramacore_config: OramacoreConfig) -> anyhow::Result<()> {
     let subscriber = Registry::default().with(fmt::layer().compact().with_ansi(true));
-    let subscriber: Box<dyn Subscriber + Send + Sync + 'static> =
-        if let Some(file_path) = &oramacore_config.log.file_path {
+
+    match (
+        oramacore_config.log.sentry_dsn.is_some(),
+        &oramacore_config.log.file_path,
+    ) {
+        (false, None) => {
+            let subscriber = subscriber.with(EnvFilter::from_default_env());
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+        }
+        (true, None) => {
+            let subscriber = subscriber
+                .with(EnvFilter::from_default_env())
+                .with(sentry_tracing::layer());
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+        }
+        (false, Some(file_path)) => {
             println!("Logging to file: {:?}", file_path);
             let debug_file = OpenOptions::new()
                 .write(true)
@@ -51,12 +92,24 @@ async fn main() -> anyhow::Result<()> {
                 .truncate(true)
                 .open(file_path)
                 .expect("Cannot open log file");
-            Box::new(subscriber.with(fmt::layer().json().with_writer(debug_file)))
-        } else {
-            Box::new(subscriber)
-        };
-    let subscriber = subscriber.with(EnvFilter::from_default_env());
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+            let subscriber = subscriber.with(fmt::layer().json().with_writer(debug_file));
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+        }
+        (true, Some(file_path)) => {
+            println!("Logging to file: {:?}", file_path);
+            let debug_file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(file_path)
+                .expect("Cannot open log file");
+            let subscriber = subscriber
+                .with(EnvFilter::from_default_env())
+                .with(sentry_tracing::layer());
+            let subscriber = subscriber.with(fmt::layer().json().with_writer(debug_file));
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+        }
+    }
 
     start(oramacore_config).await?;
 

@@ -40,6 +40,7 @@ mod tests;
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LogConfig {
     pub file_path: Option<PathBuf>,
+    pub sentry_dsn: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
