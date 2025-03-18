@@ -1,5 +1,5 @@
 use crate::{
-    ai::vllm::{self, KnownPrompts, VLLMService},
+    ai::vllm::{KnownPrompts, VLLMService},
     collection_manager::{
         dto::InteractionMessage,
         sides::generic_kv::{format_key, KV},
