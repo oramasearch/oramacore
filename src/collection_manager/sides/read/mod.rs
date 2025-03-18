@@ -40,6 +40,8 @@ use super::{
     OperationReceiverCreator, WriteOperation,
 };
 
+pub use collection::{stats, FieldStats, FieldStatsType};
+
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub input: InputSideChannelType,

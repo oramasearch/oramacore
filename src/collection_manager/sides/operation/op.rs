@@ -32,6 +32,9 @@ pub enum DocumentFieldIndexOperation {
     IndexEmbedding {
         value: Vec<f32>,
     },
+    IndexStringFilter {
+        value: String,
+    },
     IndexNumber {
         value: NumberWrapper,
     },
@@ -138,6 +141,8 @@ pub enum TypedFieldWrapper {
     ArrayText(Locale),
     ArrayNumber,
     ArrayBoolean,
+    String,
+    ArrayString,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
