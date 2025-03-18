@@ -698,6 +698,7 @@ pub struct InteractionMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Interaction {
     pub interaction_id: String,
+    pub system_prompt_id: Option<String>,
     pub query: String,
     pub visitor_id: String,
     pub conversation_id: String,

@@ -400,6 +400,30 @@ impl ReadSide {
             .await
     }
 
+    pub async fn has_system_prompts(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<bool> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts.has_system_prompts(collection_id).await
+    }
+
+    pub async fn perform_system_prompt_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Option<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts
+            .perform_system_prompt_selection(collection_id)
+            .await
+    }
+
     pub async fn get_all_system_prompts_by_collection(
         &self,
         read_api_key: ApiKey,
