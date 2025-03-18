@@ -34,6 +34,7 @@ use crate::{
 };
 
 use super::segments::{Segment, SelectedSegment};
+use super::system_prompts::SystemPromptInterface;
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
@@ -69,6 +70,7 @@ pub struct ReadSide {
 
     triggers: TriggerInterface,
     segments: SegmentInterface,
+    system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     vllm_service: Arc<VLLMService>,
 }
@@ -122,6 +124,7 @@ impl ReadSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -133,6 +136,7 @@ impl ReadSide {
             commit_insert_mutex: Mutex::new(last_offset),
             segments,
             triggers,
+            system_prompts,
             kv,
             vllm_service,
         };

@@ -18,6 +18,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
+    system_prompts::{self, SystemPromptInterface},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
@@ -89,6 +90,7 @@ pub struct WriteSide {
     document_storage: DocumentStorage,
     segments: SegmentInterface,
     triggers: TriggerInterface,
+    system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     master_api_key: ApiKey,
 }
@@ -141,6 +143,7 @@ impl WriteSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
@@ -168,6 +171,7 @@ impl WriteSide {
             sender,
             segments,
             triggers,
+            system_prompts,
             kv,
         };
 
