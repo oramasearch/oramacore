@@ -88,4 +88,4 @@ ai_server:
     llm:
         port: 8000
         host: vllm
-        model: "microsoft/Phi-4"
+        model: "Qwen/Qwen2.5-3B-Instruct"
