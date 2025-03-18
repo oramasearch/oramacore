@@ -34,7 +34,7 @@ use crate::{
 };
 
 use super::segments::{Segment, SelectedSegment};
-use super::system_prompts::SystemPromptInterface;
+use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
@@ -384,6 +384,31 @@ impl ReadSide {
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
+    }
+
+    pub async fn get_system_prompt(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt_id: String,
+    ) -> Result<Option<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts
+            .get(collection_id, system_prompt_id)
+            .await
+    }
+
+    pub async fn get_all_system_prompts_by_collection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts.list_by_collection(collection_id).await
     }
 
     pub async fn get_segment(

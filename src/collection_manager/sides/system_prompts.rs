@@ -3,15 +3,11 @@ use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{ai::vllm::VLLMService, types::CollectionId};
+use crate::{
+    ai::vllm::VLLMService, collection_manager::dto::SystemPromptUsageMode, types::CollectionId,
+};
 
 use super::generic_kv::{format_key, KV};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SystemPromptUsageMode {
-    Automatic,
-    Manual,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPrompt {

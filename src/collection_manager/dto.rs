@@ -731,6 +731,35 @@ pub struct ExecuteActionPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertSystemPromptParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub prompt: String,
+    pub usage_mode: SystemPromptUsageMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteSystemPromptParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum SystemPromptUsageMode {
+    #[serde(rename = "automatic")]
+    Automatic,
+    #[serde(rename = "manual")]
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateSystemPromptParams {
+    pub id: String,
+    pub name: String,
+    pub prompt: String,
+    pub usage_mode: SystemPromptUsageMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertSegmentParams {
     pub id: Option<String>,
     pub name: String,
