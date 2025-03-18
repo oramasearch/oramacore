@@ -50,6 +50,10 @@ pub fn merge_number_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
+            if uncommitted.len() == 0 {
+                return Ok(None);
+            }
+
             let uncommitted_iter = uncommitted.iter().map(|(n, v)| (SerializableNumber(n), v));
             let committed_iter = committed.iter();
 
@@ -67,6 +71,69 @@ pub fn merge_number_field(
                 (k, d)
             });
             Ok(Some(committed_fields::NumberField::from_iter(
+                iter, data_dir,
+            )?))
+        }
+    }
+}
+
+pub fn merge_string_filter_field(
+    uncommitted: Option<&uncommitted_fields::StringFilterField>,
+    committed: Option<&committed_fields::StringFilterField>,
+    data_dir: PathBuf,
+    uncommitted_document_deletions: &HashSet<DocumentId>,
+) -> Result<Option<committed_fields::StringFilterField>> {
+    match (uncommitted, committed) {
+        (None, None) => {
+            bail!("Both uncommitted and committed number fields are None. Never should happen");
+        }
+        (None, Some(committed)) => {
+            if uncommitted_document_deletions.is_empty() {
+                // No changes
+                return Ok(None);
+            }
+
+            let committed_iter = committed.iter().map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            });
+
+            Ok(Some(committed_fields::StringFilterField::from_iter(
+                committed_iter,
+                data_dir,
+            )?))
+        }
+        (Some(uncommitted), None) => {
+            let iter = uncommitted.iter().map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            });
+            Ok(Some(committed_fields::StringFilterField::from_iter(
+                iter, data_dir,
+            )?))
+        }
+        (Some(uncommitted), Some(committed)) => {
+            if uncommitted.len() == 0 {
+                return Ok(None);
+            }
+
+            let uncommitted_iter = uncommitted.iter();
+            let committed_iter = committed.iter();
+
+            let iter = MergedIterator::new(
+                committed_iter,
+                uncommitted_iter,
+                |_, v| v,
+                |_, mut v1, v2| {
+                    v1.extend(v2);
+                    v1
+                },
+            )
+            .map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            });
+            Ok(Some(committed_fields::StringFilterField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -121,6 +188,10 @@ pub fn merge_bool_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
+            if uncommitted.len() == 0 {
+                return Ok(None);
+            }
+
             let (uncommitted_true_docs, uncommitted_false_docs) = uncommitted.clone_inner();
             let (mut committed_true_docs, mut committed_false_docs) = committed.clone_inner()?;
 
@@ -172,6 +243,10 @@ pub fn merge_string_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
+            if uncommitted.len() == 0 {
+                return Ok(None);
+            }
+
             let length_per_documents = uncommitted.field_length_per_doc();
             // let uncommitted_iter = uncommitted.iter();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
@@ -230,6 +305,10 @@ pub fn merge_vector_field(
             Ok(Some(new_field))
         }
         (Some(uncommitted), Some(committed)) => {
+            if uncommitted.len() == 0 {
+                return Ok(None);
+            }
+
             let info = committed.get_field_info();
             let new_field = committed_fields::VectorField::from_dump_and_iter(
                 info.data_dir,
@@ -241,49 +320,3 @@ pub fn merge_vector_field(
         }
     }
 }
-
-/*
-pub fn merge_uncommitted(
-    committed: &mut CommittedCollection,
-    uncommitted: &mut UncommittedCollection,
-    data_dir: PathBuf,
-) -> Result<()> {
-    let data_dir = data_dir.join("fields");
-
-    let number_dir = data_dir.join("numbers");
-    for (field_id, field) in &uncommitted.number_index {
-        let committed = committed.number_index.get(field_id);
-
-        let field_dir = number_dir.join(format!("field-{}", field_id.0));
-
-        let new_committed_field = merge_number_field(field, committed, field_dir)?;
-
-        committed.number_index.insert(*field_id, new_committed_field);
-    }
-
-    let bool_dir = data_dir.join("bools");
-    for (field_id, field) in &uncommitted.bool_index {
-        let committed = committed.bool_index.get(field_id);
-
-        let field_dir = bool_dir.join(format!("field-{}", field_id.0));
-
-        let new_committed_field = merge_bool_field(uncommitted, committed, field_dir)?;
-
-        committed.bool_index.insert(*field_id, new_committed_field);
-    }
-
-    let strings_dir = data_dir.join("strings");
-    for (field_id, field) in &uncommitted.string_index {
-        let committed = committed.string_index.get(field_id);
-
-        let field_dir = strings_dir.join(format!("field-{}", field_id.0));
-
-        let new_committed_field = merge_string_field(uncommitted, committed, field_dir)?;
-
-
-        committed.string_index.insert(*field_id, new_committed_field);
-    }
-
-    Ok(())
-}
-*/

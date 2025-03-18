@@ -1,14 +1,8 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    ops::Bound,
-};
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::{
-    collection_manager::dto::{Number, NumberFilter},
-    types::DocumentId,
-};
+use crate::types::DocumentId;
 
 #[derive(Debug)]
 pub struct StringFilterField {
@@ -30,14 +24,14 @@ impl StringFilterField {
         self.inner.entry(value).or_default().insert(doc_id);
     }
 
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter: &String,
-    ) -> impl Iterator<Item = DocumentId> + 'iter
+    pub fn filter<'s, 'iter>(&'s self, filter: &String) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
     {
-        self.inner.get(filter).map(|doc_ids| doc_ids.iter().cloned()).unwrap_or_default()
+        self.inner
+            .get(filter)
+            .map(|doc_ids| doc_ids.iter().cloned())
+            .unwrap_or_default()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (String, HashSet<DocumentId>)> + '_ {
@@ -47,19 +41,17 @@ impl StringFilterField {
     }
 
     pub fn get_stats(&self) -> StringFilterUncommittedFieldStats {
-        if self.inner.is_empty() {
-            return StringFilterUncommittedFieldStats {
-                variant_count: 0,
-            };
-        }
+        let doc_count = self.inner.values().map(|v| v.len()).sum();
 
         StringFilterUncommittedFieldStats {
             variant_count: self.inner.len(),
+            doc_count,
         }
     }
 }
 
 #[derive(Serialize, Debug)]
 pub struct StringFilterUncommittedFieldStats {
-    pub variant_count: usize
+    pub variant_count: usize,
+    pub doc_count: usize,
 }

@@ -36,7 +36,7 @@ async fn test_ensure_back_compatibility() -> Result<()> {
         )
         .await;
 
-    assert_eq!(output.is_ok(), true);
+    assert!(output.is_ok());
 
     Ok(())
 }

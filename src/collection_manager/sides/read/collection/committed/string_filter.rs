@@ -1,10 +1,14 @@
-use std::{collections::{HashMap, HashSet}, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::dto::{Number, NumberFilter, SerializableNumber}, file_utils::{create_if_not_exists, BufferedFile}, indexes::ordered_key::{BoundedValue, OrderedKeyIndex}, types::DocumentId
+    file_utils::{create_if_not_exists, BufferedFile},
+    types::DocumentId,
 };
 
 #[derive(Debug)]
@@ -29,12 +33,17 @@ impl StringFilterField {
             inner.insert(key, doc_ids);
         }
 
+        let data = StringFilterFieldDump::V1(StringFilterFieldDumpV1 { data: inner });
         BufferedFile::create(data_dir.join("data.bin"))
-            .context("Cannot create hnsw file")?
-            .write_bincode_data(&inner)
-            .context("Cannot write hnsw file")?;
+            .context("Cannot create data.bin")?
+            .write_bincode_data(&data)
+            .context("Cannot write data.bin")?;
+        let StringFilterFieldDump::V1(inner) = data;
 
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            inner: inner.data,
+            data_dir,
+        })
     }
 
     pub fn load(info: StringFilterFieldInfo) -> Result<Self> {
@@ -42,9 +51,9 @@ impl StringFilterField {
         let dump_file_path = data_dir.join("data.bin");
 
         let inner: StringFilterFieldDump = BufferedFile::open(dump_file_path)
-            .context("Cannot open hnsw file")?
+            .context("Cannot open data.bin")?
             .read_bincode_data()
-            .context("Cannot read hnsw file")?;
+            .context("Cannot read data.bin")?;
         let inner = match inner {
             StringFilterFieldDump::V1(inner) => inner.data,
         };
@@ -57,24 +66,27 @@ impl StringFilterField {
         }
     }
 
-    pub fn get_stats(&self) -> Result<StringFilterCommittedFieldStats> {
-        Ok(StringFilterCommittedFieldStats {
+    pub fn get_stats(&self) -> StringFilterCommittedFieldStats {
+        let doc_count = self.inner.values().map(|v| v.len()).sum();
+        StringFilterCommittedFieldStats {
             variant_count: self.inner.len(),
-        })
+            doc_count,
+        }
     }
 
-    pub fn filter<'s, 'iter>(
-        &'s self,
-        filter: &String,
-    ) -> impl Iterator<Item = DocumentId> + 'iter
+    pub fn filter<'s, 'iter>(&'s self, filter: &String) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
     {
-        self.inner.get(filter).map(|doc_ids| doc_ids.iter().cloned()).unwrap_or_default()
+        self.inner
+            .get(filter)
+            .map(|doc_ids| doc_ids.iter().cloned())
+            .unwrap_or_default()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (String, HashSet<DocumentId>)> + '_ {
-        self.inner.iter()
+        self.inner
+            .iter()
             .map(|(k, doc_ids)| (k.clone(), doc_ids.clone()))
     }
 }
@@ -87,6 +99,7 @@ pub struct StringFilterFieldInfo {
 #[derive(Serialize, Debug)]
 pub struct StringFilterCommittedFieldStats {
     pub variant_count: usize,
+    pub doc_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -4,7 +4,8 @@ use anyhow::Result;
 use bool::{BoolField, BoolUncommittedFieldStats};
 use number::{NumberField, NumberUncommittedFieldStats};
 use string::{StringField, StringUncommittedFieldStats};
-use tracing::trace;
+use string_filter::{StringFilterField, StringFilterUncommittedFieldStats};
+use tracing::{trace, warn};
 use vector::{VectorField, VectorUncommittedFieldStats};
 
 use crate::{
@@ -18,12 +19,14 @@ use crate::{
 mod bool;
 mod number;
 mod string;
+mod string_filter;
 mod vector;
 
 pub mod fields {
     pub use super::bool::{BoolField, BoolUncommittedFieldStats};
     pub use super::number::{NumberField, NumberUncommittedFieldStats};
     pub use super::string::{StringField, StringUncommittedFieldStats};
+    pub use super::string_filter::{StringFilterField, StringFilterUncommittedFieldStats};
     pub use super::vector::{VectorField, VectorUncommittedFieldStats};
 }
 
@@ -33,6 +36,7 @@ pub use string::{Positions, TotalDocumentsWithTermInField};
 pub struct UncommittedCollection {
     pub number_index: HashMap<FieldId, NumberField>,
     pub bool_index: HashMap<FieldId, BoolField>,
+    pub string_filter_index: HashMap<FieldId, StringFilterField>,
     pub string_index: HashMap<FieldId, StringField>,
     pub vector_index: HashMap<FieldId, VectorField>,
 }
@@ -42,6 +46,7 @@ impl UncommittedCollection {
         Self {
             number_index: HashMap::new(),
             bool_index: HashMap::new(),
+            string_filter_index: HashMap::new(),
             string_index: HashMap::new(),
             vector_index: HashMap::new(),
         }
@@ -56,7 +61,7 @@ impl UncommittedCollection {
 
     pub fn get_infos(&self) -> UncommittedInfo {
         trace!(
-            "Getting uncommitted info. vector: {:?}, number {:?}, string {:?}, bool {:?}",
+            "Getting uncommitted info. vector: {:?}, number {:?}, string {:?}, bool {:?}, string_filter {:?}",
             self.vector_index
                 .iter()
                 .map(|(k, v)| (k, v.len()))
@@ -73,33 +78,19 @@ impl UncommittedCollection {
                 .iter()
                 .map(|(k, v)| (k, v.len()))
                 .collect::<Vec<_>>(),
+            self.string_filter_index
+                .iter()
+                .map(|(k, v)| (k, v.len()))
+                .collect::<Vec<_>>(),
         );
-
+        // We returns also empty fields because it is needed if an index is created but no document is indexed
+        // That situation occurs when a field is created and the collection is committed before any document is indexed
         UncommittedInfo {
-            number_fields: self
-                .number_index
-                .iter()
-                .filter(|(_, v)| v.len() > 0)
-                .map(|(k, _)| *k)
-                .collect(),
-            string_fields: self
-                .string_index
-                .iter()
-                .filter(|(_, v)| v.len() > 0)
-                .map(|(k, _)| *k)
-                .collect(),
-            bool_fields: self
-                .bool_index
-                .iter()
-                .filter(|(_, v)| v.len() > 0)
-                .map(|(k, _)| *k)
-                .collect(),
-            vector_fields: self
-                .vector_index
-                .iter()
-                .filter(|(_, v)| v.len() > 0)
-                .map(|(k, _)| *k)
-                .collect(),
+            number_fields: self.number_index.keys().copied().collect(),
+            string_filter_fields: self.string_filter_index.keys().copied().collect(),
+            string_fields: self.string_index.keys().copied().collect(),
+            bool_fields: self.bool_index.keys().copied().collect(),
+            vector_fields: self.vector_index.keys().copied().collect(),
         }
     }
 
@@ -115,6 +106,16 @@ impl UncommittedCollection {
     pub fn get_number_stats(&self) -> HashMap<FieldId, NumberUncommittedFieldStats> {
         let mut ret = HashMap::new();
         for (field_id, field) in &self.number_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
+    }
+
+    pub fn get_string_filter_stats(&self) -> HashMap<FieldId, StringFilterUncommittedFieldStats> {
+        let mut ret = HashMap::new();
+        println!("string_filter_index: {:?}", self.string_filter_index);
+        for (field_id, field) in &self.string_filter_index {
             let field_stats = field.get_stats();
             ret.insert(*field_id, field_stats);
         }
@@ -219,6 +220,22 @@ impl UncommittedCollection {
         Ok(Some(number_index.filter(filter_number)))
     }
 
+    pub fn calculate_string_filter<'s, 'iter>(
+        &'s self,
+        field_id: FieldId,
+        filter: &String,
+    ) -> Result<Option<impl Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let string_filter_index = match self.string_filter_index.get(&field_id) {
+            Some(index) => index,
+            None => return Ok(None),
+        };
+
+        Ok(Some(string_filter_index.filter(filter)))
+    }
+
     pub fn calculate_bool_filter<'s, 'iter>(
         &'s self,
         field_id: FieldId,
@@ -255,7 +272,11 @@ impl UncommittedCollection {
                     .insert(doc_id, value.0);
             }
             DocumentFieldIndexOperation::IndexStringFilter { value } => {
-                // panic!("Not yet implemented");
+                warn!("IndexStringFilter value {}", value);
+                self.string_filter_index
+                    .entry(field_id)
+                    .or_insert_with(StringFilterField::empty)
+                    .insert(doc_id, value);
             }
             DocumentFieldIndexOperation::IndexString {
                 field_length,
@@ -282,6 +303,7 @@ impl UncommittedCollection {
 pub struct UncommittedInfo {
     pub number_fields: HashSet<FieldId>,
     pub string_fields: HashSet<FieldId>,
+    pub string_filter_fields: HashSet<FieldId>,
     pub bool_fields: HashSet<FieldId>,
     pub vector_fields: HashSet<FieldId>,
 }

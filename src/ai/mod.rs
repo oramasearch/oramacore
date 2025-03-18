@@ -1,4 +1,4 @@
-use std::{net::IpAddr, time::Duration};
+use std::time::Duration;
 
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;

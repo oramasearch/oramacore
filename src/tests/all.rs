@@ -1022,22 +1022,27 @@ async fn test_handle_bool() -> Result<()> {
         vec![
             json!({
                 "id": "doc1",
+                "title": "doc1",
                 "bool": true,
             }),
             json!({
                 "id": "doc2",
+                "title": "doc2",
                 "bool": false,
             }),
             json!({
                 "id": "doc3",
+                "title": "doc3",
                 "bool": true,
             }),
             json!({
                 "id": "doc4",
+                "title": "doc4",
                 "bool": false,
             }),
             json!({
                 "id": "doc5",
+                "title": "doc5",
                 "bool": true,
             }),
         ],
@@ -1058,6 +1063,7 @@ async fn test_handle_bool() -> Result<()> {
             .unwrap(),
         )
         .await?;
+
     assert_eq!(output.count, 3);
 
     read_side.commit().await?;
@@ -1847,13 +1853,13 @@ export default {
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
-                "similarity": 0.001,
             })
             .try_into()?,
         )
         .await?;
     assert_eq!(output.count, 1);
 
+    // Hook change the meaning of the text, so the exact match should not work
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1867,8 +1873,8 @@ export default {
         .await?;
     assert_eq!(output.count, 0);
 
-    read_side.commit().await?;
-    write_side.commit().await?;
+    read_side.commit().await.unwrap();
+    write_side.commit().await.unwrap();
 
     let (write_side, read_side) = create(config.clone()).await?;
 
@@ -1935,8 +1941,8 @@ export default {
         .await?;
     assert_eq!(output.count, 0);
 
-    read_side.commit().await?;
-    write_side.commit().await?;
+    read_side.commit().await.unwrap();
+    write_side.commit().await.unwrap();
 
     let (_, read_side) = create(config.clone()).await?;
 

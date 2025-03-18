@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
 use number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
 use string::{StringCommittedFieldStats, StringField, StringFieldInfo};
+use string_filter::{StringFilterCommittedFieldStats, StringFilterField, StringFilterFieldInfo};
 use vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
 
 use crate::{
@@ -14,12 +15,16 @@ use crate::{
 mod bool;
 mod number;
 mod string;
+mod string_filter;
 mod vector;
 
 pub mod fields {
     pub use super::bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
     pub use super::number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
     pub use super::string::{StringCommittedFieldStats, StringField, StringFieldInfo};
+    pub use super::string_filter::{
+        StringFilterCommittedFieldStats, StringFilterField, StringFilterFieldInfo,
+    };
     pub use super::vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
 
     pub use super::bool::BoolWrapper;
@@ -29,6 +34,7 @@ pub mod fields {
 pub struct CommittedCollection {
     pub number_index: HashMap<FieldId, NumberField>,
     pub bool_index: HashMap<FieldId, BoolField>,
+    pub string_filter_index: HashMap<FieldId, StringFilterField>,
     pub string_index: HashMap<FieldId, StringField>,
     pub vector_index: HashMap<FieldId, VectorField>,
 }
@@ -38,6 +44,7 @@ impl CommittedCollection {
         Self {
             number_index: Default::default(),
             bool_index: Default::default(),
+            string_filter_index: Default::default(),
             string_index: Default::default(),
             vector_index: Default::default(),
         }
@@ -46,11 +53,13 @@ impl CommittedCollection {
     pub fn try_load(
         number_field_infos: Vec<(FieldId, NumberFieldInfo)>,
         bool_field_infos: Vec<(FieldId, BoolFieldInfo)>,
+        string_filter_field_infos: Vec<(FieldId, StringFilterFieldInfo)>,
         string_field_infos: Vec<(FieldId, StringFieldInfo)>,
         vector_field_infos: Vec<(FieldId, VectorFieldInfo)>,
     ) -> Result<Self> {
         let mut number_index: HashMap<FieldId, NumberField> = Default::default();
         let mut bool_index: HashMap<FieldId, BoolField> = Default::default();
+        let mut string_filter_index: HashMap<FieldId, StringFilterField> = Default::default();
         let mut string_index: HashMap<FieldId, StringField> = Default::default();
         let mut vector_index: HashMap<FieldId, VectorField> = Default::default();
 
@@ -74,10 +83,16 @@ impl CommittedCollection {
                 .with_context(|| format!("Cannot load vector {:?} field", field_id))?;
             vector_index.insert(field_id, vector_field);
         }
+        for (field_id, info) in string_filter_field_infos {
+            let vector_field = StringFilterField::load(info)
+                .with_context(|| format!("Cannot load string filter  {:?} field", field_id))?;
+            string_filter_index.insert(field_id, vector_field);
+        }
 
         Ok(Self {
             number_index,
             bool_index,
+            string_filter_index,
             string_index,
             vector_index,
         })
@@ -115,6 +130,15 @@ impl CommittedCollection {
             stats.insert(*field_id, field_stats);
         }
         Ok(stats)
+    }
+
+    pub fn get_string_filter_stats(&self) -> HashMap<FieldId, StringFilterCommittedFieldStats> {
+        let mut ret = HashMap::new();
+        for (field_id, field) in &self.string_filter_index {
+            let field_stats = field.get_stats();
+            ret.insert(*field_id, field_stats);
+        }
+        ret
     }
 
     pub fn get_string_stats(&self) -> Result<HashMap<FieldId, StringCommittedFieldStats>> {
@@ -218,6 +242,22 @@ impl CommittedCollection {
         };
 
         field.filter(filter_number).map(Some)
+    }
+
+    pub fn calculate_string_filter<'s, 'iter>(
+        &'s self,
+        field_id: FieldId,
+        filter_string: &String,
+    ) -> Result<Option<impl Iterator<Item = DocumentId> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let field = match self.string_filter_index.get(&field_id) {
+            Some(field) => field,
+            None => return Ok(None),
+        };
+
+        Ok(Some(field.filter(filter_string)))
     }
 
     pub fn calculate_bool_filter<'s, 'iter>(

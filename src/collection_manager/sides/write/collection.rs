@@ -9,18 +9,16 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use doc_id_storage::DocIdStorage;
-use futures::stream::Collect;
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{debug, field, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
             hooks::{HookName, HooksRuntime},
-            write::collection,
             CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
             OperationSender, TypedFieldWrapper, WriteOperation,
         },
@@ -306,6 +304,11 @@ impl CollectionWriter {
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<Vec<FieldId>> {
+        // We don't index the "id" field at all.
+        if field_name == "id" {
+            return Ok(vec![]);
+        }
+
         let mut added_fields = vec![];
         let mut create_new_id = async |field_id_generator: &AtomicU16,
                                        map: &RwLock<HashMap<String, FieldId>>,

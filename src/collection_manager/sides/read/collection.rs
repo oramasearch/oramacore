@@ -8,29 +8,43 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use backoff::default;
 use committed::{
     fields::{
         BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
-        VectorCommittedFieldStats,
+        StringFilterCommittedFieldStats, VectorCommittedFieldStats,
     },
     CommittedCollection,
 };
 use dashmap::DashMap;
 use debug_panic::debug_panic;
-use dump::{CollectionInfo, CollectionInfoV1};
-use merge::{merge_bool_field, merge_number_field, merge_string_field, merge_vector_field};
+use dump::CollectionInfo;
+use merge::{
+    merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
+    merge_vector_field,
+};
 use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{join, sync::RwLock};
 use tracing::{debug, error, info, instrument, trace};
 use uncommitted::{
     fields::{
-        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringUncommittedFieldStats,
+        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringFilterField,
+        StringFilterUncommittedFieldStats, StringUncommittedFieldStats,
         VectorUncommittedFieldStats,
     },
     UncommittedCollection,
 };
+
+pub mod stats {
+    pub use super::committed::fields::{
+        BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
+        StringFilterCommittedFieldStats, VectorCommittedFieldStats,
+    };
+    pub use super::uncommitted::fields::{
+        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringFilterUncommittedFieldStats,
+        StringUncommittedFieldStats, VectorUncommittedFieldStats,
+    };
+}
 
 mod committed;
 mod merge;
@@ -155,6 +169,7 @@ impl CollectionReader {
                 dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
                 dump::TypedField::Number => continue,
                 dump::TypedField::Bool => continue,
+                dump::TypedField::String => continue,
             };
             score_fields.insert(field_name, (field_id, typed_field));
         }
@@ -166,6 +181,7 @@ impl CollectionReader {
                 dump::TypedField::Embedding(_) => continue,
                 dump::TypedField::Number => TypedField::Number,
                 dump::TypedField::Bool => TypedField::Bool,
+                dump::TypedField::String => TypedField::String,
             };
             filter_fields.insert(field_name, (field_id, typed_field));
         }
@@ -181,6 +197,9 @@ impl CollectionReader {
                 if let TypedField::Text(l) = e.1 {
                     let locale = l;
                     Some((e.0, (locale, nlp_service.get(locale))))
+                } else if let TypedField::ArrayText(l) = e.1 {
+                    let locale = l;
+                    Some((e.0, (locale, nlp_service.get(locale))))
                 } else {
                     None
                 }
@@ -190,11 +209,15 @@ impl CollectionReader {
         let committed_collection = CommittedCollection::try_load(
             collection_info.number_field_infos,
             collection_info.bool_field_infos,
+            collection_info.string_filter_field_infos,
             collection_info.string_field_infos,
             collection_info.vector_field_infos,
         )
         .context("Cannot load committed collection")?;
         let committed_collection = RwLock::new(committed_collection);
+
+        let offset_storage = OffsetStorage::new();
+        offset_storage.set_offset(current_offset);
 
         Ok(Self {
             id: collection_info.id,
@@ -214,7 +237,7 @@ impl CollectionReader {
             committed_collection,
             uncommitted_deleted_documents: RwLock::new(HashSet::new()),
 
-            offset_storage: OffsetStorage::new(),
+            offset_storage,
         })
     }
 
@@ -272,13 +295,14 @@ impl CollectionReader {
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
+                string_filter_field_infos: Default::default(),
                 bool_field_infos: Default::default(),
                 vector_field_infos: Default::default(),
             }
         } else if let Some(previous_offset_collection_info_path) =
             previous_offset_collection_info_path
         {
-            debug!("We will merge it with the current one");
+            debug!("We will merge new data with previous one");
             let previous_collection_info: CollectionInfo =
                 BufferedFile::open(previous_offset_collection_info_path)
                     .context("Cannot open previous collection info")?
@@ -302,6 +326,7 @@ impl CollectionReader {
                 read_api_key: self.read_api_key.0.expose_secret().clone(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
+                string_filter_field_infos: Default::default(),
                 string_field_infos: Default::default(),
                 bool_field_infos: Default::default(),
                 vector_field_infos: Default::default(),
@@ -597,6 +622,84 @@ impl CollectionReader {
         }
         debug!("Bool fields merged");
 
+        let mut string_filter_fields = HashMap::new();
+        let string_filter_dir = data_dir.join("string_filters");
+        debug!(
+            "Merging string filter fields {:?}",
+            uncommitted_infos.string_filter_fields
+        );
+        for field_id in uncommitted_infos.string_filter_fields {
+            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+                collection: self.id.0.clone().into(),
+                field: field_id,
+                field_type: "string_filter",
+                side: "read",
+            });
+            let uncommitted_string_filter_index = uncommitted.string_filter_index.get(&field_id);
+            let committed_string_filter_index = committed.string_filter_index.get(&field_id);
+
+            let field_dir = string_filter_dir
+                .join(format!("field-{}", field_id.0))
+                .join(format!("offset-{}", offset.0));
+            let new_committed_string_filter_index = merge_string_filter_field(
+                uncommitted_string_filter_index,
+                committed_string_filter_index,
+                field_dir,
+                &uncommitted_document_deletions,
+            )
+            .with_context(|| {
+                format!(
+                    "Cannot merge {:?} field for collection {:?}",
+                    field_id, self.id
+                )
+            })?;
+            let new_committed_string_filter_index = match new_committed_string_filter_index {
+                None => {
+                    debug_panic!("String filter field is not changed");
+                    continue;
+                }
+                Some(new_committed_string_filter_index) => new_committed_string_filter_index,
+            };
+
+            let field_info = new_committed_string_filter_index.get_field_info();
+            string_filter_fields.insert(field_id, new_committed_string_filter_index);
+            current_collection_info
+                .string_filter_field_infos
+                .retain(|(k, _)| k != &field_id);
+            current_collection_info
+                .string_filter_field_infos
+                .push((field_id, field_info));
+
+            let field = current_collection_info
+                .filter_fields
+                .iter_mut()
+                .find(|(_, (f, _))| f == &field_id);
+            match field {
+                Some((_, (_, typed_field))) => {
+                    if typed_field != &mut dump::TypedField::String {
+                        error!("Field {:?} is changing type and this is not allowed. before {:?} after {:?}", field_id, typed_field, dump::TypedField::String);
+                        return Err(anyhow!(
+                            "Field {:?} is changing type and this is not allowed",
+                            field_id
+                        ));
+                    }
+                }
+                None => {
+                    let field_name = self
+                        .filter_fields
+                        .iter()
+                        .find(|e| e.0 == field_id)
+                        .context("String filter field not registered")?;
+                    let field_name = field_name.key().to_string();
+                    current_collection_info
+                        .filter_fields
+                        .push((field_name, (field_id, dump::TypedField::String)));
+                }
+            }
+            drop(m);
+        }
+        debug!("String filter  fields merged");
+
         let mut vector_fields = HashMap::new();
         let vector_dir = data_dir.join("vectors");
         debug!(
@@ -710,6 +813,10 @@ impl CollectionReader {
             uncommitted.number_index.remove(&field_id);
             committed.number_index.insert(field_id, field);
         }
+        for (field_id, field) in string_filter_fields {
+            uncommitted.string_filter_index.remove(&field_id);
+            committed.string_filter_index.insert(field_id, field);
+        }
         for (field_id, field) in string_fields {
             uncommitted.string_index.remove(&field_id);
             committed.string_index.insert(field_id, field);
@@ -779,7 +886,7 @@ impl CollectionReader {
                 match typed_field {
                     TypedFieldWrapper::Embedding(model) => {
                         self.fields_per_model
-                            .entry(model.model.0.clone())
+                            .entry(model.model.0)
                             .or_default()
                             .push(field_id);
                         self.score_fields.insert(
@@ -790,16 +897,18 @@ impl CollectionReader {
                     TypedFieldWrapper::Text(locale) => {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
-                            .insert(field_id, (locale.clone(), text_parser));
+                            .insert(field_id, (locale, text_parser));
                         self.score_fields
                             .insert(field_name.clone(), (field_id, TypedField::Text(locale)));
                     }
                     TypedFieldWrapper::ArrayText(locale) => {
                         let text_parser = self.nlp_service.get(locale);
                         self.text_parser_per_field
-                            .insert(field_id, (locale.clone(), text_parser));
-                        self.score_fields
-                            .insert(field_name.clone(), (field_id, TypedField::Text(locale)));
+                            .insert(field_id, (locale, text_parser));
+                        self.score_fields.insert(
+                            field_name.clone(),
+                            (field_id, TypedField::ArrayText(locale)),
+                        );
                     }
                     TypedFieldWrapper::Number => {
                         self.filter_fields
@@ -817,8 +926,24 @@ impl CollectionReader {
                         self.filter_fields
                             .insert(field_name.clone(), (field_id, TypedField::ArrayBoolean));
                     }
-                    TypedFieldWrapper::ArrayString => {}
-                    TypedFieldWrapper::String => {}
+                    TypedFieldWrapper::ArrayString => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::String));
+                        self.uncommitted_collection
+                            .write()
+                            .await
+                            .string_filter_index
+                            .insert(field_id, StringFilterField::empty());
+                    }
+                    TypedFieldWrapper::String => {
+                        self.filter_fields
+                            .insert(field_name.clone(), (field_id, TypedField::ArrayString));
+                        self.uncommitted_collection
+                            .write()
+                            .await
+                            .string_filter_index
+                            .insert(field_id, StringFilterField::empty());
+                    }
                 };
 
                 self.offset_storage.set_offset(offset);
@@ -913,7 +1038,6 @@ impl CollectionReader {
         let token_scores = match search_mode {
             SearchMode::Default(search_params) | SearchMode::FullText(search_params) => {
                 let properties = self.calculate_string_properties(properties)?;
-                println!("properties: {:?}", properties);
                 self.search_full_text(
                     &search_params.term,
                     properties,
@@ -1430,6 +1554,50 @@ impl CollectionReader {
             }
         }));
 
+        let mut string_filters: HashMap<
+            FieldId,
+            (
+                Option<StringFilterCommittedFieldStats>,
+                Option<StringFilterUncommittedFieldStats>,
+            ),
+        > = HashMap::new();
+        let string_filter_committed_fields_stats = self
+            .committed_collection
+            .read()
+            .await
+            .get_string_filter_stats();
+        string_filters.extend(
+            string_filter_committed_fields_stats
+                .into_iter()
+                .map(|(k, v)| (k, (Some(v), None))),
+        );
+        let string_filter_uncommitted_fields_stats = self
+            .uncommitted_collection
+            .read()
+            .await
+            .get_string_filter_stats();
+        for (k, v) in string_filter_uncommitted_fields_stats {
+            let e = string_filters.entry(k).or_default();
+            e.1 = Some(v);
+        }
+        println!("string_filters: {:?}", string_filters);
+        fields_stats.extend(string_filters.into_iter().map(|(k, v)| {
+            let name = self
+                .filter_fields
+                .iter()
+                .find(|e| e.value().0 == k)
+                .map(|e| e.key().to_string())
+                .unwrap_or_default();
+            FieldStats {
+                field_id: k,
+                name,
+                stats: FieldStatsType::StringFilter {
+                    uncommitted: v.1,
+                    committed: v.0,
+                },
+            }
+        }));
+
         let mut strings: HashMap<
             FieldId,
             (
@@ -1546,8 +1714,6 @@ mod dump {
     }
 
     pub fn migrate_v1_to_v2(info: CollectionInfoV1) -> CollectionInfoV2 {
-        println!("info: {:#?}", info);
-
         let mut filter_fields: Vec<(String, (FieldId, TypedField))> = vec![];
         let mut score_fields: Vec<(String, (FieldId, TypedField))> = vec![];
         for (field_name, (field_id, field_type)) in info.fields {
@@ -1564,6 +1730,9 @@ mod dump {
                 TypedField::Bool => {
                     filter_fields.push((field_name, (field_id, TypedField::Bool)));
                 }
+                TypedField::String => {
+                    filter_fields.push((field_name, (field_id, TypedField::String)));
+                }
             }
         }
 
@@ -1579,6 +1748,7 @@ mod dump {
             used_models: info.used_models,
             number_field_infos: info.number_field_infos,
             string_field_infos: info.string_field_infos,
+            string_filter_field_infos: vec![],
             bool_field_infos: info.bool_field_infos,
             vector_field_infos: info.vector_field_infos,
         }
@@ -1614,6 +1784,8 @@ mod dump {
         pub filter_fields: Vec<(String, (FieldId, TypedField))>,
         pub used_models: Vec<(OramaModelSerializable, Vec<FieldId>)>,
         pub number_field_infos: Vec<(FieldId, committed::fields::NumberFieldInfo)>,
+        #[serde(default)]
+        pub string_filter_field_infos: Vec<(FieldId, committed::fields::StringFilterFieldInfo)>,
         pub string_field_infos: Vec<(FieldId, committed::fields::StringFieldInfo)>,
         pub bool_field_infos: Vec<(FieldId, committed::fields::BoolFieldInfo)>,
         pub vector_field_infos: Vec<(FieldId, committed::fields::VectorFieldInfo)>,
@@ -1630,6 +1802,7 @@ mod dump {
         Embedding(EmbeddingTypedField),
         Number,
         Bool,
+        String,
     }
 }
 
@@ -1697,6 +1870,40 @@ async fn get_number_filtered_document(
     Ok(result)
 }
 
+async fn get_string_filtered_document(
+    reader: &CollectionReader,
+    field_id: FieldId,
+    filter_string: String,
+    uncommitted_deleted_documents: &HashSet<DocumentId>,
+) -> Result<HashSet<DocumentId>> {
+    let lock = reader.uncommitted_collection.read().await;
+    let uncommitted_output = lock
+        .calculate_string_filter(field_id, &filter_string)
+        .context("Cannot calculate uncommitted filter")?;
+
+    let lock = reader.committed_collection.read().await;
+    let committed_output = lock
+        .calculate_string_filter(field_id, &filter_string)
+        .context("Cannot calculate committed filter")?;
+
+    let result = match (uncommitted_output, committed_output) {
+        (Some(uncommitted_output), Some(committed_output)) => committed_output
+            .chain(uncommitted_output)
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (Some(uncommitted_output), None) => uncommitted_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        (None, Some(committed_output)) => committed_output
+            .filter(|doc_id| !uncommitted_deleted_documents.contains(doc_id))
+            .collect(),
+        // This case probable means the field is not a number indexed
+        (None, None) => HashSet::new(),
+    };
+
+    Ok(result)
+}
+
 async fn get_filtered_document(
     reader: &CollectionReader,
     field_name: &String,
@@ -1719,11 +1926,16 @@ async fn get_filtered_document(
             get_bool_filtered_document(reader, field_id, filter_bool, uncommitted_deleted_documents)
                 .await
         }
+        (TypedField::String | TypedField::ArrayString, Filter::String(string_filter)) => {
+            get_string_filtered_document(
+                reader,
+                field_id,
+                string_filter,
+                uncommitted_deleted_documents,
+            )
+            .await
+        }
         _ => {
-            error!(
-                "Filter on field {:?}({:?}) not supported",
-                field_name, field_type
-            );
             anyhow::bail!(
                 "Filter on field {:?}({:?}) not supported",
                 field_name,
@@ -1748,10 +1960,10 @@ pub enum TypedField {
 
 #[derive(Serialize, Debug)]
 pub struct FieldStats {
-    name: String,
-    field_id: FieldId,
+    pub name: String,
+    pub field_id: FieldId,
     #[serde(flatten)]
-    stats: FieldStatsType,
+    pub stats: FieldStatsType,
 }
 
 #[derive(Serialize, Debug)]
@@ -1776,6 +1988,11 @@ pub enum FieldStatsType {
         uncommitted: Option<NumberUncommittedFieldStats>,
         committed: Option<NumberCommittedFieldStats>,
     },
+    #[serde(rename = "string_filter")]
+    StringFilter {
+        uncommitted: Option<StringFilterUncommittedFieldStats>,
+        committed: Option<StringFilterCommittedFieldStats>,
+    },
     #[serde(rename = "string")]
     String {
         uncommitted: Option<StringUncommittedFieldStats>,
@@ -1786,10 +2003,4 @@ pub enum FieldStatsType {
         uncommitted: Option<VectorUncommittedFieldStats>,
         committed: Option<VectorCommittedFieldStats>,
     },
-}
-
-#[derive(Serialize)]
-pub struct BoolFieldStats {
-    true_count: usize,
-    false_count: usize,
 }
