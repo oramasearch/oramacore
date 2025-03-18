@@ -236,7 +236,6 @@ async fn answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let ai_service = read_side.clone().get_ai_service();
         let vllm_service = read_side.clone().get_vllm_service();
 
         let _ = tx
@@ -250,6 +249,40 @@ async fn answer_v1(
 
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
+        let mut system_prompt: Option<SystemPrompt> = None;
+
+        // Check if we have to select a random system prompt or a specific one based on the `system_prompt_id` param.
+        match interaction.system_prompt_id {
+            Some(id) => {
+                let full_prompt = read_side
+                    .get_system_prompt(read_api_key.clone(), collection_id.clone(), id)
+                    .await
+                    .context("Failed to get full system prompt")
+                    .unwrap();
+
+                system_prompt = full_prompt;
+            }
+            None => {
+                let has_system_prompts = read_side
+                    .has_system_prompts(read_api_key.clone(), collection_id.clone())
+                    .await
+                    .context("Failed to check if the collection has system prompts")
+                    .unwrap();
+
+                if has_system_prompts {
+                    let chosen_system_prompt = read_side
+                        .perform_system_prompt_selection(
+                            read_api_key.clone(),
+                            collection_id.clone(),
+                        )
+                        .await
+                        .context("Failed to choose a system prompt")
+                        .unwrap();
+
+                    system_prompt = chosen_system_prompt;
+                }
+            }
+        }
 
         // Always make sure that the conversation is not empty, or else the AI will not be able to
         // determine the segment and trigger.
@@ -342,7 +375,7 @@ async fn answer_v1(
         ];
 
         let mut answer_stream = vllm_service
-            .run_known_prompt_stream(vllm::KnownPrompts::Answer, variables)
+            .run_known_prompt_stream(vllm::KnownPrompts::Answer, variables, system_prompt)
             .await;
 
         while let Some(resp) = answer_stream.next().await {

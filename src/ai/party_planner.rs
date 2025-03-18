@@ -69,6 +69,7 @@ impl PartyPlanner {
             content: include_str!("../prompts/v1/party_planner/system_short.md").to_string(),
         };
 
+        // If there's a custom system prompt, append it to the default system prompt.
         if let Some(custom_system_prompt) = custom_system_prompt {
             system_prompt.content += &format!(
                 "\n\n### Important Additional Information - FOLLOW STRICTLY\n\n{}",

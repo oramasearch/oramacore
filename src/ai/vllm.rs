@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::collection_manager::dto::InteractionMessage;
+use crate::collection_manager::{dto::InteractionMessage, sides::system_prompts::SystemPrompt};
 
 use super::{party_planner::Step, AIServiceLLMConfig};
 
@@ -240,7 +240,7 @@ impl VLLMService {
         variables: Vec<(String, String)>,
     ) -> Result<String> {
         let mut acc = String::new();
-        let mut stream = self.run_known_prompt_stream(prompt, variables).await;
+        let mut stream = self.run_known_prompt_stream(prompt, variables, None).await;
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -260,9 +260,18 @@ impl VLLMService {
         &self,
         prompt: KnownPrompts,
         variables: Vec<(String, String)>,
+        custom_system_prompt: Option<SystemPrompt>,
     ) -> impl Stream<Item = Result<String>> {
-        let prompts = prompt.get_prompts();
+        let mut prompts = prompt.get_prompts();
         let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
+
+        if let Some(system_propmpt) = custom_system_prompt {
+            prompts.system += format!(
+                "\n\n# Additional Information - FOLLOW STRICTLY\n\n{}",
+                system_propmpt.prompt
+            )
+            .as_str();
+        }
 
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
