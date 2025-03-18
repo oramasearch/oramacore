@@ -9,23 +9,19 @@ run your own custom agents on your data, and many more utilities.
 
 ## Getting Started
 
-Pull the Docker image:
+The absolute easier way to get started is by following the
+[docker-compose.yml](./docker-compose.yml) file that you can find in this
+repository.
 
-```sh
-docker pull oramasearch/oramacore:latest
-```
+You can either clone the entire repo or setup `oramasearch/oramacore:latest` as
+image in your `docker-compose.yml` file under the `oramacore` service.
 
 Then compile your
 [configuration file](https://docs.oramacore.com/docs/guide/configuration) and
 run it:
 
 ```sh
-docker run \
-  -p 8080:8080 \
-  -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
-  -v ./config.yaml:/app/config.yaml \
-  --gpus all \
-  oramacore
+docker compose up
 ```
 
 An NVIDIA GPU is highly recommended for running the application.
