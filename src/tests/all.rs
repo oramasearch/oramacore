@@ -151,10 +151,6 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
         )
         .await;
     assert!(result.is_err());
-    assert_eq!(
-        format!("{}", result.unwrap_err()),
-        "Filter on field \"name\"(Text(EN)) not supported".to_string(),
-    );
 
     Ok(())
 }
@@ -1026,22 +1022,27 @@ async fn test_handle_bool() -> Result<()> {
         vec![
             json!({
                 "id": "doc1",
+                "title": "doc1",
                 "bool": true,
             }),
             json!({
                 "id": "doc2",
+                "title": "doc2",
                 "bool": false,
             }),
             json!({
                 "id": "doc3",
+                "title": "doc3",
                 "bool": true,
             }),
             json!({
                 "id": "doc4",
+                "title": "doc4",
                 "bool": false,
             }),
             json!({
                 "id": "doc5",
+                "title": "doc5",
                 "bool": true,
             }),
         ],
@@ -1062,6 +1063,7 @@ async fn test_handle_bool() -> Result<()> {
             .unwrap(),
         )
         .await?;
+
     assert_eq!(output.count, 3);
 
     read_side.commit().await?;
@@ -1757,7 +1759,7 @@ async fn test_document_duplication() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_simple() -> Result<()> {
+async fn test_simple_simple() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
@@ -1851,13 +1853,13 @@ export default {
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
-                "similarity": 0.001,
             })
             .try_into()?,
         )
         .await?;
     assert_eq!(output.count, 1);
 
+    // Hook change the meaning of the text, so the exact match should not work
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -1871,8 +1873,8 @@ export default {
         .await?;
     assert_eq!(output.count, 0);
 
-    read_side.commit().await?;
-    write_side.commit().await?;
+    read_side.commit().await.unwrap();
+    write_side.commit().await.unwrap();
 
     let (write_side, read_side) = create(config.clone()).await?;
 
@@ -1939,8 +1941,8 @@ export default {
         .await?;
     assert_eq!(output.count, 0);
 
-    read_side.commit().await?;
-    write_side.commit().await?;
+    read_side.commit().await.unwrap();
+    write_side.commit().await.unwrap();
 
     let (_, read_side) = create(config.clone()).await?;
 

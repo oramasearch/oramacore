@@ -324,6 +324,7 @@ impl Default for Limit {
 pub enum Filter {
     Number(#[schema(inline)] NumberFilter),
     Bool(bool),
+    String(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
