@@ -1580,7 +1580,6 @@ impl CollectionReader {
             let e = string_filters.entry(k).or_default();
             e.1 = Some(v);
         }
-        println!("string_filters: {:?}", string_filters);
         fields_stats.extend(string_filters.into_iter().map(|(k, v)| {
             let name = self
                 .filter_fields

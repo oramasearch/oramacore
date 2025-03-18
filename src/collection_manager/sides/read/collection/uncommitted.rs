@@ -114,7 +114,6 @@ impl UncommittedCollection {
 
     pub fn get_string_filter_stats(&self) -> HashMap<FieldId, StringFilterUncommittedFieldStats> {
         let mut ret = HashMap::new();
-        println!("string_filter_index: {:?}", self.string_filter_index);
         for (field_id, field) in &self.string_filter_index {
             let field_stats = field.get_stats();
             ret.insert(*field_id, field_stats);

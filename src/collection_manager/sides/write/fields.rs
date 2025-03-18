@@ -24,8 +24,6 @@ use crate::{
 
 use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
 
-// pub type FieldsToIndex = DashMap<String, (ValueType, CollectionField)>;
-
 pub enum CollectionFilterField {
     Number(NumberFilterField),
     Bool(BoolFilterField),
