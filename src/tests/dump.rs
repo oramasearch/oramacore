@@ -13,8 +13,9 @@ use crate::{
 async fn test_ensure_back_compatibility() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let mut config = create_oramacore_config();
-    config.writer_side.config.data_dir = "./src/tests/dump/v1/write_side".to_string().into();
-    config.reader_side.config.data_dir = "./src/tests/dump/v1/read_side".to_string().into();
+    let cwd = std::env::current_dir().unwrap();
+    config.writer_side.config.data_dir = cwd.join("./src/tests/dump/v1/write_side");
+    config.reader_side.config.data_dir = cwd.join("./src/tests/dump/v1/read_side");
     let (_, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
@@ -45,11 +46,16 @@ async fn test_ensure_back_compatibility() -> Result<()> {
 async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let mut config = create_oramacore_config();
+    let cwd = std::env::current_dir().unwrap();
 
-    copy_dir("./src/tests/dump", "./src/tests/dump-test/").unwrap();
+    copy_dir(
+        cwd.join("./src/tests/dump"),
+        cwd.join("./src/tests/dump-test/"),
+    )
+    .unwrap();
 
-    config.writer_side.config.data_dir = "./src/tests/dump-test/v1/write_side".to_string().into();
-    config.reader_side.config.data_dir = "./src/tests/dump-test/v1/read_side".to_string().into();
+    config.writer_side.config.data_dir = cwd.join("./src/tests/dump-test/v1/write_side");
+    config.reader_side.config.data_dir = cwd.join("./src/tests/dump-test/v1/read_side");
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId("test-collection".to_string());
