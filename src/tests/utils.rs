@@ -160,8 +160,10 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
 pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
 
+    let cwd = std::env::current_dir().unwrap();
+    let cache_dir = cwd.join(".custom_models");
     let init_option = InitOptions::new(model.clone())
-        .with_cache_dir(std::env::temp_dir())
+        .with_cache_dir(cache_dir)
         .with_show_download_progress(false);
 
     info!("Initializing the Fastembed: {model}");
