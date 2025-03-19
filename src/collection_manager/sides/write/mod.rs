@@ -445,7 +445,7 @@ impl WriteSide {
         request: CreateCollectionFrom,
     ) -> Result<CollectionId> {
         info!("create temporary collection");
-        self.check_write_api_key(request.from.clone(), write_api_key)
+        self.check_write_api_key(request.from.clone(), write_api_key.clone())
             .await
             .context("Check write api key fails")?;
 
@@ -465,6 +465,25 @@ impl WriteSide {
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
             .await?;
+
+        let hook = self
+            .get_javascript_hook(
+                write_api_key.clone(),
+                request.from,
+                HookName::SelectEmbeddingsProperties,
+            )
+            .await
+            .context("Cannot get embedding hook")?;
+        if let Some(hook) = hook {
+            self.insert_javascript_hook(
+                write_api_key.clone(),
+                collection_id_tmp.clone(),
+                HookName::SelectEmbeddingsProperties,
+                hook,
+            )
+            .await
+            .context("Cannot insert embedding hook to new collection")?;
+        }
 
         Ok(collection_id_tmp)
     }
