@@ -270,6 +270,18 @@ impl WriteSide {
                 }
             }
 
+            // We update the document if it already exists
+            let doc_id_value = doc
+                .get("id")
+                .expect("id is set")
+                .as_str()
+                .expect("id is a string");
+            if collection.contains(doc_id_value).await {
+                collection
+                    .delete_documents(vec![doc_id_value.to_string()], self.sender.clone())
+                    .await?;
+            }
+
             let doc_id = DocumentId(doc_id);
 
             self.document_storage

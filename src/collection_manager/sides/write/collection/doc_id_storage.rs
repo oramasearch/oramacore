@@ -32,6 +32,10 @@ impl DocIdStorage {
         }
     }
 
+    pub fn contains(&self, doc_id: &str) -> bool {
+        self.document_id.contains_key(doc_id)
+    }
+
     pub fn get_document_ids(&self) -> impl Iterator<Item = DocumentId> + '_ {
         self.document_id.values().copied()
     }

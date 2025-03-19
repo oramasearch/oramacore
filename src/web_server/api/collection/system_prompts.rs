@@ -128,7 +128,7 @@ async fn validate_system_prompt_v1(
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let system_prompt = SystemPrompt {
-        id: params.id.clone().unwrap_or_else(|| cuid2::create_id()),
+        id: params.id.clone().unwrap_or_else(cuid2::create_id),
         name: params.name.clone(),
         prompt: params.prompt.clone(),
         usage_mode: params.usage_mode.clone(),
