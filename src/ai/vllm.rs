@@ -16,7 +16,7 @@ use crate::collection_manager::{dto::InteractionMessage, sides::system_prompts::
 
 use super::{party_planner::Step, AIServiceLLMConfig};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
     Answer,
     Autoquery,
@@ -27,6 +27,7 @@ pub enum KnownPrompts {
     ValidateSystemPrompt,
 }
 
+#[derive(Debug, Clone)]
 pub struct KnownPrompt {
     pub system: String,
     pub user: String,
