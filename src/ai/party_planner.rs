@@ -13,7 +13,7 @@ use crate::{
             ApiKey, AutoMode, InteractionMessage, Limit, Role, SearchMode, SearchParams,
             SearchResult,
         },
-        sides::{segments::Segment, triggers::Trigger, ReadSide},
+        sides::{segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide},
     },
     types::CollectionId,
 };
@@ -59,14 +59,23 @@ impl PartyPlanner {
         mut history: Vec<InteractionMessage>,
         segment: Option<Segment>,
         trigger: Option<Trigger>,
+        custom_system_prompt: Option<SystemPrompt>,
     ) -> impl Stream<Item = PartyPlannerMessage> {
         let vllm_service = read_side.get_vllm_service();
 
         // Add a system prompt to the history if the first entry is not a system prompt.
-        let system_prompt = InteractionMessage {
+        let mut system_prompt = InteractionMessage {
             role: Role::System,
             content: include_str!("../prompts/v1/party_planner/system_short.md").to_string(),
         };
+
+        // If there's a custom system prompt, append it to the default system prompt.
+        if let Some(custom_system_prompt) = custom_system_prompt {
+            system_prompt.content += &format!(
+                "\n\n### Important Additional Information - FOLLOW STRICTLY\n\n{}",
+                custom_system_prompt.prompt
+            );
+        }
 
         if history.is_empty()
             || history

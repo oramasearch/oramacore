@@ -698,6 +698,7 @@ pub struct InteractionMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Interaction {
     pub interaction_id: String,
+    pub system_prompt_id: Option<String>,
     pub query: String,
     pub visitor_id: String,
     pub conversation_id: String,
@@ -728,6 +729,35 @@ pub struct DeleteHookParams {
 pub struct ExecuteActionPayload {
     pub name: String, // we're not using an enum here since users will be able to define their own actions
     pub context: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertSystemPromptParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub prompt: String,
+    pub usage_mode: SystemPromptUsageMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteSystemPromptParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum SystemPromptUsageMode {
+    #[serde(rename = "automatic")]
+    Automatic,
+    #[serde(rename = "manual")]
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateSystemPromptParams {
+    pub id: String,
+    pub name: String,
+    pub prompt: String,
+    pub usage_mode: SystemPromptUsageMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -18,6 +18,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
+    system_prompts::{self, SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
@@ -89,6 +90,7 @@ pub struct WriteSide {
     document_storage: DocumentStorage,
     segments: SegmentInterface,
     triggers: TriggerInterface,
+    system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     master_api_key: ApiKey,
 }
@@ -141,6 +143,7 @@ impl WriteSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
@@ -168,6 +171,7 @@ impl WriteSide {
             sender,
             segments,
             triggers,
+            system_prompts,
             kv,
         };
 
@@ -684,6 +688,71 @@ impl WriteSide {
         if self.master_api_key != master_api_key {
             return Err(anyhow::anyhow!("Invalid master api key"));
         }
+
+        Ok(())
+    }
+
+    pub async fn validate_system_prompt(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt: SystemPrompt,
+    ) -> Result<SystemPromptValidationResponse> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.system_prompts.validate_prompt(system_prompt).await
+    }
+
+    pub async fn insert_system_prompt(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt: SystemPrompt,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.system_prompts
+            .insert(collection_id.clone(), system_prompt.clone())
+            .await
+            .context("Cannot insert system prompt")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_system_prompt(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt_id: String,
+    ) -> Result<Option<SystemPrompt>> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.system_prompts
+            .delete(collection_id.clone(), system_prompt_id.clone())
+            .await
+            .context("Cannot delete system prompt")
+    }
+
+    pub async fn update_system_prompt(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt: SystemPrompt,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id.clone(), write_api_key)
+            .await?;
+
+        self.system_prompts
+            .delete(collection_id.clone(), system_prompt.id.clone())
+            .await
+            .context("Cannot delete system prompt")?;
+        self.system_prompts
+            .insert(collection_id, system_prompt)
+            .await
+            .context("Cannot insert system prompt")?;
 
         Ok(())
     }

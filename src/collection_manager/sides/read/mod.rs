@@ -34,6 +34,7 @@ use crate::{
 };
 
 use super::segments::{Segment, SelectedSegment};
+use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
     CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
@@ -69,6 +70,7 @@ pub struct ReadSide {
 
     triggers: TriggerInterface,
     segments: SegmentInterface,
+    system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     vllm_service: Arc<VLLMService>,
 }
@@ -122,6 +124,7 @@ impl ReadSide {
         let kv = Arc::new(kv);
         let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -133,6 +136,7 @@ impl ReadSide {
             commit_insert_mutex: Mutex::new(last_offset),
             segments,
             triggers,
+            system_prompts,
             kv,
             vllm_service,
         };
@@ -380,6 +384,55 @@ impl ReadSide {
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
+    }
+
+    pub async fn get_system_prompt(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt_id: String,
+    ) -> Result<Option<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts
+            .get(collection_id, system_prompt_id)
+            .await
+    }
+
+    pub async fn has_system_prompts(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<bool> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts.has_system_prompts(collection_id).await
+    }
+
+    pub async fn perform_system_prompt_selection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Option<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts
+            .perform_system_prompt_selection(collection_id)
+            .await
+    }
+
+    pub async fn get_all_system_prompts_by_collection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<SystemPrompt>> {
+        self.check_read_api_key(collection_id.clone(), read_api_key)
+            .await?;
+
+        self.system_prompts.list_by_collection(collection_id).await
     }
 
     pub async fn get_segment(
