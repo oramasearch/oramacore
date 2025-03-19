@@ -1,8 +1,8 @@
-use super::{Embedding, OramaModel};
+use super::OramaModel;
 use crate::{
     ai::AIService,
     collection_manager::dto::SearchResult,
-    nlp::chunker::{self, Chunker, ChunkerConfig},
+    nlp::chunker::{Chunker, ChunkerConfig},
 };
 use anyhow::Result;
 use serde_json::Value;
