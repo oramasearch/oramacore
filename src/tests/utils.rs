@@ -2,7 +2,7 @@ use std::{
     fs,
     net::{SocketAddr, TcpListener},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 
@@ -117,7 +117,7 @@ pub mod grpc_def {
 }
 
 pub struct GRPCServer {
-    fastembed_model: TextEmbedding,
+    fastembed_model: Arc<TextEmbedding>,
 }
 
 type EchoResult<T> = Result<Response<T>, Status>;
@@ -157,18 +157,25 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
         }))
     }
 }
+
+static CELL: OnceLock<Result<Arc<TextEmbedding>>> = OnceLock::new();
+
 pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
 
-    let cwd = std::env::current_dir().unwrap();
-    let cache_dir = cwd.join(".custom_models");
-    let init_option = InitOptions::new(model.clone())
-        .with_cache_dir(cache_dir)
-        .with_show_download_progress(false);
+    let text_embedding = CELL.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap();
+        let cache_dir = cwd.join(".custom_models");
+        let init_option = InitOptions::new(model.clone())
+            .with_cache_dir(cache_dir)
+            .with_show_download_progress(false);
 
-    info!("Initializing the Fastembed: {model}");
-    let text_embedding = TextEmbedding::try_new(init_option)
-        .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
+        info!("Initializing the Fastembed: {model}");
+        let text_embedding = TextEmbedding::try_new(init_option)
+            .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
+        Ok(Arc::new(text_embedding))
+    });
+    let text_embedding = text_embedding.as_ref().unwrap().clone();
 
     let server = GRPCServer {
         fastembed_model: text_embedding,
