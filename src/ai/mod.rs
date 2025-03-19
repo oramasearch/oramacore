@@ -99,9 +99,21 @@ impl AIService {
             input.len(),
         );
 
+        let processed_input: Vec<String> = if model == OramaModel::MultilingualE5Small
+            || model == OramaModel::MultilingualE5Base
+            || model == OramaModel::MultilingualE5Large
+        {
+            match intent {
+                OramaIntent::Query => input.iter().map(|s| format!("query: {}", *s)).collect(),
+                OramaIntent::Passage => input.iter().map(|s| format!("passage: {}", *s)).collect(),
+            }
+        } else {
+            input.iter().map(|s| (*s).clone()).collect()
+        };
+
         trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
-            input: input.into_iter().cloned().collect(),
+            input: processed_input,
             model: model.into(),
             intent: intent.into(),
         });
