@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-    ai::vllm::VLLMService, collection_manager::dto::SystemPromptUsageMode, types::CollectionId,
+    ai::vllm::KnownPrompts, ai::vllm::VLLMService, collection_manager::dto::SystemPromptUsageMode,
+    types::CollectionId,
 };
 
 use super::generic_kv::{format_key, KV};
@@ -17,6 +18,33 @@ pub struct SystemPrompt {
     pub prompt: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemPromptValidationSecurity {
+    pub valid: String,
+    pub reason: String,
+    pub violations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemPromptValidationTechnical {
+    valid: String,
+    reason: String,
+    instruction_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemPromptValidationOverall {
+    valid: String,
+    summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemPromptValidationResponse {
+    pub security: SystemPromptValidationSecurity,
+    pub technical: SystemPromptValidationTechnical,
+    pub overall_assessment: SystemPromptValidationOverall,
+}
+
 pub struct SystemPromptInterface {
     kv: Arc<KV>,
     vllm_service: Arc<VLLMService>,
@@ -25,6 +53,22 @@ pub struct SystemPromptInterface {
 impl SystemPromptInterface {
     pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
         Self { kv, vllm_service }
+    }
+
+    pub async fn validate_prompt(
+        &self,
+        system_prompt: SystemPrompt,
+    ) -> Result<SystemPromptValidationResponse> {
+        let variables = vec![("input".to_string(), system_prompt.prompt)];
+        let response = self
+            .vllm_service
+            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables)
+            .await?;
+
+        let repaired = repair_json::repair(response)?;
+        let deserialized: SystemPromptValidationResponse = serde_json::from_str(&repaired)?;
+
+        Ok(deserialized)
     }
 
     pub async fn insert(

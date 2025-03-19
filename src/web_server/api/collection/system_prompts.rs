@@ -51,6 +51,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
         .add(insert_system_prompt_v1())
         .add(delete_system_prompt_v1())
         .add(update_system_prompt_v1())
+        .add(validate_system_prompt_v1())
         .with_state(write_side)
 }
 
@@ -109,6 +110,44 @@ async fn list_system_prompts_v1(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
         )),
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{id}/system_prompts/validate",
+    description = "Validate a system prompt"
+)]
+async fn validate_system_prompt_v1(
+    Path(id): Path<String>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+    write_side: State<Arc<WriteSide>>,
+    Json(params): Json<InsertSystemPromptParams>,
+) -> impl IntoResponse {
+    let collection_id = CollectionId(id);
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    let system_prompt = SystemPrompt {
+        id: params.id.clone().unwrap_or_else(|| cuid2::create_id()),
+        name: params.name.clone(),
+        prompt: params.prompt.clone(),
+        usage_mode: params.usage_mode.clone(),
+    };
+
+    match write_side
+        .validate_system_prompt(write_api_key, collection_id, system_prompt)
+        .await
+    {
+        Ok(result) => Ok((StatusCode::OK, Json(json!({ "result": result })))),
+        Err(e) => {
+            e.chain()
+                .skip(1)
+                .for_each(|cause| println!("because: {}", cause));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 

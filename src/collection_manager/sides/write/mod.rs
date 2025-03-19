@@ -18,7 +18,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
-    system_prompts::{self, SystemPrompt, SystemPromptInterface},
+    system_prompts::{self, SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
@@ -666,6 +666,18 @@ impl WriteSide {
         }
 
         Ok(())
+    }
+
+    pub async fn validate_system_prompt(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        system_prompt: SystemPrompt,
+    ) -> Result<SystemPromptValidationResponse> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.system_prompts.validate_prompt(system_prompt).await
     }
 
     pub async fn insert_system_prompt(
