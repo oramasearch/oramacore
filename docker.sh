@@ -1,11 +1,7 @@
 docker build -t oramacore .
+docker tag oramacore oramasearch/oramacore:1.0.2
+docker push
 
-docker tag oramacore oramasearch/oramacore:1.0.0-rc1
-
-docker run -d \
-  -p 8080:8080 \
-  -p 50051:50051 \
-  -v ${HOME}/.cache/huggingface:/root/.cache/huggingface \
-  -v ./config.yaml:/app/config.yaml \
-  --gpus all \
-  oramasearch/oramacore:lastest
+cd src/ai_server && docker build -t oramacore-ai-server .
+cd src/ai_server && docker tag oramacore-ai-server oramasearch/oramacore-ai-server:1.0.2
+cd src/ai_server && docker push
