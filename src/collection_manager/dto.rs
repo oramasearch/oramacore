@@ -803,6 +803,13 @@ pub struct UpdateTriggerParams {
     pub segment_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertDocumentsResult {
+    pub inserted: usize,
+    pub replaced: usize,
+    pub failed: usize,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

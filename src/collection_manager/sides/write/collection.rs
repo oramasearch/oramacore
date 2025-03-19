@@ -141,6 +141,11 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn contains(&self, doc_id_str: &str) -> bool {
+        let doc_id_storage = self.doc_id_storage.write().await;
+        doc_id_storage.contains(doc_id_str)
+    }
+
     pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
@@ -159,11 +164,10 @@ impl CollectionWriter {
             .context("Document id is not a string")?;
         let mut doc_id_storage = self.doc_id_storage.write().await;
         if !doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id) {
-            // The document is already indexed.
-            // If the document id is there, it will be difficul to remove it.
-            // So, we decided to just ignore it.
-            // We could at least return a warning to the user.
-            // TODO: return a warning
+            // We already checked if the document is present in the storage
+            // This error happens on concurrent writes
+            // Anyway, handling this error is not easy, so for now we just log it
+            // TODO: handle this error better
             warn!("Document '{}' already indexed", doc_id_str);
             return Ok(());
         }

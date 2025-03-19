@@ -153,9 +153,7 @@ async fn add_documents(
         .insert_documents(write_api_key, collection_id, json)
         .await
     {
-        Ok(_) => {
-            info!("Documents added to collection");
-        }
+        Ok(r) => return Ok((StatusCode::OK, Json(r))),
         Err(e) => {
             error!("{e:?}");
             error!("Error adding documents to collection: {}", e);
@@ -168,11 +166,6 @@ async fn add_documents(
             ));
         }
     };
-
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "documents added" })),
-    ))
 }
 
 #[endpoint(
