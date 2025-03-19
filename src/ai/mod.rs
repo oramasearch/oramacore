@@ -15,6 +15,7 @@ use crate::metrics::{
     EmbeddingCalculationLabels,
 };
 
+pub mod context_evaluator;
 pub mod party_planner;
 pub mod vllm;
 
