@@ -7,6 +7,9 @@ http:
 log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
+    levels:
+        oramacore: trace
+        orama_js_pool: info
 
 writer_side:
     output:

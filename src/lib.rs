@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use ai::{vllm::VLLMService, AIService, AIServiceConfig};
 use anyhow::{Context, Result};
@@ -9,6 +9,7 @@ use collection_manager::sides::{
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
 use serde::Deserialize;
+use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
@@ -41,6 +42,26 @@ mod tests;
 pub struct LogConfig {
     pub file_path: Option<PathBuf>,
     pub sentry_dsn: Option<String>,
+    #[serde(deserialize_with = "deserialize_levels", default)]
+    pub levels: HashMap<String, LevelFilter>,
+}
+
+fn deserialize_levels<'de, D>(deserializer: D) -> Result<HashMap<String, LevelFilter>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Wrapper(HashMap<String, String>);
+
+    let wrapper = Wrapper::deserialize(deserializer)?;
+
+    let mut ret = HashMap::new();
+    for (k, v) in wrapper.0 {
+        let level: LevelFilter = v.parse().map_err(serde::de::Error::custom)?;
+        ret.insert(k, level);
+    }
+
+    Ok(ret)
 }
 
 #[derive(Deserialize, Clone)]
