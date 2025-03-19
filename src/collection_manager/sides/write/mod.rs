@@ -45,7 +45,7 @@ use crate::{
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertTriggerParams, ReindexConfig, SwapCollections,
+            InsertDocumentsResult, InsertTriggerParams, ReindexConfig, SwapCollections,
         },
         sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
@@ -228,7 +228,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         document_list: DocumentList,
-    ) -> Result<()> {
+    ) -> Result<InsertDocumentsResult> {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
@@ -240,6 +240,11 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
+        let mut result = InsertDocumentsResult {
+            inserted: 0,
+            replaced: 0,
+            failed: 0,
+        };
         let sender = self.sender.clone();
         for mut doc in document_list {
             let metric = DOCUMENT_CALCULATION_TIME.create(CollectionLabels {
@@ -277,9 +282,12 @@ impl WriteSide {
                 .as_str()
                 .expect("id is a string");
             if collection.contains(doc_id_value).await {
+                result.replaced += 1;
                 collection
                     .delete_documents(vec![doc_id_value.to_string()], self.sender.clone())
                     .await?;
+            } else {
+                result.inserted += 1;
             }
 
             let doc_id = DocumentId(doc_id);
@@ -330,7 +338,8 @@ impl WriteSide {
                         .await
                         .context("Cannot send delete document operation")?;
 
-                    return Err(e);
+                    tracing::error!(?e, "Cannot process document");
+                    result.failed += 1;
                 }
             };
             info!("Document inserted");
@@ -359,7 +368,7 @@ impl WriteSide {
 
         info!("Batch of documents inserted");
 
-        Ok(())
+        Ok(result)
     }
 
     pub async fn delete_documents(

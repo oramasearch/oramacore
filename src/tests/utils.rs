@@ -22,7 +22,7 @@ use crate::{
     ai::AIServiceConfig,
     build_orama,
     collection_manager::{
-        dto::ApiKey,
+        dto::{ApiKey, InsertDocumentsResult},
         sides::{
             hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
             CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
@@ -96,20 +96,20 @@ pub async fn insert_docs<I>(
     write_api_key: ApiKey,
     collection_id: CollectionId,
     docs: I,
-) -> Result<()>
+) -> Result<InsertDocumentsResult>
 where
     I: IntoIterator<Item = serde_json::Value>,
 {
     let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
     let document_list: DocumentList = document_list.try_into()?;
 
-    write_side
+    let result = write_side
         .insert_documents(write_api_key, collection_id, document_list)
         .await?;
 
     sleep(Duration::from_millis(1_000)).await;
 
-    Ok(())
+    Ok(result)
 }
 
 pub mod grpc_def {
