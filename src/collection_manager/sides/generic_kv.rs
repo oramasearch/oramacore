@@ -108,6 +108,22 @@ impl KV {
         Ok(data.map(|_| ()))
     }
 
+    pub async fn delete_with_prefix(&self, prefix: &str) -> Result<()> {
+        // This is not atomic, but it's fine for now
+        let read_ref = self.data.write().await;
+        let keys: Vec<_> = read_ref
+            .scan_postfix_keys(prefix.as_bytes().iter().cloned())
+            .collect();
+        drop(read_ref);
+
+        for key in keys {
+            let key = String::from_utf8_lossy(&key).to_string();
+            self.remove(&key).await?;
+        }
+
+        Ok(())
+    }
+
     #[must_use = "Use `remove` if you want to get the value back"]
     pub async fn remove_and_get<V: Clone + Serialize + DeserializeOwned>(
         &self,
