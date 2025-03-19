@@ -141,14 +141,14 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
 }
 
 async fn run_fulltext_search_test() {
-    let content = include_str!("../../api-test.hurl");
+    let content = include_str!("./hurl/api-test.hurl");
 
     let result = run_hurl_test(content).await.unwrap();
     assert!(result.success);
 }
 
 async fn run_embedding_search_test() {
-    let content = include_str!("../../embedding-api-test.hurl");
+    let content = include_str!("./hurl/embedding-api-test.hurl");
     let result = run_hurl_test(content).await.unwrap();
     assert!(result.success);
 }

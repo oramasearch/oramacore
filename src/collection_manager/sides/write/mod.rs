@@ -18,7 +18,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
-    system_prompts::{self, SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
+    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
     triggers::{get_trigger_key, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
