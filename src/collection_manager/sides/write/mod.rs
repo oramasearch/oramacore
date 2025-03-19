@@ -384,9 +384,14 @@ impl WriteSide {
                 .context("Cannot commit collections after collection deletion")?;
 
             self.sender
-                .send(WriteOperation::DeleteCollection(collection_id))
+                .send(WriteOperation::DeleteCollection(collection_id.clone()))
                 .await
                 .context("Cannot send delete collection operation")?;
+
+            self.kv
+                .delete_with_prefix(&collection_id.0)
+                .await
+                .context("Cannot delete collection from KV")?;
         }
 
         Ok(())

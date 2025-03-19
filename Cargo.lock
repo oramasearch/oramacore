@@ -4968,7 +4968,7 @@ dependencies = [
 [[package]]
 name = "ptrie"
 version = "0.7.1"
-source = "git+https://github.com/oramasearch/ptrie.git?branch=feat%2Fexpose-find-postfixes-with-current#44a1c1824702334a2dba9c86219889ecad7579a0"
+source = "git+https://github.com/oramasearch/ptrie.git?branch=feat%2Fscan-postfix-keys#2febca31945ffe5f0f212f2cfc614cee3d1baaf9"
 dependencies = [
  "serde",
 ]
