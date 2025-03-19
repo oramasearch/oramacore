@@ -369,10 +369,18 @@ async fn answer_v1(
 
         let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
 
-        let variables = vec![
+        let mut variables = vec![
             ("question".to_string(), query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];
+
+        if let Some(full_segment) = segment {
+            variables.push(("segment".to_string(), full_segment.to_string()));
+        }
+
+        if let Some(full_trigger) = trigger {
+            variables.push(("trigger".to_string(), full_trigger.response));
+        }
 
         let mut answer_stream = vllm_service
             .run_known_prompt_stream(vllm::KnownPrompts::Answer, variables, system_prompt)

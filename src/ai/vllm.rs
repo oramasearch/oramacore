@@ -16,6 +16,7 @@ use crate::collection_manager::{dto::InteractionMessage, sides::system_prompts::
 
 use super::{party_planner::Step, AIServiceLLMConfig};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
     Answer,
     Autoquery,
@@ -26,6 +27,7 @@ pub enum KnownPrompts {
     ValidateSystemPrompt,
 }
 
+#[derive(Debug, Clone)]
 pub struct KnownPrompt {
     pub system: String,
     pub user: String,
@@ -278,6 +280,27 @@ impl VLLMService {
                 system_propmpt.prompt
             )
             .as_str();
+        }
+
+        // Only for Answer prompts, add the trigger to the user prompt
+        if prompt == KnownPrompts::Answer {
+            if variables_map.contains_key("segment") {
+                prompts.user += "### Persona\n\n";
+                prompts.user += variables_map
+                    .get("segment")
+                    .context("Unable to retrieve segment from variable map")
+                    .unwrap();
+                prompts.user += "\n\n";
+            }
+
+            if variables_map.contains_key("trigger") {
+                prompts.user += "### Instructions\n\n";
+                prompts.user += variables_map
+                    .get("trigger")
+                    .context("Unable to retrieve trigger from variable map")
+                    .unwrap();
+                prompts.user += "\n\n";
+            }
         }
 
         let request = CreateChatCompletionRequestArgs::default()
