@@ -56,6 +56,7 @@ jobs:
         cargo clippy --target x86_64-unknown-linux-gnu
     - name: Test
       run: |
+        bash download-test-model.sh
         cargo test --all --target x86_64-unknown-linux-gnu
     - name: Build
       run: |
