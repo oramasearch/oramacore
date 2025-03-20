@@ -9,16 +9,22 @@ use serde_json::Value;
 use std::sync::Arc;
 use tiktoken_rs::{cl100k_base, CoreBPE};
 
-struct ContextEvaluator {
+pub struct ContextEvaluator {
     pub ai_service: Arc<AIService>,
     pub bpe: CoreBPE,
+    pub model: OramaModel,
 }
 
 impl ContextEvaluator {
     pub fn try_new(ai_service: Arc<AIService>) -> Result<Self> {
         let bpe = cl100k_base()?;
+        let model = OramaModel::MultilingualMiniLml12v2;
 
-        Ok(Self { ai_service, bpe })
+        Ok(Self {
+            ai_service,
+            bpe,
+            model,
+        })
     }
 
     pub async fn evaluate(&self, query: String, context: SearchResult) -> Result<f32> {
@@ -42,7 +48,7 @@ impl ContextEvaluator {
 
         let query_embeddings_list = self
             .ai_service
-            .embed_query(OramaModel::MultilingualMiniLml12v2, vec![&query])
+            .embed_query(self.model, vec![&query])
             .await?;
 
         let query_embeddings = query_embeddings_list.first();
@@ -71,15 +77,10 @@ impl ContextEvaluator {
             .flat_map(|hit| chunker.chunk_text(hit))
             .collect::<Vec<String>>();
 
-        dbg!(&chunks);
-
         let mut chunks_embeddings = Vec::new();
 
         for chunk in &chunks {
-            let embedding_result = self
-                .ai_service
-                .embed_passage(OramaModel::MultilingualMiniLml12v2, vec![chunk])
-                .await;
+            let embedding_result = self.ai_service.embed_passage(self.model, vec![chunk]).await;
 
             if let Ok(embeddings) = embedding_result {
                 match embeddings.first() {
@@ -93,9 +94,17 @@ impl ContextEvaluator {
 
         for chunk_embedding in &chunks_embeddings {
             let score = self.cosine_similarity(&query_embeddings.unwrap(), &chunk_embedding);
-            scores.push(self.rescale_similarity(0.0, score));
-            dbg!(score);
-            dbg!(self.rescale_similarity(0.0, score));
+
+            let final_score = if self.model == OramaModel::MultilingualE5Small
+                || self.model == OramaModel::MultilingualE5Base
+                || self.model == OramaModel::MultilingualE5Large
+            {
+                self.rescale_similarity(0.7, score)
+            } else {
+                score
+            };
+
+            scores.push(self.rescale_similarity(0.0, final_score));
         }
 
         scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
@@ -292,7 +301,6 @@ mod tests {
             .await
             .unwrap();
 
-        dbg!(result);
         assert!(result > 0.80);
     }
 

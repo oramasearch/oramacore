@@ -1,5 +1,6 @@
+use crate::ai::context_evaluator::ContextEvaluator;
 use crate::ai::party_planner::PartyPlanner;
-use crate::ai::vllm;
+use crate::ai::{context_evaluator, vllm};
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
@@ -229,6 +230,10 @@ async fn answer_v1(
         .await
         .expect("Invalid API key");
 
+    let context_evaluator = ContextEvaluator::try_new(read_side.get_ai_service())
+        .context("Unable to instantiate the context evaluator")
+        .unwrap();
+
     let query = interaction.query;
     let conversation = interaction.messages;
 
@@ -368,6 +373,68 @@ async fn answer_v1(
             .await;
 
         let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
+
+        // Run the context evaluator to determine if the context is good enough to proceed with the answer.
+        // We assume that vector search should pull highly relevant results, but sometimes it can happen that on very specific
+        // queries the context is not good enough to provide a good answer.
+        // match context_evaluator
+        //     .evaluate(query.clone(), search_results)
+        //     .await
+        // {
+        //     Ok(evaluation_result) => {
+        //         // In case the context does not support the query, we'll ask for clarifications.
+        //         // For now, the context must be at least 70% relevant to the query.
+        //         if evaluation_result < 0.7 {
+        //             let variables = vec![
+        //             ("input".to_string(), query.clone()),
+        //             ("description".to_string(), format!("Ask clarifications about {} in relationship to the following retrieved context: \n\n{}", query.clone(), search_result_str.clone())),
+        //         ];
+
+        //             let mut answer_stream = vllm_service
+        //                 .run_known_prompt_stream(vllm::KnownPrompts::Followup, variables, None)
+        //                 .await;
+
+        //             while let Some(resp) = answer_stream.next().await {
+        //                 match resp {
+        //                     Ok(chunk) => {
+        //                         tx.send(Ok(Event::default().data(
+        //                             serialize_response("ANSWER_RESPONSE", &chunk, false).unwrap(),
+        //                         )))
+        //                         .await
+        //                         .unwrap();
+        //                     }
+        //                     Err(e) => {
+        //                         let _ = tx
+        //                             .send(Ok(Event::default().data(
+        //                                 serde_json::to_string(&SseMessage::Error {
+        //                                     message: format!("Error during streaming: {}", e),
+        //                                 })
+        //                                 .unwrap(),
+        //                             )))
+        //                             .await;
+        //                         break;
+        //                     }
+        //                 }
+        //             }
+
+        //             return;
+        //         }
+        //     }
+
+        //     // If for any reason the context evaluation fails, we'll exit early to avoid hallucinations.
+        //     Err(err) => {
+        //         let _ = tx
+        //             .send(Ok(Event::default().data(
+        //                 serde_json::to_string(&SseMessage::Error {
+        //                     message: format!("Error during context evaluation: {}", err),
+        //                 })
+        //                 .unwrap(),
+        //             )))
+        //             .await;
+
+        //         return;
+        //     }
+        // }
 
         let mut variables = vec![
             ("question".to_string(), query.clone()),
