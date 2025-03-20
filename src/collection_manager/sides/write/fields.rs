@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,11 @@ use crate::{
             Term, TermStringField, WriteOperation,
         },
     },
-    nlp::{locales::Locale, TextParser},
+    nlp::{
+        chunker::{Chunker, ChunkerConfig},
+        locales::Locale,
+        TextParser,
+    },
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
 };
 
@@ -647,7 +651,6 @@ impl StringField {
     }
 }
 
-#[derive(Debug)]
 pub struct EmbeddingField {
     collection_id: CollectionId,
     field_id: FieldId,
@@ -657,6 +660,41 @@ pub struct EmbeddingField {
     document_fields: DocumentFields,
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     hooks_runtime: Arc<HooksRuntime>,
+
+    chunker: Chunker,
+}
+
+impl OramaModel {
+    pub fn senquence_length(&self) -> usize {
+        //
+        // From Michele slack message:
+        // https://oramasearch.slack.com/archives/D0571JYV5LK/p1742488393750479
+        // ```
+        // intfloat/multilingual-e5-small: 512
+        // intfloat/multilingual-e5-base: 512
+        // intfloat/multilingual-e5-large: 512
+        // BAAI/bge-small-en: 512
+        // BAAI/bge-base-en: 512
+        // BAAI/bge-large-en: 512
+        // sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2: 128
+        // jinaai/jina-embeddings-v2-base-code: 8000 (ma fai comunque massimo 512 o 1024)
+        // ```
+        match self {
+            OramaModel::MultilingualE5Small => 512,
+            OramaModel::MultilingualE5Base => 512,
+            OramaModel::MultilingualE5Large => 512,
+            OramaModel::BgeSmall => 512,
+            OramaModel::BgeBase => 512,
+            OramaModel::BgeLarge => 512,
+            OramaModel::MultilingualMiniLml12v2 => 128,
+            OramaModel::JinaEmbeddingsV2BaseCode => 512,
+        }
+    }
+
+    pub fn overlap(&self) -> usize {
+        // https://oramasearch.slack.com/archives/D0571JYV5LK/p1742488431564979
+        self.senquence_length() * 2 / 100
+    }
 }
 
 impl EmbeddingField {
@@ -669,6 +707,15 @@ impl EmbeddingField {
         field_id: FieldId,
         field_name: String,
     ) -> Self {
+        let max_tokens = model.senquence_length();
+        let overlap = model.overlap();
+
+        let chunker = Chunker::try_new(ChunkerConfig {
+            max_tokens,
+            overlap: Some(overlap),
+        })
+        .expect("Hardcoded data are valid");
+
         Self {
             model,
             document_fields,
@@ -677,6 +724,7 @@ impl EmbeddingField {
             collection_id,
             field_id,
             field_name,
+            chunker,
         }
     }
 }
@@ -734,23 +782,33 @@ impl EmbeddingField {
         };
 
         // The input could be:
-        // - empty: we should skip this (???)
+        // - empty: we should skip this
         // - "normal": it is ok
         // - "too long": we should chunk it in a smart way
-        // TODO: implement that logic
 
-        self.embedding_sender
-            .send(EmbeddingCalculationRequest {
+        if input.trim().is_empty() {
+            return Ok(());
+        }
+
+        let chunked_data = self.chunker.chunk_text(&input);
+
+        let reserved = self
+            .embedding_sender
+            .reserve_many(chunked_data.len())
+            .await
+            .context("Unable to reserve space for embedding")?;
+        for (chunk, reserve) in chunked_data.into_iter().zip(reserved) {
+            reserve.send(EmbeddingCalculationRequest {
                 model: self.model,
                 input: EmbeddingCalculationRequestInput {
-                    text: input,
+                    text: chunk,
                     coll_id: self.collection_id,
                     doc_id,
                     field_id: self.field_id,
-                    op_sender: sender,
+                    op_sender: sender.clone(),
                 },
-            })
-            .await?;
+            });
+        }
 
         Ok(())
     }
