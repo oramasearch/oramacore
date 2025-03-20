@@ -83,7 +83,7 @@ impl CollectionsReader {
                 info!("Collection {:?} is deleted. Skip loading", collection_id);
                 continue;
             }
-            let collection_dir = base_dir_for_collections.join(&collection_id.0);
+            let collection_dir = base_dir_for_collections.join(collection_id.0);
             info!("Loading collection {:?}", collection_dir);
 
             let collection = CollectionReader::try_load(
@@ -149,14 +149,14 @@ impl CollectionsReader {
         let collection_ids: Vec<_> = col.keys().cloned().collect();
         let mut deleted_collection_ids = HashSet::new();
         for (id, collection) in col {
-            let collection_dir = collections_dir.join(&id.0);
+            let collection_dir = collections_dir.join(id.0);
 
             create_if_not_exists_async(&collection_dir)
                 .await
                 .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
 
             let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: id.0.clone(),
+                collection: id.to_string(),
                 side: "read",
             });
             collection
@@ -166,7 +166,7 @@ impl CollectionsReader {
             drop(m);
 
             if collection.is_deleted() {
-                deleted_collection_ids.insert(id.clone());
+                deleted_collection_ids.insert(*id);
             }
         }
 
@@ -198,7 +198,7 @@ impl CollectionsReader {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
         let collection = CollectionReader::empty(
-            id.clone(),
+            id,
             description,
             default_language,
             read_api_key,
@@ -220,7 +220,7 @@ impl CollectionsReader {
             self.clean_fs_for_collection(collection).await.ok();
         }
 
-        guard.insert(id.clone(), collection);
+        guard.insert(id, collection);
         drop(guard);
 
         info!(collection_id=?id, "Collection created {:?}", id);
@@ -244,7 +244,7 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(&collection.id.0);
+        let collection_dir = collections_dir.join(collection.id.0);
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
@@ -277,14 +277,14 @@ impl CollectionsReader {
         let mut source = guard
             .remove(&source_collection_id)
             .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
-        source.id = target_collection_id.clone();
+        source.id = target_collection_id;
         // ignore return value
         let _ = guard.remove(&target_collection_id);
-        guard.insert(target_collection_id.clone(), source);
+        guard.insert(target_collection_id, source);
         drop(guard);
 
         let mut guard = self.last_reindexed_collections.write().await;
-        guard.push((source_collection_id.clone(), target_collection_id.clone()));
+        guard.push((source_collection_id, target_collection_id));
         if guard.len() > LIMIT {
             guard.remove(0);
         }
@@ -293,7 +293,7 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(&target_collection_id.0);
+        let collection_dir = collections_dir.join(target_collection_id.0);
         create_if_not_exists_async(&collection_dir)
             .await
             .with_context(|| {
@@ -304,11 +304,11 @@ impl CollectionsReader {
             })?;
 
         let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-            collection: target_collection_id.0.clone(),
+            collection: target_collection_id.to_string(),
             side: "read",
         });
         let collection = self
-            .get_collection(target_collection_id.clone())
+            .get_collection(target_collection_id)
             .await
             .context("Cannot get collection")?;
         collection
@@ -361,7 +361,7 @@ impl<'guard> CollectionReadLock<'guard> {
                                 let _ = guard;
                                 Some(CollectionReadLock {
                                     lock: collections_lock,
-                                    id: id.clone(),
+                                    id: *id,
                                 })
                             }
                             None => None,
@@ -443,14 +443,14 @@ mod tests {
         .await
         .unwrap();
 
-        let target_collection_id = CollectionId("target".to_string());
-        let tmp_collection_id = CollectionId("tmp".to_string());
+        let target_collection_id = CollectionId::from("target".to_string());
+        let tmp_collection_id = CollectionId::from("tmp".to_string());
 
         // Target collection
         collections
             .create_collection(
                 Offset(1),
-                target_collection_id.clone(),
+                target_collection_id,
                 None,
                 LanguageDTO::English,
                 ApiKey(Secret::from("read".to_string())),
@@ -462,7 +462,7 @@ mod tests {
         collections
             .create_collection(
                 Offset(1),
-                tmp_collection_id.clone(),
+                tmp_collection_id,
                 None,
                 LanguageDTO::English,
                 ApiKey(Secret::from("read".to_string())),
@@ -472,25 +472,18 @@ mod tests {
 
         // Substitute target collection with tmp collection
         collections
-            .substitute_collection(
-                Offset(2),
-                target_collection_id.clone(),
-                tmp_collection_id.clone(),
-            )
+            .substitute_collection(Offset(2), target_collection_id, tmp_collection_id)
             .await
             .unwrap();
 
         let collection = collections
-            .get_collection(target_collection_id.clone())
+            .get_collection(target_collection_id)
             .await
             .unwrap();
         let collection = &*collection;
         assert_eq!(collection.get_id(), target_collection_id);
 
-        let collection = collections
-            .get_collection(tmp_collection_id.clone())
-            .await
-            .unwrap();
+        let collection = collections.get_collection(tmp_collection_id).await.unwrap();
         let collection = &*collection;
         assert_eq!(collection.get_id(), target_collection_id);
     }
@@ -530,8 +523,8 @@ mod tests {
 
         let couples: Vec<_> = (0..(LIMIT + 1))
             .map(|i| {
-                let target_collection_id = CollectionId(format!("target-{}", i));
-                let tmp_collection_id = CollectionId(format!("tmp-{}", i));
+                let target_collection_id = CollectionId::from(format!("target-{}", i));
+                let tmp_collection_id = CollectionId::from(format!("tmp-{}", i));
                 (target_collection_id, tmp_collection_id)
             })
             .collect();
@@ -541,7 +534,7 @@ mod tests {
             collections
                 .create_collection(
                     Offset(1),
-                    target_collection_id.clone(),
+                    *target_collection_id,
                     None,
                     LanguageDTO::English,
                     ApiKey(Secret::from("read".to_string())),
@@ -553,7 +546,7 @@ mod tests {
             collections
                 .create_collection(
                     Offset(1),
-                    tmp_collection_id.clone(),
+                    *tmp_collection_id,
                     None,
                     LanguageDTO::English,
                     ApiKey(Secret::from("read".to_string())),
@@ -563,23 +556,19 @@ mod tests {
 
             // Substitute target collection with tmp collection
             collections
-                .substitute_collection(
-                    Offset(2),
-                    target_collection_id.clone(),
-                    tmp_collection_id.clone(),
-                )
+                .substitute_collection(Offset(2), *target_collection_id, *tmp_collection_id)
                 .await
                 .unwrap();
 
             let collection = collections
-                .get_collection(target_collection_id.clone())
+                .get_collection(*target_collection_id)
                 .await
                 .unwrap();
             let collection = &*collection;
             assert_eq!(collection.get_id(), target_collection_id.clone());
 
             let collection = collections
-                .get_collection(tmp_collection_id.clone())
+                .get_collection(*tmp_collection_id)
                 .await
                 .unwrap();
             let collection = &*collection;
@@ -588,14 +577,14 @@ mod tests {
 
         // All collections are there
         for (target, _) in &couples {
-            let collection = collections.get_collection(target.clone()).await;
+            let collection = collections.get_collection(*target).await;
             assert!(collection.is_some());
         }
 
-        let collection = collections.get_collection(couples[0].0.clone()).await;
+        let collection = collections.get_collection(couples[0].0).await;
         assert!(collection.is_some());
         // But the first one tmp collection is not there
-        let collection = collections.get_collection(couples[0].1.clone()).await;
+        let collection = collections.get_collection(couples[0].1).await;
         assert!(collection.is_none());
     }
 }

@@ -42,7 +42,7 @@ async fn add_hook_v0(
     TypedHeader(auth): AuthorizationBearerHeader,
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let NewHookPostParams { name, code } = params;
@@ -74,7 +74,7 @@ async fn get_hook_v0(
     TypedHeader(auth): AuthorizationBearerHeader,
     params: Query<GetHookQueryParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let GetHookQueryParams { name } = params.0;
@@ -108,7 +108,7 @@ async fn delete_hook_v0(
     Json(params): Json<DeleteHookParams>,
 ) -> impl IntoResponse {
     let name = params.name;
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
@@ -142,7 +142,7 @@ async fn list_hooks_v0(
     write_side: State<Arc<WriteSide>>,
     TypedHeader(auth): AuthorizationBearerHeader,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side

@@ -205,7 +205,7 @@ impl HooksRuntime {
 
         let m = JS_CALCULATION_TIME.create(JSOperationLabels {
             operation: "selectEmbeddingsProperties",
-            collection: collection_id.0.clone().into(),
+            collection: collection_id.to_string().into(),
         });
         let output = self
             .embedding_js_runtime
@@ -271,10 +271,10 @@ mod tests {
         )
         .await;
 
-        let collection_id = CollectionId("1".to_string());
+        let collection_id = CollectionId::from("1".to_string());
         hook_runtime
             .insert_hook(
-                collection_id.clone(),
+                collection_id,
                 HookName::SelectEmbeddingsProperties,
                 "function the_hook() { return 1; }".to_string(),
             )
@@ -282,25 +282,22 @@ mod tests {
             .unwrap();
 
         let hook = hook_runtime
-            .get_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .get_hook(collection_id, HookName::SelectEmbeddingsProperties)
             .await
             .unwrap();
         assert_eq!(hook.code, "function the_hook() { return 1; }");
 
-        let hooks = hook_runtime
-            .list_hooks(collection_id.clone())
-            .await
-            .unwrap();
+        let hooks = hook_runtime.list_hooks(collection_id).await.unwrap();
         assert_eq!(hooks.len(), 1);
 
         let hook = hook_runtime
-            .delete_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .delete_hook(collection_id, HookName::SelectEmbeddingsProperties)
             .await
             .unwrap();
         assert_eq!(hook.0, "selectEmbeddingProperties");
 
         let hook = hook_runtime
-            .get_hook(collection_id.clone(), HookName::SelectEmbeddingsProperties)
+            .get_hook(collection_id, HookName::SelectEmbeddingsProperties)
             .await;
         assert!(hook.is_none());
     }

@@ -234,7 +234,7 @@ impl WriteSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
@@ -248,7 +248,7 @@ impl WriteSide {
         let sender = self.sender.clone();
         for mut doc in document_list {
             let metric = DOCUMENT_CALCULATION_TIME.create(CollectionLabels {
-                collection: collection_id.0.clone(),
+                collection: collection_id.to_string(),
             });
 
             debug!("Inserting doc");
@@ -302,7 +302,7 @@ impl WriteSide {
             // Otherwise, we could find the document without having it yet.
             self.sender
                 .send(WriteOperation::Collection(
-                    collection_id.clone(),
+                    collection_id,
                     CollectionWriteOperation::InsertDocument {
                         doc_id,
                         doc: DocumentToInsert(doc.into_raw()?),
@@ -330,7 +330,7 @@ impl WriteSide {
 
                     self.sender
                         .send(WriteOperation::Collection(
-                            collection_id.clone(),
+                            collection_id,
                             CollectionWriteOperation::DeleteDocuments {
                                 doc_ids: vec![doc_id],
                             },
@@ -379,7 +379,7 @@ impl WriteSide {
     ) -> Result<()> {
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .context("Collection not found")?;
 
@@ -399,17 +399,14 @@ impl WriteSide {
     ) -> Result<()> {
         self.check_master_api_key(master_api_key).unwrap();
 
-        let deleted = self
-            .collections
-            .delete_collection(collection_id.clone())
-            .await;
+        let deleted = self.collections.delete_collection(collection_id).await;
         if deleted {
             self.commit()
                 .await
                 .context("Cannot commit collections after collection deletion")?;
 
             self.sender
-                .send(WriteOperation::DeleteCollection(collection_id.clone()))
+                .send(WriteOperation::DeleteCollection(collection_id))
                 .await
                 .context("Cannot send delete collection operation")?;
 
@@ -430,7 +427,7 @@ impl WriteSide {
         code: String,
     ) -> Result<()> {
         self.hook_runtime
-            .insert_hook(collection_id.clone(), name.clone(), code)
+            .insert_hook(collection_id, name.clone(), code)
             .await
             .context("Cannot insert hook")?;
 
@@ -475,12 +472,12 @@ impl WriteSide {
         request: CreateCollectionFrom,
     ) -> Result<CollectionId> {
         info!("create temporary collection");
-        self.check_write_api_key(request.from.clone(), write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key.clone())
             .await
             .context("Check write api key fails")?;
 
         let collection_id_tmp = cuid2::create_id();
-        let collection_id_tmp = CollectionId(collection_id_tmp);
+        let collection_id_tmp = CollectionId::from(collection_id_tmp);
 
         let mut option = self
             .collections
@@ -490,7 +487,7 @@ impl WriteSide {
             .clone();
         option.language = request.language.or(option.language);
         option.embeddings = request.embeddings.or(option.embeddings);
-        option.id = collection_id_tmp.clone();
+        option.id = collection_id_tmp;
 
         self.collections
             .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
@@ -507,7 +504,7 @@ impl WriteSide {
         if let Some(hook) = hook {
             self.insert_javascript_hook(
                 write_api_key.clone(),
-                collection_id_tmp.clone(),
+                collection_id_tmp,
                 HookName::SelectEmbeddingsProperties,
                 hook,
             )
@@ -524,15 +521,15 @@ impl WriteSide {
         request: SwapCollections,
     ) -> Result<()> {
         info!("Replacing collection");
-        self.check_write_api_key(request.from.clone(), write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key.clone())
             .await
             .context("Check write api key fails")?;
-        self.check_write_api_key(request.to.clone(), write_api_key)
+        self.check_write_api_key(request.to, write_api_key)
             .await
             .context("Check write api key fails")?;
 
         self.collections
-            .replace(request.from.clone(), request.from.clone())
+            .replace(request.from, request.from)
             .await
             .context("Cannot replace collection")?;
         info!("Replaced");
@@ -559,7 +556,7 @@ impl WriteSide {
             .create_collection_from(
                 write_api_key.clone(),
                 CreateCollectionFrom {
-                    from: collection_id.clone(),
+                    from: collection_id,
                     embeddings: reindex_config.embeddings.clone(),
                     language: reindex_config.language,
                 },
@@ -569,7 +566,7 @@ impl WriteSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
@@ -578,7 +575,7 @@ impl WriteSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id_tmp.clone())
+            .get_collection(collection_id_tmp)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
@@ -603,7 +600,7 @@ impl WriteSide {
 
                     self.sender
                         .send(WriteOperation::Collection(
-                            collection_id.clone(),
+                            collection_id,
                             CollectionWriteOperation::DeleteDocuments {
                                 doc_ids: vec![doc_id],
                             },
@@ -621,8 +618,8 @@ impl WriteSide {
         self.swap_collections(
             write_api_key,
             SwapCollections {
-                from: collection_id_tmp.clone(),
-                to: collection_id.clone(),
+                from: collection_id_tmp,
+                to: collection_id,
             },
         )
         .await
@@ -639,7 +636,7 @@ impl WriteSide {
     ) -> Result<Option<String>> {
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
@@ -674,7 +671,7 @@ impl WriteSide {
     ) -> Result<HashMap<HookName, String>> {
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
@@ -731,11 +728,11 @@ impl WriteSide {
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
     ) -> Result<()> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.system_prompts
-            .insert(collection_id.clone(), system_prompt.clone())
+            .insert(collection_id, system_prompt.clone())
             .await
             .context("Cannot insert system prompt")?;
 
@@ -748,11 +745,11 @@ impl WriteSide {
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.system_prompts
-            .delete(collection_id.clone(), system_prompt_id.clone())
+            .delete(collection_id, system_prompt_id.clone())
             .await
             .context("Cannot delete system prompt")
     }
@@ -763,11 +760,11 @@ impl WriteSide {
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
     ) -> Result<()> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.system_prompts
-            .delete(collection_id.clone(), system_prompt.id.clone())
+            .delete(collection_id, system_prompt.id.clone())
             .await
             .context("Cannot delete system prompt")?;
         self.system_prompts
@@ -784,11 +781,11 @@ impl WriteSide {
         collection_id: CollectionId,
         segment: Segment,
     ) -> Result<()> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.segments
-            .insert(collection_id.clone(), segment.clone())
+            .insert(collection_id, segment.clone())
             .await
             .context("Cannot insert segment")?;
 
@@ -801,11 +798,11 @@ impl WriteSide {
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.segments
-            .delete(collection_id.clone(), segment_id.clone())
+            .delete(collection_id, segment_id.clone())
             .await
             .context("Cannot delete segment")
     }
@@ -816,11 +813,11 @@ impl WriteSide {
         collection_id: CollectionId,
         segment: Segment,
     ) -> Result<()> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.segments
-            .delete(collection_id.clone(), segment.id.clone())
+            .delete(collection_id, segment.id.clone())
             .await
             .context("Cannot delete segment")?;
         self.segments
@@ -838,14 +835,14 @@ impl WriteSide {
         trigger: InsertTriggerParams,
         trigger_id: Option<String>,
     ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         let final_trigger_id = match trigger_id {
             Some(id) => id,
             None => {
                 let cuid = cuid2::create_id();
-                get_trigger_key(collection_id.clone(), cuid, trigger.segment_id.clone())
+                get_trigger_key(collection_id, cuid, trigger.segment_id.clone())
             }
         };
 
@@ -871,7 +868,7 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         let trigger = self
@@ -893,7 +890,7 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         self.triggers
@@ -917,7 +914,7 @@ impl WriteSide {
 
         self.insert_trigger(
             write_api_key.clone(),
-            collection_id.clone(),
+            collection_id,
             updated_trigger,
             Some(trigger.id),
         )

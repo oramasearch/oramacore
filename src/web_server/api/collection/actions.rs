@@ -41,7 +41,7 @@ async fn execute_action_v0(
     Query(query): Query<ActionQueryParams>,
     Json(params): Json<ExecuteActionPayload>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let ExecuteActionPayload { name, context } = params;
 
     let read_api_key = query.api_key;

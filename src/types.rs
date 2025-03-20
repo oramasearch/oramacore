@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
-use axum_openapi3::utoipa;
-use axum_openapi3::utoipa::ToSchema;
+use arrayvec::ArrayString;
+use axum_openapi3::utoipa::{self};
+use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct RawJSONDocument {
@@ -60,8 +62,50 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub struct CollectionId(pub String);
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
+pub struct CollectionId(pub ArrayString<128>);
+
+// Implement serialize for CollectionId
+impl Serialize for CollectionId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
+    }
+}
+// Implement deserialize for CollectionId
+impl<'de> Deserialize<'de> for CollectionId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(CollectionId(ArrayString::try_from(s.as_str()).unwrap()))
+    }
+}
+impl CollectionId {
+    pub fn from(s: String) -> Self {
+        CollectionId(ArrayString::try_from(s.as_str()).unwrap())
+    }
+}
+impl ToString for CollectionId {
+    fn to_string(&self) -> String {
+        self.0.as_str().to_string()
+    }
+}
+impl AsRef<Path> for CollectionId {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+impl PartialSchema for CollectionId {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        String::schema()
+    }
+}
+impl ToSchema for CollectionId {}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct DocumentId(pub u64);

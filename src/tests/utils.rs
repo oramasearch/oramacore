@@ -79,7 +79,7 @@ pub async fn create_collection(
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "read_api_key": "my-read-api-key",
                 "write_api_key": "my-write-api-key",
             })

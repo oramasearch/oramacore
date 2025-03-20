@@ -22,13 +22,13 @@ async fn test_simple_text_search() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -45,7 +45,7 @@ async fn test_simple_text_search() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
             })
@@ -62,7 +62,7 @@ async fn test_simple_text_search() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "John Doe",
             })
@@ -85,13 +85,13 @@ async fn test_simple_text_search() -> Result<()> {
 async fn test_filter_on_unknown_field() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -116,12 +116,12 @@ async fn test_filter_on_unknown_field() -> Result<()> {
 async fn test_filter_field_with_from_filter_type() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -138,7 +138,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -160,12 +160,12 @@ async fn test_commit_and_load() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -182,7 +182,7 @@ async fn test_commit_and_load() -> Result<()> {
     let before_commit_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
             })
@@ -200,7 +200,7 @@ async fn test_commit_and_load() -> Result<()> {
     let after_commit_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
             })
@@ -232,7 +232,7 @@ async fn test_commit_and_load() -> Result<()> {
     let after_load_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
             })
@@ -256,14 +256,14 @@ async fn test_collection_id_already_exists() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let (write_side, _) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let output = write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "read_api_key": "my-read-api-key",
                 "write_api_key": "my-write-api-key",
             })
@@ -284,10 +284,10 @@ async fn test_get_collections() -> Result<()> {
     let (write_side, _) = create(create_oramacore_config()).await?;
 
     let collection_ids: Vec<_> = (0..3)
-        .map(|i| format!("my-test-collection-{}", i))
+        .map(|i| CollectionId::from(format!("my-test-collection-{}", i)))
         .collect();
     for id in &collection_ids {
-        create_collection(write_side.clone(), CollectionId(id.clone())).await?;
+        create_collection(write_side.clone(), *id).await?;
     }
 
     let collections = write_side
@@ -296,7 +296,7 @@ async fn test_get_collections() -> Result<()> {
 
     assert_eq!(collections.len(), 3);
 
-    let ids: HashSet<_> = collections.into_iter().map(|c| c.id.0).collect();
+    let ids: HashSet<_> = collections.into_iter().map(|c| c.id).collect();
     assert_eq!(ids, collection_ids.into_iter().collect());
 
     Ok(())
@@ -306,12 +306,12 @@ async fn test_get_collections() -> Result<()> {
 async fn test_search_documents_order() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -350,12 +350,12 @@ async fn test_search_documents_order() -> Result<()> {
 async fn test_search_documents_limit() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -399,12 +399,12 @@ async fn test_filter_number() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -420,7 +420,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -442,7 +442,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -463,7 +463,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -484,7 +484,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -505,7 +505,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -526,7 +526,7 @@ async fn test_filter_number() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -549,12 +549,12 @@ async fn test_filter_number() -> Result<()> {
 async fn test_facets_number() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -638,12 +638,12 @@ async fn test_facets_number() -> Result<()> {
 async fn test_filter_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -657,7 +657,7 @@ async fn test_filter_bool() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -703,12 +703,12 @@ async fn test_filter_bool() -> Result<()> {
 async fn test_facets_bool() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -757,12 +757,12 @@ async fn test_facets_should_based_on_term() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -846,12 +846,12 @@ async fn test_facets_should_based_on_term() -> Result<()> {
 async fn test_empty_term() -> Result<()> {
     let (write_side, read_side) = create(create_oramacore_config()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "doc1",
@@ -875,7 +875,7 @@ async fn test_empty_term() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "doc",
             })
@@ -890,7 +890,7 @@ async fn test_empty_term() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "",
             })
@@ -917,12 +917,12 @@ async fn test_vector_search_grpc() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "embeddings": {
                     "model": "BGESmall",
                     "document_fields": ["text"],
@@ -961,7 +961,7 @@ async fn test_vector_search_grpc() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         docs,
     )
     .await?;
@@ -969,7 +969,7 @@ async fn test_vector_search_grpc() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The feline is napping comfortably indoors.",
@@ -1013,12 +1013,12 @@ async fn test_handle_bool() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "doc1",
@@ -1052,7 +1052,7 @@ async fn test_handle_bool() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "doc",
                 "where": {
@@ -1071,7 +1071,7 @@ async fn test_handle_bool() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "doc",
                 "where": {
@@ -1089,7 +1089,7 @@ async fn test_handle_bool() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "doc",
                 "where": {
@@ -1112,12 +1112,12 @@ async fn test_commit_and_load2() -> Result<()> {
 
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
@@ -1133,7 +1133,7 @@ async fn test_commit_and_load2() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -1153,7 +1153,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let before_commit_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1175,7 +1175,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let after_commit_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1195,7 +1195,7 @@ async fn test_commit_and_load2() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "id": "3",
             "name": "Foo Doe",
@@ -1206,7 +1206,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1226,7 +1226,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let after_load_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1246,7 +1246,7 @@ async fn test_commit_and_load2() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "id": "3",
             "name": "Foo Doe",
@@ -1259,7 +1259,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1282,7 +1282,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "where": {
@@ -1300,7 +1300,7 @@ async fn test_commit_and_load2() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "Doe",
                 "mode": "vector",
@@ -1331,12 +1331,12 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
 
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "embeddings": {
                     "model_name": "gte-small",
                     "document_fields": ["name"],
@@ -1351,7 +1351,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..100).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -1376,7 +1376,7 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
         read_side
             .search(
                 ApiKey(Secret::new("my-read-api-key".to_string())),
-                collection_id.clone(),
+                collection_id,
                 json!({
                     "term": "text",
                 })
@@ -1411,12 +1411,12 @@ async fn test_read_commit_should_not_block_search() -> Result<()> {
 
 //     let (write_side, read_side) = create(config.clone()).await?;
 
-//     let collection_id = CollectionId("test-collection".to_string());
+//     let collection_id = CollectionId::from("test-collection".to_string());
 //     write_side
 //         .create_collection(
 //             ApiKey(Secret::new("my-master-api-key".to_string())),
 //             json!({
-//                 "id": collection_id.0.clone(),
+//                 "id": collection_id,
 //                 "read_api_key": "my-read-api-key",
 //                 "write_api_key": "my-write-api-key",
 //             })
@@ -1453,12 +1453,12 @@ async fn test_array_types() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "read_api_key": "my-read-api-key",
                 "write_api_key": "my-write-api-key",
             })
@@ -1470,7 +1470,7 @@ async fn test_array_types() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..document_count).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -1486,7 +1486,7 @@ async fn test_array_types() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -1498,7 +1498,7 @@ async fn test_array_types() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -1515,7 +1515,7 @@ async fn test_array_types() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
                 "where": {
@@ -1536,12 +1536,12 @@ async fn test_simple_simple() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "bar",
         })],
@@ -1551,7 +1551,7 @@ async fn test_simple_simple() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "bar",
             })
@@ -1585,8 +1585,8 @@ async fn test_commit_hooks() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let code = r#"
 function selectEmbeddingsProperties() {
@@ -1600,7 +1600,7 @@ export default {
     write_side
         .insert_javascript_hook(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             HookName::SelectEmbeddingsProperties,
             code.to_string(),
         )
@@ -1609,7 +1609,7 @@ export default {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
         })],
@@ -1621,7 +1621,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -1635,7 +1635,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "Today I want to listen only Max Pezzali.",
@@ -1653,7 +1653,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -1666,7 +1666,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "My dog is barking.",
@@ -1679,7 +1679,7 @@ export default {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "My dog is barking.",
         })],
@@ -1690,7 +1690,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -1703,7 +1703,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "My dog is barking.",
@@ -1721,7 +1721,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -1734,7 +1734,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "My dog is barking.",
@@ -1753,13 +1753,13 @@ async fn test_stats() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
         })],
@@ -1769,7 +1769,7 @@ async fn test_stats() -> Result<()> {
     let stats_before = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await?;
 
@@ -1782,7 +1782,7 @@ async fn test_stats() -> Result<()> {
     let stats_after = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await?;
 
@@ -1799,15 +1799,15 @@ async fn test_trigger() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let trigger_id = "my-trigger".to_string();
 
     let trigger = write_side
         .insert_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             InsertTriggerParams {
                 description: "My trigger".to_string(),
                 name: "my-trigger-name".to_string(),
@@ -1824,7 +1824,7 @@ async fn test_trigger() -> Result<()> {
     let trigger = write_side
         .get_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             trigger_id.clone(),
         )
         .await?;
@@ -1833,7 +1833,7 @@ async fn test_trigger() -> Result<()> {
     let trigger = read_side
         .get_trigger(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             trigger_id.clone(),
         )
         .await?
@@ -1848,7 +1848,7 @@ async fn test_trigger() -> Result<()> {
     let trigger = write_side
         .get_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             trigger_id.clone(),
         )
         .await?;
@@ -1857,7 +1857,7 @@ async fn test_trigger() -> Result<()> {
     let trigger = read_side
         .get_trigger(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             trigger_id.clone(),
         )
         .await?

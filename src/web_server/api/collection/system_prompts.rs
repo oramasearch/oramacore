@@ -65,7 +65,7 @@ async fn get_system_prompt_v1(
     Query(query): Query<GetSystemPromptQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let system_prompt_id = query.system_prompt_id;
     let read_api_key = query.api_key;
 
@@ -95,7 +95,7 @@ async fn list_system_prompts_v1(
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
@@ -124,7 +124,7 @@ async fn validate_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let system_prompt = SystemPrompt {
@@ -162,7 +162,7 @@ async fn insert_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let system_prompt_id = params.id.unwrap_or(cuid2::create_id());
@@ -207,7 +207,7 @@ async fn delete_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
@@ -238,7 +238,7 @@ async fn update_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let system_prompt = SystemPrompt {

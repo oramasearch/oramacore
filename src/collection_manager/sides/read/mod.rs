@@ -184,13 +184,13 @@ impl ReadSide {
 
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
 
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
-            collection: collection_id.0.clone().into(),
+            collection: collection_id.to_string().into(),
             mode: search_params.mode.as_str(),
             has_filter: if search_params.where_filter.is_empty() {
                 "false"
@@ -247,7 +247,7 @@ impl ReadSide {
     ) -> Result<CollectionStats> {
         let collection = self
             .collections
-            .get_collection(collection_id.clone())
+            .get_collection(collection_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
@@ -300,7 +300,7 @@ impl ReadSide {
             WriteOperation::Collection(collection_id, collection_operation) => {
                 OPERATION_COUNT.track_usize(
                     CollectionLabels {
-                        collection: collection_id.0.clone(),
+                        collection: collection_id.to_string(),
                     },
                     1,
                 );
@@ -392,8 +392,7 @@ impl ReadSide {
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.system_prompts
             .get(collection_id, system_prompt_id)
@@ -405,8 +404,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<bool> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.system_prompts.has_system_prompts(collection_id).await
     }
@@ -416,8 +414,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Option<SystemPrompt>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.system_prompts
             .perform_system_prompt_selection(collection_id)
@@ -429,8 +426,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<SystemPrompt>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.system_prompts.list_by_collection(collection_id).await
     }
@@ -441,8 +437,7 @@ impl ReadSide {
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
         self.segments.get(collection_id, segment_id).await
     }
 
@@ -451,8 +446,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Segment>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
         self.segments.list_by_collection(collection_id).await
     }
 
@@ -462,8 +456,7 @@ impl ReadSide {
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
     ) -> Result<Option<SelectedSegment>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.segments
             .perform_segment_selection(collection_id, conversation)
@@ -477,8 +470,7 @@ impl ReadSide {
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
     ) -> Result<Option<SelectedTrigger>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.triggers
             .perform_trigger_selection(collection_id, conversation, triggers)
@@ -491,8 +483,7 @@ impl ReadSide {
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
         self.triggers
             .list_by_segment(collection_id, segment_id)
             .await
@@ -504,8 +495,7 @@ impl ReadSide {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
         self.triggers.get(trigger_id).await
     }
 
@@ -514,8 +504,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id.clone(), read_api_key)
-            .await?;
+        self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.triggers.list_by_collection(collection_id).await
     }

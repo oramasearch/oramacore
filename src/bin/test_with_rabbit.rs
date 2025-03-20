@@ -58,7 +58,7 @@ async fn main2() -> Result<()> {
     println!("Sending message");
     producer
         .send(WriteOperation::CreateCollection {
-            id: CollectionId("foo".to_string()),
+            id: CollectionId::from("foo".to_string()),
             read_api_key: ApiKey(Secret::from("too".to_string())),
             default_language: LanguageDTO::English,
             description: None,

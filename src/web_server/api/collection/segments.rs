@@ -62,7 +62,7 @@ async fn get_segment_v1(
     Query(query): Query<GetSegmentQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let segment_id = query.segment_id;
     let read_api_key = query.api_key;
 
@@ -89,7 +89,7 @@ async fn get_all_segments_v1(
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
@@ -115,7 +115,7 @@ async fn insert_segment_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let segment = Segment {
@@ -156,7 +156,7 @@ async fn delete_segment_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
@@ -187,7 +187,7 @@ async fn update_segment_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     let segment = Segment {

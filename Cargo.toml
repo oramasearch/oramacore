@@ -106,6 +106,7 @@ orama-js-pool = "0.1.0"
 sentry = "0.36.0"
 sentry-debug-images = "0.36.0"
 sentry-tracing = "0.36.0"
+arrayvec = "0.7.6"
 
 [build-dependencies]
 cc = "1"

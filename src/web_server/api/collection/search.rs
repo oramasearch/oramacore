@@ -45,7 +45,7 @@ async fn search(
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     let output = read_side.search(read_api_key, collection_id, json).await;
@@ -75,7 +75,7 @@ async fn stats(
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side

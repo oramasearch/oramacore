@@ -7,6 +7,7 @@ use std::{
 use anyhow::Result;
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::{
     ai::OramaModel,
@@ -352,7 +353,7 @@ impl NumberFilterField {
 
         for value in data {
             let op = WriteOperation::Collection(
-                self.collection_id.clone(),
+                self.collection_id,
                 CollectionWriteOperation::Index(
                     doc_id,
                     self.field_id,
@@ -424,7 +425,7 @@ impl BoolFilterField {
 
         for value in data {
             let op = WriteOperation::Collection(
-                self.collection_id.clone(),
+                self.collection_id,
                 CollectionWriteOperation::Index(
                     doc_id,
                     self.field_id,
@@ -501,7 +502,7 @@ impl StringFilterField {
             // TODO: put this "25" in the collection config
             if value.len() < 25 {
                 let op = WriteOperation::Collection(
-                    self.collection_id.clone(),
+                    self.collection_id,
                     CollectionWriteOperation::Index(
                         doc_id,
                         self.field_id,
@@ -626,7 +627,7 @@ impl StringField {
         }
 
         let op = WriteOperation::Collection(
-            self.collection_id.clone(),
+            self.collection_id,
             CollectionWriteOperation::Index(
                 doc_id,
                 self.field_id,
@@ -699,7 +700,7 @@ impl EmbeddingField {
             DocumentFields::Hook(_) => {
                 let hook_exec_result = self
                     .hooks_runtime
-                    .calculate_text_for_embedding(self.collection_id.clone(), doc.clone()) // @todo: make sure we pass unflatten document here
+                    .calculate_text_for_embedding(self.collection_id, doc.clone()) // @todo: make sure we pass unflatten document here
                     .await;
 
                 let input: SelectEmbeddingPropertiesReturnType = match hook_exec_result {
@@ -720,7 +721,11 @@ impl EmbeddingField {
             }
             DocumentFields::AllStringProperties => {
                 let mut input = String::new();
-                for (_, value) in doc.iter() {
+                for (k, value) in doc.iter() {
+                    // Don't include the id in the input
+                    if k == "id" {
+                        continue;
+                    }
                     if let Some(value) = value.as_str() {
                         input.push_str(value);
                     }
@@ -740,7 +745,7 @@ impl EmbeddingField {
                 model: self.model,
                 input: EmbeddingCalculationRequestInput {
                     text: input,
-                    coll_id: self.collection_id.clone(),
+                    coll_id: self.collection_id,
                     doc_id,
                     field_id: self.field_id,
                     op_sender: sender,

@@ -101,12 +101,13 @@ impl AIService {
             input.len(),
         );
 
-        trace!("Requesting embeddings");
-        let request = Request::new(EmbeddingRequest {
+        let request = EmbeddingRequest {
             input: input.iter().map(|s| s.to_string()).collect(),
             model: model.into(),
             intent: intent.into(),
-        });
+        };
+        trace!("Requesting embeddings: {:?}", request);
+        let request = Request::new(request);
         let v = conn
             .get_embedding(request)
             .await
