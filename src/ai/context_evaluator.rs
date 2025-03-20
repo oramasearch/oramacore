@@ -83,9 +83,8 @@ impl ContextEvaluator {
             let embedding_result = self.ai_service.embed_passage(self.model, vec![chunk]).await;
 
             if let Ok(embeddings) = embedding_result {
-                match embeddings.first() {
-                    Some(embedding) => chunks_embeddings.push(embedding.clone()),
-                    None => {}
+                if let Some(embedding) = embeddings.first() {
+                    chunks_embeddings.push(embedding.clone())
                 }
             }
         }
@@ -93,7 +92,7 @@ impl ContextEvaluator {
         let mut scores = Vec::new();
 
         for chunk_embedding in &chunks_embeddings {
-            let score = self.cosine_similarity(&query_embeddings.unwrap(), &chunk_embedding);
+            let score = self.cosine_similarity(query_embeddings.unwrap(), chunk_embedding);
 
             let final_score = if self.model == OramaModel::MultilingualE5Small
                 || self.model == OramaModel::MultilingualE5Base
@@ -205,7 +204,6 @@ impl ContextEvaluator {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -213,6 +211,7 @@ mod tests {
     use crate::{
         ai::{AIService, AIServiceConfig},
         collection_manager::dto::{SearchResult, SearchResultHit},
+        tests::utils::create_grpc_server,
         types::RawJSONDocument,
     };
     use http::uri::Scheme;
@@ -239,6 +238,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_evaluator_positive() {
+        let address = create_grpc_server().await.unwrap();
+        let ai_server_host = address.ip().to_string();
+        let ai_server_port = address.port();
+
         let query = "How do I create a new branch in Git?";
 
         let context = SearchResult {
@@ -284,8 +287,8 @@ mod tests {
 
         let ai_service = Arc::new(super::AIService::new(AIServiceConfig {
             api_key: None,
-            host: "0.0.0.0".to_string(),
-            port: 50051,
+            host: ai_server_host,
+            port: ai_server_port,
             llm: crate::ai::AIServiceLLMConfig {
                 port: 8000,
                 host: "0.0.0.0".to_string(),
@@ -307,6 +310,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_evaluator_neutral() {
+        let address = create_grpc_server().await.unwrap();
+        let ai_server_host = address.ip().to_string();
+        let ai_server_port = address.port();
+
         let query = "`git checkout main` gives not fully merged error";
 
         let context = SearchResult {
@@ -352,8 +359,8 @@ mod tests {
 
         let ai_service = Arc::new(super::AIService::new(AIServiceConfig {
             api_key: None,
-            host: "0.0.0.0".to_string(),
-            port: 50051,
+            host: ai_server_host,
+            port: ai_server_port,
             llm: crate::ai::AIServiceLLMConfig {
                 port: 8000,
                 host: "0.0.0.0".to_string(),
@@ -375,6 +382,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_evaluator_negative() {
+        let address = create_grpc_server().await.unwrap();
+        let ai_server_host = address.ip().to_string();
+        let ai_server_port = address.port();
+
         let query = "How do I cook pasta with tomato sauce?";
 
         let context = SearchResult {
@@ -420,8 +431,8 @@ mod tests {
 
         let ai_service = Arc::new(super::AIService::new(AIServiceConfig {
             api_key: None,
-            host: "0.0.0.0".to_string(),
-            port: 50051,
+            host: ai_server_host,
+            port: ai_server_port,
             llm: crate::ai::AIServiceLLMConfig {
                 port: 8000,
                 host: "0.0.0.0".to_string(),
@@ -511,4 +522,3 @@ mod tests {
         assert_eq!(result, 0.0);
     }
 }
-*/

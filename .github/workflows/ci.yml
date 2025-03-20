@@ -38,6 +38,7 @@ jobs:
           ~/.cargo/git/db/
           target/
           .custom_models/
+          .fastembed_cache/
         key: cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: cargo-
     - name: Install target
@@ -56,6 +57,7 @@ jobs:
         cargo clippy --target x86_64-unknown-linux-gnu
     - name: Test
       run: |
+        bash download-test-model.sh
         cargo test --all --target x86_64-unknown-linux-gnu
     - name: Build
       run: |

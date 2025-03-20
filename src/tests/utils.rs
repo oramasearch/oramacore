@@ -8,7 +8,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use duration_string::DurationString;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::{
+    EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
+    UserDefinedEmbeddingModel,
+};
 use grpc_def::Embedding;
 use http::uri::Scheme;
 use redact::Secret;
@@ -118,6 +121,7 @@ pub mod grpc_def {
 
 pub struct GRPCServer {
     fastembed_model: Arc<TextEmbedding>,
+    context_evaluator: Arc<TextEmbedding>,
 }
 
 type EchoResult<T> = Result<Response<T>, Status>;
@@ -139,12 +143,14 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
     ) -> Result<tonic::Response<grpc_def::EmbeddingResponse>, Status> {
         let req = req.into_inner();
         // `0` means `BgeSmall`
-        if req.model != 0 {
-            return Err(Status::invalid_argument("Invalid model"));
-        }
+        // `6` means `SentenceTransformersParaphraseMultilingualMiniLML12v2`
+        let model = match req.model {
+            0 => self.fastembed_model.clone(),
+            6 => self.context_evaluator.clone(),
+            _ => return Err(Status::invalid_argument("Invalid model")),
+        };
 
-        let embed = self
-            .fastembed_model
+        let embed = model
             .embed(req.input, None)
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -158,7 +164,7 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
     }
 }
 
-static CELL: OnceLock<Result<Arc<TextEmbedding>>> = OnceLock::new();
+static CELL: OnceLock<Result<(Arc<TextEmbedding>, Arc<TextEmbedding>)>> = OnceLock::new();
 
 pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
@@ -166,19 +172,56 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
     let text_embedding = CELL.get_or_init(|| {
         let cwd = std::env::current_dir().unwrap();
         let cache_dir = cwd.join(".custom_models");
+        std::fs::create_dir_all(&cache_dir).expect("Cannot create cache dir");
+
         let init_option = InitOptions::new(model.clone())
-            .with_cache_dir(cache_dir)
+            .with_cache_dir(cache_dir.clone())
             .with_show_download_progress(false);
+
+        let context_evaluator_model_dir =
+            cache_dir.join("sentenceTransformersParaphraseMultilingualMiniLML12v2");
+        std::fs::create_dir_all(&context_evaluator_model_dir).expect("Cannot create cache dir");
+
+        let onnx_file = std::fs::read(context_evaluator_model_dir.join("model.onnx"))
+            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
+        let config_file = std::fs::read(context_evaluator_model_dir.join("config.json"))
+            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
+        let tokenizer_file = std::fs::read(context_evaluator_model_dir.join("tokenizer.json"))
+            .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
+        let special_tokens_map_file = std::fs::read(
+            context_evaluator_model_dir.join("special_tokens_map.json"),
+        )
+        .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
+        let tokenizer_config_file = std::fs::read(
+            context_evaluator_model_dir.join("tokenizer_config.json"),
+        )
+        .expect("Cache not found. Run 'download-test-model.sh' to create the cache locally");
+        let tokenizer_files = TokenizerFiles {
+            config_file,
+            special_tokens_map_file,
+            tokenizer_file,
+            tokenizer_config_file,
+        };
+        let user_defined_model =
+            UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files).with_pooling(Pooling::Mean);
+
+        // Try creating a TextEmbedding instance from the user-defined model
+        let context_evaluator: TextEmbedding = TextEmbedding::try_new_from_user_defined(
+            user_defined_model,
+            InitOptionsUserDefined::default(),
+        )
+        .unwrap();
 
         info!("Initializing the Fastembed: {model}");
         let text_embedding = TextEmbedding::try_new(init_option)
             .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
-        Ok(Arc::new(text_embedding))
+        Ok((Arc::new(text_embedding), Arc::new(context_evaluator)))
     });
-    let text_embedding = text_embedding.as_ref().unwrap().clone();
+    let (text_embedding, context_evaluator) = text_embedding.as_ref().unwrap().clone();
 
     let server = GRPCServer {
         fastembed_model: text_embedding,
+        context_evaluator,
     };
 
     info!("Checking which port is available on system");
