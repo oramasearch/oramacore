@@ -17,23 +17,58 @@ JavaScript hooks are a way to customize OramaCore using JavaScript. You can use 
 - Write your own agents and actions
 - And much more!
 
-At the time of writing, we're working on a set of JavaScript hooks that you can use to customize OramaCore. We're planning to release the first version of JavaScript hooks in **v1.0.0**.
+At the time of writing, we're working on a set of JavaScript hooks that you can use to customize OramaCore.
 
 ## Creating a Hooks
 
-Once you have created a collection, you can create a JavaScript hook by sending a POST request to the `/v0/hooks` endpoint.
+Once you have created a collection, you can create a JavaScript hook by using the `.addHook` method from the official SDK.
 
-Here's an example of how to create a JavaScript hook:
+Here's an example of what a JavaScript hook looks like:
 
-```bash
+```js
+function selectEmbeddingsProperties(doc) {
+  return `
+    ### ${doc.title}
+    ${doc.content}
 
-curl -X POST http://localhost:8080/{COLLECTION_ID}/v0/hooks/add \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization Bearer <write-api-key>' \
-  -d '{
-    "id": "selectEmbeddingProperties",
-    "code": "function selectEmbeddingProperties(document) { return document.title; }"
-  }'
+    #### Category
+    ${doc.category}
+
+    #### Section
+    ${doc.section}
+  `
+}
+
+export default { selectEmbeddingsProperties };
+```
+
+As you can see, this hook takes a document as an input and produces a formatted MarkDown string as an output, which will then be used by OramaCore to generate embeddings.
+
+Wehn using the official JavaScript SDK, you can insert the hook above by turning it into a string and passing it to the `addHook` function:
+
+```js
+const hookCode = `
+  function selectEmbeddingsProperties(doc) {
+    return \`
+      ### \${doc.title}
+      \${doc.content}
+
+      #### Category
+      \${doc.category}
+
+      #### Section
+      \${doc.section}
+  \`
+  }
+
+  export default { selectEmbeddingsProperties };
+`;
+
+await collection.addHook({
+  collectionID: "<collection-id>",
+  code: hookCode,
+  name: "selectEmbeddingProperties",
+});
 ```
 
 Before inserting the hook, OramaCore will validate the JavaScript code to ensure it's safe to run. If the code is invalid, OramaCore will return an error.

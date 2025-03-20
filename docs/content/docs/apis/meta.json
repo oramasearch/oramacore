@@ -5,6 +5,8 @@
     "create-collection",
     "insert-documents",
     "search-documents",
-    "answer-session"
+    "answer-session",
+    "advanced-reasoning",
+    "custom-system-prompts"
   ]
 }

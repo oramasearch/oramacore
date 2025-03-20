@@ -20,21 +20,21 @@ pub struct SystemPrompt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPromptValidationSecurity {
-    pub valid: String,
+    pub valid: bool,
     pub reason: String,
     pub violations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPromptValidationTechnical {
-    valid: String,
+    valid: bool,
     reason: String,
     instruction_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPromptValidationOverall {
-    valid: String,
+    valid: bool,
     summary: String,
 }
 
