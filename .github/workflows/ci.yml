@@ -38,6 +38,7 @@ jobs:
           ~/.cargo/git/db/
           target/
           .custom_models/
+          .fastembed_cache/
         key: cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: cargo-
     - name: Install target
