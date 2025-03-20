@@ -7,6 +7,7 @@ use std::{
 use anyhow::Result;
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::{
     ai::OramaModel,
@@ -720,7 +721,11 @@ impl EmbeddingField {
             }
             DocumentFields::AllStringProperties => {
                 let mut input = String::new();
-                for (_, value) in doc.iter() {
+                for (k, value) in doc.iter() {
+                    // Don't include the id in the input
+                    if k == "id" {
+                        continue;
+                    }
                     if let Some(value) = value.as_str() {
                         input.push_str(value);
                     }
