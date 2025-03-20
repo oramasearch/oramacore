@@ -14,6 +14,8 @@ enum OramaModel {
     MultilingualE5Small = 3;
     MultilingualE5Base = 4;
     MultilingualE5Large = 5;
+    MultilingualMiniLML12V2 = 6;
+    JinaEmbeddingsV2BaseCode = 7;
 }
 
 enum OramaIntent {

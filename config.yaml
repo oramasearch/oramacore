@@ -81,7 +81,7 @@ ai_server:
     total_threads: 12
 
     embeddings:
-        default_model_group: small
+        default_model_group: all
         dynamically_load_models: false
         execution_providers:
             - CUDAExecutionProvider

@@ -30,6 +30,8 @@ impl OramaModel {
             OramaModel::MultilingualE5Small => 384,
             OramaModel::MultilingualE5Base => 768,
             OramaModel::MultilingualE5Large => 1024,
+            OramaModel::JinaEmbeddingsV2BaseCode => 768,
+            OramaModel::MultilingualMiniLml12v2 => 768,
         }
     }
 }
@@ -99,21 +101,9 @@ impl AIService {
             input.len(),
         );
 
-        let processed_input: Vec<String> = if model == OramaModel::MultilingualE5Small
-            || model == OramaModel::MultilingualE5Base
-            || model == OramaModel::MultilingualE5Large
-        {
-            match intent {
-                OramaIntent::Query => input.iter().map(|s| format!("query: {}", *s)).collect(),
-                OramaIntent::Passage => input.iter().map(|s| format!("passage: {}", *s)).collect(),
-            }
-        } else {
-            input.iter().map(|s| (*s).clone()).collect()
-        };
-
         trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
-            input: processed_input,
+            input: input.iter().map(|s| s.to_string()).collect(),
             model: model.into(),
             intent: intent.into(),
         });

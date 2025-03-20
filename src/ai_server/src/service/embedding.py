@@ -10,6 +10,11 @@ from src.embeddings.embeddings import initialize_thread_executor
 
 logger = logging.getLogger(__name__)
 
+EMBEDDINGS_MODEL_CACHE_DIR = "/tmp/fastembed_cache"
+
+os.environ["FASTEMBED_CACHE_DIR"] = EMBEDDINGS_MODEL_CACHE_DIR
+os.makedirs(EMBEDDINGS_MODEL_CACHE_DIR, exist_ok=True)
+
 
 class EmbeddingService:
     def __init__(self, config):

@@ -42,7 +42,7 @@ impl ContextEvaluator {
 
         let query_embeddings_list = self
             .ai_service
-            .embed_query(OramaModel::MultilingualE5Small, vec![&query])
+            .embed_query(OramaModel::MultilingualMiniLml12v2, vec![&query])
             .await?;
 
         let query_embeddings = query_embeddings_list.first();
@@ -78,7 +78,7 @@ impl ContextEvaluator {
         for chunk in &chunks {
             let embedding_result = self
                 .ai_service
-                .embed_passage(OramaModel::MultilingualE5Small, vec![chunk])
+                .embed_passage(OramaModel::MultilingualMiniLml12v2, vec![chunk])
                 .await;
 
             if let Ok(embeddings) = embedding_result {
@@ -93,20 +93,17 @@ impl ContextEvaluator {
 
         for chunk_embedding in &chunks_embeddings {
             let score = self.cosine_similarity(&query_embeddings.unwrap(), &chunk_embedding);
-            scores.push(self.rescale_similarity(0.7, score));
-            dbg!(self.rescale_similarity(0.7, score));
+            scores.push(self.rescale_similarity(0.0, score));
+            dbg!(score);
+            dbg!(self.rescale_similarity(0.0, score));
         }
 
         scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-
-        let result = if scores.is_empty() {
-            0.0
-        } else if scores.len() == 1 {
-            scores[0]
-        } else if scores.len() == 2 {
-            (scores[0] * 0.7) + (scores[1] * 0.3)
+        let top_n = scores.iter().take(3).copied().collect::<Vec<f32>>();
+        let result = if !top_n.is_empty() {
+            top_n.iter().sum::<f32>() / top_n.len() as f32
         } else {
-            (scores[0] * 0.6) + (scores[1] * 0.3) + (scores[2] * 0.1)
+            0.0
         };
 
         Ok(result)
