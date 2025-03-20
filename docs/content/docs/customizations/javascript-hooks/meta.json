@@ -4,6 +4,6 @@
   "root": false,
   "pages": [
     "introduction",
-    "selectEmbeddingProperties" 
+    "selectEmbeddingsProperties" 
   ]
 }

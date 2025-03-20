@@ -45,6 +45,8 @@ The supported models are:
 | [BGESmall](https://huggingface.co/BAAI/bge-small-en-v1.5) | English model by [BAAI](https://www.baai.ac.cn/english.html) | English | 384 |
 | [BGEBase](https://huggingface.co/BAAI/bge-base-en-v1.5) | English model by [BAAI](https://www.baai.ac.cn/english.html) | English | 768 |
 | [BGELarge](https://huggingface.co/BAAI/bge-large-en-v1.5) | English model by [BAAI](https://www.baai.ac.cn/english.html) | English | 1024 |
+| [ParaphraseMultilingualMiniLML12v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) | Multilingual model by [Sentence Transformers](https://www.sbert.net/) | Multilingual | 384 |
+| [JnaEmbeddingsV2BaseCode](https://huggingface.co/jinaai/jina-embeddings-v2-base-code) | Multilingual model by [Jina AI](https://jina.ai/) with support for code-oriented embeddings in many programming languages | Multilingual | 768 |
 
 
 These models are optimized for speed and memory usage, making them suitable for real-time applications and large-scale deployments.
@@ -76,7 +78,7 @@ When configuring OramaCore, you can specify what models or model groups to use f
 ai_server:
     # ...
     embeddings:
-        default_model_group: small
+        default_model_group: all
         dynamically_load_models: false 
         execution_providers:
             - CUDAExecutionProvider
@@ -94,10 +96,10 @@ At startup-time, OramaCore will preload the models specified in the `default_mod
 
 | Model Group | Description | Included Models |
 |------------|-------------|-----------------|
-| `small` | Small-sized models for text embeddings | - `MultilingualE5Small`<br/>- `BGESmall` |
-| `multilingual` | All multilingual models (default group) | - `MultilingualE5Small`<br/>- `MultilingualE5Base`<br/>- `MultilingualE5Large` |
+| `small` | Small-sized models for text embeddings | - `MultilingualE5Small`<br/>- `BGESmall`<br/>- `ParaphraseMultilingualMiniLML12v2` |
+| `multilingual` | All multilingual models (default group) | - `MultilingualE5Small`<br/>- `MultilingualE5Base`<br/>- `MultilingualE5Large`<br/>- `ParaphraseMultilingualMiniLML12v2` |
 | `en` | English-only models | - `BGESmall`<br/>- `BGEBase`<br/>- `BGELarge` |
-| `all` | Complete set of available models | - `MultilingualE5Small`<br/>- `MultilingualE5Base`<br/>- `MultilingualE5Large`<br/>- `BGESmall`<br/>- `BGEBase`<br/>- `BGELarge` |
+| `all` | Complete set of available models | - `MultilingualE5Small`<br/>- `MultilingualE5Base`<br/>- `MultilingualE5Large`<br/>- `BGESmall`<br/>- `BGEBase`<br/>- `BGELarge`<br/>- `ParaphraseMultilingualMiniLML12v2`<br/>- `JnaEmbeddingsV2BaseCode` |
 
 By default, OramaCore uses the `multilingual` group, which includes all multilingual models.
 

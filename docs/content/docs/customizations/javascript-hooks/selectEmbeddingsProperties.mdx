@@ -1,9 +1,9 @@
 ---
-title: "selectEmbeddingProperties"
+title: "selectEmbeddingsProperties"
 description: "Customize the text extraction process for each document."
 ---
 
-The `selectEmbeddingProperties` hook allows you to customize the text extraction and transformation process.
+The `selectEmbeddingsProperties` hook allows you to customize the text extraction and transformation process.
 
 You can use this hook to select the properties of the document that will be used to generate the embeddings.
 
@@ -34,14 +34,14 @@ Let's take the following documents as an example:
 }
 ```
 
-As you can see, the structure of the documents is different. With the `selectEmbeddingProperties` hook, you can customize the text extraction process for each document.
+As you can see, the structure of the documents is different. With the `selectEmbeddingsProperties` hook, you can customize the text extraction process for each document.
 
 #### Returning a single string
 
 You could write a JavaScript function like this:
 
-```javascript title="selectEmbeddingProperties.js"
-function selectEmbeddingProperties(document) {
+```javascript title="selectEmbeddingsProperties.js"
+function selectEmbeddingsProperties(document) {
   if (document.productName && document.description && document.brand) {
     return [document.productName, document.description, document.brand].join(". ");
   }
@@ -52,6 +52,8 @@ function selectEmbeddingProperties(document) {
 
   return document.title || document.description || document.productName || document.brand;
 }
+
+export default { selectEmbeddingsProperties };
 ```
 
 Which will return the following strings for the documents:
@@ -74,8 +76,8 @@ This way, you can easily produce highly optimized embeddings for each document.
 
 Another approach is to return a single markdown string that will be used for embeddings:
 
-````javascript title="selectEmbeddingProperties.js"
-function selectEmbeddingProperties(document) {
+````javascript title="selectEmbeddingsProperties.js"
+function selectEmbeddingsProperties(document) {
   const isDocumentType1 = document.productName && document.description && document.brand;
 
   if (isDocumentType1) {
@@ -96,6 +98,8 @@ function selectEmbeddingProperties(document) {
     ${document.description}
   ```
 }
+
+export default { selectEmbeddingsProperties };
 ````
 
 This will produce the following outputs for the two documents:
@@ -126,14 +130,16 @@ This approach allows you to generate complete markdown documents rich in informa
 
 Finally, you can return an array of strings with the properties name to use for each document. OramaCore will then concatenate the values of these properties to generate the embeddings.
 
-```javascript title="selectEmbeddingProperties.js"
-function selectEmbeddingProperties(document) {
+```javascript title="selectEmbeddingsProperties.js"
+function selectEmbeddingsProperties(document) {
   if (document.productName && document.description && document.brand) {
     return ["productName", "description", "brand"];
   }
 
   return ["title", "description"];
 }
+
+export default { selectEmbeddingsProperties };
 ```
 
 This will produce the following outputs for the two documents:
@@ -150,4 +156,4 @@ This will produce the following outputs for the two documents:
   ["title", "description"]
   ```
 
-There is no right or wrong way to use the `selectEmbeddingProperties` hook. You can use it in the way that best fits your needs and the structure of your documents.
+There is no right or wrong way to use the `selectEmbeddingsProperties` hook. You can use it in the way that best fits your needs and the structure of your documents.
