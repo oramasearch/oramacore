@@ -42,7 +42,7 @@ class SamplingParams:
 
 @dataclass
 class OramaAIConfig:
-    models_cache_dir: Optional[str] = ".embeddings_models_cache"
+    models_cache_dir: Optional[str] = "/tmp/fastembed_cache"
     port: Optional[int] = 50051
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)

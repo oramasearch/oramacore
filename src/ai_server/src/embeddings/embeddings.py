@@ -96,6 +96,24 @@ def extend_supported_models():
             "sources": {"hf": "BAAI/bge-large-en-v1.5"},
             "model_file": "onnx/model.onnx",
         },
+        {
+            "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "dim": 768,
+            "description": "Text embeddings in many languages",
+            "license": "apache-2.0",
+            "size_in_GB": 0.4,
+            "sources": {"hf": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
+            "model_file": "onnx/model.onnx",
+        },
+        {
+            "model": "jinaai/jina-embeddings-v2-base-code",
+            "dim": 768,
+            "description": "Text embeddings for code and english",
+            "license": "apache-2.0",
+            "size_in_GB": 0.6,
+            "sources": {"hf": "jinaai/jina-embeddings-v2-base-code"},
+            "model_file": "onnx/model.onnx",
+        },
     ]
 
     for model in new_models:
@@ -151,6 +169,10 @@ class OramaModelInfo(Enum):
     MultilingualE5Base = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-base"]
     MultilingualE5Large = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-large"]
     MultilingualE5LargeRaw = SUPPORTED_MODELS_INFO["intfloat/multilingual-e5-large-raw"]
+    MultilingualMiniLML12V2 = SUPPORTED_MODELS_INFO["sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"]
+
+    # Code models
+    JinaEmbeddingsV2BaseCode = SUPPORTED_MODELS_INFO["jinaai/jina-embeddings-v2-base-code"]
 
 
 class ModelGroups(Enum):
@@ -159,10 +181,21 @@ class ModelGroups(Enum):
         OramaModelInfo.MultilingualE5Large,
         OramaModelInfo.MultilingualE5Small,
         OramaModelInfo.MultilingualE5Base,
+        OramaModelInfo.MultilingualMiniLML12V2,
     ]
     small = [
         OramaModelInfo.BGESmallRaw,
         OramaModelInfo.BGESmall,
         OramaModelInfo.MultilingualE5Small,
     ]
-    all = list(OramaModelInfo)
+    code = [OramaModelInfo.JinaEmbeddingsV2BaseCode]
+    all = [
+        OramaModelInfo.BGESmall,
+        OramaModelInfo.BGEBase,
+        OramaModelInfo.BGELarge,
+        OramaModelInfo.MultilingualE5Small,
+        OramaModelInfo.MultilingualE5Base,
+        OramaModelInfo.MultilingualE5Large,
+        OramaModelInfo.MultilingualMiniLML12V2,
+        OramaModelInfo.JinaEmbeddingsV2BaseCode,
+    ]

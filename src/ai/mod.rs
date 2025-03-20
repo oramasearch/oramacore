@@ -15,6 +15,7 @@ use crate::metrics::{
     EmbeddingCalculationLabels,
 };
 
+pub mod context_evaluator;
 pub mod party_planner;
 pub mod vllm;
 
@@ -29,6 +30,8 @@ impl OramaModel {
             OramaModel::MultilingualE5Small => 384,
             OramaModel::MultilingualE5Base => 768,
             OramaModel::MultilingualE5Large => 1024,
+            OramaModel::JinaEmbeddingsV2BaseCode => 768,
+            OramaModel::MultilingualMiniLml12v2 => 768,
         }
     }
 }
@@ -100,7 +103,7 @@ impl AIService {
 
         trace!("Requesting embeddings");
         let request = Request::new(EmbeddingRequest {
-            input: input.into_iter().cloned().collect(),
+            input: input.iter().map(|s| s.to_string()).collect(),
             model: model.into(),
             intent: intent.into(),
         });

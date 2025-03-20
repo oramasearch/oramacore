@@ -25,6 +25,7 @@ pub enum KnownPrompts {
     Segmenter,
     Trigger,
     ValidateSystemPrompt,
+    Followup,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +99,12 @@ impl KnownPrompts {
                 system: include_str!("../prompts/v1/custom_system_prompt_validator/system.md")
                     .to_string(),
                 user: include_str!("../prompts/v1/custom_system_prompt_validator/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::Followup => KnownPrompt {
+                system: include_str!("../prompts/v1/party_planner/actions/ask_followup_system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/party_planner/actions/ask_followup_user.md")
                     .to_string(),
             },
         }

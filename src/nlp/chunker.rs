@@ -20,7 +20,15 @@ pub struct ChunkerConfig {
 impl Chunker {
     pub fn try_new(config: ChunkerConfig) -> Result<Self> {
         let tokenizer = cl100k_base()?;
-        let text_tokenizer_config = ChunkConfig::new(config.max_tokens).with_sizer(tokenizer);
+
+        let overlap = match config.overlap {
+            Some(overlap) => overlap,
+            None => 0,
+        };
+
+        let text_tokenizer_config = ChunkConfig::new(config.max_tokens)
+            .with_sizer(tokenizer)
+            .with_overlap(overlap)?;
 
         Ok(Chunker {
             max_tokens: config.max_tokens,
