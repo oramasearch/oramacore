@@ -20,13 +20,13 @@ async fn test_reindex_change_language() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "avvocata",
         })],
@@ -36,7 +36,7 @@ async fn test_reindex_change_language() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "avvocato",
             })
@@ -48,7 +48,7 @@ async fn test_reindex_change_language() -> Result<()> {
     write_side
         .reindex(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             ReindexConfig {
                 description: None,
                 embeddings: None,
@@ -63,7 +63,7 @@ async fn test_reindex_change_language() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "avvocato",
             })
@@ -83,13 +83,13 @@ async fn test_reindex_field_reorder() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title1": "title1",
             "number1": 1,
@@ -107,7 +107,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "title1",
             })
@@ -120,7 +120,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
         write_side
             .reindex(
                 ApiKey(Secret::new("my-write-api-key".to_string())),
-                collection_id.clone(),
+                collection_id,
                 ReindexConfig {
                     description: None,
                     embeddings: None,
@@ -136,7 +136,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "title1",
             })
@@ -156,8 +156,8 @@ async fn test_reindex_with_hooks() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let code = r#"
 function selectEmbeddingsProperties() {
@@ -171,7 +171,7 @@ export default {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
         })],
@@ -183,7 +183,7 @@ export default {
     write_side
         .insert_javascript_hook(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             HookName::SelectEmbeddingsProperties,
             code.to_string(),
         )
@@ -192,7 +192,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -206,7 +206,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "Today I want to listen only Max Pezzali.",
@@ -219,7 +219,7 @@ export default {
     write_side
         .reindex(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             ReindexConfig {
                 description: None,
                 embeddings: None,
@@ -233,7 +233,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "The pen is on the table.",
@@ -247,7 +247,7 @@ export default {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "mode": "vector",
                 "term": "Today I want to listen only Max Pezzali.",

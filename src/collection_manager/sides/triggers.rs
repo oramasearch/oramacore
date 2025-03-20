@@ -167,7 +167,7 @@ pub fn get_trigger_key(
 
 pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
     let parts = trigger_id.split(':').collect::<Vec<&str>>();
-    let collection_id = CollectionId(parts[0].to_string());
+    let collection_id = CollectionId::from(parts[0].to_string());
 
     let segment_id = parts
         .iter()

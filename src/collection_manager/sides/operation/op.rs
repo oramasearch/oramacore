@@ -273,13 +273,13 @@ mod tests {
     fn test_bincode() {
         let ops = [
             WriteOperation::CreateCollection {
-                id: CollectionId("col".to_string()),
+                id: CollectionId::from("col".to_string()),
                 read_api_key: ApiKey(Secret::from("foo".to_string())),
                 description: Some("bar".to_string()),
                 default_language: LanguageDTO::English,
             },
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -287,7 +287,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -295,7 +295,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -308,7 +308,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -321,7 +321,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -332,7 +332,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -345,7 +345,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -353,7 +353,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::CreateField {
                     field_id: FieldId(1),
                     field_name: "Foo".to_string(),
@@ -361,13 +361,13 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::DeleteDocuments {
                     doc_ids: vec![DocumentId(1)],
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::InsertDocument {
                     doc_id: DocumentId(1),
                     doc: DocumentToInsert(RawJSONDocument {
@@ -377,7 +377,7 @@ mod tests {
                 },
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
@@ -391,7 +391,7 @@ mod tests {
                 ),
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
@@ -399,7 +399,7 @@ mod tests {
                 ),
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
@@ -409,7 +409,7 @@ mod tests {
                 ),
             ),
             WriteOperation::Collection(
-                CollectionId("col".to_string()),
+                CollectionId::from("col".to_string()),
                 CollectionWriteOperation::Index(
                     DocumentId(1),
                     FieldId(1),
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn test_bincode_index_number() {
         let op = WriteOperation::Collection(
-            CollectionId("col".to_string()),
+            CollectionId::from("col".to_string()),
             CollectionWriteOperation::Index(
                 DocumentId(1),
                 FieldId(1),

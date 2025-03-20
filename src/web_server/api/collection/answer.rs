@@ -68,7 +68,7 @@ async fn planned_answer_v1(
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId(id.clone()).0;
+    let collection_id = CollectionId::from(id);
     let read_side = read_side.clone();
 
     let query = interaction.query.clone();
@@ -77,7 +77,7 @@ async fn planned_answer_v1(
 
     read_side
         .clone()
-        .check_read_api_key(CollectionId(id.clone()), api_key.clone())
+        .check_read_api_key(collection_id, api_key.clone())
         .await
         .expect("Invalid API key");
 
@@ -102,7 +102,7 @@ async fn planned_answer_v1(
         match interaction.system_prompt_id {
             Some(id) => {
                 let full_prompt = read_side
-                    .get_system_prompt(api_key.clone(), CollectionId(id.clone()), id)
+                    .get_system_prompt(api_key.clone(), collection_id, id)
                     .await
                     .context("Failed to get full system prompt")
                     .unwrap();
@@ -111,14 +111,14 @@ async fn planned_answer_v1(
             }
             None => {
                 let has_system_prompts = read_side
-                    .has_system_prompts(api_key.clone(), CollectionId(id.clone()))
+                    .has_system_prompts(api_key.clone(), collection_id)
                     .await
                     .context("Failed to check if the collection has system prompts")
                     .unwrap();
 
                 if has_system_prompts {
                     let chosen_system_prompt = read_side
-                        .perform_system_prompt_selection(api_key.clone(), CollectionId(id.clone()))
+                        .perform_system_prompt_selection(api_key.clone(), collection_id)
                         .await
                         .context("Failed to choose a system prompt")
                         .unwrap();
@@ -141,7 +141,7 @@ async fn planned_answer_v1(
         let mut segments_and_triggers_stream = select_triggers_and_segments(
             read_side.clone(),
             api_key.clone(),
-            CollectionId(id),
+            collection_id,
             segments_and_triggers_conversation,
         )
         .await;
@@ -181,7 +181,7 @@ async fn planned_answer_v1(
 
         let mut party_planner_stream = PartyPlanner::run(
             read_side.clone(),
-            collection_id.clone(),
+            collection_id,
             api_key.clone(),
             interaction.query.clone(),
             interaction.messages.clone(),
@@ -220,13 +220,13 @@ async fn answer_v1(
     Query(query): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_side = read_side.clone();
     let read_api_key = query.api_key;
 
     read_side
         .clone()
-        .check_read_api_key(collection_id.clone(), read_api_key.clone())
+        .check_read_api_key(collection_id, read_api_key.clone())
         .await
         .expect("Invalid API key");
 
@@ -260,7 +260,7 @@ async fn answer_v1(
         match interaction.system_prompt_id {
             Some(id) => {
                 let full_prompt = read_side
-                    .get_system_prompt(read_api_key.clone(), collection_id.clone(), id)
+                    .get_system_prompt(read_api_key.clone(), collection_id, id)
                     .await
                     .context("Failed to get full system prompt")
                     .unwrap();
@@ -269,17 +269,14 @@ async fn answer_v1(
             }
             None => {
                 let has_system_prompts = read_side
-                    .has_system_prompts(read_api_key.clone(), collection_id.clone())
+                    .has_system_prompts(read_api_key.clone(), collection_id)
                     .await
                     .context("Failed to check if the collection has system prompts")
                     .unwrap();
 
                 if has_system_prompts {
                     let chosen_system_prompt = read_side
-                        .perform_system_prompt_selection(
-                            read_api_key.clone(),
-                            collection_id.clone(),
-                        )
+                        .perform_system_prompt_selection(read_api_key.clone(), collection_id)
                         .await
                         .context("Failed to choose a system prompt")
                         .unwrap();
@@ -302,7 +299,7 @@ async fn answer_v1(
         let mut segments_and_triggers_stream = select_triggers_and_segments(
             read_side.clone(),
             read_api_key.clone(),
-            collection_id.clone(),
+            collection_id,
             segments_and_triggers_conversation,
         )
         .await;
@@ -502,7 +499,7 @@ async fn select_triggers_and_segments(
     conversation: Option<Vec<InteractionMessage>>,
 ) -> impl Stream<Item = AudienceManagementResult> {
     let all_segments = read_side
-        .get_all_segments_by_collection(read_api_key.clone(), collection_id.clone())
+        .get_all_segments_by_collection(read_api_key.clone(), collection_id)
         .await
         .expect("Failed to get segments for the collection");
 
@@ -517,11 +514,7 @@ async fn select_triggers_and_segments(
         };
 
         let chosen_segment = read_side
-            .perform_segment_selection(
-                read_api_key.clone(),
-                collection_id.clone(),
-                conversation.clone(),
-            )
+            .perform_segment_selection(read_api_key.clone(), collection_id, conversation.clone())
             .await
             .expect("Failed to choose a segment.");
 
@@ -539,7 +532,7 @@ async fn select_triggers_and_segments(
                 let full_segment = read_side
                     .get_segment(
                         read_api_key.clone(),
-                        collection_id.clone(),
+                        collection_id,
                         segment.clone().id.clone(),
                     )
                     .await
@@ -552,7 +545,7 @@ async fn select_triggers_and_segments(
                 let all_segments_triggers = read_side
                     .get_all_triggers_by_segment(
                         read_api_key.clone(),
-                        collection_id.clone(),
+                        collection_id,
                         full_segment.unwrap().id.clone(),
                     )
                     .await
@@ -568,7 +561,7 @@ async fn select_triggers_and_segments(
                 let chosen_trigger = read_side
                     .perform_trigger_selection(
                         read_api_key.clone(),
-                        collection_id.clone(),
+                        collection_id,
                         conversation,
                         all_segments_triggers,
                     )

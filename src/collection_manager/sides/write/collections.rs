@@ -65,11 +65,11 @@ impl CollectionsWriter {
         };
 
         for collection_id in collection_info.collection_ids {
-            let collection_dir = data_dir.join(collection_id.0.clone());
+            let collection_dir = data_dir.join(collection_id.0);
 
             // All those values are replaced inside `load` method
             let mut collection = CollectionWriter::new(
-                collection_id.clone(),
+                collection_id,
                 None,
                 ApiKey(Secret::new("".to_string())),
                 LanguageDTO::English,
@@ -123,7 +123,7 @@ impl CollectionsWriter {
         let default_language = language.unwrap_or(LanguageDTO::English);
 
         let collection = CollectionWriter::new(
-            id.clone(),
+            id,
             description.clone(),
             write_api_key,
             default_language,
@@ -160,7 +160,7 @@ impl CollectionsWriter {
         // Send event & Register field should be inside the lock transaction
         sender
             .send(WriteOperation::CreateCollection {
-                id: id.clone(),
+                id,
                 read_api_key,
                 description,
                 default_language,
@@ -172,7 +172,7 @@ impl CollectionsWriter {
             .await
             .context("Cannot register fields")?;
 
-        collections.insert(id.clone(), collection);
+        collections.insert(id, collection);
         drop(collections);
 
         self.collection_options.insert(id, collection_option);
@@ -189,7 +189,7 @@ impl CollectionsWriter {
         let mut collection_tmp = collections
             .remove(&collection_id_tmp)
             .ok_or_else(|| anyhow!("Collection not found"))?;
-        collection_tmp.id = collection_id.clone();
+        collection_tmp.id = collection_id;
         collections.insert(collection_id, collection_tmp);
         Ok(())
     }
@@ -212,10 +212,10 @@ impl CollectionsWriter {
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
         for (collection_id, collection) in collections.iter() {
-            let collection_dir = data_dir.join(collection_id.0.clone());
+            let collection_dir = data_dir.join(collection_id);
 
             let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: collection_id.0.clone(),
+                collection: collection_id.to_string(),
                 side: "write",
             });
             collection.commit(collection_dir).await?;
@@ -231,7 +231,7 @@ impl CollectionsWriter {
                 collection_options: self
                     .collection_options
                     .iter()
-                    .map(|e| (e.key().clone(), e.value().clone()))
+                    .map(|e| (*e.key(), e.value().clone()))
                     .collect(),
             }))
             .context("Cannot write info.json")?;
@@ -254,7 +254,7 @@ impl CollectionsWriter {
         };
 
         let data_dir = &self.config.data_dir.join("collections");
-        let collection_dir = data_dir.join(collection_id.0.clone());
+        let collection_dir = data_dir.join(collection_id.0);
 
         collection.remove_from_fs(collection_dir).await;
 

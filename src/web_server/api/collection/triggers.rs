@@ -65,7 +65,7 @@ async fn get_trigger_v1(
     Query(query): Query<GetTriggerQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let trigger_id = query.trigger_id;
     let read_api_key = query.api_key;
 
@@ -92,7 +92,7 @@ async fn get_all_triggers_v1(
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
@@ -118,7 +118,7 @@ async fn insert_trigger_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
@@ -152,7 +152,7 @@ async fn delete_trigger_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
@@ -183,7 +183,7 @@ async fn update_trigger_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let trigger_id_parts = parse_trigger_id(params.id.clone());
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 

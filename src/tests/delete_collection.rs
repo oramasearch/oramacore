@@ -17,13 +17,13 @@ async fn test_delete_collection() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -43,7 +43,7 @@ async fn test_delete_collection() -> Result<()> {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await?;
     assert_eq!(stats.document_count, 2);
@@ -51,7 +51,7 @@ async fn test_delete_collection() -> Result<()> {
     write_side
         .delete_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await?;
 
@@ -61,14 +61,14 @@ async fn test_delete_collection() -> Result<()> {
     let stats = write_side
         .get_collection_dto(
             ApiKey(Secret::new("my-master-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await;
     assert!(matches!(stats, Ok(None)));
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await;
     assert!(stats.is_err());
@@ -76,7 +76,7 @@ async fn test_delete_collection() -> Result<()> {
     write_side.commit().await?;
     read_side.commit().await?;
 
-    let result = create_collection(write_side.clone(), collection_id.clone()).await;
+    let result = create_collection(write_side.clone(), collection_id).await;
     assert!(result.is_ok());
 
     sleep(Duration::from_millis(600)).await;
@@ -84,7 +84,7 @@ async fn test_delete_collection() -> Result<()> {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -94,14 +94,14 @@ async fn test_delete_collection() -> Result<()> {
     let stats = write_side
         .get_collection_dto(
             ApiKey(Secret::new("my-master-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await;
     assert!(matches!(stats, Ok(None)));
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await;
     assert!(stats.is_err());

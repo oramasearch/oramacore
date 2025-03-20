@@ -18,7 +18,7 @@ async fn test_ensure_back_compatibility() -> Result<()> {
     config.reader_side.config.data_dir = cwd.join("./src/tests/dump/v1/read_side");
     let (_, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
 
     let output = read_side
         .search(
@@ -58,12 +58,12 @@ async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
     config.reader_side.config.data_dir = cwd.join("./src/tests/dump-test/v1/read_side");
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
 
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "d",
                 "where": {

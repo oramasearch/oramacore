@@ -267,7 +267,7 @@ impl CollectionReader {
 
     #[inline]
     pub fn get_id(&self) -> CollectionId {
-        self.id.clone()
+        self.id
     }
 
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
@@ -292,7 +292,7 @@ impl CollectionReader {
         let mut current_collection_info = if force_new {
             debug!("Force to create new new one");
             dump::CollectionInfoV2 {
-                id: self.id.clone(),
+                id: self.id,
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
@@ -324,7 +324,7 @@ impl CollectionReader {
         } else {
             debug!("No previous collection info found, creating a new one");
             dump::CollectionInfoV2 {
-                id: self.id.clone(),
+                id: self.id,
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
@@ -398,7 +398,7 @@ impl CollectionReader {
         );
         for field_id in uncommitted_infos.number_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_id,
                 field_type: "number",
                 side: "read",
@@ -478,7 +478,7 @@ impl CollectionReader {
         );
         for field_id in uncommitted_infos.string_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_id,
                 field_type: "string",
                 side: "read",
@@ -560,7 +560,7 @@ impl CollectionReader {
         debug!("Merging bool fields {:?}", uncommitted_infos.bool_fields);
         for field_id in uncommitted_infos.bool_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_id,
                 field_type: "bool",
                 side: "read",
@@ -638,7 +638,7 @@ impl CollectionReader {
         );
         for field_id in uncommitted_infos.string_filter_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_id,
                 field_type: "string_filter",
                 side: "read",
@@ -716,7 +716,7 @@ impl CollectionReader {
         );
         for field_id in uncommitted_infos.vector_fields {
             let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_id,
                 field_type: "vector",
                 side: "read",
@@ -999,13 +999,13 @@ impl CollectionReader {
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
             FILTER_PERC_CALCULATION_COUNT.track(
                 CollectionLabels {
-                    collection: self.id.0.clone(),
+                    collection: self.id.to_string(),
                 },
                 filtered_doc_ids.len() as f64 / self.count_documents() as f64,
             );
             FILTER_COUNT_CALCULATION_COUNT.track_usize(
                 CollectionLabels {
-                    collection: self.id.0.clone(),
+                    collection: self.id.to_string(),
                 },
                 filtered_doc_ids.len(),
             );
@@ -1116,13 +1116,13 @@ impl CollectionReader {
 
         MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
             CollectionLabels {
-                collection: self.id.0.clone(),
+                collection: self.id.to_string(),
             },
             token_scores.len(),
         );
         MATCHING_PERC_CALCULATION_COUNT.track(
             CollectionLabels {
-                collection: self.id.0.clone(),
+                collection: self.id.to_string(),
             },
             token_scores.len() as f64 / self.count_documents() as f64,
         );
@@ -1157,7 +1157,7 @@ impl CollectionReader {
         }
 
         let filter_m = FILTER_CALCULATION_TIME.create(CollectionLabels {
-            collection: self.id.0.clone(),
+            collection: self.id.to_string(),
         });
 
         info!(

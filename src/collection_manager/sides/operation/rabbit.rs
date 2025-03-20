@@ -91,14 +91,14 @@ impl RabbitOperationSender {
 
     pub async fn send(&self, operation: &WriteOperation) -> Result<()> {
         let coll_id: Option<CollectionId> = match operation {
-            WriteOperation::Collection(coll_id, _) => Some(coll_id.clone()),
-            WriteOperation::DeleteCollection(id) => Some(id.clone()),
-            WriteOperation::CreateCollection { id, .. } => Some(id.clone()),
+            WriteOperation::Collection(coll_id, _) => Some(*coll_id),
+            WriteOperation::DeleteCollection(id) => Some(*id),
+            WriteOperation::CreateCollection { id, .. } => Some(*id),
             WriteOperation::KV(_) => None,
             WriteOperation::SubstituteCollection {
                 target_collection_id,
                 ..
-            } => Some(target_collection_id.clone()),
+            } => Some(*target_collection_id),
         };
 
         let op_type_id = operation.get_type_id();
@@ -112,7 +112,7 @@ impl RabbitOperationSender {
             .application_properties();
 
         let prop = if let Some(coll_id) = coll_id {
-            prop.insert("coll_id", coll_id.0)
+            prop.insert("coll_id", coll_id.to_string())
         } else {
             prop
         };

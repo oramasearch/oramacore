@@ -4236,6 +4236,7 @@ name = "oramacore"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrayvec",
  "assert_approx_eq",
  "async-openai",
  "async-trait",

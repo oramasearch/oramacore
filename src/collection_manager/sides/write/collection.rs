@@ -69,7 +69,7 @@ impl CollectionWriter {
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     ) -> Self {
         Self {
-            id: id.clone(),
+            id,
             description,
             write_api_key,
             default_language,
@@ -106,7 +106,7 @@ impl CollectionWriter {
             .collect();
 
         CollectionDTO {
-            id: self.id.clone(),
+            id: self.id,
             description: self.description.clone(),
             document_count: self
                 .collection_document_count
@@ -190,7 +190,7 @@ impl CollectionWriter {
             let field_name = field.field_name();
 
             let metric = FIELD_CALCULATION_TIME.create(FieldCalculationLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_name.clone().into(),
                 field_type: field.field_type_str().into(),
             });
@@ -210,7 +210,7 @@ impl CollectionWriter {
             let field_name = field.field_name();
 
             let metric = FIELD_CALCULATION_TIME.create(FieldCalculationLabels {
-                collection: self.id.0.clone().into(),
+                collection: self.id.to_string().into(),
                 field: field_name.clone().into(),
                 field_type: field.field_type_str().into(),
             });
@@ -367,14 +367,14 @@ impl CollectionWriter {
                         embedding_field.document_fields.clone(),
                         embedding_sender,
                         hooks_runtime,
-                        self.id.clone(),
+                        self.id,
                         field_id,
                         field_name.clone(),
                     ),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
@@ -396,16 +396,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionScoreField::new_string(
-                        parser,
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionScoreField::new_string(parser, self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender.clone(),
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name.clone(),
                     TypedFieldWrapper::Text(locale),
@@ -422,15 +417,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_string(
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionFilterField::new_string(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::String,
@@ -451,14 +442,14 @@ impl CollectionWriter {
                     field_id,
                     CollectionScoreField::new_arr_string(
                         parser,
-                        self.id.clone(),
+                        self.id,
                         field_id,
                         field_name.clone(),
                     ),
                 );
                 send(
                     sender.clone(),
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name.clone(),
                     TypedFieldWrapper::ArrayText(locale),
@@ -475,15 +466,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_string(
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionFilterField::new_string(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::String,
@@ -501,15 +488,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_number(
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionFilterField::new_number(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::Number,
@@ -527,15 +510,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_arr_number(
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionFilterField::new_arr_number(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::ArrayNumber,
@@ -553,11 +532,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_bool(self.id.clone(), field_id, field_name.clone()),
+                    CollectionFilterField::new_bool(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::Bool,
@@ -575,15 +554,11 @@ impl CollectionWriter {
                 .await;
                 lock.insert(
                     field_id,
-                    CollectionFilterField::new_arr_bool(
-                        self.id.clone(),
-                        field_id,
-                        field_name.clone(),
-                    ),
+                    CollectionFilterField::new_arr_bool(self.id, field_id, field_name.clone()),
                 );
                 send(
                     sender,
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name,
                     TypedFieldWrapper::ArrayBoolean,
@@ -677,7 +652,7 @@ impl CollectionWriter {
 
         sender
             .send(WriteOperation::Collection(
-                self.id.clone(),
+                self.id,
                 CollectionWriteOperation::DeleteDocuments { doc_ids },
             ))
             .await?;
@@ -710,7 +685,7 @@ impl CollectionWriter {
             .context("Cannot commit doc_id_storage")?;
 
         let dump = CollectionDump::V2(CollectionDumpV2 {
-            id: self.id.clone(),
+            id: self.id,
             description: self.description.clone(),
             write_api_key: self.write_api_key.0.expose_secret().clone(),
             default_language: self.default_language,
@@ -841,13 +816,13 @@ impl CollectionWriter {
 
             let collection_field: CollectionFilterField = match serialized {
                 SerializedFieldIndexer::Number => {
-                    CollectionFilterField::new_number(self.id.clone(), field_id, field_name.clone())
+                    CollectionFilterField::new_number(self.id, field_id, field_name.clone())
                 }
                 SerializedFieldIndexer::Bool => {
-                    CollectionFilterField::new_bool(self.id.clone(), field_id, field_name.clone())
+                    CollectionFilterField::new_bool(self.id, field_id, field_name.clone())
                 }
                 SerializedFieldIndexer::StringFilter => {
-                    CollectionFilterField::new_string(self.id.clone(), field_id, field_name.clone())
+                    CollectionFilterField::new_string(self.id, field_id, field_name.clone())
                 }
                 SerializedFieldIndexer::Embedding(_, _) => {
                     return Err(anyhow!("Embedding field not supported"))
@@ -872,7 +847,7 @@ impl CollectionWriter {
             let collection_field: CollectionScoreField = match serialized {
                 SerializedFieldIndexer::String(locale) => CollectionScoreField::new_string(
                     nlp_service.get(locale),
-                    self.id.clone(),
+                    self.id,
                     field_id,
                     field_name.clone(),
                 ),
@@ -882,7 +857,7 @@ impl CollectionWriter {
                         fields,
                         self.embedding_sender.clone(),
                         hooks_runtime.clone(),
-                        self.id.clone(),
+                        self.id,
                         field_id,
                         field_name.clone(),
                     )

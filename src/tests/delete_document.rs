@@ -20,14 +20,14 @@ async fn test_delete_documents() -> Result<()> {
 
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let document_count = 10;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..document_count).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -40,7 +40,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -52,7 +52,7 @@ async fn test_delete_documents() -> Result<()> {
     write_side
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             vec![(document_count - 1).to_string()],
         )
         .await?;
@@ -60,7 +60,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -75,7 +75,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -87,7 +87,7 @@ async fn test_delete_documents() -> Result<()> {
     write_side
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             vec![(document_count - 2).to_string()],
         )
         .await?;
@@ -96,7 +96,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -109,7 +109,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -121,7 +121,7 @@ async fn test_delete_documents() -> Result<()> {
     write_side
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             vec![(document_count - 2).to_string()],
         )
         .await?;
@@ -130,7 +130,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -146,7 +146,7 @@ async fn test_delete_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -159,7 +159,7 @@ async fn test_delete_documents() -> Result<()> {
     let output = write_side
         .delete_documents(
             ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             vec![(document_count - 2).to_string()],
         )
         .await;

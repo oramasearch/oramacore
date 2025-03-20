@@ -20,14 +20,14 @@ async fn test_insert_duplicate_documents() -> Result<()> {
 
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
 
     let document_count = 10;
     let result = insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..document_count).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -43,7 +43,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "text",
             })
@@ -55,7 +55,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
     let result = insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         (0..document_count).map(|i| {
             json!({
                 "id": i.to_string(),
@@ -73,7 +73,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "pippo",
             })
@@ -91,12 +91,12 @@ async fn test_document_duplication() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
+    let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
             ApiKey(Secret::new("my-master-api-key".to_string())),
             json!({
-                "id": collection_id.0.clone(),
+                "id": collection_id,
                 "read_api_key": "my-read-api-key",
                 "write_api_key": "my-write-api-key",
             })
@@ -107,7 +107,7 @@ async fn test_document_duplication() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "id": "1",
             "text": "B",
@@ -117,7 +117,7 @@ async fn test_document_duplication() -> Result<()> {
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "id": "1",
             "text": "C",
@@ -128,7 +128,7 @@ async fn test_document_duplication() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "B",
             })
@@ -140,7 +140,7 @@ async fn test_document_duplication() -> Result<()> {
     let result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "C",
             })

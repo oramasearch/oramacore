@@ -53,7 +53,7 @@ pub struct PartyPlanner {}
 impl PartyPlanner {
     pub fn run(
         read_side: State<Arc<ReadSide>>,
-        collection_id: String,
+        collection_id: CollectionId,
         api_key: ApiKey,
         input: String,
         mut history: Vec<InteractionMessage>,
@@ -165,7 +165,7 @@ impl PartyPlanner {
                     let result = Self::handle_orama_search(
                         read_side.clone(),
                         input.clone(),
-                        CollectionId(collection_id.clone()),
+                        collection_id,
                         api_key.clone(),
                     )
                     .await

@@ -20,12 +20,12 @@ async fn test_string_filter() -> Result<()> {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone()).await?;
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![
             json!({
                 "id": "1",
@@ -44,7 +44,7 @@ async fn test_string_filter() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "d",
                 "where": {
@@ -59,7 +59,7 @@ async fn test_string_filter() -> Result<()> {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -97,7 +97,7 @@ async fn test_string_filter() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "d",
                 "where": {
@@ -113,7 +113,7 @@ async fn test_string_filter() -> Result<()> {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -150,7 +150,7 @@ async fn test_string_filter() -> Result<()> {
     let output = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
             json!({
                 "term": "d",
                 "where": {
@@ -167,7 +167,7 @@ async fn test_string_filter() -> Result<()> {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -208,15 +208,15 @@ async fn test_string_filter_long_text() {
     let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await.unwrap();
 
-    let collection_id = CollectionId("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id.clone())
+    let collection_id = CollectionId::from("test-collection".to_string());
+    create_collection(write_side.clone(), collection_id)
         .await
         .unwrap();
 
     insert_docs(
         write_side.clone(),
         ApiKey(Secret::new("my-write-api-key".to_string())),
-        collection_id.clone(),
+        collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
         })],
@@ -227,7 +227,7 @@ async fn test_string_filter_long_text() {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -265,7 +265,7 @@ async fn test_string_filter_long_text() {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();
@@ -302,7 +302,7 @@ async fn test_string_filter_long_text() {
     let stats = read_side
         .collection_stats(
             ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id.clone(),
+            collection_id,
         )
         .await
         .unwrap();

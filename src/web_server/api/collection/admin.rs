@@ -78,7 +78,7 @@ async fn get_collection_by_id(
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
     let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
     let collection_dto = write_side
         .get_collection_dto(master_api_key, collection_id)
         .await;
@@ -144,7 +144,7 @@ async fn add_documents(
     TypedHeader(auth): AuthorizationBearerHeader,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
 
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
@@ -153,19 +153,19 @@ async fn add_documents(
         .insert_documents(write_api_key, collection_id, json)
         .await
     {
-        Ok(r) => return Ok((StatusCode::OK, Json(r))),
+        Ok(r) => Ok((StatusCode::OK, Json(r))),
         Err(e) => {
             error!("{e:?}");
             error!("Error adding documents to collection: {}", e);
             e.chain()
                 .skip(1)
                 .for_each(|cause| error!("because: {}", cause));
-            return Err((
+            Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),
-            ));
+            ))
         }
-    };
+    }
 }
 
 #[endpoint(
@@ -241,7 +241,7 @@ async fn delete_documents(
     TypedHeader(auth): AuthorizationBearerHeader,
     Json(json): Json<DeleteDocuments>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
 
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
@@ -282,7 +282,7 @@ async fn reindex(
     TypedHeader(auth): AuthorizationBearerHeader,
     Json(json): Json<ReindexConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId(id);
+    let collection_id = CollectionId::from(id);
 
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
