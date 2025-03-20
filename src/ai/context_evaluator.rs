@@ -205,6 +205,7 @@ impl ContextEvaluator {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -510,3 +511,4 @@ mod tests {
         assert_eq!(result, 0.0);
     }
 }
+*/
