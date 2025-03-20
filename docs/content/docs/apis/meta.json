@@ -6,6 +6,7 @@
     "insert-documents",
     "search-documents",
     "answer-session",
-    "advanced-reasoning"
+    "advanced-reasoning",
+    "custom-system-prompts"
   ]
 }
