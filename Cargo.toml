@@ -148,6 +148,7 @@ default = ["writer", "reader"]
 no_auto_embedding_field_on_creation = []
 writer = []
 reader = []
+test-mem-alloc = []
 
 [workspace]
 members = ["crates/hnsw2"]

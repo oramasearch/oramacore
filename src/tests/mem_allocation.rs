@@ -18,7 +18,7 @@ const MAX_LOG_COUNT: usize = 1_024 * 10;
 static ALLOCATOR: RalloAllocator<MAX_FRAME_LENGTH, MAX_LOG_COUNT> = RalloAllocator::new();
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-async fn test_search_simpleeeee() -> Result<()> {
+async fn test_search_mem_allocation() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
     let mut config = create_oramacore_config();
     config.reader_side.config.insert_batch_commit_size = 1_000_000;
