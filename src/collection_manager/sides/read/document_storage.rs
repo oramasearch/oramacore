@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
+    sync::Arc,
 };
 use tracing::{debug, info, trace, warn};
 
@@ -23,11 +24,12 @@ use crate::{
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
     path: PathBuf,
-    cache: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>>,
+    cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>>,
 }
 impl CommittedDiskDocumentStorage {
     fn new(path: PathBuf) -> Self {
-        let cache: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>> = Default::default();
+        let cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>> =
+            Default::default();
 
         Self { path, cache }
     }
@@ -35,9 +37,9 @@ impl CommittedDiskDocumentStorage {
     async fn get_documents_by_ids(
         &self,
         doc_ids: &[DocumentId],
-    ) -> Result<Vec<Option<RawJSONDocument>>> {
+    ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
         let lock = self.cache.read().await;
-        let mut from_cache: HashMap<DocumentId, RawJSONDocument> = doc_ids
+        let mut from_cache: HashMap<DocumentId, Arc<RawJSONDocument>> = doc_ids
             .iter()
             .filter_map(|id| lock.get(id).map(|d| (*id, d.clone())))
             .collect();
@@ -85,17 +87,18 @@ impl CommittedDiskDocumentStorage {
                 std::result::Result::Ok(doc) => doc,
             };
 
+            let doc = doc.0;
             let mut lock = self.cache.write().await;
-            lock.insert(*id, doc.0.clone());
+            lock.insert(*id, doc.clone());
             drop(lock);
 
-            result.push(Some(doc.0));
+            result.push(Some(doc));
         }
 
         Ok(result)
     }
 
-    async fn add(&self, docs: Vec<(DocumentId, RawJSONDocument)>) -> Result<()> {
+    async fn add(&self, docs: Vec<(DocumentId, Arc<RawJSONDocument>)>) -> Result<()> {
         for (doc_id, doc) in docs {
             let doc_path = self.path.join(format!("{}", doc_id.0));
 
@@ -116,7 +119,7 @@ pub struct DocumentStorageConfig {
 
 #[derive(Debug)]
 pub struct DocumentStorage {
-    uncommitted: tokio::sync::RwLock<HashMap<DocumentId, RawJSONDocument>>,
+    uncommitted: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>>,
     committed: CommittedDiskDocumentStorage,
     uncommitted_document_deletions: tokio::sync::RwLock<HashSet<DocumentId>>,
 }
@@ -133,6 +136,7 @@ impl DocumentStorage {
     }
 
     pub async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
+        let doc = Arc::new(doc);
         let mut uncommitted = self.uncommitted.write().await;
         if uncommitted.insert(doc_id, doc).is_some() {
             warn!("Document {:?} already exists. Overwritten.", doc_id);
@@ -151,7 +155,7 @@ impl DocumentStorage {
     pub async fn get_documents_by_ids(
         &self,
         mut doc_ids: Vec<DocumentId>,
-    ) -> Result<Vec<Option<RawJSONDocument>>> {
+    ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
         let uncommitted_document_deletions = self.uncommitted_document_deletions.read().await;
         doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
 
@@ -224,7 +228,7 @@ impl DocumentStorage {
     }
 }
 
-struct RawJSONDocumentWrapper(RawJSONDocument);
+struct RawJSONDocumentWrapper(Arc<RawJSONDocument>);
 
 #[cfg(test)]
 impl PartialEq for RawJSONDocumentWrapper {
@@ -297,7 +301,10 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
                     Ok(inner) => inner,
                 };
 
-                Result::Ok(RawJSONDocumentWrapper(RawJSONDocument { id, inner }))
+                Result::Ok(RawJSONDocumentWrapper(Arc::new(RawJSONDocument {
+                    id,
+                    inner,
+                })))
             }
         }
 
@@ -319,7 +326,7 @@ mod tests {
         let raw_json_document: RawJSONDocument = value.try_into().unwrap();
         assert_eq!(raw_json_document.id, Some("the-id".to_string()));
 
-        let raw_json_document_wrapper = RawJSONDocumentWrapper(raw_json_document);
+        let raw_json_document_wrapper = RawJSONDocumentWrapper(Arc::new(raw_json_document));
         let serialized = serde_json::to_string(&raw_json_document_wrapper).unwrap();
         let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
 

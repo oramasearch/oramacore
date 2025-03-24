@@ -250,7 +250,7 @@ mod tests {
                     id: "123".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("123".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -260,14 +260,14 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 },
                 SearchResultHit {
                     id: "456".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("456".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -277,7 +277,7 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 }
             ],
@@ -322,7 +322,7 @@ mod tests {
                     id: "123".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("123".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -332,14 +332,14 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 },
                 SearchResultHit {
                     id: "456".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("456".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -349,7 +349,7 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 }
             ],
@@ -394,7 +394,7 @@ mod tests {
                     id: "123".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("123".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -404,14 +404,14 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 },
                 SearchResultHit {
                     id: "456".to_string(),
                     score: 0.0,
                     document: Some(
-                        RawJSONDocument {
+                        Arc::new(RawJSONDocument {
                             id: Some("456".to_string()),
                             inner: RawValue::from_string(
                                     r#"
@@ -421,7 +421,7 @@ mod tests {
                                     }
                                     "#.to_string()
                                 ).unwrap(),
-                        }
+                        })
                     )
                 }
             ],
