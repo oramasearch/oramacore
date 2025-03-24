@@ -126,6 +126,7 @@ reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
 fake = "4.0.0"
 dircpy = "0.3.19"
+rallo = { version = "0.2.0" }
 
 [[bin]]
 name = "oramacore"
@@ -147,6 +148,7 @@ default = ["writer", "reader"]
 no_auto_embedding_field_on_creation = []
 writer = []
 reader = []
+test-mem-alloc = []
 
 [workspace]
 members = ["crates/hnsw2"]

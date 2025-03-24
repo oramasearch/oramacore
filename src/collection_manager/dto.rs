@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum_openapi3::utoipa::{self, IntoParams};
 use axum_openapi3::utoipa::{PartialSchema, ToSchema};
@@ -650,7 +651,7 @@ impl TryFrom<serde_json::Value> for SearchParams {
 pub struct SearchResultHit {
     pub id: String,
     pub score: f32,
-    pub document: Option<RawJSONDocument>,
+    pub document: Option<Arc<RawJSONDocument>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
