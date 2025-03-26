@@ -230,9 +230,9 @@ async fn answer_v1(
         .await
         .expect("Invalid API key");
 
-    let context_evaluator = ContextEvaluator::try_new(read_side.get_ai_service())
-        .context("Unable to instantiate the context evaluator")
-        .unwrap();
+    // let context_evaluator = ContextEvaluator::try_new(read_side.get_ai_service())
+    //     .context("Unable to instantiate the context evaluator")
+    //     .unwrap();
 
     let query = interaction.query;
     let conversation = interaction.messages;
