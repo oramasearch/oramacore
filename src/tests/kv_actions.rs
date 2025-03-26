@@ -141,7 +141,7 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
 }
 
 async fn run_segments_tests() {
-    let content = include_str!("./hurl/segments-test.hurl");
+    let content = include_str!("./hurl/kv-actions-test.hurl");
 
     let result = run_hurl_test(content).await.unwrap();
     assert!(result.success);

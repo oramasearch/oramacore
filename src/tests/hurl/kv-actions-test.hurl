@@ -134,6 +134,8 @@ Authorization: Bearer my-write-api-key
 HTTP 201
 [Asserts]
 jsonpath "$.success" == true
+jsonpath "$.id" == "1"
+jsonpath "$.trigger.id" == "1"
 jsonpath "$.trigger.name" == "My first trigger"
 jsonpath "$.trigger.description" == "My first trigger description"
 jsonpath "$.trigger.response" == "My first trigger response"
@@ -162,6 +164,8 @@ Authorization: Bearer my-write-api-key
 HTTP 201
 [Asserts]
 jsonpath "$.success" == true
+jsonpath "$.id" == "2"
+jsonpath "$.trigger.id" == "2"
 jsonpath "$.trigger.name" == "My second trigger"
 jsonpath "$.trigger.description" == "My second trigger description"
 jsonpath "$.trigger.response" == "My second trigger response"

@@ -839,7 +839,15 @@ impl WriteSide {
             .await?;
 
         let final_trigger_id = match trigger_id {
-            Some(id) => id,
+            Some(mut id) => {
+                let required_prefix = format!("{}:trigger:", collection_id.0);
+
+                if !id.starts_with(&required_prefix) {
+                    id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
+                }
+
+                id
+            }
             None => {
                 let cuid = cuid2::create_id();
                 get_trigger_key(collection_id, cuid, trigger.segment_id.clone())

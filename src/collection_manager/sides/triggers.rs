@@ -71,18 +71,21 @@ impl TriggerInterface {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
-        let trigger_id_parts = parse_trigger_id(trigger_id.clone());
+        match parse_trigger_id(trigger_id.clone()) {
+            Some(trigger_id_parts) => {
+                let key = get_trigger_key(
+                    collection_id,
+                    trigger_id_parts.trigger_id,
+                    trigger_id_parts.segment_id,
+                );
 
-        let key = get_trigger_key(
-            collection_id,
-            trigger_id_parts.trigger_id,
-            trigger_id_parts.segment_id,
-        );
-
-        match self.kv.remove_and_get(&key).await? {
-            None => Ok(None),
-            Some(Err(e)) => Err(e),
-            Some(Ok(trigger)) => Ok(Some(trigger)),
+                match self.kv.remove_and_get(&key).await? {
+                    None => Ok(None),
+                    Some(Err(e)) => Err(e),
+                    Some(Ok(trigger)) => Ok(Some(trigger)),
+                }
+            }
+            None => Err(anyhow::anyhow!("Cannot parse trigger id {}", trigger_id)),
         }
     }
 
@@ -165,7 +168,7 @@ pub fn get_trigger_key(
     }
 }
 
-pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
+pub fn parse_trigger_id(trigger_id: String) -> Option<TriggerIdContent> {
     let parts = trigger_id.split(':').collect::<Vec<&str>>();
     let collection_id = CollectionId::from(parts[0].to_string());
 
@@ -174,13 +177,15 @@ pub fn parse_trigger_id(trigger_id: String) -> TriggerIdContent {
         .find(|part| part.starts_with("s_"))
         .map(|s| s.to_string());
 
-    let trigger_id = parts.iter().find(|part| part.starts_with("t_")).unwrap();
+    if let Some(trigger_id) = parts.iter().find(|part| part.starts_with("t_")) {
+        return Some(TriggerIdContent {
+            collection_id,
+            trigger_id: trigger_id.replace("t_", ""),
+            segment_id: segment_id.map(|s| s.replace("s_", "")),
+        });
+    };
 
-    TriggerIdContent {
-        collection_id,
-        trigger_id: trigger_id.replace("t_", ""),
-        segment_id: segment_id.map(|s| s.replace("s_", "")),
-    }
+    None
 }
 
 #[cfg(test)]

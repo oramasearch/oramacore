@@ -69,6 +69,9 @@ async fn get_trigger_v1(
     let trigger_id = query.trigger_id;
     let read_api_key = query.api_key;
 
+    dbg!("TRIGGER_ID--------------------------------------------");
+    dbg!(&trigger_id);
+
     match read_side
         .get_trigger(read_api_key, collection_id, trigger_id)
         .await
@@ -130,13 +133,29 @@ async fn insert_trigger_v1(
     };
 
     match write_side
-        .insert_trigger(write_api_key, collection_id, trigger, None)
+        .insert_trigger(
+            write_api_key,
+            collection_id,
+            trigger.clone(),
+            Some(trigger.id),
+        )
         .await
     {
-        Ok(new_trigger) => Ok((
-            StatusCode::CREATED,
-            Json(json!({ "success": true, "id": new_trigger.id.clone(), "trigger": new_trigger })),
-        )),
+        Ok(new_trigger) => match parse_trigger_id(new_trigger.id.clone()) {
+            Some(parsed_trigger_id) => Ok((
+                StatusCode::CREATED,
+                Json(
+                    json!({ "success": true, "id": parsed_trigger_id.trigger_id, "trigger": Trigger {
+                        id: parsed_trigger_id.trigger_id,
+                        ..new_trigger
+                    } }),
+                ),
+            )),
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to parse trigger ID" })),
+            )),
+        },
         Err(e) => {
             e.chain()
                 .skip(1)
@@ -192,39 +211,48 @@ async fn update_trigger_v1(
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId::from(id);
-    let trigger_id_parts = parse_trigger_id(params.id.clone());
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
-    if Some(trigger_id_parts.segment_id.clone()) != Some(params.segment_id.clone()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "You can not update a segment ID. Please create a new trigger and link it to a new segment instead." }),
-            ),
-        ));
-    }
+    match parse_trigger_id(params.id.clone()) {
+        Some(trigger_id_parts) => {
+            if Some(trigger_id_parts.segment_id.clone()) != Some(params.segment_id.clone()) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({ "error": "You can not update a segment ID. Please create a new trigger and link it to a new segment instead." }),
+                    ),
+                ));
+            }
 
-    let trigger = Trigger {
-        id: params.id,
-        name: params.name.clone(),
-        description: params.description.clone(),
-        response: params.response.clone(),
-        segment_id: trigger_id_parts.segment_id,
-    };
+            let trigger = Trigger {
+                id: params.id,
+                name: params.name.clone(),
+                description: params.description.clone(),
+                response: params.response.clone(),
+                segment_id: trigger_id_parts.segment_id,
+            };
 
-    match write_side
-        .update_trigger(write_api_key, collection_id, trigger.clone())
-        .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
+            match write_side
+                .update_trigger(write_api_key, collection_id, trigger.clone())
+                .await
+            {
+                Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
+                Err(e) => {
+                    e.chain()
+                        .skip(1)
+                        .for_each(|cause| println!("because: {}", cause));
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    ))
+                }
+            }
+        }
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Failed to parse trigger ID" })),
+            ));
         }
     }
 }
