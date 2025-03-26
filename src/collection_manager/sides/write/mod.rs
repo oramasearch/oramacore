@@ -19,7 +19,7 @@ use super::{
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
-    triggers::{get_trigger_key, Trigger, TriggerInterface},
+    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -912,17 +912,47 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<()> {
+    ) -> Result<Option<Trigger>> {
+        let trigger_key = get_trigger_key(
+            collection_id,
+            trigger.id.clone(),
+            trigger.segment_id.clone(),
+        );
+
+        let new_trigger = Trigger {
+            id: trigger_key.clone(),
+            ..trigger
+        };
+
         self.insert_trigger(
             write_api_key.clone(),
             collection_id,
-            trigger.clone(),
+            new_trigger,
             Some(trigger.id),
         )
         .await
         .context("Cannot insert updated trigger")?;
 
-        Ok(())
+        match parse_trigger_id(trigger_key.clone()) {
+            Some(key_content) => {
+                let updated_trigger = self
+                    .triggers
+                    .get(collection_id, key_content.trigger_id.clone())
+                    .await
+                    .context("Cannot get updated trigger")?;
+
+                match updated_trigger {
+                    Some(trigger) => Ok(Some(Trigger {
+                        id: key_content.trigger_id,
+                        ..trigger
+                    })),
+                    None => bail!("Cannot get updated trigger"),
+                }
+            }
+            None => {
+                bail!("Cannot parse trigger id")
+            }
+        }
     }
 }
 
