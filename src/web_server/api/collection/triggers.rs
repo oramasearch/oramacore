@@ -69,9 +69,6 @@ async fn get_trigger_v1(
     let trigger_id = query.trigger_id;
     let read_api_key = query.api_key;
 
-    dbg!("TRIGGER_ID--------------------------------------------");
-    dbg!(&trigger_id);
-
     match read_side
         .get_trigger(read_api_key, collection_id, trigger_id)
         .await
