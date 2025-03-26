@@ -832,7 +832,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        trigger: InsertTriggerParams,
+        trigger: Trigger,
         trigger_id: Option<String>,
     ) -> Result<Trigger> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -905,17 +905,10 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger: Trigger,
     ) -> Result<()> {
-        let updated_trigger = InsertTriggerParams {
-            name: trigger.name.clone(),
-            description: trigger.description.clone(),
-            response: trigger.response.clone(),
-            segment_id: trigger.segment_id.clone(),
-        };
-
         self.insert_trigger(
             write_api_key.clone(),
             collection_id,
-            updated_trigger,
+            trigger.clone(),
             Some(trigger.id),
         )
         .await

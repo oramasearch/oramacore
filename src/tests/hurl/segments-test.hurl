@@ -114,3 +114,69 @@ jsonpath "$.segments[0].id" == "2"
 jsonpath "$.segments[0].name" == "My second segment"
 jsonpath "$.segments[0].description" == "My second segment description"
 jsonpath "$.segments[0].goal" == "My second segment goal"
+
+# ------------------------------------------------------------------------------------
+#
+# Triggers
+#
+# ------------------------------------------------------------------------------------
+
+# Create a new trigger linked to the second segment
+POST {{base_url}}/v1/collections/{{collection_id}}/triggers/insert
+Authorization: Bearer my-write-api-key
+{
+    "id": "1",
+    "name": "My first trigger",
+    "description": "My first trigger description",
+    "response": "My first trigger response",
+    "segment_id": "2"
+}
+HTTP 201
+[Asserts]
+jsonpath "$.success" == true
+jsonpath "$.trigger.name" == "My first trigger"
+jsonpath "$.trigger.description" == "My first trigger description"
+jsonpath "$.trigger.response" == "My first trigger response"
+jsonpath "$.trigger.segment_id" == "2"
+
+# Get the trigger
+GET {{base_url}}/v1/collections/{{collection_id}}/triggers/get?api-key=my-read-api-key&trigger_id=1
+HTTP 200
+[Asserts]
+jsonpath "$.trigger.id" == "1"
+jsonpath "$.trigger.name" == "My first trigger"
+jsonpath "$.trigger.description" == "My first trigger description"
+jsonpath "$.trigger.response" == "My first trigger response"
+jsonpath "$.trigger.segment_id" == "2"
+
+# Insert a second trigger
+POST {{base_url}}/v1/collections/{{collection_id}}/triggers/insert
+Authorization: Bearer my-write-api-key
+{
+    "id": "2",
+    "name": "My second trigger",
+    "description": "My second trigger description",
+    "response": "My second trigger response",
+    "segment_id": "2"
+}
+HTTP 201
+[Asserts]
+jsonpath "$.success" == true
+jsonpath "$.trigger.name" == "My second trigger"
+jsonpath "$.trigger.description" == "My second trigger description"
+jsonpath "$.trigger.response" == "My second trigger response"
+jsonpath "$.trigger.segment_id" == "2"
+
+# List all triggers
+GET {{base_url}}/v1/collections/{{collection_id}}/triggers/all?api-key=my-read-api-key
+HTTP 200
+[Asserts]
+jsonpath "$.triggers" count == 2
+jsonpath "$.triggers[0].id" == "1"
+jsonpath "$.triggers[0].name" == "My first trigger"
+jsonpath "$.triggers[0].description" == "My first trigger description"
+jsonpath "$.triggers[0].goal" == "My first trigger goal"
+jsonpath "$.triggers[1].id" == "2"
+jsonpath "$.triggers[1].name" == "My second trigger"
+jsonpath "$.triggers[1].description" == "My second trigger description"
+jsonpath "$.triggers[1].goal" == "My second trigger goal"

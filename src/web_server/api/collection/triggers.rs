@@ -121,12 +121,20 @@ async fn insert_trigger_v1(
     let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
+    let trigger = Trigger {
+        id: params.id.unwrap_or(cuid2::create_id()),
+        name: params.name.clone(),
+        description: params.description.clone(),
+        response: params.response.clone(),
+        segment_id: params.segment_id.clone(),
+    };
+
     match write_side
-        .insert_trigger(write_api_key, collection_id, params, None)
+        .insert_trigger(write_api_key, collection_id, trigger, None)
         .await
     {
         Ok(new_trigger) => Ok((
-            StatusCode::OK,
+            StatusCode::CREATED,
             Json(json!({ "success": true, "id": new_trigger.id.clone(), "trigger": new_trigger })),
         )),
         Err(e) => {
