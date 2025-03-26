@@ -20,6 +20,7 @@ use crate::{
             ReadSide, WriteSide,
         },
     },
+    nlp::stop_words::tr,
     types::CollectionId,
 };
 
@@ -121,14 +122,38 @@ async fn insert_trigger_v1(
     let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
+    let trigger = Trigger {
+        id: params.id.unwrap_or(cuid2::create_id()),
+        name: params.name.clone(),
+        description: params.description.clone(),
+        response: params.response.clone(),
+        segment_id: params.segment_id.clone(),
+    };
+
     match write_side
-        .insert_trigger(write_api_key, collection_id, params, None)
+        .insert_trigger(
+            write_api_key,
+            collection_id,
+            trigger.clone(),
+            Some(trigger.id),
+        )
         .await
     {
-        Ok(new_trigger) => Ok((
-            StatusCode::OK,
-            Json(json!({ "success": true, "id": new_trigger.id.clone(), "trigger": new_trigger })),
-        )),
+        Ok(new_trigger) => match parse_trigger_id(new_trigger.id.clone()) {
+            Some(parsed_trigger_id) => Ok((
+                StatusCode::CREATED,
+                Json(
+                    json!({ "success": true, "id": parsed_trigger_id.trigger_id, "trigger": Trigger {
+                        id: parsed_trigger_id.trigger_id,
+                        ..new_trigger
+                    } }),
+                ),
+            )),
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to parse trigger ID" })),
+            )),
+        },
         Err(e) => {
             e.chain()
                 .skip(1)
@@ -184,31 +209,74 @@ async fn update_trigger_v1(
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId::from(id);
-    let trigger_id_parts = parse_trigger_id(params.id.clone());
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
-    if Some(trigger_id_parts.segment_id.clone()) != Some(params.segment_id.clone()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "You can not update a segment ID. Please create a new trigger and link it to a new segment instead." }),
-            ),
-        ));
-    }
-
-    let trigger = Trigger {
-        id: params.id,
-        name: params.name.clone(),
-        description: params.description.clone(),
-        response: params.response.clone(),
-        segment_id: trigger_id_parts.segment_id,
-    };
-
     match write_side
-        .update_trigger(write_api_key, collection_id, trigger.clone())
+        .get_trigger(write_api_key.clone(), collection_id, params.id.clone())
         .await
     {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
+        Ok(existing_trigger) => {
+            // Make sure we don't update the segment ID. Not supported for now.
+            match (
+                existing_trigger.segment_id.as_ref(),
+                params.segment_id.as_ref(),
+            ) {
+                (Some(existing), Some(new)) if existing != new => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(
+                            json!({ "error": "You can not update a segment linked to a trigger." }),
+                        ),
+                    ));
+                }
+                _ => {}
+            }
+
+            // Determine which segment_id to use
+            // If params.segment_id is None but existing_trigger has one, use the existing one
+            let segment_id = match (
+                params.segment_id.clone(),
+                existing_trigger.segment_id.clone(),
+            ) {
+                (Some(new_id), _) => Some(new_id),
+                (None, Some(existing_id)) => Some(existing_id),
+                (None, None) => None,
+            };
+
+            let trigger = Trigger {
+                id: params.id.clone(),
+                name: params.name.clone(),
+                description: params.description.clone(),
+                response: params.response.clone(),
+                segment_id,
+            };
+
+            let update_result = write_side
+                .update_trigger(write_api_key, collection_id, trigger)
+                .await;
+
+            match update_result {
+                Ok(updated_trigger) => match updated_trigger {
+                    Some(trigger) => Ok((
+                        StatusCode::OK,
+                        Json(json!({ "success": true, "trigger": trigger })),
+                    )),
+                    None => Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Unable to get the trigger after updating it." })),
+                    )),
+                },
+                Err(e) => {
+                    e.chain()
+                        .skip(1)
+                        .for_each(|cause| println!("because: {}", cause));
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    ))
+                }
+            }
+        }
         Err(e) => {
             e.chain()
                 .skip(1)

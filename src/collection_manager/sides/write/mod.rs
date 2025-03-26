@@ -19,7 +19,7 @@ use super::{
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
-    triggers::{get_trigger_key, Trigger, TriggerInterface},
+    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -832,14 +832,22 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        trigger: InsertTriggerParams,
+        trigger: Trigger,
         trigger_id: Option<String>,
     ) -> Result<Trigger> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         let final_trigger_id = match trigger_id {
-            Some(id) => id,
+            Some(mut id) => {
+                let required_prefix = format!("{}:trigger:", collection_id.0);
+
+                if !id.starts_with(&required_prefix) {
+                    id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
+                }
+
+                id
+            }
             None => {
                 let cuid = cuid2::create_id();
                 get_trigger_key(collection_id, cuid, trigger.segment_id.clone())
@@ -868,12 +876,12 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id, write_api_key)
+        self.check_write_api_key(collection_id.clone(), write_api_key)
             .await?;
 
         let trigger = self
             .triggers
-            .get(trigger_id)
+            .get(collection_id, trigger_id)
             .await
             .context("Cannot insert trigger")?;
         let trigger = match trigger {
@@ -904,24 +912,47 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<()> {
-        let updated_trigger = InsertTriggerParams {
-            name: trigger.name.clone(),
-            description: trigger.description.clone(),
-            response: trigger.response.clone(),
-            segment_id: trigger.segment_id.clone(),
+    ) -> Result<Option<Trigger>> {
+        let trigger_key = get_trigger_key(
+            collection_id,
+            trigger.id.clone(),
+            trigger.segment_id.clone(),
+        );
+
+        let new_trigger = Trigger {
+            id: trigger_key.clone(),
+            ..trigger
         };
 
         self.insert_trigger(
             write_api_key.clone(),
             collection_id,
-            updated_trigger,
+            new_trigger,
             Some(trigger.id),
         )
         .await
         .context("Cannot insert updated trigger")?;
 
-        Ok(())
+        match parse_trigger_id(trigger_key.clone()) {
+            Some(key_content) => {
+                let updated_trigger = self
+                    .triggers
+                    .get(collection_id, key_content.trigger_id.clone())
+                    .await
+                    .context("Cannot get updated trigger")?;
+
+                match updated_trigger {
+                    Some(trigger) => Ok(Some(Trigger {
+                        id: key_content.trigger_id,
+                        ..trigger
+                    })),
+                    None => bail!("Cannot get updated trigger"),
+                }
+            }
+            None => {
+                bail!("Cannot parse trigger id")
+            }
+        }
     }
 }
 

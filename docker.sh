@@ -1,7 +1,7 @@
 
 set -axe
 
-VERSION=1.0.3
+VERSION=1.0.4
 
 docker build -t oramacore .
 docker tag oramacore oramasearch/oramacore:$VERSION

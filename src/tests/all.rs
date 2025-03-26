@@ -11,7 +11,7 @@ use tokio::time::sleep;
 use crate::{
     collection_manager::{
         dto::{ApiKey, InsertTriggerParams},
-        sides::hooks::HookName,
+        sides::{hooks::HookName, triggers::Trigger},
     },
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
     types::CollectionId,
@@ -1808,7 +1808,8 @@ async fn test_trigger() -> Result<()> {
         .insert_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id,
-            InsertTriggerParams {
+            Trigger {
+                id: "1".to_string(),
                 description: "My trigger".to_string(),
                 name: "my-trigger-name".to_string(),
                 response: "my-response".to_string(),

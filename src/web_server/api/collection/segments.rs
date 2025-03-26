@@ -130,7 +130,7 @@ async fn insert_segment_v1(
         .await
     {
         Ok(_) => Ok((
-            StatusCode::OK,
+            StatusCode::CREATED,
             Json(json!({ "success": true, "id": segment.id, "segment": segment })),
         )),
         Err(e) => {
