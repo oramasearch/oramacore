@@ -83,17 +83,6 @@ pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<
 
 pub struct BufferedFile;
 impl BufferedFile {
-    pub fn create(path: PathBuf) -> Result<WriteBufferedFile> {
-        let file = std::fs::File::create_new(&path)
-            .with_context(|| format!("Cannot create file at {:?}", path))?;
-        let buf = std::io::BufWriter::new(file);
-        Ok(WriteBufferedFile {
-            path,
-            closed: false,
-            buf,
-        })
-    }
-
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
         let file = std::fs::File::create(&path)
             .with_context(|| format!("Cannot create file at {:?}", path))?;

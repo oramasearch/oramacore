@@ -42,7 +42,7 @@ impl VectorField {
         inner.build().context("Cannot build hnsw index")?;
 
         create_if_not_exists(&data_dir).context("Cannot create data directory")?;
-        BufferedFile::create(data_dir.join("index.hnsw"))
+        BufferedFile::create_or_overwrite(data_dir.join("index.hnsw"))
             .context("Cannot create hnsw file")?
             .write_bincode_data(&inner)
             .context("Cannot write hnsw file")?;
@@ -79,7 +79,7 @@ impl VectorField {
         new_inner.build().context("Cannot build hnsw index")?;
 
         create_if_not_exists(&new_data_dir).context("Cannot create data directory")?;
-        BufferedFile::create(new_data_dir.join("index.hnsw"))
+        BufferedFile::create_or_overwrite(new_data_dir.join("index.hnsw"))
             .context("Cannot create hnsw file")?
             .write_bincode_data(&new_inner)
             .context("Cannot write hnsw file")?;

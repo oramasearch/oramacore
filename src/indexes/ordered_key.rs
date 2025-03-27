@@ -138,7 +138,7 @@ impl<
     fn save_on_disk(&self) -> Result<()> {
         match &self.pointer {
             PagePointer::InMemory { items, path } => {
-                BufferedFile::create(path.clone())
+                BufferedFile::create_or_overwrite(path.clone())
                     .context("Cannot create page file")?
                     .write_bincode_data(items)
                     .context("Cannot serialize page")?;
@@ -262,7 +262,7 @@ impl<
         bounds[0].0 = Key::min_value();
 
         let bounds_file = data_dir.join(BOUND_FILE_NAME);
-        BufferedFile::create(bounds_file.clone())
+        BufferedFile::create_or_overwrite(bounds_file.clone())
             .context("Cannot create bounds file")?
             .write_bincode_data(&bounds)
             .context("Cannot serialize bounds")?;

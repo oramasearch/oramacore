@@ -34,7 +34,7 @@ impl StringFilterField {
         }
 
         let data = StringFilterFieldDump::V1(StringFilterFieldDumpV1 { data: inner });
-        BufferedFile::create(data_dir.join("data.bin"))
+        BufferedFile::create_or_overwrite(data_dir.join("data.bin"))
             .context("Cannot create data.bin")?
             .write_bincode_data(&data)
             .context("Cannot write data.bin")?;

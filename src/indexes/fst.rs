@@ -31,7 +31,7 @@ impl FSTIndex {
             .context("Cannot create the base directory for the committed index")?;
 
         let mut buffered_file =
-            BufferedFile::create(file_path.clone()).context("Cannot create file")?;
+            BufferedFile::create_or_overwrite(file_path.clone()).context("Cannot create file")?;
         let mut build = MapBuilder::new(&mut buffered_file)?;
 
         for (key, value) in iter {

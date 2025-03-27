@@ -20,7 +20,6 @@ use crate::{
             ReadSide, WriteSide,
         },
     },
-    nlp::stop_words::tr,
     types::CollectionId,
 };
 

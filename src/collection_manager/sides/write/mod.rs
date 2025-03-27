@@ -45,7 +45,7 @@ use crate::{
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertDocumentsResult, InsertTriggerParams, ReindexConfig, SwapCollections,
+            InsertDocumentsResult, ReindexConfig, SwapCollections,
         },
         sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
@@ -876,7 +876,7 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id.clone(), write_api_key)
+        self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
         let trigger = self

@@ -87,7 +87,7 @@ impl TriggerInterface {
         collection_id: CollectionId,
         trigger_id: String,
     ) -> Result<Option<Trigger>> {
-        match self.get(collection_id.clone(), trigger_id.clone()).await? {
+        match self.get(collection_id, trigger_id.clone()).await? {
             Some(trigger) => {
                 let trigger_id = trigger.id.clone();
 
@@ -97,13 +97,11 @@ impl TriggerInterface {
                     Some(Ok(trigger)) => Ok(Some(trigger)),
                 }
             }
-            None => {
-                return Err(anyhow::anyhow!(
-                    "No trigger {} found for collection {}",
-                    trigger_id,
-                    collection_id.0
-                ));
-            }
+            None => Err(anyhow::anyhow!(
+                "No trigger {} found for collection {}",
+                trigger_id,
+                collection_id.0
+            )),
         }
     }
 

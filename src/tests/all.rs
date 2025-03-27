@@ -10,7 +10,7 @@ use tokio::time::sleep;
 
 use crate::{
     collection_manager::{
-        dto::{ApiKey, InsertTriggerParams},
+        dto::ApiKey,
         sides::{hooks::HookName, triggers::Trigger},
     },
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},

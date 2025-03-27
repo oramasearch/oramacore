@@ -842,7 +842,7 @@ impl CollectionReader {
 
         let new_offset_collection_info_path =
             data_dir.join(format!("info-offset-{}.info", offset.0));
-        BufferedFile::create(new_offset_collection_info_path)
+        BufferedFile::create_or_overwrite(new_offset_collection_info_path)
             .context("Cannot create previous collection info")?
             .write_json_data(&CollectionInfo::V2(current_collection_info))
             .context("Cannot write previous collection info")?;
