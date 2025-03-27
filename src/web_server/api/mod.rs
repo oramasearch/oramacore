@@ -56,7 +56,7 @@ async fn prometheus_handler(prometheus_handle: State<Arc<PrometheusHandle>>) -> 
     prometheus_handle.render()
 }
 
-static INDEX_MESSAGE: &str = "hi! welcome to Orama";
+static INDEX_MESSAGE: &str = "OramaCore is up and running.";
 
 #[endpoint(method = "GET", path = "/", description = "Welcome to Orama")]
 async fn index() -> Json<&'static str> {
