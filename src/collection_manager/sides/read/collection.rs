@@ -396,13 +396,12 @@ impl CollectionReader {
             "Merging number fields {:?}",
             uncommitted_infos.number_fields
         );
+        let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+            collection: self.id.to_string().into(),
+            field_type: "number",
+            side: "read",
+        });
         for field_id in uncommitted_infos.number_fields {
-            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.to_string().into(),
-                field: field_id,
-                field_type: "number",
-                side: "read",
-            });
             let uncommitted_number_index = uncommitted.number_index.get(&field_id);
             let committed_number_index = committed.number_index.get(&field_id);
 
@@ -466,8 +465,8 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Number)));
                 }
             }
-            drop(m);
         }
+        drop(m);
         debug!("Number fields merged");
 
         let mut string_fields = HashMap::new();
@@ -476,14 +475,12 @@ impl CollectionReader {
             "Merging string fields {:?}",
             uncommitted_infos.string_fields
         );
+        let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+            collection: self.id.to_string().into(),
+            field_type: "string",
+            side: "read",
+        });
         for field_id in uncommitted_infos.string_fields {
-            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.to_string().into(),
-                field: field_id,
-                field_type: "string",
-                side: "read",
-            });
-
             let uncommitted_string_index = uncommitted.string_index.get(&field_id);
             let committed_string_index = committed.string_index.get(&field_id);
 
@@ -551,20 +548,19 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Text(field_locale))));
                 }
             }
-            drop(m);
         }
+        drop(m);
         debug!("String fields merged");
 
         let mut bool_fields = HashMap::new();
         let bool_dir = data_dir.join("bools");
         debug!("Merging bool fields {:?}", uncommitted_infos.bool_fields);
+        let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+            collection: self.id.to_string().into(),
+            field_type: "bool",
+            side: "read",
+        });
         for field_id in uncommitted_infos.bool_fields {
-            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.to_string().into(),
-                field: field_id,
-                field_type: "bool",
-                side: "read",
-            });
             let uncommitted_bool_index = uncommitted.bool_index.get(&field_id);
             let committed_bool_index = committed.bool_index.get(&field_id);
 
@@ -626,8 +622,8 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::Bool)));
                 }
             }
-            drop(m);
         }
+        drop(m);
         debug!("Bool fields merged");
 
         let mut string_filter_fields = HashMap::new();
@@ -636,13 +632,12 @@ impl CollectionReader {
             "Merging string filter fields {:?}",
             uncommitted_infos.string_filter_fields
         );
+        let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+            collection: self.id.to_string().into(),
+            field_type: "string_filter",
+            side: "read",
+        });
         for field_id in uncommitted_infos.string_filter_fields {
-            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.to_string().into(),
-                field: field_id,
-                field_type: "string_filter",
-                side: "read",
-            });
             let uncommitted_string_filter_index = uncommitted.string_filter_index.get(&field_id);
             let committed_string_filter_index = committed.string_filter_index.get(&field_id);
 
@@ -704,8 +699,8 @@ impl CollectionReader {
                         .push((field_name, (field_id, dump::TypedField::String)));
                 }
             }
-            drop(m);
         }
+        drop(m);
         debug!("String filter  fields merged");
 
         let mut vector_fields = HashMap::new();
@@ -714,13 +709,12 @@ impl CollectionReader {
             "Merging vector fields {:?}",
             uncommitted_infos.vector_fields
         );
+        let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
+            collection: self.id.to_string().into(),
+            field_type: "vector",
+            side: "read",
+        });
         for field_id in uncommitted_infos.vector_fields {
-            let m = FIELD_COMMIT_CALCULATION_TIME.create(CollectionFieldCommitLabels {
-                collection: self.id.to_string().into(),
-                field: field_id,
-                field_type: "vector",
-                side: "read",
-            });
             let uncommitted_vector_index = uncommitted.vector_index.get(&field_id);
             let committed_vector_index = committed.vector_index.get(&field_id);
 
@@ -804,8 +798,8 @@ impl CollectionReader {
                     ));
                 }
             }
-            drop(m);
         }
+        drop(m);
         debug!("Vector fields merged");
 
         // Read lock ends

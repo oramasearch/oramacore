@@ -48,7 +48,6 @@ create_label_struct!(CollectionCommitLabels, {
 });
 create_label_struct!(CollectionFieldCommitLabels, {
     collection: SharedString,
-    field: FieldId,
     field_type: &'static str,
     side: &'static str,
 });
