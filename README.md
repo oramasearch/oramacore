@@ -27,7 +27,7 @@ docker compose up
 This will create the following architecture, allowing you to perform
 high-performance RAG with little to zero configuration.
 
-![OramaCore Architecture](/docs/public/oramacore-architecture.svg)
+![OramaCore Architecture](/docs/public/oramacore-arch.png)
 
 An NVIDIA GPU is highly recommended for running the application. For production
 usage, we recommend using minimum one NVIDIA A100. Optimal configuration would
