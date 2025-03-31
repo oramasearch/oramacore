@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -536,12 +535,24 @@ async fn select_triggers_and_segments(
     read_api_key: ApiKey,
     collection_id: CollectionId,
     conversation: Option<Vec<InteractionMessage>>,
-    llm_config: Option<InteractionLLMConfig>,
+    mut llm_config: Option<InteractionLLMConfig>,
 ) -> impl Stream<Item = AudienceManagementResult> {
     let all_segments = read_side
         .get_all_segments_by_collection(read_api_key.clone(), collection_id)
         .await
         .expect("Failed to get segments for the collection");
+
+    if read_side.is_gpu_overloaded() {
+        match read_side.select_random_remote_llm_service() {
+            Some((provider, model)) => {
+                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                llm_config = Some(InteractionLLMConfig { model, provider });
+            }
+            None => {
+                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+            }
+        }
+    }
 
     let (tx, rx) = mpsc::channel(100);
 
