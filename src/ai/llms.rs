@@ -12,7 +12,10 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::collection_manager::{dto::InteractionMessage, sides::system_prompts::SystemPrompt};
+use crate::collection_manager::{
+    dto::{InteractionLLMConfig, InteractionMessage},
+    sides::system_prompts::SystemPrompt,
+};
 
 use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
 
@@ -323,9 +326,12 @@ impl LLMService {
         &self,
         prompt: KnownPrompts,
         variables: Vec<(String, String)>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
         let mut acc = String::new();
-        let mut stream = self.run_known_prompt_stream(prompt, variables, None).await;
+        let mut stream = self
+            .run_known_prompt_stream(prompt, variables, None, llm_config)
+            .await;
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -346,6 +352,7 @@ impl LLMService {
         prompt: KnownPrompts,
         variables: Vec<(String, String)>,
         custom_system_prompt: Option<SystemPrompt>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> impl Stream<Item = Result<String>> {
         let mut prompts = prompt.get_prompts();
         let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
@@ -379,8 +386,11 @@ impl LLMService {
             }
         }
 
+        let chosen_model = self.get_chosen_model(llm_config.clone());
+        let llm_client = self.get_chosen_llm_client(llm_config);
+
         let request = CreateChatCompletionRequestArgs::default()
-            .model(&self.model)
+            .model(chosen_model)
             .max_tokens(512u32)
             .stream(true)
             .messages([
@@ -399,8 +409,7 @@ impl LLMService {
             .context("Unable to build KnownPrompt LLM request body")
             .unwrap();
 
-        let mut response_stream = self
-            .local_vllm_client
+        let mut response_stream = llm_client
             .chat()
             .create_stream(request)
             .await
@@ -442,6 +451,7 @@ impl LLMService {
         step: Step,
         input: &String,
         history: &Vec<InteractionMessage>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<impl Stream<Item = Result<String>>> {
         let step_name = step.name.as_str();
 
@@ -503,20 +513,21 @@ impl LLMService {
                 .into(),
         );
 
+        let chosen_model = self.get_chosen_model(llm_config.clone());
+        let llm_client = self.get_chosen_llm_client(llm_config);
+
         let request = CreateChatCompletionRequestArgs::default()
-            .model(&self.model)
+            .model(chosen_model)
             .max_tokens(hyperparameters.max_tokens)
             .stream(true)
             .messages(full_history)
             .build()
             .context("Unable to build KnownPrompt LLM request body")?;
 
-        let mut response_stream = self
-            .local_vllm_client
-            .chat()
-            .create_stream(request)
-            .await
-            .context("An error occurred while initializing the stream from remote LLM instance")?;
+        let mut response_stream =
+            llm_client.chat().create_stream(request).await.context(
+                "An error occurred while initializing the stream from remote LLM instance",
+            )?;
 
         let (tx, rx) = mpsc::channel(100);
 
@@ -554,10 +565,11 @@ impl LLMService {
         step: Step,
         input: &String,
         history: &Vec<InteractionMessage>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
         let mut acc = String::new();
         let mut stream = self
-            .run_party_planner_prompt_stream(step, input, history)
+            .run_party_planner_prompt_stream(step, input, history, llm_config)
             .await?;
 
         while let Some(msg) = stream.next().await {
@@ -572,5 +584,28 @@ impl LLMService {
         }
 
         Ok(acc)
+    }
+
+    pub fn get_chosen_llm_client(
+        &self,
+        config: Option<InteractionLLMConfig>,
+    ) -> async_openai::Client<OpenAIConfig> {
+        if let Some(config) = config {
+            if let Some(remote_clients) = &self.remote_clients {
+                if let Some(client) = remote_clients.get(&config.provider) {
+                    return client.clone();
+                }
+            }
+        }
+
+        self.local_vllm_client.clone()
+    }
+
+    pub fn get_chosen_model(&self, config: Option<InteractionLLMConfig>) -> String {
+        if let Some(config) = config {
+            return config.model;
+        }
+
+        self.model.clone()
     }
 }

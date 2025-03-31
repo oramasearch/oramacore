@@ -1,7 +1,7 @@
 use super::generic_kv::{format_key, KV};
 use crate::{
     ai::llms::{self, LLMService},
-    collection_manager::dto::InteractionMessage,
+    collection_manager::dto::{InteractionLLMConfig, InteractionMessage},
     types::CollectionId,
 };
 use anyhow::{Context, Result};
@@ -142,6 +142,7 @@ impl TriggerInterface {
         _collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedTrigger>> {
         let response = self
             .llm_service
@@ -154,6 +155,7 @@ impl TriggerInterface {
                         serde_json::to_string(&conversation)?,
                     ),
                 ],
+                llm_config,
             )
             .await?;
 

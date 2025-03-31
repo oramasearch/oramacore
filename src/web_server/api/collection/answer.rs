@@ -1,7 +1,8 @@
 use crate::ai::llms;
 use crate::ai::party_planner::PartyPlanner;
 use crate::collection_manager::dto::{
-    ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
+    ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Role,
+    SearchMode, SearchParams,
 };
 use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::system_prompts::SystemPrompt;
@@ -142,6 +143,7 @@ async fn planned_answer_v1(
             api_key.clone(),
             collection_id,
             segments_and_triggers_conversation,
+            interaction.llm_config.clone(),
         )
         .await;
 
@@ -178,7 +180,9 @@ async fn planned_answer_v1(
             }
         }
 
-        let mut party_planner_stream = PartyPlanner::run(
+        let party_planner = PartyPlanner::new(read_side.clone(), interaction.llm_config.clone());
+
+        let mut party_planner_stream = party_planner.run(
             read_side.clone(),
             collection_id,
             api_key.clone(),
@@ -300,6 +304,7 @@ async fn answer_v1(
             read_api_key.clone(),
             collection_id,
             segments_and_triggers_conversation,
+            interaction.llm_config.clone(),
         )
         .await;
 
@@ -328,7 +333,11 @@ async fn answer_v1(
         let optimized_query_variables = vec![("input".to_string(), query.clone())];
 
         let optimized_query = llm_service
-            .run_known_prompt(llms::KnownPrompts::OptimizeQuery, optimized_query_variables)
+            .run_known_prompt(
+                llms::KnownPrompts::OptimizeQuery,
+                optimized_query_variables,
+                interaction.llm_config.clone(),
+            )
             .await
             .unwrap_or(query.clone()); // fallback to the original query if the optimization fails
 
@@ -446,7 +455,12 @@ async fn answer_v1(
         }
 
         let mut answer_stream = llm_service
-            .run_known_prompt_stream(llms::KnownPrompts::Answer, variables, system_prompt)
+            .run_known_prompt_stream(
+                llms::KnownPrompts::Answer,
+                variables,
+                system_prompt,
+                interaction.llm_config,
+            )
             .await;
 
         while let Some(resp) = answer_stream.next().await {
@@ -496,6 +510,7 @@ async fn select_triggers_and_segments(
     read_api_key: ApiKey,
     collection_id: CollectionId,
     conversation: Option<Vec<InteractionMessage>>,
+    llm_config: Option<InteractionLLMConfig>,
 ) -> impl Stream<Item = AudienceManagementResult> {
     let all_segments = read_side
         .get_all_segments_by_collection(read_api_key.clone(), collection_id)
@@ -513,7 +528,12 @@ async fn select_triggers_and_segments(
         };
 
         let chosen_segment = read_side
-            .perform_segment_selection(read_api_key.clone(), collection_id, conversation.clone())
+            .perform_segment_selection(
+                read_api_key.clone(),
+                collection_id,
+                conversation.clone(),
+                llm_config.clone(),
+            )
             .await
             .expect("Failed to choose a segment.");
 
@@ -563,6 +583,7 @@ async fn select_triggers_and_segments(
                         collection_id,
                         conversation,
                         all_segments_triggers,
+                        llm_config.clone(),
                     )
                     .await
                     .context(

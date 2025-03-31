@@ -1,7 +1,7 @@
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
     collection_manager::{
-        dto::InteractionMessage,
+        dto::{InteractionLLMConfig, InteractionMessage},
         sides::generic_kv::{format_key, KV},
     },
     types::CollectionId,
@@ -108,6 +108,7 @@ impl SegmentInterface {
         &self,
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedSegment>> {
         let segments = self.list_by_collection(collection_id).await?;
 
@@ -125,6 +126,7 @@ impl SegmentInterface {
                         serde_json::to_string(&conversation).unwrap(),
                     ),
                 ],
+                llm_config,
             )
             .await?;
 

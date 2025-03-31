@@ -45,7 +45,7 @@ use crate::{
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertDocumentsResult, ReindexConfig, SwapCollections,
+            InsertDocumentsResult, InteractionLLMConfig, ReindexConfig, SwapCollections,
         },
         sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
@@ -715,11 +715,14 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<SystemPromptValidationResponse> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.system_prompts.validate_prompt(system_prompt).await
+        self.system_prompts
+            .validate_prompt(system_prompt, llm_config)
+            .await
     }
 
     pub async fn insert_system_prompt(

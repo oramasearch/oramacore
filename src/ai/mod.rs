@@ -1,10 +1,12 @@
 use std::{str::FromStr, time::Duration};
 
+use axum_openapi3::utoipa::ToSchema;
+use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use anyhow::{anyhow, Context, Result};
 use strum_macros::Display;
@@ -44,7 +46,7 @@ pub struct AIServiceLLMConfig {
     pub model: String,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Display)]
+#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
 pub enum RemoteLLMProvider {
     OpenAI,
     Fireworks,

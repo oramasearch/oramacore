@@ -18,7 +18,9 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::ai::llms::{self, LLMService};
-use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
+use crate::collection_manager::dto::{
+    InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
+};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
@@ -455,11 +457,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedSegment>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.segments
-            .perform_segment_selection(collection_id, conversation)
+            .perform_segment_selection(collection_id, conversation, llm_config)
             .await
     }
 
@@ -469,11 +472,12 @@ impl ReadSide {
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedTrigger>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.triggers
-            .perform_trigger_selection(collection_id, conversation, triggers)
+            .perform_trigger_selection(collection_id, conversation, triggers, llm_config)
             .await
     }
 
@@ -509,12 +513,17 @@ impl ReadSide {
         self.triggers.list_by_collection(collection_id).await
     }
 
-    pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
+    pub async fn get_search_mode(
+        &self,
+        query: String,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<SearchMode> {
         let search_mode: String = self
             .llm_service
             .run_known_prompt(
                 llms::KnownPrompts::Autoquery,
                 vec![("query".to_string(), query.clone())],
+                llm_config,
             )
             .await?;
         let parsed_mode: SearchModeResult = serde_json::from_str(&search_mode)?;

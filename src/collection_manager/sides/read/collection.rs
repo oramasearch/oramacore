@@ -1014,6 +1014,8 @@ impl CollectionReader {
                     .run_known_prompt(
                         llms::KnownPrompts::Autoquery,
                         vec![("query".to_string(), mode_result.term.clone())],
+                        // @todo: determine if we want to allow the user to select which LLM to use here.
+                        None,
                     )
                     .await?;
 

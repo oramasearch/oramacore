@@ -135,7 +135,12 @@ async fn validate_system_prompt_v1(
     };
 
     match write_side
-        .validate_system_prompt(write_api_key, collection_id, system_prompt)
+        .validate_system_prompt(
+            write_api_key,
+            collection_id,
+            system_prompt,
+            params.llm_config,
+        )
         .await
     {
         Ok(result) => Ok((StatusCode::OK, Json(json!({ "result": result })))),
