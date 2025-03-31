@@ -74,6 +74,7 @@ async fn start_server() {
                 host: "localhost".to_string(),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            remote_llms: None,
         },
         writer_side: WriteSideConfig {
             master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
