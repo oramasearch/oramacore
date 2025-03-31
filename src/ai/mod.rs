@@ -19,6 +19,7 @@ use crate::metrics::{
 };
 
 pub mod context_evaluator;
+pub mod gpu;
 pub mod llms;
 pub mod party_planner;
 
