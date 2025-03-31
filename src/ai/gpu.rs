@@ -3,28 +3,42 @@ use nvml_wrapper::Nvml;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+static MAX_LOADING_THRESHOLD: u32 = 90;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DeviceUtilization {
-    gpu_util: u32,
-    memory_util: u32,
-    memory_used: u64,
-    memory_total: u64,
+pub struct DeviceUtilization {
+    pub gpu_util: u32,
+    pub memory_util: u32,
+    pub memory_used: u64,
+    pub memory_total: u64,
 }
 
-struct LocalGPUManager {
+pub struct LocalGPUManager {
     pub nvml: Nvml,
     pub device_count: u32,
 }
 
 impl LocalGPUManager {
-    fn try_new() -> Result<Self> {
+    pub fn try_new() -> Result<Self> {
         let nvml = Nvml::init()?;
         let device_count = nvml.device_count()?;
 
         Ok(LocalGPUManager { nvml, device_count })
     }
 
-    fn get_gpu_utilization(&self) -> Result<HashMap<String, DeviceUtilization>> {
+    pub fn is_overloaded(&self) -> Result<bool> {
+        let utilization_data = self.get_gpu_utilization()?;
+
+        for (_, util) in utilization_data.iter() {
+            if util.gpu_util > MAX_LOADING_THRESHOLD || util.memory_util > MAX_LOADING_THRESHOLD {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub fn get_gpu_utilization(&self) -> Result<HashMap<String, DeviceUtilization>> {
         let mut result = HashMap::new();
 
         for i in 0..self.device_count {
@@ -47,7 +61,7 @@ impl LocalGPUManager {
         Ok(result)
     }
 
-    fn print_utilization(&self) -> Result<()> {
+    pub fn print_utilization(&self) -> Result<()> {
         let utilization_data = self.get_gpu_utilization()?;
 
         println!("=== GPU Utilization ===");

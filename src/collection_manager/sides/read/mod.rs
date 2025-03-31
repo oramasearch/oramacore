@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
+use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
 use crate::collection_manager::dto::{
     InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
@@ -75,6 +76,7 @@ pub struct ReadSide {
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
+    local_gpu_manager: Arc<LocalGPUManager>,
 }
 
 impl ReadSide {
@@ -127,6 +129,7 @@ impl ReadSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
+        let local_gpu_manager = Arc::new(LocalGPUManager::try_new()?);
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -141,6 +144,7 @@ impl ReadSide {
             system_prompts,
             kv,
             llm_service,
+            local_gpu_manager
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;

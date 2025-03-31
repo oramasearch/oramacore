@@ -41,7 +41,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{llms::LLMService, AIService},
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
@@ -92,6 +92,7 @@ pub struct WriteSide {
     triggers: TriggerInterface,
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
+    local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
 }
 
@@ -146,6 +147,7 @@ impl WriteSide {
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
+        let local_gpu_manager = Arc::new(LocalGPUManager::try_new()?);
 
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
@@ -173,6 +175,7 @@ impl WriteSide {
             triggers,
             system_prompts,
             kv,
+            local_gpu_manager,
         };
 
         let write_side = Arc::new(write_side);
