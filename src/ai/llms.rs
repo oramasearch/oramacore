@@ -243,6 +243,7 @@ pub struct LLMService {
     pub local_vllm_client: async_openai::Client<OpenAIConfig>,
     pub remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
     pub model: String,
+    pub default_remote_models: Option<HashMap<RemoteLLMProvider, String>>,
 }
 
 impl LLMService {
@@ -254,16 +255,32 @@ impl LLMService {
             "http://{}:{}/v1",
             local_vllm_config.host, local_vllm_config.port
         );
+
         let mut remote_llm_providers: HashMap<
             RemoteLLMProvider,
             async_openai::Client<OpenAIConfig>,
         > = HashMap::new();
+
+        let mut default_remote_models: HashMap<RemoteLLMProvider, String> = HashMap::new();
 
         if let Some(remote_config) = remote_llm_config {
             for conf in remote_config {
                 match conf.provider {
                     RemoteLLMProvider::OpenAI => {
                         info!("Found OpenAI remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for OpenAI provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models
+                                    .insert(RemoteLLMProvider::OpenAI, conf.default_model.clone());
+                            }
+                        }
+
                         remote_llm_providers.insert(
                             RemoteLLMProvider::OpenAI,
                             async_openai::Client::with_config(
@@ -277,6 +294,21 @@ impl LLMService {
                     }
                     RemoteLLMProvider::Fireworks => {
                         info!("Found Fireworks remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for Fireworks provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models.insert(
+                                    RemoteLLMProvider::Fireworks,
+                                    conf.default_model.clone(),
+                                );
+                            }
+                        }
+
                         remote_llm_providers.insert(
                             RemoteLLMProvider::Fireworks,
                             async_openai::Client::with_config(
@@ -290,6 +322,21 @@ impl LLMService {
                     }
                     RemoteLLMProvider::Together => {
                         info!("Found Together remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for Together provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models.insert(
+                                    RemoteLLMProvider::Together,
+                                    conf.default_model.clone(),
+                                );
+                            }
+                        }
+
                         remote_llm_providers.insert(
                             RemoteLLMProvider::Together,
                             async_openai::Client::with_config(
@@ -317,10 +364,16 @@ impl LLMService {
             _ => Some(remote_llm_providers),
         };
 
+        let default_remote_models = match default_remote_models.len() {
+            0 => None,
+            _ => Some(default_remote_models),
+        };
+
         Ok(Self {
             local_vllm_client: async_openai::Client::with_config(
                 OpenAIConfig::new().with_api_base(&local_vllm_provider_url),
             ),
+            default_remote_models,
             remote_clients,
             model: local_vllm_config.model,
         })

@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
+use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
+use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::dto::{
     InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
 };
@@ -75,6 +77,7 @@ pub struct ReadSide {
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
+    local_gpu_manager: Arc<LocalGPUManager>,
 }
 
 impl ReadSide {
@@ -84,6 +87,7 @@ impl ReadSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
+        local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -141,6 +145,7 @@ impl ReadSide {
             system_prompts,
             kv,
             llm_service,
+            local_gpu_manager,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -543,6 +548,34 @@ impl ReadSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
         collection.check_read_api_key(read_api_key)
+    }
+
+    pub fn is_gpu_overloaded(&self) -> bool {
+        match self.local_gpu_manager.is_overloaded() {
+            Ok(overloaded) => overloaded,
+            Err(e) => {
+                error!(?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                true
+            }
+        }
+    }
+
+    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
+        self.llm_service.default_remote_models.clone()
+    }
+
+    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
+        match self.get_available_remote_llm_services() {
+            Some(services) => {
+                let mut rng = rand::rng();
+                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
+                services.into_iter().nth(random_index)
+            }
+            None => {
+                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
+                None
+            }
+        }
     }
 }
 
