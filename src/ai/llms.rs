@@ -11,6 +11,7 @@ use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::{info, trace};
 
 use crate::collection_manager::{
     dto::{InteractionLLMConfig, InteractionMessage},
@@ -262,6 +263,7 @@ impl LLMService {
             for conf in remote_config {
                 match conf.provider {
                     RemoteLLMProvider::OpenAI => {
+                        info!("Found OpenAI remote LLM provider");
                         remote_llm_providers.insert(
                             RemoteLLMProvider::OpenAI,
                             async_openai::Client::with_config(
@@ -274,6 +276,7 @@ impl LLMService {
                         );
                     }
                     RemoteLLMProvider::Fireworks => {
+                        info!("Found Fireworks remote LLM provider");
                         remote_llm_providers.insert(
                             RemoteLLMProvider::Fireworks,
                             async_openai::Client::with_config(
@@ -286,6 +289,7 @@ impl LLMService {
                         );
                     }
                     RemoteLLMProvider::Together => {
+                        info!("Found Together remote LLM provider");
                         remote_llm_providers.insert(
                             RemoteLLMProvider::Together,
                             async_openai::Client::with_config(
