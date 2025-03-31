@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    ai::{vllm::VLLMService, AIService},
+    ai::{llms::LLMService, AIService},
     collection_manager::{
         dto::{ApiKey, LanguageDTO},
         sides::Offset,
@@ -31,7 +31,7 @@ const LIMIT: usize = 100;
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
-    vllm_service: Arc<VLLMService>,
+    llm_service: Arc<LLMService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
@@ -41,7 +41,7 @@ impl CollectionsReader {
     pub async fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
@@ -62,7 +62,7 @@ impl CollectionsReader {
                 return Ok(Self {
                     ai_service,
                     nlp_service,
-                    vllm_service,
+                    llm_service,
 
                     collections: Default::default(),
                     indexes_config,
@@ -89,7 +89,7 @@ impl CollectionsReader {
             let collection = CollectionReader::try_load(
                 ai_service.clone(),
                 nlp_service.clone(),
-                vllm_service.clone(),
+                llm_service.clone(),
                 collection_dir,
             )
             .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
@@ -102,7 +102,7 @@ impl CollectionsReader {
         Ok(Self {
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             collections: RwLock::new(collections),
             indexes_config,
             last_reindexed_collections: RwLock::new(
@@ -204,7 +204,7 @@ impl CollectionsReader {
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
-            self.vllm_service.clone(),
+            self.llm_service.clone(),
         );
 
         let mut guard = self.collections.write().await;
@@ -421,19 +421,26 @@ mod tests {
                 port: 8000,
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            remote_llms: None,
         }));
 
-        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
-            host: "localhost".to_string(),
-            port: 8000,
-            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-        }));
+        let llm_service = Arc::new(
+            LLMService::try_new(
+                crate::ai::AIServiceLLMConfig {
+                    host: "localhost".to_string(),
+                    port: 8000,
+                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
 
         let nlp_service = Arc::new(NLPService::new());
         let collections = CollectionsReader::try_load(
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             IndexesConfig {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),
@@ -501,17 +508,24 @@ mod tests {
                 port: 8000,
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            remote_llms: None,
         }));
         let nlp_service = Arc::new(NLPService::new());
-        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
-            host: "localhost".to_string(),
-            port: 8000,
-            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-        }));
+        let llm_service = Arc::new(
+            LLMService::try_new(
+                crate::ai::AIServiceLLMConfig {
+                    host: "localhost".to_string(),
+                    port: 8000,
+                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
         let collections = CollectionsReader::try_load(
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             IndexesConfig {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),

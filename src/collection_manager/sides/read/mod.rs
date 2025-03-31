@@ -17,8 +17,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
-use crate::ai::vllm::{self, VLLMService};
-use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
+use crate::ai::llms::{self, LLMService};
+use crate::collection_manager::dto::{
+    InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
+};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
@@ -72,7 +74,7 @@ pub struct ReadSide {
     segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl ReadSide {
@@ -80,7 +82,7 @@ impl ReadSide {
         operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
         config: ReadSideConfig,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
@@ -95,7 +97,7 @@ impl ReadSide {
         let collections_reader = CollectionsReader::try_load(
             ai_service.clone(),
             nlp_service,
-            vllm_service.clone(),
+            llm_service.clone(),
             config.config,
         )
         .await
@@ -122,9 +124,9 @@ impl ReadSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
-        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
+        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -138,7 +140,7 @@ impl ReadSide {
             triggers,
             system_prompts,
             kv,
-            vllm_service,
+            llm_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -377,8 +379,8 @@ impl ReadSide {
 
     // This is wrong. We should not expose the vllm service to the read side.
     // TODO: Remove this method.
-    pub fn get_vllm_service(&self) -> Arc<VLLMService> {
-        self.vllm_service.clone()
+    pub fn get_llm_service(&self) -> Arc<LLMService> {
+        self.llm_service.clone()
     }
 
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
@@ -455,11 +457,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedSegment>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.segments
-            .perform_segment_selection(collection_id, conversation)
+            .perform_segment_selection(collection_id, conversation, llm_config)
             .await
     }
 
@@ -469,11 +472,12 @@ impl ReadSide {
         collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedTrigger>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.triggers
-            .perform_trigger_selection(collection_id, conversation, triggers)
+            .perform_trigger_selection(collection_id, conversation, triggers, llm_config)
             .await
     }
 
@@ -509,12 +513,17 @@ impl ReadSide {
         self.triggers.list_by_collection(collection_id).await
     }
 
-    pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
+    pub async fn get_search_mode(
+        &self,
+        query: String,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<SearchMode> {
         let search_mode: String = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(
-                vllm::KnownPrompts::Autoquery,
+                llms::KnownPrompts::Autoquery,
                 vec![("query".to_string(), query.clone())],
+                llm_config,
             )
             .await?;
         let parsed_mode: SearchModeResult = serde_json::from_str(&search_mode)?;

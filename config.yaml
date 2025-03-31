@@ -92,3 +92,7 @@ ai_server:
         port: 8000
         host: 0.0.0.0
         model: "Qwen/Qwen2.5-3B-Instruct"
+
+    remote_llms:
+        - provider: "openai"
+          api_key: "sk-"

@@ -1,7 +1,7 @@
 use super::generic_kv::{format_key, KV};
 use crate::{
-    ai::vllm::{self, VLLMService},
-    collection_manager::dto::InteractionMessage,
+    ai::llms::{self, LLMService},
+    collection_manager::dto::{InteractionLLMConfig, InteractionMessage},
     types::CollectionId,
 };
 use anyhow::{Context, Result};
@@ -45,12 +45,12 @@ pub struct SelectedTrigger {
 
 pub struct TriggerInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
-        Self { kv, vllm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        Self { kv, llm_service }
     }
 
     pub async fn insert(&self, trigger: Trigger) -> Result<String> {
@@ -142,11 +142,12 @@ impl TriggerInterface {
         _collection_id: CollectionId,
         conversation: Option<Vec<InteractionMessage>>,
         triggers: Vec<Trigger>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<SelectedTrigger>> {
         let response = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(
-                vllm::KnownPrompts::Trigger,
+                llms::KnownPrompts::Trigger,
                 vec![
                     ("triggers".to_string(), serde_json::to_string(&triggers)?),
                     (
@@ -154,6 +155,7 @@ impl TriggerInterface {
                         serde_json::to_string(&conversation)?,
                     ),
                 ],
+                llm_config,
             )
             .await?;
 

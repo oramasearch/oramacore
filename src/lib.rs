@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ai::{vllm::VLLMService, AIService, AIServiceConfig};
+use ai::{llms::LLMService, AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
@@ -111,7 +111,16 @@ pub async fn build_orama(
 
     let ai_service = Arc::new(ai_service);
 
-    let vllm_service = Arc::new(VLLMService::new(config.ai_server.llm));
+    let llm_service = match LLMService::try_new(config.ai_server.llm, config.ai_server.remote_llms)
+    {
+        Ok(service) => Arc::new(service),
+        Err(err) => {
+            anyhow::bail!(
+                "Failed to create LLMService: {}. Please check your configuration.",
+                err
+            );
+        }
+    };
 
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
@@ -139,7 +148,7 @@ pub async fn build_orama(
             config.writer_side,
             ai_service.clone(),
             nlp_service.clone(),
-            vllm_service.clone(),
+            llm_service.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -160,7 +169,7 @@ pub async fn build_orama(
             receiver_creator,
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             config.reader_side,
         )
         .await

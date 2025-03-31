@@ -52,7 +52,7 @@ mod uncommitted;
 
 use crate::{
     ai::{
-        vllm::{self, VLLMService},
+        llms::{self, LLMService},
         AIService, OramaModel,
     },
     collection_manager::{
@@ -87,7 +87,7 @@ pub struct CollectionReader {
     read_api_key: ApiKey,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
-    vllm_service: Arc<VLLMService>,
+    llm_service: Arc<LLMService>,
 
     document_count: AtomicU64,
 
@@ -113,7 +113,7 @@ impl CollectionReader {
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
     ) -> Self {
         Self {
             id,
@@ -124,7 +124,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             document_count: AtomicU64::new(0),
             filter_fields: Default::default(),
             score_fields: Default::default(),
@@ -144,7 +144,7 @@ impl CollectionReader {
     pub fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
         data_dir: PathBuf,
     ) -> Result<Self> {
         info!("Loading collection from {:?}", data_dir);
@@ -234,7 +234,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
-            vllm_service,
+            llm_service,
             document_count: AtomicU64::new(collection_info.document_count),
             fields_per_model,
             text_parser_per_field,
@@ -1010,10 +1010,12 @@ impl CollectionReader {
         let search_mode: SearchMode = match mode.clone() {
             SearchMode::Auto(mode_result) => {
                 let final_mode: String = self
-                    .vllm_service
+                    .llm_service
                     .run_known_prompt(
-                        vllm::KnownPrompts::Autoquery,
+                        llms::KnownPrompts::Autoquery,
                         vec![("query".to_string(), mode_result.term.clone())],
+                        // @todo: determine if we want to allow the user to select which LLM to use here.
+                        None,
                     )
                     .await?;
 

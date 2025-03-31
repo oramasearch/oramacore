@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use async_openai::config::OpenAIConfig;
 use axum::extract::State;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -10,15 +11,18 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::{
     collection_manager::{
         dto::{
-            ApiKey, AutoMode, InteractionMessage, Limit, Role, SearchMode, SearchParams,
-            SearchResult,
+            ApiKey, AutoMode, InteractionLLMConfig, InteractionMessage, Limit, Role, SearchMode,
+            SearchParams, SearchResult,
         },
         sides::{segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide},
     },
     types::CollectionId,
 };
 
-use super::vllm::{KnownPrompts, VLLMService};
+use super::{
+    llms::{KnownPrompts, LLMService},
+    RemoteLLMProvider,
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Action {
@@ -48,10 +52,32 @@ pub struct PartyPlannerMessage {
     pub done: bool,
 }
 
-pub struct PartyPlanner {}
+pub struct PartyPlanner {
+    chosen_model: String,
+    llm_client: async_openai::Client<OpenAIConfig>,
+    llm_config: Option<InteractionLLMConfig>,
+}
 
 impl PartyPlanner {
+    pub fn new(read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
+        let llm_service = read_side.get_llm_service();
+        // Let the user choose a remote LLM model / client if they want to.
+        let chosen_model = get_chosen_model(llm_config.clone(), llm_service.model.clone());
+        let llm_client = get_chosen_llm_client(
+            llm_config.clone(),
+            llm_service.remote_clients.clone(),
+            llm_service.local_vllm_client.clone(),
+        );
+
+        Self {
+            chosen_model,
+            llm_client,
+            llm_config,
+        }
+    }
+
     pub fn run(
+        &self,
         read_side: State<Arc<ReadSide>>,
         collection_id: CollectionId,
         api_key: ApiKey,
@@ -61,7 +87,8 @@ impl PartyPlanner {
         trigger: Option<Trigger>,
         custom_system_prompt: Option<SystemPrompt>,
     ) -> impl Stream<Item = PartyPlannerMessage> {
-        let vllm_service = read_side.get_vllm_service();
+        let llm_service = read_side.get_llm_service();
+        let llm_config = self.llm_config.clone();
 
         // Add a system prompt to the history if the first entry is not a system prompt.
         let mut system_prompt = InteractionMessage {
@@ -108,19 +135,22 @@ impl PartyPlanner {
         tokio::spawn(async move {
             // Get the action plan from the AI service.
             // If there is an error, send an error message to the caller and exit early.
-            let action_plan = match Self::get_action_plan(vllm_service.clone(), full_input).await {
-                Ok(plan) => plan,
-                Err(e) => {
-                    tx.send(PartyPlannerMessage {
-                        action: "PARTY_PLANNER_ERROR".to_string(),
-                        result: format!("{:?}", e),
-                        done: true,
-                    })
+            let action_plan =
+                match Self::get_action_plan(llm_service.clone(), full_input, llm_config.clone())
                     .await
-                    .unwrap();
-                    return;
-                }
-            };
+                {
+                    Ok(plan) => plan,
+                    Err(e) => {
+                        tx.send(PartyPlannerMessage {
+                            action: "PARTY_PLANNER_ERROR".to_string(),
+                            result: format!("{:?}", e),
+                            done: true,
+                        })
+                        .await
+                        .unwrap();
+                        return;
+                    }
+                };
 
             // Set the action plan as followup prompt in the history
             history.push(InteractionMessage {
@@ -186,8 +216,13 @@ impl PartyPlanner {
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
                 } else if !step.should_stream {
-                    let result = vllm_service
-                        .run_party_planner_prompt(step.clone(), &input, &history)
+                    let result = llm_service
+                        .run_party_planner_prompt(
+                            step.clone(),
+                            &input,
+                            &history,
+                            llm_config.clone(),
+                        )
                         .await
                         .context(format!(
                             "Unable to run party planner prompt for step: {}",
@@ -219,8 +254,13 @@ impl PartyPlanner {
                 // Just like we did with non-streaming steps, we need to handle streaming steps here.
                 else if step.clone().should_stream {
                     let mut acc = String::new();
-                    let mut stream = vllm_service
-                        .run_party_planner_prompt_stream(step.clone(), &input, &history)
+                    let mut stream = llm_service
+                        .run_party_planner_prompt_stream(
+                            step.clone(),
+                            &input,
+                            &history,
+                            llm_config.clone(),
+                        )
                         .await
                         .unwrap();
 
@@ -272,11 +312,16 @@ impl PartyPlanner {
         ReceiverStream::new(rx)
     }
 
-    async fn get_action_plan(vllm_service: Arc<VLLMService>, input: String) -> Result<Vec<Action>> {
-        let action_plan = vllm_service
+    async fn get_action_plan(
+        llm_service: Arc<LLMService>,
+        input: String,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Vec<Action>> {
+        let action_plan = llm_service
             .run_known_prompt(
                 KnownPrompts::PartyPlanner,
                 vec![("input".to_string(), input)],
+                llm_config,
             )
             .await?;
 
@@ -348,6 +393,30 @@ impl PartyPlanner {
 
         Ok(results)
     }
+}
+
+fn get_chosen_model(llm_config: Option<InteractionLLMConfig>, default: String) -> String {
+    if let Some(config) = llm_config {
+        return config.model;
+    }
+
+    default
+}
+
+fn get_chosen_llm_client(
+    config: Option<InteractionLLMConfig>,
+    remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
+    default: async_openai::Client<OpenAIConfig>,
+) -> async_openai::Client<OpenAIConfig> {
+    if let Some(config) = config {
+        if let Some(remote_clients) = remote_clients {
+            if let Some(client) = remote_clients.get(&config.provider) {
+                return client.clone();
+            }
+        }
+    }
+
+    default
 }
 
 fn json_to_md(data: &Value, level: usize) -> String {

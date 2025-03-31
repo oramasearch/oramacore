@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-    ai::vllm::KnownPrompts, ai::vllm::VLLMService, collection_manager::dto::SystemPromptUsageMode,
+    ai::llms::{KnownPrompts, LLMService},
+    collection_manager::dto::{InteractionLLMConfig, SystemPromptUsageMode},
     types::CollectionId,
 };
 
@@ -47,22 +48,23 @@ pub struct SystemPromptValidationResponse {
 
 pub struct SystemPromptInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl SystemPromptInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
-        Self { kv, vllm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        Self { kv, llm_service }
     }
 
     pub async fn validate_prompt(
         &self,
         system_prompt: SystemPrompt,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<SystemPromptValidationResponse> {
         let variables = vec![("input".to_string(), system_prompt.prompt)];
         let response = self
-            .vllm_service
-            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables)
+            .llm_service
+            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables, llm_config)
             .await?;
 
         let repaired = repair_json::repair(response)?;

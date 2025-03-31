@@ -7,6 +7,7 @@ use redact::Secret;
 use serde::de::{Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
 
+use crate::ai::RemoteLLMProvider;
 use crate::{
     nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
@@ -697,6 +698,12 @@ pub struct InteractionMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InteractionLLMConfig {
+    pub provider: RemoteLLMProvider,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Interaction {
     pub interaction_id: String,
     pub system_prompt_id: Option<String>,
@@ -705,6 +712,7 @@ pub struct Interaction {
     pub conversation_id: String,
     pub related: Option<RelatedRequest>,
     pub messages: Vec<InteractionMessage>,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -738,6 +746,7 @@ pub struct InsertSystemPromptParams {
     pub name: String,
     pub prompt: String,
     pub usage_mode: SystemPromptUsageMode,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

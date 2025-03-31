@@ -1,12 +1,15 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
+use axum_openapi3::utoipa::ToSchema;
+use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use anyhow::{anyhow, Context, Result};
+use strum_macros::Display;
 use tonic::{transport::Channel, Request};
 use tracing::{debug, info, trace};
 
@@ -16,8 +19,8 @@ use crate::metrics::{
 };
 
 pub mod context_evaluator;
+pub mod llms;
 pub mod party_planner;
-pub mod vllm;
 
 tonic::include_proto!("orama_ai_service");
 
@@ -43,6 +46,41 @@ pub struct AIServiceLLMConfig {
     pub model: String,
 }
 
+#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
+pub enum RemoteLLMProvider {
+    OpenAI,
+    Fireworks,
+    Together,
+}
+
+impl FromStr for RemoteLLMProvider {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "openai" => Ok(RemoteLLMProvider::OpenAI),
+            _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RemoteLLMProvider {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        FromStr::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RemoteLLMsConfig {
+    pub provider: RemoteLLMProvider,
+    pub api_key: String,
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceConfig {
     #[serde(deserialize_with = "deserialize_scheme")]
@@ -54,6 +92,7 @@ pub struct AIServiceConfig {
     #[serde(default = "default_max_connections")]
     pub max_connections: u64,
     pub llm: AIServiceLLMConfig,
+    pub remote_llms: Option<Vec<RemoteLLMsConfig>>,
 }
 
 #[derive(Debug)]

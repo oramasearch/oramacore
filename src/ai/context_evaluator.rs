@@ -229,6 +229,7 @@ mod tests {
                 host: "0.0.0.0".to_string(),
                 model: "".to_string(),
             },
+            remote_llms: None,
             max_connections: 1,
             scheme: Scheme::HTTP,
         }));
@@ -294,6 +295,7 @@ mod tests {
                 host: "0.0.0.0".to_string(),
                 model: "".to_string(),
             },
+            remote_llms: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));
@@ -366,6 +368,7 @@ mod tests {
                 host: "0.0.0.0".to_string(),
                 model: "".to_string(),
             },
+            remote_llms: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));
@@ -438,6 +441,7 @@ mod tests {
                 host: "0.0.0.0".to_string(),
                 model: "".to_string(),
             },
+            remote_llms: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));

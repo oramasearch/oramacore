@@ -41,11 +41,11 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{vllm::VLLMService, AIService},
+    ai::{llms::LLMService, AIService},
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertDocumentsResult, ReindexConfig, SwapCollections,
+            InsertDocumentsResult, InteractionLLMConfig, ReindexConfig, SwapCollections,
         },
         sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     },
@@ -101,7 +101,7 @@ impl WriteSide {
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -141,9 +141,9 @@ impl WriteSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
-        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
+        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
@@ -715,11 +715,14 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Result<SystemPromptValidationResponse> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.system_prompts.validate_prompt(system_prompt).await
+        self.system_prompts
+            .validate_prompt(system_prompt, llm_config)
+            .await
     }
 
     pub async fn insert_system_prompt(
