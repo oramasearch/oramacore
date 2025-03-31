@@ -61,7 +61,7 @@ impl PartyPlanner {
         trigger: Option<Trigger>,
         custom_system_prompt: Option<SystemPrompt>,
     ) -> impl Stream<Item = PartyPlannerMessage> {
-        let vllm_service = read_side.get_vllm_service();
+        let llm_service = read_side.get_llm_service();
 
         // Add a system prompt to the history if the first entry is not a system prompt.
         let mut system_prompt = InteractionMessage {
@@ -108,7 +108,7 @@ impl PartyPlanner {
         tokio::spawn(async move {
             // Get the action plan from the AI service.
             // If there is an error, send an error message to the caller and exit early.
-            let action_plan = match Self::get_action_plan(vllm_service.clone(), full_input).await {
+            let action_plan = match Self::get_action_plan(llm_service.clone(), full_input).await {
                 Ok(plan) => plan,
                 Err(e) => {
                     tx.send(PartyPlannerMessage {
@@ -186,7 +186,7 @@ impl PartyPlanner {
                 // For now, Orama-specific steps do not stream tokens. But there are other steps that may not stream them,
                 // so we need to handle them here.
                 } else if !step.should_stream {
-                    let result = vllm_service
+                    let result = llm_service
                         .run_party_planner_prompt(step.clone(), &input, &history)
                         .await
                         .context(format!(
@@ -219,7 +219,7 @@ impl PartyPlanner {
                 // Just like we did with non-streaming steps, we need to handle streaming steps here.
                 else if step.clone().should_stream {
                     let mut acc = String::new();
-                    let mut stream = vllm_service
+                    let mut stream = llm_service
                         .run_party_planner_prompt_stream(step.clone(), &input, &history)
                         .await
                         .unwrap();
@@ -272,8 +272,8 @@ impl PartyPlanner {
         ReceiverStream::new(rx)
     }
 
-    async fn get_action_plan(vllm_service: Arc<LLMService>, input: String) -> Result<Vec<Action>> {
-        let action_plan = vllm_service
+    async fn get_action_plan(llm_service: Arc<LLMService>, input: String) -> Result<Vec<Action>> {
+        let action_plan = llm_service
             .run_known_prompt(
                 KnownPrompts::PartyPlanner,
                 vec![("input".to_string(), input)],

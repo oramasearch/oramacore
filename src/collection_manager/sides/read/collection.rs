@@ -113,7 +113,7 @@ impl CollectionReader {
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<LLMService>,
+        llm_service: Arc<LLMService>,
     ) -> Self {
         Self {
             id,
@@ -124,7 +124,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
-            llm_service: vllm_service,
+            llm_service,
             document_count: AtomicU64::new(0),
             filter_fields: Default::default(),
             score_fields: Default::default(),
@@ -144,7 +144,7 @@ impl CollectionReader {
     pub fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<LLMService>,
+        llm_service: Arc<LLMService>,
         data_dir: PathBuf,
     ) -> Result<Self> {
         info!("Loading collection from {:?}", data_dir);
@@ -234,7 +234,7 @@ impl CollectionReader {
             read_api_key,
             ai_service,
             nlp_service,
-            llm_service: vllm_service,
+            llm_service,
             document_count: AtomicU64::new(collection_info.document_count),
             fields_per_model,
             text_parser_per_field,

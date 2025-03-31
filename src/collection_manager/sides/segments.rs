@@ -43,12 +43,12 @@ pub struct SelectedSegment {
 
 pub struct SegmentInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<LLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl SegmentInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
-        Self { kv, vllm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        Self { kv, llm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, segment: Segment) -> Result<()> {
@@ -112,7 +112,7 @@ impl SegmentInterface {
         let segments = self.list_by_collection(collection_id).await?;
 
         let response = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(
                 KnownPrompts::Segmenter,
                 vec![

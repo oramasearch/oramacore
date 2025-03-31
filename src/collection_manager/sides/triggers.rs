@@ -45,12 +45,12 @@ pub struct SelectedTrigger {
 
 pub struct TriggerInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<LLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
-        Self { kv, vllm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        Self { kv, llm_service }
     }
 
     pub async fn insert(&self, trigger: Trigger) -> Result<String> {
@@ -144,7 +144,7 @@ impl TriggerInterface {
         triggers: Vec<Trigger>,
     ) -> Result<Option<SelectedTrigger>> {
         let response = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(
                 llms::KnownPrompts::Trigger,
                 vec![

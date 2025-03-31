@@ -47,12 +47,12 @@ pub struct SystemPromptValidationResponse {
 
 pub struct SystemPromptInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<LLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl SystemPromptInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
-        Self { kv, vllm_service }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        Self { kv, llm_service }
     }
 
     pub async fn validate_prompt(
@@ -61,7 +61,7 @@ impl SystemPromptInterface {
     ) -> Result<SystemPromptValidationResponse> {
         let variables = vec![("input".to_string(), system_prompt.prompt)];
         let response = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables)
             .await?;
 

@@ -72,7 +72,7 @@ pub struct ReadSide {
     segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
-    vllm_service: Arc<LLMService>,
+    llm_service: Arc<LLMService>,
 }
 
 impl ReadSide {
@@ -80,7 +80,7 @@ impl ReadSide {
         operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<LLMService>,
+        llm_service: Arc<LLMService>,
         config: ReadSideConfig,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
@@ -95,7 +95,7 @@ impl ReadSide {
         let collections_reader = CollectionsReader::try_load(
             ai_service.clone(),
             nlp_service,
-            vllm_service.clone(),
+            llm_service.clone(),
             config.config,
         )
         .await
@@ -122,9 +122,9 @@ impl ReadSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
-        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
+        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -138,7 +138,7 @@ impl ReadSide {
             triggers,
             system_prompts,
             kv,
-            vllm_service,
+            llm_service,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -377,8 +377,8 @@ impl ReadSide {
 
     // This is wrong. We should not expose the vllm service to the read side.
     // TODO: Remove this method.
-    pub fn get_vllm_service(&self) -> Arc<LLMService> {
-        self.vllm_service.clone()
+    pub fn get_llm_service(&self) -> Arc<LLMService> {
+        self.llm_service.clone()
     }
 
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
@@ -511,7 +511,7 @@ impl ReadSide {
 
     pub async fn get_search_mode(&self, query: String) -> Result<SearchMode> {
         let search_mode: String = self
-            .vllm_service
+            .llm_service
             .run_known_prompt(
                 llms::KnownPrompts::Autoquery,
                 vec![("query".to_string(), query.clone())],

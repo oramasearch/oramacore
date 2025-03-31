@@ -240,7 +240,7 @@ async fn answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let llm_service = read_side.clone().get_vllm_service();
+        let llm_service = read_side.clone().get_llm_service();
 
         let _ = tx
             .send(Ok(Event::default().data(
