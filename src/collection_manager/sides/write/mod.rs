@@ -103,6 +103,7 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
+        local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -147,7 +148,6 @@ impl WriteSide {
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
-        let local_gpu_manager = Arc::new(LocalGPUManager::try_new()?);
 
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,

@@ -86,6 +86,7 @@ impl ReadSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         config: ReadSideConfig,
+        local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
@@ -129,7 +130,6 @@ impl ReadSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
-        let local_gpu_manager = Arc::new(LocalGPUManager::try_new()?);
 
         let read_side = ReadSide {
             collections: collections_reader,
@@ -144,7 +144,7 @@ impl ReadSide {
             system_prompts,
             kv,
             llm_service,
-            local_gpu_manager
+            local_gpu_manager,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;

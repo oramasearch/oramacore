@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ai::{llms::LLMService, AIService, AIServiceConfig};
+use ai::{gpu::LocalGPUManager, llms::LLMService, AIService, AIServiceConfig};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
@@ -122,6 +122,8 @@ pub async fn build_orama(
         }
     };
 
+    let local_gpu_manager = Arc::new(LocalGPUManager::new());
+
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());
@@ -149,6 +151,7 @@ pub async fn build_orama(
             ai_service.clone(),
             nlp_service.clone(),
             llm_service.clone(),
+            local_gpu_manager.clone(),
         )
         .await
         .context("Cannot create write side")?;
@@ -171,6 +174,7 @@ pub async fn build_orama(
             nlp_service,
             llm_service,
             config.reader_side,
+            local_gpu_manager,
         )
         .await
         .context("Cannot create read side")?;
