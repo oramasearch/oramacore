@@ -80,6 +80,7 @@ pub struct RemoteLLMsConfig {
     pub provider: RemoteLLMProvider,
     pub api_key: String,
     pub url: Option<String>,
+    pub default_model: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

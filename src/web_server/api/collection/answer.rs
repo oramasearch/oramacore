@@ -1,5 +1,5 @@
-use crate::ai::llms;
 use crate::ai::party_planner::PartyPlanner;
+use crate::ai::{llms, RemoteLLMProvider, RemoteLLMsConfig};
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Role,
     SearchMode, SearchParams,
@@ -23,11 +23,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tracing::{info, warn};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -66,7 +68,7 @@ async fn planned_answer_v1(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
     Query(query_params): Query<AnswerQueryParams>,
-    Json(interaction): Json<Interaction>,
+    Json(mut interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId::from(id);
     let read_side = read_side.clone();
@@ -74,6 +76,18 @@ async fn planned_answer_v1(
     let query = interaction.query.clone();
     let conversation = interaction.messages.clone();
     let api_key = query_params.api_key;
+
+    if read_side.is_gpu_overloaded() {
+        match read_side.select_random_remote_llm_service() {
+            Some((provider, model)) => {
+                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                interaction.llm_config = Some(InteractionLLMConfig { model, provider });
+            }
+            None => {
+                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+            }
+        }
+    }
 
     read_side
         .clone()
@@ -221,11 +235,23 @@ async fn answer_v1(
     Path(id): Path<String>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
-    Json(interaction): Json<Interaction>,
+    Json(mut interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let collection_id = CollectionId::from(id);
     let read_side = read_side.clone();
     let read_api_key = query.api_key;
+
+    if read_side.is_gpu_overloaded() {
+        match read_side.select_random_remote_llm_service() {
+            Some((provider, model)) => {
+                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                interaction.llm_config = Some(InteractionLLMConfig { model, provider });
+            }
+            None => {
+                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+            }
+        }
+    }
 
     read_side
         .clone()
