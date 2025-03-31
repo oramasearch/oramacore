@@ -11,11 +11,13 @@ use http::StatusCode;
 use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
+use tracing::{info, warn};
 
 use crate::{
     collection_manager::{
         dto::{
-            ApiKey, DeleteSystemPromptParams, InsertSystemPromptParams, UpdateSystemPromptParams,
+            ApiKey, DeleteSystemPromptParams, InsertSystemPromptParams, InteractionLLMConfig,
+            UpdateSystemPromptParams,
         },
         sides::{system_prompts::SystemPrompt, ReadSide, WriteSide},
     },
@@ -122,10 +124,22 @@ async fn validate_system_prompt_v1(
     Path(id): Path<String>,
     TypedHeader(auth): AuthorizationBearerHeader,
     write_side: State<Arc<WriteSide>>,
-    Json(params): Json<InsertSystemPromptParams>,
+    Json(mut params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
     let collection_id = CollectionId::from(id);
     let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    if write_side.is_gpu_overloaded() {
+        match write_side.select_random_remote_llm_service() {
+            Some((provider, model)) => {
+                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                params.llm_config = Some(InteractionLLMConfig { model, provider });
+            }
+            None => {
+                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+            }
+        }
+    }
 
     let system_prompt = SystemPrompt {
         id: params.id.clone().unwrap_or_else(cuid2::create_id),

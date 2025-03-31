@@ -2,7 +2,6 @@ mod collection;
 mod collections;
 mod document_storage;
 
-use async_openai::config::OpenAIConfig;
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use std::sync::Arc;

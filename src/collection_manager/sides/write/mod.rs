@@ -33,7 +33,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
@@ -41,7 +41,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
@@ -94,6 +94,7 @@ pub struct WriteSide {
     kv: Arc<KV>,
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
+    llm_service: Arc<LLMService>,
 }
 
 impl WriteSide {
@@ -176,6 +177,7 @@ impl WriteSide {
             system_prompts,
             kv,
             local_gpu_manager,
+            llm_service,
         };
 
         let write_side = Arc::new(write_side);
@@ -957,6 +959,34 @@ impl WriteSide {
             }
             None => {
                 bail!("Cannot parse trigger id")
+            }
+        }
+    }
+
+    pub fn is_gpu_overloaded(&self) -> bool {
+        match self.local_gpu_manager.is_overloaded() {
+            Ok(overloaded) => overloaded,
+            Err(e) => {
+                error!(?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                true
+            }
+        }
+    }
+
+    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
+        self.llm_service.default_remote_models.clone()
+    }
+
+    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
+        match self.get_available_remote_llm_services() {
+            Some(services) => {
+                let mut rng = rand::rng();
+                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
+                services.into_iter().nth(random_index)
+            }
+            None => {
+                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
+                None
             }
         }
     }
