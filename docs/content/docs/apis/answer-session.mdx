@@ -50,6 +50,10 @@ const answerSession = collection.createAnswerSession({
         { role: 'user', content: 'How do I install OramaCore?' },
         { role: 'assistant', content: 'You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image' }
     ],
+    LLMConfig: {
+      provider: 'openai',
+      model: 'gpt-4o'
+    },
     events: {
         onStateChange(state) {
             console.log('State changed:', state)
@@ -60,6 +64,8 @@ const answerSession = collection.createAnswerSession({
 </Tabs>
 
 The `initialMessages` field is an array of messages that will be sent to the answer session as soon as it is created. This is useful if you are resuming a conversation, or if you want to provide some context to the answer session.
+
+The `LLMConfig` allows you to specify a remote LLM to invoke for this particular answer session. It depends on the [OramaCore configuration](/docs/guide/configuration).
 
 The `events` field is an object that can contain the following event handlers:
 
