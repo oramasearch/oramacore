@@ -41,7 +41,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{vllm::VLLMService, AIService},
+    ai::{llms::LLMService, AIService},
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
@@ -101,7 +101,7 @@ impl WriteSide {
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        llm_service: Arc<LLMService>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -141,9 +141,9 @@ impl WriteSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), vllm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), vllm_service.clone());
-        let system_prompts = SystemPromptInterface::new(kv.clone(), vllm_service.clone());
+        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
+        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 

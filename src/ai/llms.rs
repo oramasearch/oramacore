@@ -14,7 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::collection_manager::{dto::InteractionMessage, sides::system_prompts::SystemPrompt};
 
-use super::{party_planner::Step, AIServiceLLMConfig};
+use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
@@ -235,19 +235,88 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
 }
 
 #[derive(Debug)]
-pub struct VLLMService {
-    pub client: async_openai::Client<OpenAIConfig>,
+pub struct LLMService {
+    pub local_vllm_client: async_openai::Client<OpenAIConfig>,
+    pub remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
     pub model: String,
 }
 
-impl VLLMService {
-    pub fn new(conf: AIServiceLLMConfig) -> Self {
-        let url = format!("http://{}:{}/v1", conf.host, conf.port);
+impl LLMService {
+    pub fn try_new(
+        local_vllm_config: AIServiceLLMConfig,
+        remote_llm_config: Option<Vec<RemoteLLMsConfig>>,
+    ) -> Result<Self> {
+        let local_vllm_provider_url = format!(
+            "http://{}:{}/v1",
+            local_vllm_config.host, local_vllm_config.port
+        );
+        let mut remote_llm_providers: HashMap<
+            RemoteLLMProvider,
+            async_openai::Client<OpenAIConfig>,
+        > = HashMap::new();
 
-        Self {
-            client: async_openai::Client::with_config(OpenAIConfig::new().with_api_base(&url)),
-            model: conf.model,
+        if let Some(remote_config) = remote_llm_config {
+            for conf in remote_config {
+                match conf.provider {
+                    RemoteLLMProvider::OpenAI => {
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::OpenAI,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                        "https://api.openai.com/v1".to_string()
+                                    })),
+                            ),
+                        );
+                    }
+                    RemoteLLMProvider::Fireworks => {
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::Fireworks,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                        "https://api.fireworks.ai/inference/v1".to_string()
+                                    })),
+                            ),
+                        );
+                    }
+                    RemoteLLMProvider::Together => {
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::Together,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                        "https://api.together.xyz/v1".to_string()
+                                    })),
+                            ),
+                        );
+                    }
+                    #[warn(unreachable_patterns)]
+                    _ => {
+                        return Err(anyhow::Error::msg(format!(
+                            "Unsupported remote LLM provider: {}",
+                            conf.provider
+                        )));
+                    }
+                }
+            }
         }
+
+        let remote_clients = match remote_llm_providers.len() {
+            0 => None,
+            _ => Some(remote_llm_providers),
+        };
+
+        Ok(Self {
+            local_vllm_client: async_openai::Client::with_config(
+                OpenAIConfig::new().with_api_base(&local_vllm_provider_url),
+            ),
+            remote_clients,
+            model: local_vllm_config.model,
+        })
     }
 
     pub async fn run_known_prompt(
@@ -331,7 +400,7 @@ impl VLLMService {
             .unwrap();
 
         let mut response_stream = self
-            .client
+            .local_vllm_client
             .chat()
             .create_stream(request)
             .await
@@ -442,10 +511,12 @@ impl VLLMService {
             .build()
             .context("Unable to build KnownPrompt LLM request body")?;
 
-        let mut response_stream =
-            self.client.chat().create_stream(request).await.context(
-                "An error occurred while initializing the stream from remote LLM instance",
-            )?;
+        let mut response_stream = self
+            .local_vllm_client
+            .chat()
+            .create_stream(request)
+            .await
+            .context("An error occurred while initializing the stream from remote LLM instance")?;
 
         let (tx, rx) = mpsc::channel(100);
 

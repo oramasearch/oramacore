@@ -1,5 +1,5 @@
 use crate::{
-    ai::vllm::{KnownPrompts, VLLMService},
+    ai::llms::{KnownPrompts, LLMService},
     collection_manager::{
         dto::InteractionMessage,
         sides::generic_kv::{format_key, KV},
@@ -43,11 +43,11 @@ pub struct SelectedSegment {
 
 pub struct SegmentInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    vllm_service: Arc<LLMService>,
 }
 
 impl SegmentInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
+    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
         Self { kv, vllm_service }
     }
 

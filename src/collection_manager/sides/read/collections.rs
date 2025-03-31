@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    ai::{vllm::VLLMService, AIService},
+    ai::{llms::LLMService, AIService},
     collection_manager::{
         dto::{ApiKey, LanguageDTO},
         sides::Offset,
@@ -31,7 +31,7 @@ const LIMIT: usize = 100;
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
-    vllm_service: Arc<VLLMService>,
+    vllm_service: Arc<LLMService>,
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
@@ -41,7 +41,7 @@ impl CollectionsReader {
     pub async fn try_load(
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        vllm_service: Arc<LLMService>,
         indexes_config: IndexesConfig,
     ) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
@@ -421,13 +421,20 @@ mod tests {
                 port: 8000,
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            remote_llms: None,
         }));
 
-        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
-            host: "localhost".to_string(),
-            port: 8000,
-            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-        }));
+        let vllm_service = Arc::new(
+            LLMService::try_new(
+                crate::ai::AIServiceLLMConfig {
+                    host: "localhost".to_string(),
+                    port: 8000,
+                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
 
         let nlp_service = Arc::new(NLPService::new());
         let collections = CollectionsReader::try_load(
@@ -501,13 +508,20 @@ mod tests {
                 port: 8000,
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            remote_llms: None,
         }));
         let nlp_service = Arc::new(NLPService::new());
-        let vllm_service = Arc::new(VLLMService::new(crate::ai::AIServiceLLMConfig {
-            host: "localhost".to_string(),
-            port: 8000,
-            model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-        }));
+        let vllm_service = Arc::new(
+            LLMService::try_new(
+                crate::ai::AIServiceLLMConfig {
+                    host: "localhost".to_string(),
+                    port: 8000,
+                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                },
+                None,
+            )
+            .unwrap(),
+        );
         let collections = CollectionsReader::try_load(
             ai_service,
             nlp_service,

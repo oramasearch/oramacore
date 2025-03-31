@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, instrument, trace, warn};
 
-use crate::ai::vllm::{self, VLLMService};
+use crate::ai::llms::{self, LLMService};
 use crate::collection_manager::dto::{InteractionMessage, SearchMode, SearchModeResult};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
@@ -72,7 +72,7 @@ pub struct ReadSide {
     segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    vllm_service: Arc<LLMService>,
 }
 
 impl ReadSide {
@@ -80,7 +80,7 @@ impl ReadSide {
         operation_receiver_creator: OperationReceiverCreator,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
-        vllm_service: Arc<VLLMService>,
+        vllm_service: Arc<LLMService>,
         config: ReadSideConfig,
     ) -> Result<Arc<Self>> {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
@@ -377,7 +377,7 @@ impl ReadSide {
 
     // This is wrong. We should not expose the vllm service to the read side.
     // TODO: Remove this method.
-    pub fn get_vllm_service(&self) -> Arc<VLLMService> {
+    pub fn get_vllm_service(&self) -> Arc<LLMService> {
         self.vllm_service.clone()
     }
 
@@ -513,7 +513,7 @@ impl ReadSide {
         let search_mode: String = self
             .vllm_service
             .run_known_prompt(
-                vllm::KnownPrompts::Autoquery,
+                llms::KnownPrompts::Autoquery,
                 vec![("query".to_string(), query.clone())],
             )
             .await?;

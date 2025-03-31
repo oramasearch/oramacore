@@ -1,5 +1,5 @@
+use crate::ai::llms;
 use crate::ai::party_planner::PartyPlanner;
-use crate::ai::vllm;
 use crate::collection_manager::dto::{
     ApiKey, AutoMode, Interaction, InteractionMessage, Limit, Role, SearchMode, SearchParams,
 };
@@ -240,7 +240,7 @@ async fn answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
-        let vllm_service = read_side.clone().get_vllm_service();
+        let llm_service = read_side.clone().get_vllm_service();
 
         let _ = tx
             .send(Ok(Event::default().data(
@@ -327,8 +327,8 @@ async fn answer_v1(
 
         let optimized_query_variables = vec![("input".to_string(), query.clone())];
 
-        let optimized_query = vllm_service
-            .run_known_prompt(vllm::KnownPrompts::OptimizeQuery, optimized_query_variables)
+        let optimized_query = llm_service
+            .run_known_prompt(llms::KnownPrompts::OptimizeQuery, optimized_query_variables)
             .await
             .unwrap_or(query.clone()); // fallback to the original query if the optimization fails
 
@@ -445,8 +445,8 @@ async fn answer_v1(
             variables.push(("trigger".to_string(), full_trigger.response));
         }
 
-        let mut answer_stream = vllm_service
-            .run_known_prompt_stream(vllm::KnownPrompts::Answer, variables, system_prompt)
+        let mut answer_stream = llm_service
+            .run_known_prompt_stream(llms::KnownPrompts::Answer, variables, system_prompt)
             .await;
 
         while let Some(resp) = answer_stream.next().await {

@@ -1,6 +1,6 @@
 use super::generic_kv::{format_key, KV};
 use crate::{
-    ai::vllm::{self, VLLMService},
+    ai::llms::{self, LLMService},
     collection_manager::dto::InteractionMessage,
     types::CollectionId,
 };
@@ -45,11 +45,11 @@ pub struct SelectedTrigger {
 
 pub struct TriggerInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    vllm_service: Arc<LLMService>,
 }
 
 impl TriggerInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
+    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
         Self { kv, vllm_service }
     }
 
@@ -146,7 +146,7 @@ impl TriggerInterface {
         let response = self
             .vllm_service
             .run_known_prompt(
-                vllm::KnownPrompts::Trigger,
+                llms::KnownPrompts::Trigger,
                 vec![
                     ("triggers".to_string(), serde_json::to_string(&triggers)?),
                     (

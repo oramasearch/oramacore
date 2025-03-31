@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-    ai::vllm::KnownPrompts, ai::vllm::VLLMService, collection_manager::dto::SystemPromptUsageMode,
+    ai::llms::KnownPrompts, ai::llms::LLMService, collection_manager::dto::SystemPromptUsageMode,
     types::CollectionId,
 };
 
@@ -47,11 +47,11 @@ pub struct SystemPromptValidationResponse {
 
 pub struct SystemPromptInterface {
     kv: Arc<KV>,
-    vllm_service: Arc<VLLMService>,
+    vllm_service: Arc<LLMService>,
 }
 
 impl SystemPromptInterface {
-    pub fn new(kv: Arc<KV>, vllm_service: Arc<VLLMService>) -> Self {
+    pub fn new(kv: Arc<KV>, vllm_service: Arc<LLMService>) -> Self {
         Self { kv, vllm_service }
     }
 

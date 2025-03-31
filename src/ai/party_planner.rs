@@ -18,7 +18,7 @@ use crate::{
     types::CollectionId,
 };
 
-use super::vllm::{KnownPrompts, VLLMService};
+use super::llms::{KnownPrompts, LLMService};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Action {
@@ -272,7 +272,7 @@ impl PartyPlanner {
         ReceiverStream::new(rx)
     }
 
-    async fn get_action_plan(vllm_service: Arc<VLLMService>, input: String) -> Result<Vec<Action>> {
+    async fn get_action_plan(vllm_service: Arc<LLMService>, input: String) -> Result<Vec<Action>> {
         let action_plan = vllm_service
             .run_known_prompt(
                 KnownPrompts::PartyPlanner,
