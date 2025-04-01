@@ -95,8 +95,15 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
         config.http.host, config.http.port
     );
 
-    let web_server = WebServer::new(write_side, read_side, prometheus_hadler);
+    let web_server = WebServer::new(write_side.clone(), read_side.clone(), prometheus_hadler);
     web_server.start(config.http).await?;
+
+    if let Some(write_side) = write_side {
+        write_side.commit().await?;
+    }
+    if let Some(read_side) = read_side {
+        read_side.commit().await?;
+    }
 
     Ok(())
 }

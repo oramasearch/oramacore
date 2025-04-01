@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 
@@ -51,19 +51,33 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
     pub fn commit(&self) -> Result<()> {
         create_if_not_exists(self.file_path.parent().expect("file_path has a parent"))
             .context("Cannot create the base directory for the committed index")?;
+
+        #[derive(Serialize)]
+        struct Item<'a, Key, Value> {
+            k: &'a Key,
+            v: &'a Value,
+        }
+        let items: Vec<Item<Key, Value>> = self.inner.iter().map(|(k, v)| Item { k, v }).collect();
+
         BufferedFile::create_or_overwrite(self.file_path.clone())
             .context("Cannot create file")?
-            .write_bincode_data(&self.inner)
+            .write_bincode_data(&items)
             .context("Cannot write map to file")?;
 
         Ok(())
     }
 
     pub fn load(file_path: PathBuf) -> Result<Self> {
-        let map: HashMap<Key, Value> = BufferedFile::open(file_path.clone())
+        #[derive(Deserialize)]
+        struct Item<Key, Value> {
+            k: Key,
+            v: Value,
+        }
+        let map: Vec<Item<Key, Value>> = BufferedFile::open(file_path.clone())
             .context("Cannot open file")?
             .read_bincode_data()
             .context("Cannot read map from file")?;
+        let map: HashMap<_, _> = map.into_iter().map(|item| (item.k, item.v)).collect();
 
         Ok(Self {
             inner: map,

@@ -78,6 +78,11 @@ pub struct ReadSide {
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
+
+    // Handle to stop the read side
+    // This is used to stop the read side when the server is shutting down
+    stop_sender: tokio::sync::mpsc::Sender<()>,
+    stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
 }
 
 impl ReadSide {
@@ -132,6 +137,10 @@ impl ReadSide {
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
 
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_sender, stop_receiver) = tokio::sync::mpsc::channel(1);
+
+        let stop_done_receiver = RwLock::new(stop_done_receiver);
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
@@ -146,6 +155,8 @@ impl ReadSide {
             kv,
             llm_service,
             local_gpu_manager,
+            stop_sender,
+            stop_done_receiver,
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
@@ -153,9 +164,30 @@ impl ReadSide {
         let read_side = Arc::new(read_side);
 
         start_commit_loop(read_side.clone(), commit_interval);
-        start_receive_operations(read_side.clone(), operation_receiver);
+        start_receive_operations(
+            read_side.clone(),
+            operation_receiver,
+            stop_receiver,
+            stop_done_sender,
+        );
 
         Ok(read_side)
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        info!("Stopping read side");
+        self.stop_sender
+            .send(())
+            .await
+            .context("Cannot send stop signal")?;
+        let mut stop_done_receiver = self.stop_done_receiver.write().await;
+        stop_done_receiver
+            .recv()
+            .await
+            .context("Cannot send stop signal")?;
+        info!("Read side stopped");
+
+        Ok(())
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -630,14 +662,42 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
     });
 }
 
-fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: OperationReceiver) {
+fn start_receive_operations(
+    read_side: Arc<ReadSide>,
+    mut operation_receiver: OperationReceiver,
+    stop_receiver: tokio::sync::mpsc::Receiver<()>,
+    stop_done_sender: tokio::sync::mpsc::Sender<()>,
+) {
     tokio::task::spawn(async move {
         use backoff::future::retry;
         use backoff::ExponentialBackoff;
+        use core::pin::pin;
+
+        let mut stopped = false;
+
+        let mut stop_receiver = pin!(stop_receiver);
 
         info!("Starting operation receiver");
-        loop {
-            while let Some(op) = operation_receiver.recv().await {
+        'outer: loop {
+            loop {
+                let op = tokio::select! {
+                    _ = stop_receiver.recv() => {
+                        stopped = true;
+                        info!("Stopping operation receiver");
+                        break 'outer;
+                    }
+                    op = operation_receiver.recv() => {
+                        op
+                    }
+                };
+
+                let op = match op {
+                    None => {
+                        warn!("Operation receiver is closed");
+                        break;
+                    }
+                    Some(op) => op,
+                };
                 let op = match op {
                     Ok(op) => op,
                     Err(e) => {
@@ -689,7 +749,13 @@ fn start_receive_operations(read_side: Arc<ReadSide>, mut operation_receiver: Op
             info!("Reconnected to operation receiver");
         }
 
-        error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
+        if !stopped {
+            error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
+        }
+
+        stop_done_sender.send(()).await.unwrap_or_else(|e| {
+            error!("Cannot send stop signal to read side: {e:?}");
+        });
     });
 }
 

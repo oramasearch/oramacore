@@ -44,7 +44,11 @@ impl WebServer {
     pub async fn start(self, config: HttpConfig) -> Result<()> {
         let addr = SocketAddr::new(config.host, config.port);
 
-        let router = api_config(self.write_side, self.read_side, self.prometheus_handler);
+        let router = api_config(
+            self.write_side,
+            self.read_side.clone(),
+            self.prometheus_handler,
+        );
 
         let router = if config.allow_cors {
             info!("Enabling CORS");
@@ -61,11 +65,47 @@ impl WebServer {
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
         info!("Address binded. Starting web server on http://{}", addr);
-        let output = axum::serve(listener, router).await;
+        let output = axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown_signal(self.read_side))
+            .await;
 
         match output {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }
+}
+
+async fn shutdown_signal(reader_side: Option<Arc<ReadSide>>) {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    // wait for a CTRL+C signal
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    };
+
+    if let Some(reader_side) = reader_side {
+        info!("Stopping reader side");
+        reader_side.stop().await;
+    }
+
+    info!("Shutting down web server");
 }
