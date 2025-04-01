@@ -108,6 +108,7 @@ sentry-debug-images = "0.36.0"
 sentry-tracing = "0.36.0"
 arrayvec = "0.7.6"
 nvml-wrapper = "0.10.0"
+atomic-write-file = "0.2.3"
 
 [build-dependencies]
 cc = "1"

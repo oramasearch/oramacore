@@ -156,8 +156,10 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_commit_and_load() -> Result<()> {
-    let config = create_oramacore_config();
+async fn test_commit_and_load1() -> Result<()> {
+    let _ = tracing_subscriber::fmt::try_init();
+    let mut config = create_oramacore_config();
+    config.reader_side.config.data_dir = ".pippo".to_string().into();
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId::from("test-collection".to_string());
@@ -197,6 +199,8 @@ async fn test_commit_and_load() -> Result<()> {
     write_side.commit().await?;
     read_side.commit().await?;
 
+    // After commit without restart
+
     let after_commit_result = read_side
         .search(
             ApiKey(Secret::new("my-read-api-key".to_string())),
@@ -227,6 +231,7 @@ async fn test_commit_and_load() -> Result<()> {
         after_commit_collection_lists
     );
 
+    // After re-start
     let (write_side, read_side) = create(config.clone()).await?;
 
     let after_load_result = read_side

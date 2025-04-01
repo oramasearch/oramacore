@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{info, trace};
+use tracing::info;
 
 use crate::collection_manager::{
     dto::{InteractionLLMConfig, InteractionMessage},
@@ -286,7 +286,7 @@ impl LLMService {
                             async_openai::Client::with_config(
                                 OpenAIConfig::new()
                                     .with_api_key(&conf.api_key)
-                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
                                         "https://api.openai.com/v1".to_string()
                                     })),
                             ),
@@ -314,7 +314,7 @@ impl LLMService {
                             async_openai::Client::with_config(
                                 OpenAIConfig::new()
                                     .with_api_key(&conf.api_key)
-                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
                                         "https://api.fireworks.ai/inference/v1".to_string()
                                     })),
                             ),
@@ -342,7 +342,7 @@ impl LLMService {
                             async_openai::Client::with_config(
                                 OpenAIConfig::new()
                                     .with_api_key(&conf.api_key)
-                                    .with_api_base(&conf.url.unwrap_or_else(|| {
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
                                         "https://api.together.xyz/v1".to_string()
                                     })),
                             ),

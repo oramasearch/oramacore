@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use nvml_wrapper::{error::NvmlError, Nvml};
+use nvml_wrapper::Nvml;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -17,6 +17,12 @@ pub struct DeviceUtilization {
 pub struct LocalGPUManager {
     pub nvml: Option<Nvml>,
     pub device_count: u32,
+}
+
+impl Default for LocalGPUManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LocalGPUManager {

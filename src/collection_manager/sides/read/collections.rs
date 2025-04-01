@@ -32,7 +32,7 @@ pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
-    collections: RwLock<HashMap<CollectionId, CollectionReader>>,
+    pub collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
 }

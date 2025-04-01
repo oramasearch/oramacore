@@ -1,9 +1,10 @@
 use std::{
-    io::Write,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
+use atomic_write_file::AtomicWriteFile;
 use tokio::io::AsyncWriteExt;
 use tracing::trace;
 
@@ -84,14 +85,13 @@ pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
-        let file = std::fs::File::create(&path)
+        let buf = AtomicWriteFile::open(&path)
             .with_context(|| format!("Cannot create file at {:?}", path))?;
-        let buf = std::io::BufWriter::new(file);
-        Ok(WriteBufferedFile {
-            path,
-            closed: false,
-            buf,
-        })
+        // let file = std::fs::File::create(&path)
+        //     .with_context(|| format!("Cannot create file at {:?}", path))?;
+        let buf = BufWriter::new(buf);
+        let buf = Some(buf);
+        Ok(WriteBufferedFile { path, buf })
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<ReadBufferedFile> {
@@ -127,19 +127,24 @@ impl ReadBufferedFile {
 
 pub struct WriteBufferedFile {
     path: PathBuf,
-    buf: std::io::BufWriter<std::fs::File>,
-    closed: bool,
+    buf: Option<BufWriter<AtomicWriteFile>>,
 }
 impl WriteBufferedFile {
     pub fn write_json_data<T: serde::Serialize>(mut self, data: &T) -> Result<()> {
-        serde_json::to_writer(&mut self.buf, data)
-            .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
+        if let Some(buf) = self.buf.as_mut() {
+            serde_json::to_writer(buf, data)
+                .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
+        }
+
         self.close()
     }
 
     pub fn write_bincode_data<T: serde::Serialize>(mut self, data: &T) -> Result<()> {
-        bincode::serialize_into(&mut self.buf, data)
-            .with_context(|| format!("Cannot write bincode data to {:?}", self.path))?;
+        if let Some(buf) = self.buf.as_mut() {
+            bincode::serialize_into(buf, data)
+                .with_context(|| format!("Cannot write bincode data to {:?}", self.path))?;
+        }
+
         self.close()
     }
 
@@ -148,23 +153,31 @@ impl WriteBufferedFile {
     }
 
     fn drop_all(&mut self) -> Result<()> {
-        if self.closed {
-            return Ok(());
-        }
+        let mut buf = match self.buf.take() {
+            Some(buf) => buf,
+            None => {
+                return Ok(());
+            }
+        };
 
-        self.closed = true;
-
-        self.buf
-            .flush()
+        buf.flush()
             .with_context(|| format!("Cannot flush buffer {:?}", self.path))?;
 
-        let mut inner = self.buf.get_ref();
-        inner
-            .flush()
-            .with_context(|| format!("Cannot flush file {:?}", self.path))?;
-        inner
-            .sync_all()
-            .with_context(|| format!("Cannot sync_all file {:?}", self.path))?;
+        let buf = buf
+            .into_inner()
+            .with_context(|| format!("Cannot get inner buffer {:?}", self.path))?;
+        // inner
+        //     .flush()
+        //     .with_context(|| format!("Cannot flush file {:?}", self.path))?;
+        // inner
+        //     .sync_all()
+        //     .with_context(|| format!("Cannot sync_all file {:?}", self.path))?;
+        buf.commit()
+            .with_context(|| format!("Cannot commit buffer {:?}", self.path))?;
+
+        let exists = std::fs::read(&self.path)
+            .with_context(|| format!("Cannot check if file exists {:?}", self.path))?;
+        debug_assert!(!exists.is_empty(), "File should exist after commit");
 
         Ok(())
     }
@@ -172,35 +185,70 @@ impl WriteBufferedFile {
 
 // Proxy all std::io::Write methods to the inner buffer
 impl std::io::Write for WriteBufferedFile {
-    fn by_ref(&mut self) -> &mut Self {
-        self.buf.by_ref();
-        self
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(ref mut inner) = self.buf {
+            inner.write(buf)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Buffered file is closed",
+            ))
+        }
     }
 
-    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
-        self.buf.write_vectored(bufs)
+    fn write_all(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        if let Some(ref mut inner) = self.buf {
+            while !buf.is_empty() {
+                let n = inner.write(buf)?;
+                buf = &buf[n..];
+            }
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Buffered file is closed",
+            ))
+        }
     }
 
     fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::io::Result<()> {
-        self.buf.write_fmt(fmt)
+        if let Some(ref mut inner) = self.buf {
+            inner.write_fmt(fmt)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Buffered file is closed",
+            ))
+        }
     }
 
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.buf.write_all(buf)
-    }
-
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.buf.write(buf)
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        if let Some(ref mut inner) = self.buf {
+            inner.write_vectored(bufs)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Buffered file is closed",
+            ))
+        }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.buf.flush()
+        if let Some(ref mut inner) = self.buf {
+            inner.flush()
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Buffered file is closed",
+            ))
+        }
     }
 }
 
 impl Drop for WriteBufferedFile {
     fn drop(&mut self) {
-        self.drop_all()
-            .expect("WriteBufferedFile drop failed. Use `close` method to handle errors.");
+        self.drop_all().unwrap_or_else(|e| {
+            tracing::error!("Error while dropping buffered file: {:?}", e);
+        });
     }
 }
