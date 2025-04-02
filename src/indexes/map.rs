@@ -5,10 +5,9 @@ use std::{
     path::PathBuf,
 };
 
+use crate::file_utils::{create_if_not_exists, BufferedFile};
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-use crate::file_utils::{create_if_not_exists, BufferedFile};
 
 pub struct Map<Key, Value> {
     // Probably hashmap isn't a good choice here
@@ -26,8 +25,10 @@ impl<Key: Debug, Value: Debug> Debug for Map<Key, Value> {
     }
 }
 
-impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
-    Map<Key, Value>
+impl<
+        Key: Eq + Hash + Serialize + DeserializeOwned + Debug,
+        Value: Serialize + DeserializeOwned + Debug,
+    > Map<Key, Value>
 {
     pub fn from_hash_map(hash_map: HashMap<Key, Value>, file_path: PathBuf) -> Result<Self> {
         let s = Self {
@@ -52,7 +53,7 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
         create_if_not_exists(self.file_path.parent().expect("file_path has a parent"))
             .context("Cannot create the base directory for the committed index")?;
 
-        #[derive(Serialize)]
+        #[derive(Serialize, Debug)]
         struct Item<'a, Key, Value> {
             k: &'a Key,
             v: &'a Value,
@@ -61,7 +62,7 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
 
         BufferedFile::create_or_overwrite(self.file_path.clone())
             .context("Cannot create file")?
-            .write_bincode_data(&items)
+            .write_json_data(&items)
             .context("Cannot write map to file")?;
 
         Ok(())
@@ -75,7 +76,7 @@ impl<Key: Eq + Hash + Serialize + DeserializeOwned, Value: Serialize + Deseriali
         }
         let map: Vec<Item<Key, Value>> = BufferedFile::open(file_path.clone())
             .context("Cannot open file")?
-            .read_bincode_data()
+            .read_json_data()
             .context("Cannot read map from file")?;
         let map: HashMap<_, _> = map.into_iter().map(|item| (item.k, item.v)).collect();
 

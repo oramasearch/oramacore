@@ -1,12 +1,10 @@
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
 use itertools::Itertools;
 use oramacore::{start, OramacoreConfig};
-use sentry::Integration;
 use tracing::instrument;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -44,12 +42,22 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    let mut sentry_guard = None;
     if let Some(sentry_dsn) = oramacore_config.log.sentry_dsn.clone() {
+        let _guard = sentry::init(sentry::ClientOptions {
+            // Enable capturing of traces; set this a to lower value in production:
+            dsn: Some(sentry_dsn.parse().expect("Invalid Sentry DSN")),
+            traces_sample_rate: 1.0,
+            ..sentry::ClientOptions::default()
+        });
+        sentry_guard = Some(_guard);
+
+        /*
         let integration = sentry_debug_images::DebugImagesIntegration::new()
             .filter(|event| event.level >= sentry::Level::Warning);
         let integration: Arc<dyn Integration> = Arc::new(integration);
 
-        let _guard = sentry::init((
+        sentry_guard = Some(sentry::init((
             sentry_dsn,
             sentry::ClientOptions {
                 release: sentry::release_name!(),
@@ -57,7 +65,8 @@ fn main() -> anyhow::Result<()> {
                 integrations: vec![integration],
                 ..Default::default()
             },
-        ));
+        )));
+        */
     }
 
     tokio::runtime::Builder::new_multi_thread()
@@ -65,6 +74,8 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(async { run(oramacore_config).await })?;
+
+    drop(sentry_guard);
 
     Ok(())
 }

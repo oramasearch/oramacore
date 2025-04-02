@@ -759,12 +759,12 @@ fn start_receive_operations(
     });
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 struct ReadInfoV1 {
     offset: Offset,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 enum ReadInfo {
     V1(ReadInfoV1),
 }

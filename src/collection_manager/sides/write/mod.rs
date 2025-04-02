@@ -1016,14 +1016,14 @@ fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Durat
     });
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "version")]
 enum WriteSideInfo {
     #[serde(rename = "1")]
     V1(WriteSideInfoV1),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct WriteSideInfoV1 {
     document_count: u64,
     offset: Offset,
