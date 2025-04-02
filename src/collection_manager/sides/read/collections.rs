@@ -21,7 +21,7 @@ use crate::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
@@ -159,10 +159,12 @@ impl CollectionsReader {
                 collection: id.to_string(),
                 side: "read",
             });
-            collection
-                .commit(collection_dir, false)
-                .await
-                .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
+            match collection.commit(collection_dir, false).await {
+                Ok(_) => {}
+                Err(error) => {
+                    error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
+                }
+            }
             drop(m);
 
             if collection.is_deleted() {

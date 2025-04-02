@@ -109,13 +109,16 @@ impl StringField {
         let new_posting_storage_file = data_dir.join("posting_id_storage.map");
         let old_posting_storage_file = committed.posting_storage.get_backed_file();
 
-        assert_ne!(old_posting_storage_file, new_posting_storage_file);
-        std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(|| {
-            format!(
-                "Cannot copy posting storage file: old {:?} -> new {:?}",
-                old_posting_storage_file, new_posting_storage_file
-            )
-        })?;
+        if old_posting_storage_file != new_posting_storage_file {
+            std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(
+                || {
+                    format!(
+                        "Cannot copy posting storage file: old {:?} -> new {:?}",
+                        old_posting_storage_file, new_posting_storage_file
+                    )
+                },
+            )?;
+        }
         let posting_storage = PostingIdStorage::load(new_posting_storage_file)
             .context("Cannot load posting storage")?;
         let mut posting_id_generator = posting_storage.get_max_posting_id() + 1;
@@ -161,15 +164,13 @@ impl StringField {
         let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
         let old_document_lengths_per_document_file =
             committed.document_lengths_per_document.get_backed_file();
-        assert_ne!(
-            old_document_lengths_per_document_file,
-            new_document_lengths_per_document_file
-        );
-        std::fs::copy(
-            old_document_lengths_per_document_file,
-            &new_document_lengths_per_document_file,
-        )
-        .context("Cannot copy posting storage file")?;
+        if old_document_lengths_per_document_file != new_document_lengths_per_document_file {
+            std::fs::copy(
+                old_document_lengths_per_document_file,
+                &new_document_lengths_per_document_file,
+            )
+            .context("Cannot copy posting storage file")?;
+        }
         let mut document_lengths_per_document =
             DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
                 .context("Cannot load document lengths per document")?;
