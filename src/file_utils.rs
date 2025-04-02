@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
@@ -130,7 +131,7 @@ pub struct WriteBufferedFile {
     buf: Option<BufWriter<AtomicWriteFile>>,
 }
 impl WriteBufferedFile {
-    pub fn write_json_data<T: serde::Serialize>(mut self, data: &T) -> Result<()> {
+    pub fn write_json_data<T: serde::Serialize + Debug>(mut self, data: &T) -> Result<()> {
         if let Some(buf) = self.buf.as_mut() {
             serde_json::to_writer(buf, data)
                 .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
@@ -139,7 +140,7 @@ impl WriteBufferedFile {
         self.close()
     }
 
-    pub fn write_bincode_data<T: serde::Serialize>(mut self, data: &T) -> Result<()> {
+    pub fn write_bincode_data<T: serde::Serialize + Debug>(mut self, data: &T) -> Result<()> {
         if let Some(buf) = self.buf.as_mut() {
             bincode::serialize_into(buf, data)
                 .with_context(|| format!("Cannot write bincode data to {:?}", self.path))?;
@@ -166,18 +167,16 @@ impl WriteBufferedFile {
         let buf = buf
             .into_inner()
             .with_context(|| format!("Cannot get inner buffer {:?}", self.path))?;
-        // inner
-        //     .flush()
-        //     .with_context(|| format!("Cannot flush file {:?}", self.path))?;
-        // inner
-        //     .sync_all()
-        //     .with_context(|| format!("Cannot sync_all file {:?}", self.path))?;
         buf.commit()
             .with_context(|| format!("Cannot commit buffer {:?}", self.path))?;
 
-        let exists = std::fs::read(&self.path)
-            .with_context(|| format!("Cannot check if file exists {:?}", self.path))?;
-        debug_assert!(!exists.is_empty(), "File should exist after commit");
+        // Be sure the file exists after commit
+        // This is only for testing purposes, in production we don't want to check if the file exists
+        if cfg!(any(test, debug_assertions)) {
+            let exists = std::fs::read(&self.path)
+                .with_context(|| format!("Cannot check if file exists {:?}", self.path))?;
+            assert!(!exists.is_empty(), "File should exist after commit");
+        }
 
         Ok(())
     }

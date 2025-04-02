@@ -7,7 +7,7 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
-use anyhow::{anyhow, Context, Ok, Result};
+use anyhow::{anyhow, Context, Result};
 
 use crate::{
     file_utils::{create_or_overwrite, read_file},
@@ -211,9 +211,22 @@ impl DocumentStorage {
         let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
         for doc_id in uncommitted_document_deletions.drain() {
             let doc_path = self.committed.path.join(format!("{}", doc_id.0));
-            tokio::fs::remove_file(doc_path)
-                .await
-                .context("Cannot remove document")?;
+            match tokio::fs::remove_file(doc_path).await {
+                Ok(_) => {
+                    debug!("Document {:?} deleted", doc_id);
+                }
+                // Not found is not an error
+                Err(e) if e.raw_os_error() == Some(2) => {
+                    warn!("Error while deleting document {:?}: {:?}", doc_id, e);
+                }
+                Err(e) => {
+                    return Err(anyhow!(
+                        "Error while deleting document {:?}: {:?}",
+                        doc_id,
+                        e
+                    ))
+                }
+            }
         }
         uncommitted_document_deletions.clear();
         drop(uncommitted_document_deletions);

@@ -91,8 +91,8 @@ pub struct Page<Key, Value: Eq + Hash> {
 }
 
 impl<
-        Key: DeserializeOwned + Serialize + Clone,
-        Value: Eq + Hash + DeserializeOwned + Serialize + Clone,
+        Key: DeserializeOwned + Serialize + Clone + Debug,
+        Value: Eq + Hash + DeserializeOwned + Serialize + Clone + Debug,
     > Page<Key, Value>
 {
     pub fn get_page_items(&self) -> Result<Vec<Item<Key, Value>>> {
@@ -177,8 +177,8 @@ impl<Key: Debug, Value: Eq + Hash + Debug> Debug for OrderedKeyIndex<Key, Value>
 
 const MAX_NUMBER_PER_PAGE: usize = 1000;
 impl<
-        Key: Ord + DeserializeOwned + Clone + Serialize + BoundedValue,
-        Value: Eq + Hash + Clone + DeserializeOwned + Serialize,
+        Key: Ord + DeserializeOwned + Clone + Serialize + BoundedValue + Debug,
+        Value: Eq + Hash + Clone + DeserializeOwned + Serialize + Debug,
     > OrderedKeyIndex<Key, Value>
 {
     pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
