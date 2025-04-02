@@ -137,8 +137,14 @@ impl CollectionsWriter {
                 .unwrap_or(&self.config.default_embedding_model);
             let model = model.0;
             let document_fields = embeddings
-                .map(|embeddings| embeddings.document_fields)
-                .map(DocumentFields::Properties)
+                .map(|embeddings| {
+                    // Empty array means all string properties
+                    if embeddings.document_fields.is_empty() {
+                        DocumentFields::AllStringProperties
+                    } else {
+                        DocumentFields::Properties(embeddings.document_fields)
+                    }
+                })
                 .unwrap_or(DocumentFields::AllStringProperties);
             let typed_field = TypedField::Embedding(EmbeddingTypedField {
                 model: OramaModelSerializable(model),
