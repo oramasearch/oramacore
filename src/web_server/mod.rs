@@ -106,7 +106,7 @@ async fn shutdown_signal(reader_side: Option<Arc<ReadSide>>) {
         info!("Stopping reader side");
         match reader_side.stop().await {
             Ok(_) => info!("Reader side stopped"),
-            Err(e) => error!("Error stopping reader side: {}", e),
+            Err(e) => error!(error = ?e, "Error stopping reader side"),
         }
     }
 

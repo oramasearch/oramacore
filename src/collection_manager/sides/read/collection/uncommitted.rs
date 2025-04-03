@@ -5,7 +5,7 @@ use bool::{BoolField, BoolUncommittedFieldStats};
 use number::{NumberField, NumberUncommittedFieldStats};
 use string::{StringField, StringUncommittedFieldStats};
 use string_filter::{StringFilterField, StringFilterUncommittedFieldStats};
-use tracing::{trace, warn};
+use tracing::trace;
 use vector::{VectorField, VectorUncommittedFieldStats};
 
 use crate::{
@@ -271,7 +271,6 @@ impl UncommittedCollection {
                     .insert(doc_id, value.0);
             }
             DocumentFieldIndexOperation::IndexStringFilter { value } => {
-                warn!("IndexStringFilter value {}", value);
                 self.string_filter_index
                     .entry(field_id)
                     .or_insert_with(StringFilterField::empty)

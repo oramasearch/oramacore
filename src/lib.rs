@@ -41,7 +41,7 @@ mod tests;
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LogConfig {
     pub file_path: Option<PathBuf>,
-    pub sentry_dsn: Option<String>,
+    pub sentry_dns: Option<String>,
     #[serde(deserialize_with = "deserialize_levels", default)]
     pub levels: HashMap<String, LevelFilter>,
 }

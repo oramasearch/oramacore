@@ -191,7 +191,6 @@ mod tests {
         index
             .search(&[0.1, 0.1, 0.1], 0.6, 5, None, &mut output, &HashSet::new())
             .unwrap();
-        println!("output: {:?}", output);
         assert_eq!(
             HashSet::from([DocumentId(1), DocumentId(0),]),
             output.keys().cloned().collect()

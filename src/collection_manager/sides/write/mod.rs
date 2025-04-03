@@ -343,7 +343,7 @@ impl WriteSide {
                         .await
                         .context("Cannot send delete document operation")?;
 
-                    tracing::error!(?e, "Cannot process document");
+                    tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
                 }
             };
@@ -971,7 +971,7 @@ impl WriteSide {
         match self.local_gpu_manager.is_overloaded() {
             Ok(overloaded) => overloaded,
             Err(e) => {
-                error!(?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
                 true
             }
         }
@@ -1014,7 +1014,7 @@ fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Durat
                 insert_batch_commit_size.clone()
             );
             if let Err(e) = write_side.commit().await {
-                tracing::error!(?e, "Cannot commit write side");
+                error!(error = ?e, "Cannot commit write side");
             }
         }
     });

@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result};
 use atomic_write_file::AtomicWriteFile;
 use tokio::io::AsyncWriteExt;
-use tracing::trace;
+use tracing::{error, trace};
 
 pub async fn create_if_not_exists_async<P: AsRef<Path>>(p: P) -> Result<()> {
     let p: PathBuf = p.as_ref().to_path_buf();
@@ -247,7 +247,7 @@ impl std::io::Write for WriteBufferedFile {
 impl Drop for WriteBufferedFile {
     fn drop(&mut self) {
         self.drop_all().unwrap_or_else(|e| {
-            tracing::error!("Error while dropping buffered file: {:?}", e);
+            error!("Error while dropping buffered file: {:?}", e);
         });
     }
 }

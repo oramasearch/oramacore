@@ -21,6 +21,7 @@ use crate::{
         },
     },
     types::CollectionId,
+    web_server::api::collection::admin::print_error,
 };
 
 type AuthorizationBearerHeader =
@@ -75,10 +76,13 @@ async fn get_trigger_v1(
     {
         Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting trigger");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -100,10 +104,13 @@ async fn get_all_triggers_v1(
         .await
     {
         Ok(triggers) => Ok((StatusCode::OK, Json(json!({ "triggers": triggers })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting all triggers");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -154,9 +161,7 @@ async fn insert_trigger_v1(
             )),
         },
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error inserting trigger");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -185,9 +190,7 @@ async fn delete_trigger_v1(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error deleting trigger");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -266,9 +269,7 @@ async fn update_trigger_v1(
                     )),
                 },
                 Err(e) => {
-                    e.chain()
-                        .skip(1)
-                        .for_each(|cause| println!("because: {}", cause));
+                    print_error(&e, "Error updating trigger");
                     Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({ "error": e.to_string() })),
@@ -277,9 +278,7 @@ async fn update_trigger_v1(
             }
         }
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error getting trigger");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

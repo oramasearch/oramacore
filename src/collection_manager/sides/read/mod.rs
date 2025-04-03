@@ -586,7 +586,7 @@ impl ReadSide {
         match self.local_gpu_manager.is_overloaded() {
             Ok(overloaded) => overloaded,
             Err(e) => {
-                error!(?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                error!(errpr = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
                 true
             }
         }
@@ -656,7 +656,7 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
                 insert_batch_commit_size.clone()
             );
             if let Err(e) = read_side.commit().await {
-                tracing::error!(?e, "Cannot commit read side");
+                error!(error = ?e, "Cannot commit read side");
             }
         }
     });
@@ -703,16 +703,16 @@ fn start_receive_operations(
                     Err(e) => {
                         // If there's a deserialization error, should we skip it or something different?
                         // TODO: think about it
-                        error!(?e, "Cannot receive operation");
+                        error!(error = ?e, "Cannot receive operation");
                         continue;
                     }
                 };
                 trace!(?op, "Received operation");
                 if let Err(e) = read_side.update(op).await {
-                    tracing::error!(?e, "Cannot update read side");
+                    error!(error = ?e, "Cannot update read side");
                     e.chain()
                         .skip(1)
-                        .for_each(|cause| error!("because: {}", cause));
+                        .for_each(|cause| eprintln!("because: {}", cause));
                 }
             }
 
@@ -741,7 +741,7 @@ fn start_receive_operations(
             match retry(ExponentialBackoff::default(), op).await {
                 Ok(_) => {}
                 Err(e) => {
-                    error!(?e, "Cannot reconnect to operation receiver");
+                    error!(error = ?e, "Cannot reconnect to operation receiver");
                     break;
                 }
             };
@@ -754,7 +754,7 @@ fn start_receive_operations(
         }
 
         stop_done_sender.send(()).await.unwrap_or_else(|e| {
-            error!("Cannot send stop signal to read side: {e:?}");
+            error!(error = ?e, "Cannot send stop signal to read side");
         });
     });
 }

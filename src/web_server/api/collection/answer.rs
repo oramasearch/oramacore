@@ -30,6 +30,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
+use super::admin::print_error;
+
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
     text: String,
@@ -249,6 +251,7 @@ async fn planned_answer_v1(
                         .unwrap();
                     }
                     Err(e) => {
+                        print_error(&e, "Error during streaming");
                         let _ = tx
                             .send(Ok(Event::default().data(
                                 serde_json::to_string(&SseMessage::Error {
@@ -540,6 +543,7 @@ async fn answer_v1(
                     .unwrap();
                 }
                 Err(e) => {
+                    print_error(&e, "Error during streaming");
                     let _ = tx
                         .send(Ok(Event::default().data(
                             serde_json::to_string(&SseMessage::Error {
@@ -579,6 +583,7 @@ async fn answer_v1(
                         .unwrap();
                     }
                     Err(e) => {
+                        print_error(&e, "Error during streaming");
                         let _ = tx
                             .send(Ok(Event::default().data(
                                 serde_json::to_string(&SseMessage::Error {

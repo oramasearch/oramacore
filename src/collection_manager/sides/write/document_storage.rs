@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use anyhow::{Context, Result};
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::{
     file_utils::{create_if_not_exists, create_or_overwrite, read_file},
@@ -54,12 +54,12 @@ impl DocumentStorage {
                 let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
                     Ok(data) => data,
                     Err(e) => {
-                        error!("Cannot read document data: {:?}", e);
+                        error!(error = ?e, "Cannot read document data");
                         continue;
                     }
                 };
                 if let Err(e) = tx.send((id, data.0)).await {
-                    warn!("Cannot send document data: {:?}. Stopped", e);
+                    error!(error = ?e, "Cannot send document data. Stopped stream_documents");
                     break;
                 }
             }

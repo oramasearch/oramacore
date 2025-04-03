@@ -237,7 +237,6 @@ pub struct InputRabbitMQConfig {
 }
 
 async fn create_environment(client_options: ClientOptions) -> Result<Environment> {
-    println!("Creating environment {:#?}", client_options);
     let environment = Environment::from_client_option(client_options)
         .await
         .context("Cannot create environment")?;

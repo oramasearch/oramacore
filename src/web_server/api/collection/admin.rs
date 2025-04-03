@@ -54,10 +54,7 @@ async fn get_collections(
     let collections = match write_side.list_collections(master_api_key).await {
         Ok(collections) => collections,
         Err(e) => {
-            error!("Error listing collections: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error listing collections");
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -91,10 +88,7 @@ async fn get_collection_by_id(
             Json(json!({ "error": "collection not found" })),
         )),
         Err(e) => {
-            error!("Error get collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error getting collection by id");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -121,10 +115,7 @@ async fn create_collection(
             // If master_api_key is wrong we return 500
             // This is not correct, we should return a different http status code
             // TODO: do it
-            error!("Error creating collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error creating collection");
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -156,10 +147,7 @@ async fn delete_collection(
             // If master_api_key is wrong we return 500
             // This is not correct, we should return a different http status code
             // TODO: do it
-            error!("Error creating collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error deleting collection");
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -192,11 +180,7 @@ async fn add_documents(
     {
         Ok(r) => Ok((StatusCode::OK, Json(r))),
         Err(e) => {
-            error!("{e:?}");
-            error!("Error adding documents to collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error adding documents to collection");
             Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),
@@ -223,11 +207,7 @@ async fn create_collection_from(
             Json(json!({ "collection_id": collection_id })),
         )),
         Err(e) => {
-            error!("{e:?}");
-            error!("Error creating collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error creating collection from");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("{}", e) })),
@@ -254,11 +234,7 @@ async fn swap_collections(
             Json(json!({ "collection_id": collection_id })),
         )),
         Err(e) => {
-            error!("{e:?}");
-            error!("Error swapping collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error swapping collections");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("{}", e) })),
@@ -291,10 +267,7 @@ async fn delete_documents(
             info!("Documents deleted to collection");
         }
         Err(e) => {
-            error!("Error deleting documents to collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error deleting documents to collection");
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),
@@ -329,10 +302,7 @@ async fn reindex(
             info!("Done");
         }
         Err(e) => {
-            error!("Error reindexing documents to collection: {}", e);
-            e.chain()
-                .skip(1)
-                .for_each(|cause| error!("because: {}", cause));
+            print_error(&e, "Error reindexing collection");
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),
@@ -344,4 +314,11 @@ async fn reindex(
         StatusCode::OK,
         Json(json!({ "message": "collection re-indexed" })),
     ))
+}
+
+pub fn print_error(e: &anyhow::Error, msg: &'static str) {
+    error!(error = ?e, msg);
+    e.chain()
+        .skip(1)
+        .for_each(|cause| eprintln!("because: {}", cause));
 }
