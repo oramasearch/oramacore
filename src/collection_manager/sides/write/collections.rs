@@ -197,6 +197,7 @@ impl CollectionsWriter {
             .ok_or_else(|| anyhow!("Collection not found"))?;
         collection_tmp.id = collection_id;
         collections.insert(collection_id, collection_tmp);
+        drop(collections);
         Ok(())
     }
 

@@ -30,6 +30,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(create_collection())
         .add(add_documents())
         .add(delete_documents())
+        .add(delete_collection())
         .add(reindex())
         .add(create_collection_from())
         .add(swap_collections())
@@ -131,6 +132,42 @@ async fn create_collection(
         }
     };
     Ok((StatusCode::CREATED, Json(json!({ "collection_id": () }))))
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{id}/delete",
+    description = "Delete a collection"
+)]
+async fn delete_collection(
+    write_side: State<Arc<WriteSide>>,
+    Path(id): Path<String>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let collection_id = CollectionId::from(id);
+    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    match write_side
+        .delete_collection(master_api_key, collection_id)
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            // If master_api_key is wrong we return 500
+            // This is not correct, we should return a different http status code
+            // TODO: do it
+            error!("Error creating collection: {}", e);
+            e.chain()
+                .skip(1)
+                .for_each(|cause| error!("because: {}", cause));
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ));
+        }
+    };
+
+    Ok((StatusCode::OK, Json(json!({}))))
 }
 
 #[endpoint(
