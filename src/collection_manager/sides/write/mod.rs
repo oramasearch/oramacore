@@ -544,6 +544,7 @@ impl WriteSide {
             .send(WriteOperation::SubstituteCollection {
                 subject_collection_id: request.from,
                 target_collection_id: request.to,
+                reference: request.reference,
             })
             .await?;
 
@@ -629,6 +630,7 @@ impl WriteSide {
             SwapCollections {
                 from: collection_id_tmp,
                 to: collection_id,
+                reference: reindex_config.reference,
             },
         )
         .await

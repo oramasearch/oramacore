@@ -15,7 +15,10 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use tower_http::trace::TraceLayer;
 use tracing::{info, info_span};
 
-use crate::collection_manager::sides::{ReadSide, WriteSide};
+use crate::{
+    build_info::get_build_version,
+    collection_manager::sides::{ReadSide, WriteSide},
+};
 mod collection;
 
 pub fn api_config(
@@ -67,8 +70,8 @@ async fn prometheus_handler(prometheus_handle: State<Arc<PrometheusHandle>>) -> 
 static INDEX_MESSAGE: &str = "OramaCore is up and running.";
 
 #[endpoint(method = "GET", path = "/", description = "Welcome to Orama")]
-async fn index() -> Json<&'static str> {
-    Json(INDEX_MESSAGE)
+async fn index() -> Json<String> {
+    Json(format!("{} ({})", INDEX_MESSAGE, get_build_version()))
 }
 
 static HEALTH_MESSAGE: &str = "up";

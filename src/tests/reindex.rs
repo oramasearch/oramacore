@@ -53,6 +53,7 @@ async fn test_reindex_change_language() -> Result<()> {
                 description: None,
                 embeddings: None,
                 language: Some(LanguageDTO::Italian),
+                reference: None,
             },
         )
         .await
@@ -125,6 +126,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
                     description: None,
                     embeddings: None,
                     language: Some(LanguageDTO::Italian),
+                    reference: None,
                 },
             )
             .await
@@ -224,6 +226,7 @@ export default {
                 description: None,
                 embeddings: None,
                 language: None,
+                reference: None,
             },
         )
         .await

@@ -1,9 +1,11 @@
 mod collection;
 mod collections;
 mod document_storage;
+pub mod notify;
 
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
+use notify::NotifierConfig;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -60,6 +62,7 @@ pub struct IndexesConfig {
     pub insert_batch_commit_size: u64,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
+    pub notifier: Option<NotifierConfig>,
 }
 
 pub struct ReadSide {
@@ -377,9 +380,15 @@ impl ReadSide {
             WriteOperation::SubstituteCollection {
                 subject_collection_id,
                 target_collection_id,
+                reference,
             } => {
                 self.collections
-                    .substitute_collection(offset, target_collection_id, subject_collection_id)
+                    .substitute_collection(
+                        offset,
+                        target_collection_id,
+                        subject_collection_id,
+                        reference,
+                    )
                     .await?;
             }
         }

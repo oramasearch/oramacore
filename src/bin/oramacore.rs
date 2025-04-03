@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use config::Config;
 use itertools::Itertools;
+use oramacore::build_info::get_build_version;
 use oramacore::{start, OramacoreConfig};
 use tracing::instrument;
 use tracing::level_filters::LevelFilter;
@@ -34,6 +36,9 @@ fn load_config() -> Result<OramacoreConfig> {
 }
 
 fn main() -> anyhow::Result<()> {
+    let build_info = oramacore::build_info::get_build_info();
+    println!("{}", build_info,);
+
     let oramacore_config = match load_config() {
         Ok(config) => config,
         Err(e) => {
@@ -48,6 +53,7 @@ fn main() -> anyhow::Result<()> {
             // Enable capturing of traces; set this a to lower value in production:
             dsn: Some(sentry_dsn.parse().expect("Invalid Sentry DSN")),
             traces_sample_rate: 1.0,
+            release: Some(Cow::Owned(get_build_version())),
             ..sentry::ClientOptions::default()
         });
         sentry_guard = Some(_guard);
