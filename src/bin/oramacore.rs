@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut sentry_guard = None;
-    if let Some(sentry_dsn) = oramacore_config.log.sentry_dsn.clone() {
+    if let Some(sentry_dsn) = oramacore_config.log.sentry_dns.clone() {
         let _guard = sentry::init(sentry::ClientOptions {
             // Enable capturing of traces; set this a to lower value in production:
             dsn: Some(sentry_dsn.parse().expect("Invalid Sentry DSN")),
@@ -51,22 +51,6 @@ fn main() -> anyhow::Result<()> {
             ..sentry::ClientOptions::default()
         });
         sentry_guard = Some(_guard);
-
-        /*
-        let integration = sentry_debug_images::DebugImagesIntegration::new()
-            .filter(|event| event.level >= sentry::Level::Warning);
-        let integration: Arc<dyn Integration> = Arc::new(integration);
-
-        sentry_guard = Some(sentry::init((
-            sentry_dsn,
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                sample_rate: 1.0,
-                integrations: vec![integration],
-                ..Default::default()
-            },
-        )));
-        */
     }
 
     tokio::runtime::Builder::new_multi_thread()
@@ -97,7 +81,7 @@ async fn run(oramacore_config: OramacoreConfig) -> anyhow::Result<()> {
         .context("Invalid levels")?;
 
     match (
-        oramacore_config.log.sentry_dsn.is_some(),
+        oramacore_config.log.sentry_dns.is_some(),
         &oramacore_config.log.file_path,
     ) {
         (false, None) => {

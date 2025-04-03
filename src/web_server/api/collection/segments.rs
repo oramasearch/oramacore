@@ -18,6 +18,7 @@ use crate::{
         sides::{segments::Segment, ReadSide, WriteSide},
     },
     types::CollectionId,
+    web_server::api::collection::admin::print_error,
 };
 
 type AuthorizationBearerHeader =
@@ -72,10 +73,13 @@ async fn get_segment_v1(
     {
         Ok(Some(segment)) => Ok((StatusCode::OK, Json(json!({ "segment": segment })))),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "segment": null })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting segment");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -97,10 +101,13 @@ async fn get_all_segments_v1(
         .await
     {
         Ok(segments) => Ok((StatusCode::OK, Json(json!({ "segments": segments })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting all segments");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -134,9 +141,7 @@ async fn insert_segment_v1(
             Json(json!({ "success": true, "id": segment.id, "segment": segment })),
         )),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error inserting segment");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -165,9 +170,7 @@ async fn delete_segment_v1(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error deleting segment");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -203,9 +206,7 @@ async fn update_segment_v1(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error updating segment");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

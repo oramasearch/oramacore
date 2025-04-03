@@ -17,6 +17,7 @@ use crate::{
         sides::WriteSide,
     },
     types::CollectionId,
+    web_server::api::collection::admin::print_error,
 };
 
 type AuthorizationBearerHeader =
@@ -52,9 +53,7 @@ async fn add_hook_v0(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error adding hook");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -85,9 +84,7 @@ async fn get_hook_v0(
         Ok(Some(full_hook)) => Ok(Json(json!({ "hook": full_hook.to_string() }))),
         Ok(None) => Ok(Json(json!({ "hook": null }))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error getting hook");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -121,9 +118,7 @@ async fn delete_hook_v0(
             Json(json!({ "error": "Unable to find hook to delete" })),
         )),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error deleting hook");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -151,9 +146,7 @@ async fn list_hooks_v0(
     {
         Ok(hooks) => Ok((StatusCode::OK, Json(json!(hooks)))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error listing hooks");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

@@ -22,6 +22,7 @@ use crate::{
         sides::{system_prompts::SystemPrompt, ReadSide, WriteSide},
     },
     types::CollectionId,
+    web_server::api::collection::admin::print_error,
 };
 
 type AuthorizationBearerHeader =
@@ -80,10 +81,13 @@ async fn get_system_prompt_v1(
             Json(json!({ "system_prompt": system_prompt })),
         )),
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "system_prompt": null })))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting system prompt");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -108,10 +112,13 @@ async fn list_system_prompts_v1(
             StatusCode::OK,
             Json(json!({ "system_prompts": system_prompts })),
         )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )),
+        Err(e) => {
+            print_error(&e, "Error getting all system prompts");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
     }
 }
 
@@ -159,9 +166,7 @@ async fn validate_system_prompt_v1(
     {
         Ok(result) => Ok((StatusCode::OK, Json(json!({ "result": result })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error validating system prompt");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -204,9 +209,7 @@ async fn insert_system_prompt_v1(
             ),
         )),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error inserting system prompt");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -235,9 +238,7 @@ async fn delete_system_prompt_v1(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error deleting system prompt");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -273,9 +274,7 @@ async fn update_system_prompt_v1(
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
-            e.chain()
-                .skip(1)
-                .for_each(|cause| println!("because: {}", cause));
+            print_error(&e, "Error updating system prompt");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

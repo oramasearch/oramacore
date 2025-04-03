@@ -16,6 +16,7 @@ use crate::{
         sides::ReadSide,
     },
     types::CollectionId,
+    web_server::api::collection::admin::print_error,
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -55,10 +56,13 @@ async fn execute_action_v0(
 
             match output {
                 Ok(data) => Ok((StatusCode::OK, Json(data))),
-                Err(e) => Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": e.to_string() })),
-                )),
+                Err(e) => {
+                    print_error(&e, "Error executing action");
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": e.to_string() })),
+                    ))
+                }
             }
         }
         _ => Err((
