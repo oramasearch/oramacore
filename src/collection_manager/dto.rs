@@ -237,6 +237,11 @@ impl PartialSchema for ApiKey {
 }
 impl ToSchema for ApiKey {}
 
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct DeleteCollection {
+    pub id: CollectionId,
+}
+
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct CreateCollection {
@@ -673,15 +678,17 @@ pub struct SearchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub enum RelatedQueriesFormat {
+    #[serde(rename = "question")]
     Question,
+    #[serde(rename = "query")]
     Query,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelatedRequest {
-    enabled: Option<bool>,
-    size: Option<usize>,
-    format: Option<RelatedQueriesFormat>,
+    pub enabled: Option<bool>,
+    pub size: Option<usize>,
+    pub format: Option<RelatedQueriesFormat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]

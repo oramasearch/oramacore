@@ -13,4 +13,6 @@ mod string_filter;
 
 mod temp_insert_swap;
 
+mod vector_search;
+
 pub mod utils;

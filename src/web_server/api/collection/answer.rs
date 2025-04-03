@@ -98,6 +98,8 @@ async fn planned_answer_v1(
     let rx_stream = ReceiverStream::new(rx);
 
     tokio::spawn(async move {
+        let llm_service = read_side.clone().get_llm_service();
+
         let _ = tx
             .send(Ok(Event::default().data(
                 serde_json::to_string(&SseMessage::Acknowledge {
@@ -219,6 +221,46 @@ async fn planned_answer_v1(
                     .unwrap(),
                 )))
                 .await;
+        }
+
+        let mut related_queries_params =
+            llm_service.get_related_questions_params(interaction.related);
+
+        if !related_queries_params.is_empty() {
+            related_queries_params.push(("context".to_string(), "{}".to_string())); // @todo: check if we can retrieve additional context
+            related_queries_params.push(("query".to_string(), query.clone()));
+
+            let mut related_questions_stream = llm_service
+                .run_known_prompt_stream(
+                    llms::KnownPrompts::GenerateRelatedQueries,
+                    related_queries_params,
+                    None,
+                    interaction.llm_config,
+                )
+                .await;
+
+            while let Some(resp) = related_questions_stream.next().await {
+                match resp {
+                    Ok(chunk) => {
+                        tx.send(Ok(Event::default().data(
+                            serialize_response("RELATED_QUERIES", &chunk, false).unwrap(),
+                        )))
+                        .await
+                        .unwrap();
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Ok(Event::default().data(
+                                serde_json::to_string(&SseMessage::Error {
+                                    message: format!("Error during streaming: {}", e),
+                                })
+                                .unwrap(),
+                            )))
+                            .await;
+                        break;
+                    }
+                }
+            }
         }
     });
 
@@ -484,7 +526,7 @@ async fn answer_v1(
                 llms::KnownPrompts::Answer,
                 variables,
                 system_prompt,
-                interaction.llm_config,
+                interaction.llm_config.clone(),
             )
             .await;
 
@@ -507,6 +549,46 @@ async fn answer_v1(
                         )))
                         .await;
                     break;
+                }
+            }
+        }
+
+        let mut related_queries_params =
+            llm_service.get_related_questions_params(interaction.related);
+
+        if !related_queries_params.is_empty() {
+            related_queries_params.push(("context".to_string(), search_result_str.clone()));
+            related_queries_params.push(("query".to_string(), query.clone()));
+
+            let mut related_questions_stream = llm_service
+                .run_known_prompt_stream(
+                    llms::KnownPrompts::GenerateRelatedQueries,
+                    related_queries_params,
+                    None,
+                    interaction.llm_config,
+                )
+                .await;
+
+            while let Some(resp) = related_questions_stream.next().await {
+                match resp {
+                    Ok(chunk) => {
+                        tx.send(Ok(Event::default().data(
+                            serialize_response("RELATED_QUERIES", &chunk, false).unwrap(),
+                        )))
+                        .await
+                        .unwrap();
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Ok(Event::default().data(
+                                serde_json::to_string(&SseMessage::Error {
+                                    message: format!("Error during streaming: {}", e),
+                                })
+                                .unwrap(),
+                            )))
+                            .await;
+                        break;
+                    }
                 }
             }
         }

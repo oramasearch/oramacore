@@ -8,7 +8,7 @@ use api::api_config;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::collection_manager::sides::{ReadSide, WriteSide};
 
@@ -104,7 +104,10 @@ async fn shutdown_signal(reader_side: Option<Arc<ReadSide>>) {
 
     if let Some(reader_side) = reader_side {
         info!("Stopping reader side");
-        reader_side.stop().await;
+        match reader_side.stop().await {
+            Ok(_) => info!("Reader side stopped"),
+            Err(e) => error!("Error stopping reader side: {}", e),
+        }
     }
 
     info!("Shutting down web server");

@@ -1,6 +1,10 @@
 use std::sync::{atomic::AtomicUsize, Arc};
 
-use axum::{extract::State, response::IntoResponse, Json, Router};
+use axum::{
+    extract::{DefaultBodyLimit, State},
+    response::IntoResponse,
+    Json, Router,
+};
 use axum_openapi3::{
     build_openapi, endpoint, reset_openapi,
     utoipa::openapi::{InfoBuilder, OpenApiBuilder},
@@ -38,17 +42,21 @@ pub fn api_config(
 
     let counter = Arc::new(AtomicUsize::new(0));
 
-    router.layer(
-        TraceLayer::new_for_http().make_span_with(move |request: &Request<_>| {
-            let req_id = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            info_span!(
-                "http_request",
-                req_id,
-                method = ?request.method(),
-                path = ?request.uri(),
-            )
-        }),
-    )
+    const MAX_BODY_SIZE: usize = 1024 * 1024 * 100; // 100 MB
+
+    router
+        .layer(
+            TraceLayer::new_for_http().make_span_with(move |request: &Request<_>| {
+                let req_id = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                info_span!(
+                    "http_request",
+                    req_id,
+                    method = ?request.method(),
+                    path = ?request.uri(),
+                )
+            }),
+        )
+        .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
 }
 
 #[endpoint(method = "GET", path = "/metrics", description = "Prometheus Metric")]

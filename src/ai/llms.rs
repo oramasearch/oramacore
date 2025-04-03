@@ -14,7 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
 use crate::collection_manager::{
-    dto::{InteractionLLMConfig, InteractionMessage},
+    dto::{InteractionLLMConfig, InteractionMessage, RelatedRequest},
     sides::system_prompts::SystemPrompt,
 };
 
@@ -30,6 +30,7 @@ pub enum KnownPrompts {
     Trigger,
     ValidateSystemPrompt,
     Followup,
+    GenerateRelatedQueries,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +111,10 @@ impl KnownPrompts {
                     .to_string(),
                 user: include_str!("../prompts/v1/party_planner/actions/ask_followup_user.md")
                     .to_string(),
+            },
+            KnownPrompts::GenerateRelatedQueries => KnownPrompt {
+                system: include_str!("../prompts/v1/related_queries/system.md").to_string(),
+                user: include_str!("../prompts/v1/related_queries/user.md").to_string(),
             },
         }
     }
@@ -664,5 +669,32 @@ impl LLMService {
         }
 
         self.model.clone()
+    }
+
+    pub fn get_related_questions_params(
+        &self,
+        related: Option<RelatedRequest>,
+    ) -> Vec<(String, String)> {
+        use crate::collection_manager::dto::RelatedQueriesFormat;
+
+        if let Some(related_config) = related {
+            if let Some(enabled) = related_config.enabled {
+                if enabled {
+                    let number = related_config.size.unwrap_or(3);
+                    let question =
+                        match related_config.format.unwrap_or(RelatedQueriesFormat::Query) {
+                            RelatedQueriesFormat::Query => false,
+                            RelatedQueriesFormat::Question => true,
+                        };
+
+                    return vec![
+                        ("number".to_string(), number.to_string()),
+                        ("question".to_string(), question.to_string()),
+                    ];
+                }
+            }
+        }
+
+        Vec::new()
     }
 }
