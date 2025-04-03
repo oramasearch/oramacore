@@ -277,6 +277,8 @@ pub struct ReindexConfig {
     #[serde(default)]
     #[schema(inline)]
     pub embeddings: Option<CreateCollectionEmbeddings>,
+
+    pub reference: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema, Clone)]
@@ -295,6 +297,7 @@ pub struct CreateCollectionFrom {
 pub struct SwapCollections {
     pub from: CollectionId,
     pub to: CollectionId,
+    pub reference: Option<String>,
 }
 
 impl TryFrom<serde_json::Value> for CreateCollection {

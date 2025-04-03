@@ -214,6 +214,7 @@ pub enum WriteOperation {
     SubstituteCollection {
         subject_collection_id: CollectionId,
         target_collection_id: CollectionId,
+        reference: Option<String>,
     },
 }
 
