@@ -152,7 +152,9 @@ const collection = new CollectionManager({
 const answerSession = collection.createAnswerSession()
  
 // Get a single advanced reasoning answer
-const answer = await answerSession.reason('How do I install OramaCore?')
+const answer = await answerSession.reason({
+    query: 'How do I install OramaCore?'
+})
  
 console.log(answer)
 // Output: You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image [...]
@@ -172,7 +174,9 @@ const collection = new CollectionManager({
 const answerSession = collection.createAnswerSession()
  
 // Get a single planned answer
-const answer = await answerSession.reasonStream('How do I install OramaCore?')
+const answer = await answerSession.reasonStream({
+    query: 'How do I install OramaCore?'
+})
  
 for await (const message of answer) {
   console.log(message)
@@ -352,3 +356,44 @@ OramaCore will continue to update the state and trigger the `onStateChange` even
     }
 ]
 ```
+
+### Generating related queries
+
+When performing an answer session, you can ask OramaCore to generate some related queries to your question.
+This is useful if you want to explore the topic further, or if you want to ask follow-up questions.
+
+OramaCore will use the user input and the context of the conversation to generate some related queries.
+
+to do this, you can configure the `answer` or `answerStream` methods as follows:
+
+<Tabs groupId='answer-session-perform' persist items={['JavaScript']}>
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
+
+const collection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: '<COLLECTION_ID>',
+  readAPIKey: '<read_api_key>',
+})
+
+const answerSession = collection.createAnswerSession()
+
+// Get a single planned answer
+const answer = await answerSession.reasonStream({
+  query: 'How do I install OramaCore?',
+  related: {
+    enabled: true, // Enable related queries generation. Default is false
+    size: 2, // Number of related queries to generate. Default is 3
+    format: 'query' // Wether to generate queries or questions. Default is 'questions'.
+  }
+})
+
+console.log(this.state.at(-1).related)
+
+// '"[\"How do I install OramaCore on Windows?\", \"How do I install OramaCore on Mac?\", \"How do I install OramaCore on Linux?\""]'"'
+```
+</Tabs>
+
+Please note that the generated related queries are in the format of a JSON string. You can parse it using `JSON.parse()` to get the actual array of queries.
+
+The reason for this is that by streaming the JSON token by token, we can enable more interactive and real-time experiences, such as showing the user the generated queries as they are being generated.

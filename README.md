@@ -124,11 +124,13 @@ const collection = new CollectionManager({
 
 const answerSession = collection.createAnswerSession({
     initialMessages: [
-        { role: "user", content: "How do I install OramaCore?" },
+        { 
+            role: "user",
+            content: "How do I install OramaCore?"
+        },
         {
             role: "assistant",
-            content:
-                "You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image",
+            content: "You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image",
         },
     ],
     events: {
