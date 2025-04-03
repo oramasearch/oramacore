@@ -27,7 +27,7 @@ async fn test_temp_insert_swap() -> Result<()> {
         .create_collection_from(
             write_api_key.clone(),
             CreateCollectionFrom {
-                from: collection_id.clone(),
+                from: collection_id,
                 embeddings: None,
                 language: None,
             },
@@ -80,21 +80,16 @@ async fn test_temp_insert_swap() -> Result<()> {
         .await?;
     assert_eq!(output.count, 1);
 
-    println!("..........");
-
     let stats = read_side
         .collection_stats(read_api_key.clone(), collection_id)
         .await?;
     assert_eq!(stats.document_count, 1);
 
-    println!("-------");
-
     let output = write_side
         .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
         .await?;
 
-    println!("-------");
-    println!("{:?}", output);
+    assert!(!output.iter().any(|c| c.id == temp_coll_id));
 
     Ok(())
 }

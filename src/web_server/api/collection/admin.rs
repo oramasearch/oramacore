@@ -15,8 +15,8 @@ use tracing::{error, info};
 use crate::{
     collection_manager::{
         dto::{
-            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            ReindexConfig, SwapCollections,
+            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteCollection,
+            DeleteDocuments, ReindexConfig, SwapCollections,
         },
         sides::WriteSide,
     },
@@ -136,15 +136,15 @@ async fn create_collection(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/delete",
+    path = "/v1/collections/delete",
     description = "Delete a collection"
 )]
 async fn delete_collection(
     write_side: State<Arc<WriteSide>>,
-    Path(id): Path<String>,
     TypedHeader(auth): AuthorizationBearerHeader,
+    Json(json): Json<DeleteCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
+    let collection_id = json.id;
     let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side

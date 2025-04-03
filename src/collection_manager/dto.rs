@@ -237,6 +237,11 @@ impl PartialSchema for ApiKey {
 }
 impl ToSchema for ApiKey {}
 
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct DeleteCollection {
+    pub id: CollectionId,
+}
+
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct CreateCollection {
