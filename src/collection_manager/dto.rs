@@ -673,15 +673,17 @@ pub struct SearchResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub enum RelatedQueriesFormat {
+    #[serde(rename = "question")]
     Question,
+    #[serde(rename = "query")]
     Query,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelatedRequest {
-    enabled: Option<bool>,
-    size: Option<usize>,
-    format: Option<RelatedQueriesFormat>,
+    pub enabled: Option<bool>,
+    pub size: Option<usize>,
+    pub format: Option<RelatedQueriesFormat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
