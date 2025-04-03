@@ -679,9 +679,9 @@ pub enum RelatedQueriesFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RelatedRequest {
-    enabled: Option<bool>,
-    size: Option<usize>,
-    format: Option<RelatedQueriesFormat>,
+    pub enabled: Option<bool>,
+    pub size: Option<usize>,
+    pub format: Option<RelatedQueriesFormat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
