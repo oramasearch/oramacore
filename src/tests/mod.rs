@@ -11,4 +11,6 @@ mod mem_allocation;
 mod reindex;
 mod string_filter;
 
+mod temp_insert_swap;
+
 pub mod utils;

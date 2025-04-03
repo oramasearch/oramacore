@@ -534,7 +534,7 @@ impl WriteSide {
             .context("Check write api key fails")?;
 
         self.collections
-            .replace(request.from, request.from)
+            .replace(request.from, request.to)
             .await
             .context("Cannot replace collection")?;
         info!("Replaced");
@@ -546,6 +546,10 @@ impl WriteSide {
                 target_collection_id: request.to,
             })
             .await?;
+
+        self.commit()
+            .await
+            .context("Cannot commit collection after replace")?;
 
         Ok(())
     }

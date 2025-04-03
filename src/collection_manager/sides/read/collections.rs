@@ -27,6 +27,21 @@ use super::{collection::CollectionReader, IndexesConfig};
 
 const LIMIT: usize = 100;
 
+/// Lifecicle of a collection
+///
+/// # Collection creation
+/// When a collection is created, it is added the the `collections` map.
+///
+/// # Collection deletion
+/// When a collection is deleted, it is marked as deleted.
+/// The collection still exists in the `collections` map.
+/// NB: `get_collection` will return `None`.
+///
+/// # Collection substitution
+/// When a collection is substituted, the old collection is removed from the `collections` map.
+/// The old collection id is added to the `last_reindexed_collections`
+///
+
 #[derive(Debug)]
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
@@ -150,6 +165,10 @@ impl CollectionsReader {
         let mut deleted_collection_ids = HashSet::new();
         for (id, collection) in col {
             let collection_dir = collections_dir.join(id.0);
+
+            if collection.is_deleted() {
+                continue;
+            }
 
             create_if_not_exists_async(&collection_dir)
                 .await
@@ -280,7 +299,7 @@ impl CollectionsReader {
             .remove(&source_collection_id)
             .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
         source.id = target_collection_id;
-        // ignore return value
+        // Ignore return value: we don't care if the target collection was there or not.
         let _ = guard.remove(&target_collection_id);
         guard.insert(target_collection_id, source);
         drop(guard);
@@ -379,7 +398,7 @@ impl Deref for CollectionReadLock<'_> {
     type Target = CollectionReader;
 
     fn deref(&self) -> &Self::Target {
-        // safety: the collection contains the id because we checked it before
+        // Safety: the collection contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
