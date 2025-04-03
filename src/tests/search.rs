@@ -95,6 +95,7 @@ async fn start_server() {
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 10,
                 commit_interval: Duration::from_secs(3_000),
+                notifier: None,
             },
         },
     })

@@ -33,6 +33,8 @@ mod file_utils;
 mod merger;
 mod offset_storage;
 
+pub mod build_info;
+
 pub mod ai;
 
 #[cfg(test)]

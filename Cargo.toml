@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "0.1.0"
+version = "1.1.8"
 edition = "2021"
 
 [dependencies]
@@ -63,7 +63,7 @@ duration-string = { version = "0.5.2", features = ["serde"] }
 chrono = "0.4.39"
 
 # Webserver
-axum = { version = "0.8.1", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10.0", features = ["typed-header"] }
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 http = "1.2.0"
@@ -103,12 +103,13 @@ repair_json = "0.1.0"
 async-openai = "0.28.0"
 
 orama-js-pool = "0.1.1"
-sentry = "0.36.0"
-sentry-debug-images = "0.36.0"
-sentry-tracing = "0.36.0"
+sentry = "0.37.0"
+sentry-tracing = "0.37.0"
 arrayvec = "0.7.6"
 nvml-wrapper = "0.10.0"
 atomic-write-file = "0.2.3"
+
+reqwest = { version = "0.12", features = ["json"] }
 
 [build-dependencies]
 cc = "1"

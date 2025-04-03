@@ -8,7 +8,7 @@ use crate::{
     ai::{llms::LLMService, AIService},
     collection_manager::{
         dto::{ApiKey, LanguageDTO},
-        sides::Offset,
+        sides::{read::notify::Notifier, Offset},
     },
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
@@ -47,7 +47,9 @@ pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
-    pub collections: RwLock<HashMap<CollectionId, CollectionReader>>,
+    notifier: Option<Notifier>,
+
+    collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
 }
@@ -64,6 +66,12 @@ impl CollectionsReader {
 
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
+        let mut notifier = None;
+        if let Some(notifier_config) = &indexes_config.notifier {
+            let n = Notifier::try_new(notifier_config).context("Cannot create notifier")?;
+            notifier = Some(n);
+        }
+
         let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
             .and_then(|f| f.read_json_data())
             .context("Cannot deserialize info.json file")
@@ -78,6 +86,7 @@ impl CollectionsReader {
                     ai_service,
                     nlp_service,
                     llm_service,
+                    notifier,
 
                     collections: Default::default(),
                     indexes_config,
@@ -118,6 +127,8 @@ impl CollectionsReader {
             ai_service,
             nlp_service,
             llm_service,
+            notifier,
+
             collections: RwLock::new(collections),
             indexes_config,
             last_reindexed_collections: RwLock::new(
@@ -287,6 +298,7 @@ impl CollectionsReader {
         _offset: Offset,
         target_collection_id: CollectionId,
         source_collection_id: CollectionId,
+        reference: Option<String>,
     ) -> Result<()> {
         info!(
             target_collection_id=?target_collection_id,
@@ -337,6 +349,17 @@ impl CollectionsReader {
             .await
             .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
         drop(m);
+
+        if let Some(notifier) = &self.notifier {
+            notifier
+                .notify_collection_substitution(
+                    target_collection_id,
+                    source_collection_id,
+                    reference,
+                )
+                .await
+                .context("Cannot notify collection substitution")?;
+        }
 
         info!(
             target_collection_id=?target_collection_id,
@@ -466,6 +489,7 @@ mod tests {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 100_000,
+                notifier: None,
             },
         )
         .await
@@ -500,7 +524,7 @@ mod tests {
 
         // Substitute target collection with tmp collection
         collections
-            .substitute_collection(Offset(2), target_collection_id, tmp_collection_id)
+            .substitute_collection(Offset(2), target_collection_id, tmp_collection_id, None)
             .await
             .unwrap();
 
@@ -551,6 +575,7 @@ mod tests {
                 commit_interval: Duration::from_secs(1_000),
                 data_dir: generate_new_path(),
                 insert_batch_commit_size: 100_000,
+                notifier: None,
             },
         )
         .await
@@ -591,7 +616,7 @@ mod tests {
 
             // Substitute target collection with tmp collection
             collections
-                .substitute_collection(Offset(2), *target_collection_id, *tmp_collection_id)
+                .substitute_collection(Offset(2), *target_collection_id, *tmp_collection_id, None)
                 .await
                 .unwrap();
 
