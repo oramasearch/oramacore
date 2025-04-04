@@ -62,7 +62,7 @@ impl<
 
         BufferedFile::create_or_overwrite(self.file_path.clone())
             .context("Cannot create file")?
-            .write_json_data(&items)
+            .write_bincode_data(&items)
             .context("Cannot write map to file")?;
 
         Ok(())
@@ -76,7 +76,7 @@ impl<
         }
         let map: Vec<Item<Key, Value>> = BufferedFile::open(file_path.clone())
             .context("Cannot open file")?
-            .read_json_data()
+            .read_bincode_data()
             .context("Cannot read map from file")?;
         let map: HashMap<_, _> = map.into_iter().map(|item| (item.k, item.v)).collect();
 
