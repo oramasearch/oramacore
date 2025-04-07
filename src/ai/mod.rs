@@ -1,10 +1,11 @@
 use std::{str::FromStr, time::Duration};
 
+use ai_service_client::llm_service_client::LlmServiceClient;
+use ai_service_client::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use axum_openapi3::utoipa::ToSchema;
 use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;
-use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -23,22 +24,6 @@ pub mod gpu;
 pub mod llms;
 pub mod party_planner;
 
-tonic::include_proto!("orama_ai_service");
-
-impl OramaModel {
-    pub fn dimensions(&self) -> usize {
-        match self {
-            OramaModel::BgeSmall => 384,
-            OramaModel::BgeBase => 768,
-            OramaModel::BgeLarge => 1024,
-            OramaModel::MultilingualE5Small => 384,
-            OramaModel::MultilingualE5Base => 768,
-            OramaModel::MultilingualE5Large => 1024,
-            OramaModel::JinaEmbeddingsV2BaseCode => 768,
-            OramaModel::MultilingualMiniLml12v2 => 768,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceLLMConfig {

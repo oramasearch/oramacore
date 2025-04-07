@@ -23,6 +23,7 @@ use super::{
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
+use ai_service_client::OramaModel;
 use anyhow::{anyhow, bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
@@ -1043,7 +1044,7 @@ fn javascript_queue_limit_default() -> usize {
 }
 
 fn embedding_model_default() -> OramaModelSerializable {
-    OramaModelSerializable(crate::ai::OramaModel::BgeSmall)
+    OramaModelSerializable(OramaModel::BgeSmall)
 }
 
 fn default_insert_batch_commit_size() -> u64 {

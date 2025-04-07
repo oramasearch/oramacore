@@ -1,0 +1,12 @@
+[package]
+name = "ai_service_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tonic = { workspace = true }
+prost = "0.13.4"
+
+[build-dependencies]
+cc = "1"
+tonic-build = "0.13"

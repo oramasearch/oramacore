@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
+use ai_service_client::OramaModel;
 use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ai::{AIService, OramaModel},
+    ai::{AIService},
     collection_manager::{
         dto::FieldId,
         sides::{

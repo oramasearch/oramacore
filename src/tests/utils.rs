@@ -6,13 +6,13 @@ use std::{
     time::Duration,
 };
 
+use ai_service_client::{llm_service_client, llm_service_server, Embedding, EmbeddingRequest, EmbeddingResponse, HealthCheckRequest, HealthCheckResponse, OramaModel};
 use anyhow::{Context, Result};
 use duration_string::DurationString;
 use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
-use grpc_def::Embedding;
 use http::uri::Scheme;
 use redact::Secret;
 use serde_json::json;
@@ -115,10 +115,6 @@ where
     Ok(result)
 }
 
-pub mod grpc_def {
-    tonic::include_proto!("orama_ai_service");
-}
-
 pub struct GRPCServer {
     fastembed_model: Arc<TextEmbedding>,
     context_evaluator: Arc<TextEmbedding>,
@@ -127,20 +123,20 @@ pub struct GRPCServer {
 type EchoResult<T> = Result<Response<T>, Status>;
 
 #[tonic::async_trait]
-impl grpc_def::llm_service_server::LlmService for GRPCServer {
+impl llm_service_server::LlmService for GRPCServer {
     async fn check_health(
         &self,
-        _req: tonic::Request<grpc_def::HealthCheckRequest>,
-    ) -> Result<tonic::Response<grpc_def::HealthCheckResponse>, Status> {
-        Ok(tonic::Response::new(grpc_def::HealthCheckResponse {
+        _req: tonic::Request<HealthCheckRequest>,
+    ) -> Result<tonic::Response<HealthCheckResponse>, Status> {
+        Ok(tonic::Response::new(HealthCheckResponse {
             status: "ok".to_string(),
         }))
     }
 
     async fn get_embedding(
         &self,
-        req: tonic::Request<grpc_def::EmbeddingRequest>,
-    ) -> Result<tonic::Response<grpc_def::EmbeddingResponse>, Status> {
+        req: tonic::Request<EmbeddingRequest>,
+    ) -> Result<tonic::Response<EmbeddingResponse>, Status> {
         let req = req.into_inner();
         // `0` means `BgeSmall`
         // `6` means `SentenceTransformersParaphraseMultilingualMiniLML12v2`
@@ -154,7 +150,7 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
             .embed(req.input, None)
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(tonic::Response::new(grpc_def::EmbeddingResponse {
+        Ok(tonic::Response::new(EmbeddingResponse {
             embeddings_result: embed
                 .into_iter()
                 .map(|v| Embedding { embeddings: v })
@@ -232,7 +228,7 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
 
     tokio::spawn(async move {
         Server::builder()
-            .add_service(grpc_def::llm_service_server::LlmServiceServer::new(server))
+            .add_service(llm_service_server::LlmServiceServer::new(server))
             .serve(add)
             .await
             .expect("Nooope");
@@ -240,7 +236,7 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
 
     // Waiting for the server to start
     loop {
-        let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", add))
+        let c = llm_service_client::LlmServiceClient::connect(format!("http://{}", add))
             .await;
         if c.is_ok() {
             break;
@@ -280,7 +276,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
+                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
                 // Lot of tests commit to test it.
                 // So, we put an high value to avoid problems.
                 insert_batch_commit_size: 10_000,

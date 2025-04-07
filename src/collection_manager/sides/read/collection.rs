@@ -7,6 +7,7 @@ use std::{
     },
 };
 
+use ai_service_client::OramaModel;
 use anyhow::{anyhow, Context, Result};
 use committed::{
     fields::{
@@ -53,7 +54,7 @@ mod uncommitted;
 use crate::{
     ai::{
         llms::{self, LLMService},
-        AIService, OramaModel,
+        AIService,
     },
     collection_manager::{
         dto::{

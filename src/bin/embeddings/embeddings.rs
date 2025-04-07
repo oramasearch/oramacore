@@ -1,6 +1,5 @@
+use ai_service_client::{llm_service_client::LlmServiceClient, EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use anyhow::Result;
-use oramacore::ai::llm_service_client::LlmServiceClient;
-use oramacore::ai::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
 use std::time::Instant;
 use tonic::Request;
 

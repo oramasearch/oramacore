@@ -4,12 +4,12 @@ use std::{
     sync::Arc,
 };
 
+use ai_service_client::OramaModel;
 use anyhow::{Context, Result};
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ai::OramaModel,
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
         sides::{
@@ -662,39 +662,6 @@ pub struct EmbeddingField {
     hooks_runtime: Arc<HooksRuntime>,
 
     chunker: Chunker,
-}
-
-impl OramaModel {
-    pub fn senquence_length(&self) -> usize {
-        //
-        // From Michele slack message:
-        // https://oramasearch.slack.com/archives/D0571JYV5LK/p1742488393750479
-        // ```
-        // intfloat/multilingual-e5-small: 512
-        // intfloat/multilingual-e5-base: 512
-        // intfloat/multilingual-e5-large: 512
-        // BAAI/bge-small-en: 512
-        // BAAI/bge-base-en: 512
-        // BAAI/bge-large-en: 512
-        // sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2: 128
-        // jinaai/jina-embeddings-v2-base-code: 8000 (ma fai comunque massimo 512 o 1024)
-        // ```
-        match self {
-            OramaModel::MultilingualE5Small => 512,
-            OramaModel::MultilingualE5Base => 512,
-            OramaModel::MultilingualE5Large => 512,
-            OramaModel::BgeSmall => 512,
-            OramaModel::BgeBase => 512,
-            OramaModel::BgeLarge => 512,
-            OramaModel::MultilingualMiniLml12v2 => 128,
-            OramaModel::JinaEmbeddingsV2BaseCode => 512,
-        }
-    }
-
-    pub fn overlap(&self) -> usize {
-        // https://oramasearch.slack.com/archives/D0571JYV5LK/p1742488431564979
-        self.senquence_length() * 2 / 100
-    }
 }
 
 impl EmbeddingField {

@@ -1,5 +1,5 @@
-use super::OramaModel;
 use crate::{ai::AIService, collection_manager::dto::SearchResult};
+use ai_service_client::OramaModel;
 use anyhow::Result;
 use nlp::chunker::{Chunker, ChunkerConfig};
 use serde_json::Value;

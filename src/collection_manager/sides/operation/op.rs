@@ -257,11 +257,11 @@ where
 mod tests {
     use super::*;
 
+    use ai_service_client::OramaModel;
     use redact::Secret;
     use serde_json::value::RawValue;
 
     use crate::{
-        ai::OramaModel,
         collection_manager::{
             dto::{ApiKey, DocumentFields, FieldId},
             sides::{hooks::HookName, OramaModelSerializable},
