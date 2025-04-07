@@ -11,6 +11,8 @@ mod mem_allocation;
 mod reindex;
 mod string_filter;
 
+mod list_documents;
+
 mod temp_insert_swap;
 
 mod vector_search;

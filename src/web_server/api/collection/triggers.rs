@@ -74,7 +74,19 @@ async fn get_trigger_v1(
         .get_trigger(read_api_key, collection_id, trigger_id)
         .await
     {
-        Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
+        Ok(Some(trigger)) => match parse_trigger_id(trigger.id.clone()) {
+            Some(parsed_trigger_id) => Ok((
+                StatusCode::OK,
+                Json(json!({ "success": true, "trigger": Trigger {
+                            id: parsed_trigger_id.trigger_id,
+                            ..trigger
+                        } })),
+            )),
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to parse trigger ID" })),
+            )),
+        },
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
         Err(e) => {
             print_error(&e, "Error getting trigger");
@@ -103,7 +115,27 @@ async fn get_all_triggers_v1(
         .get_all_triggers_by_collection(read_api_key, collection_id)
         .await
     {
-        Ok(triggers) => Ok((StatusCode::OK, Json(json!({ "triggers": triggers })))),
+        Ok(triggers) => {
+            let mut output = vec![];
+            for trigger in triggers.iter() {
+                match parse_trigger_id(trigger.id.clone()) {
+                    Some(parsed_trigger_id) => {
+                        output.push(Trigger {
+                            id: parsed_trigger_id.trigger_id,
+                            ..trigger.clone()
+                        });
+                    }
+                    None => {
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": "Failed to parse trigger ID" })),
+                        ));
+                    }
+                }
+            }
+
+            Ok((StatusCode::OK, Json(json!({ "triggers": output }))))
+        }
         Err(e) => {
             print_error(&e, "Error getting all triggers");
             Err((

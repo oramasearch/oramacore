@@ -158,8 +158,7 @@ async fn test_filter_field_with_from_filter_type() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_commit_and_load1() -> Result<()> {
     let _ = tracing_subscriber::fmt::try_init();
-    let mut config = create_oramacore_config();
-    config.reader_side.config.data_dir = ".pippo".to_string().into();
+    let config = create_oramacore_config();
     let (write_side, read_side) = create(config.clone()).await?;
 
     let collection_id = CollectionId::from("test-collection".to_string());
@@ -1809,7 +1808,7 @@ async fn test_trigger() -> Result<()> {
 
     let trigger_id = "my-trigger".to_string();
 
-    let trigger = write_side
+    let _ = write_side
         .insert_trigger(
             ApiKey(Secret::new("my-write-api-key".to_string())),
             collection_id,
@@ -1823,7 +1822,10 @@ async fn test_trigger() -> Result<()> {
             Some(trigger_id.clone()),
         )
         .await?;
-    let trigger_id = trigger.id;
+    // In http handler there's a mapping that is not present in the `insert_trigger` method
+    // That is bad
+    // TODO: fix the `insert_trigger` method to return the trigger id and uncomment the line below
+    // let trigger_id = trigger.id;
 
     sleep(Duration::from_millis(100)).await;
 

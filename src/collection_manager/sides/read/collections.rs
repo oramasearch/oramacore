@@ -178,6 +178,7 @@ impl CollectionsReader {
             let collection_dir = collections_dir.join(id.0);
 
             if collection.is_deleted() {
+                deleted_collection_ids.insert(*id);
                 continue;
             }
 
@@ -196,16 +197,15 @@ impl CollectionsReader {
                 }
             }
             drop(m);
-
-            if collection.is_deleted() {
-                deleted_collection_ids.insert(*id);
-            }
         }
 
         let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
-            collection_ids: collection_ids.into_iter().collect(),
-            deleted_collection_ids,
+            collection_ids: collection_ids
+                .into_iter()
+                .filter(|id| !deleted_collection_ids.contains(id))
+                .collect(),
+            deleted_collection_ids: Default::default(),
             last_reindexed_collections: guard.iter().cloned().collect(),
         });
         drop(guard);
