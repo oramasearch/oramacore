@@ -159,6 +159,31 @@ async fn delete_collection(
 }
 
 #[endpoint(
+    method = "GET",
+    path = "/v1/collections/list",
+    description = "Return all documents in a collection"
+)]
+async fn list_document_in_collection(
+    write_side: State<Arc<WriteSide>>,
+    TypedHeader(auth): AuthorizationBearerHeader,
+    Json(json): Json<DeleteCollection>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let collection_id = json.id;
+    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
+
+    match write_side.list_document(write_api_key, collection_id).await {
+        Ok(docs) => Ok(Json(docs)),
+        Err(e) => {
+            print_error(&e, "Error deleting collection");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
     method = "POST",
     path = "/v1/collections/{id}/insert",
     description = "Add documents to a collection"

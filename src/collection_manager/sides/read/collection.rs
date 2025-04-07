@@ -1660,22 +1660,21 @@ impl CollectionReader {
             let e = vectors.entry(k).or_default();
             e.1 = Some(v);
         }
-        fields_stats.extend(vectors.into_iter().map(|(k, v)| {
+        fields_stats.extend(vectors.into_iter().filter_map(|(k, v)| {
             let name = self
                 .score_fields
                 .iter()
-                .find(|e| e.value().0 == k)
-                .expect("Field not found")
+                .find(|e| e.value().0 == k)?
                 .key()
                 .to_string();
-            FieldStats {
+            Some(FieldStats {
                 field_id: k,
                 name,
                 stats: FieldStatsType::Vector {
                     uncommitted: v.1,
                     committed: v.0,
                 },
-            }
+            })
         }));
 
         fields_stats.sort_by_key(|e| e.field_id.0);

@@ -36,7 +36,7 @@ use super::{
     SerializedFieldIndexer,
 };
 
-mod doc_id_storage;
+pub mod doc_id_storage;
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 

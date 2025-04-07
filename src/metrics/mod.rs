@@ -5,7 +5,7 @@ use metrics::{Label, SharedString};
 
 use crate::collection_manager::dto::FieldId;
 
-pub struct Empty {}
+pub struct Empty;
 impl From<Empty> for Vec<Label> {
     fn from(_: Empty) -> Self {
         vec![]
@@ -123,9 +123,9 @@ pub mod commit {
 }
 
 pub mod operations {
-    use super::CollectionLabels;
-    use crate::create_counter_histogram;
-    create_counter_histogram!(OPERATION_COUNT, "operation_count", CollectionLabels);
+    use super::Empty;
+    use crate::create_time_histogram;
+    create_time_histogram!(OPERATION_COUNT, "operation_count", Empty);
 }
 
 pub mod search {

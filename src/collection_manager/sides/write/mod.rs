@@ -1,6 +1,6 @@
-mod collection;
+pub mod collection;
 mod collections;
-mod document_storage;
+pub mod document_storage;
 mod embedding;
 mod fields;
 
@@ -422,6 +422,41 @@ impl WriteSide {
         }
 
         Ok(())
+    }
+
+    pub async fn list_document(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Document>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        let document_ids = collection.get_document_ids().await;
+
+        let stream = self.document_storage.stream_documents(document_ids).await;
+        let docs = stream
+            .filter_map(|(_, doc)| {
+                let inner = doc.inner;
+                let inner: Map<String, Value> = match serde_json::from_str(inner.get()) {
+                    Ok(inner) => inner,
+                    Err(e) => {
+                        error!(error = ?e, "Cannot deserialize document");
+                        return None;
+                    }
+                };
+                let doc = Document { inner };
+                Some(doc)
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        Ok(docs)
     }
 
     pub async fn insert_javascript_hook(
