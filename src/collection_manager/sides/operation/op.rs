@@ -9,9 +9,9 @@ use crate::{
         dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
         sides::{hooks::HookName, OramaModelSerializable},
     },
-    nlp::locales::Locale,
     types::{CollectionId, DocumentId, RawJSONDocument},
 };
+use nlp::locales::Locale;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Term(pub String);
@@ -266,7 +266,6 @@ mod tests {
             dto::{ApiKey, DocumentFields, FieldId},
             sides::{hooks::HookName, OramaModelSerializable},
         },
-        nlp::locales::Locale,
         types::{CollectionId, DocumentId, RawJSONDocument},
     };
 

@@ -3,12 +3,12 @@ use dashmap::DashMap;
 use text_splitter::{Characters, ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tiktoken_rs::*;
 
-use crate::code_parser::CodeLanguage;
+// use crate::code_parser::CodeLanguage;
 
 pub struct Chunker {
     max_tokens: usize,
     text_splitter: TextSplitter<CoreBPE>,
-    code_splitters: DashMap<CodeLanguage, CodeSplitter<Characters>>,
+    // code_splitters: DashMap<CodeLanguage, CodeSplitter<Characters>>,
     markdown_splitter: MarkdownSplitter<Characters>,
 }
 
@@ -29,7 +29,7 @@ impl Chunker {
 
         Ok(Chunker {
             max_tokens: config.max_tokens,
-            code_splitters: DashMap::new(),
+            // code_splitters: DashMap::new(),
             text_splitter: TextSplitter::new(text_tokenizer_config),
             markdown_splitter: MarkdownSplitter::new(config.max_tokens),
         })
@@ -49,6 +49,7 @@ impl Chunker {
             .collect()
     }
 
+    /*
     pub fn chunk_code(&self, text: &str, language: CodeLanguage) -> Vec<String> {
         let entry = self.code_splitters.entry(language);
 
@@ -69,4 +70,5 @@ impl Chunker {
             .map(|chunk| chunk.to_string())
             .collect()
     }
+    */
 }

@@ -14,9 +14,9 @@ use crate::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
     metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    nlp::NLPService,
     types::CollectionId,
 };
+use nlp::NLPService;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

@@ -8,10 +8,8 @@ use serde::de::{Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
 
 use crate::ai::RemoteLLMProvider;
-use crate::{
-    nlp::locales::Locale,
-    types::{CollectionId, DocumentId, RawJSONDocument, ValueType},
-};
+use crate::types::{CollectionId, DocumentId, RawJSONDocument, ValueType};
+use nlp::locales::Locale;
 
 mod bm25;
 mod global_info;

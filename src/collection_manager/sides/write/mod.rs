@@ -51,9 +51,9 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
-    nlp::NLPService,
     types::{CollectionId, Document, DocumentId, DocumentList},
 };
+use nlp::NLPService;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {

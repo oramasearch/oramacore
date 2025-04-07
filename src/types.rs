@@ -341,7 +341,3 @@ impl TryFrom<Vec<Value>> for DocumentList {
         Ok(DocumentList(docs))
     }
 }
-
-pub trait StringParser: Send + Sync {
-    fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>>;
-}

@@ -17,9 +17,6 @@ use web_server::{HttpConfig, WebServer};
 pub mod indexes;
 pub mod types;
 
-pub mod code_parser;
-pub mod nlp;
-
 pub mod collection_manager;
 
 pub mod web_server;

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::nlp::locales::Locale;
+use crate::locales::Locale;
 use regex::Regex;
 
 #[derive(Debug, Clone)]

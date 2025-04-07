@@ -1,0 +1,17 @@
+[package]
+name = "nlp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+dashmap = { workspace = true }
+serde = { workspace = true }
+tiktoken-rs = { workspace = true }
+rust-stemmers = "1.2.0"
+text-splitter = { version = "0.22", features = [
+    "tiktoken-rs",
+    "markdown",
+    "code",
+] }
+regex = "1.11.1"

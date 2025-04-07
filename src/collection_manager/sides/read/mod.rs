@@ -35,9 +35,9 @@ use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
     collection_manager::dto::{ApiKey, SearchParams, SearchResult, SearchResultHit, TokenScore},
-    nlp::NLPService,
     types::{CollectionId, DocumentId},
 };
+use nlp::NLPService;
 
 use super::segments::{Segment, SelectedSegment};
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};

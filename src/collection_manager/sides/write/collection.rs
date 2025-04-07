@@ -25,9 +25,9 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
-    nlp::{locales::Locale, NLPService, TextParser},
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
+use nlp::{locales::Locale, NLPService, TextParser};
 
 use crate::collection_manager::dto::{LanguageDTO, TypedField};
 

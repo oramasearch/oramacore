@@ -18,12 +18,12 @@ use crate::{
             Term, TermStringField, WriteOperation,
         },
     },
-    nlp::{
-        chunker::{Chunker, ChunkerConfig},
-        locales::Locale,
-        TextParser,
-    },
     types::{CollectionId, DocumentId, FlattenDocument, ValueType},
+};
+use nlp::{
+    chunker::{Chunker, ChunkerConfig},
+    locales::Locale,
+    TextParser,
 };
 
 use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};

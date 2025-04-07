@@ -15,8 +15,6 @@ use rust_stemmers::Algorithm;
 pub use rust_stemmers::Stemmer;
 use tokenizer::Tokenizer;
 
-use crate::types::StringParser;
-
 pub struct TextParser {
     locale: Locale,
     tokenizer: Tokenizer,
@@ -136,9 +134,7 @@ impl TextParser {
             })
             .collect()
     }
-}
 
-impl StringParser for TextParser {
     fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>> {
         Ok(self.tokenize_and_stem(input))
     }

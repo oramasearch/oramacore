@@ -15,8 +15,8 @@ use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, 
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
-use crate::nlp::NLPService;
 use crate::{collection_manager::dto::CollectionDTO, types::CollectionId};
+use nlp::NLPService;
 
 use crate::collection_manager::dto::{
     ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,

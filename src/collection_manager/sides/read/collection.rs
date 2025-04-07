@@ -72,10 +72,10 @@ use crate::{
         },
         CollectionFieldCommitLabels, CollectionLabels,
     },
-    nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
     types::{CollectionId, DocumentId},
 };
+use nlp::{locales::Locale, NLPService, TextParser};
 
 #[derive(Debug)]
 pub struct CollectionReader {
@@ -1703,9 +1703,9 @@ mod dump {
             dto::{FieldId, LanguageDTO},
             sides::OramaModelSerializable,
         },
-        nlp::locales::Locale,
         types::CollectionId,
     };
+    use nlp::locales::Locale;
 
     use super::committed;
 

@@ -1,10 +1,7 @@
 use super::OramaModel;
-use crate::{
-    ai::AIService,
-    collection_manager::dto::SearchResult,
-    nlp::chunker::{Chunker, ChunkerConfig},
-};
+use crate::{ai::AIService, collection_manager::dto::SearchResult};
 use anyhow::Result;
+use nlp::chunker::{Chunker, ChunkerConfig};
 use serde_json::Value;
 use std::sync::Arc;
 use tiktoken_rs::{cl100k_base, CoreBPE};
