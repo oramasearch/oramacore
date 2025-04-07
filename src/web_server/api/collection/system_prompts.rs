@@ -139,7 +139,7 @@ async fn validate_system_prompt_v1(
     if write_side.is_gpu_overloaded() {
         match write_side.select_random_remote_llm_service() {
             Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                info!("GPU is overloaded. Switching to \"{:?}\" as a remote LLM provider for this request.", provider);
                 params.llm_config = Some(InteractionLLMConfig { model, provider });
             }
             None => {

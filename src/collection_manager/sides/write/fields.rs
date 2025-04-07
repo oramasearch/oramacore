@@ -6,14 +6,14 @@ use std::{
 
 use ai_service_client::OramaModel;
 use anyhow::{Context, Result};
-use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
 
+use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
 use crate::{
     collection_manager::{
         dto::{DocumentFields, FieldId, Number},
         sides::{
-            hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
+            hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
             CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
             Term, TermStringField, WriteOperation,
         },
@@ -25,8 +25,7 @@ use nlp::{
     locales::Locale,
     TextParser,
 };
-
-use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
+use types::{HookName, OramaModelSerializable};
 
 pub enum CollectionFilterField {
     Number(NumberFilterField),
@@ -251,45 +250,6 @@ impl CollectionScoreField {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OramaModelSerializable(pub OramaModel);
-
-impl Serialize for OramaModelSerializable {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        self.0.as_str_name().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for OramaModelSerializable {
-    fn deserialize<D>(deserializer: D) -> Result<OramaModelSerializable, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let model_name = String::deserialize(deserializer)?;
-        let model = OramaModel::from_str_name(&model_name)
-            .ok_or_else(|| serde::de::Error::custom("Invalid model name"))?;
-        Ok(OramaModelSerializable(model))
-    }
-}
-
-impl PartialSchema for OramaModelSerializable {
-    fn schema(
-    ) -> axum_openapi3::utoipa::openapi::RefOr<axum_openapi3::utoipa::openapi::schema::Schema> {
-        let b = AnyOfBuilder::new()
-            .item(OramaModel::BgeSmall.as_str_name())
-            .item(OramaModel::BgeBase.as_str_name())
-            .item(OramaModel::BgeLarge.as_str_name())
-            .item(OramaModel::MultilingualE5Small.as_str_name())
-            .item(OramaModel::MultilingualE5Base.as_str_name())
-            .item(OramaModel::MultilingualE5Large.as_str_name());
-        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
-    }
-}
-impl ToSchema for OramaModelSerializable {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SerializedFieldIndexer {

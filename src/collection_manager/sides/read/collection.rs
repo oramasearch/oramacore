@@ -62,7 +62,7 @@ use crate::{
             HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
             SearchParams, Similarity, VectorMode,
         },
-        sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
+        sides::{CollectionWriteOperation, Offset, TypedFieldWrapper},
     },
     file_utils::BufferedFile,
     metrics::{
@@ -77,6 +77,7 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 use nlp::{locales::Locale, NLPService, TextParser};
+use types::OramaModelSerializable;
 
 #[derive(Debug)]
 pub struct CollectionReader {
@@ -1699,16 +1700,13 @@ pub struct Committed {
 mod dump {
     use serde::{Deserialize, Serialize};
 
+    use super::committed;
     use crate::{
-        collection_manager::{
-            dto::{FieldId, LanguageDTO},
-            sides::OramaModelSerializable,
-        },
+        collection_manager::dto::{FieldId, LanguageDTO},
         types::CollectionId,
     };
     use nlp::locales::Locale;
-
-    use super::committed;
+    use types::OramaModelSerializable;
 
     #[derive(Debug, Serialize, Deserialize)]
     #[serde(tag = "version")]

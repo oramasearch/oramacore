@@ -5,7 +5,7 @@ use tokio::sync::mpsc::Receiver;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ai::{AIService},
+    ai::AIService,
     collection_manager::{
         dto::FieldId,
         sides::{

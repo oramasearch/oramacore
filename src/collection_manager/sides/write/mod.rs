@@ -16,7 +16,7 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
+    hooks::{HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
     triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
@@ -42,7 +42,7 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
     collection_manager::{
         dto::{
             ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
@@ -55,6 +55,7 @@ use crate::{
     types::{CollectionId, Document, DocumentId, DocumentList},
 };
 use nlp::NLPService;
+use types::{HookName, OramaModelSerializable, RemoteLLMProvider};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {

@@ -7,15 +7,13 @@ edition = "2021"
 config = { version = "0.15.6", features = ["json5"] }
 
 anyhow = { workspace = true }
-thiserror = "2"
 
-smallvec = { version = "1.13.2", features = ["serde"] }
+serde_json = { workspace = true }
 
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "full", "sync"] }
 tokio-stream = "0.1"
 
 serde = { workspace = true }
-serde_json = { version = "1", features = ["raw_value"] }
 
 dashmap = { workspace = true }
 bincode = "1.3.3"
@@ -23,20 +21,12 @@ bincode = "1.3.3"
 rayon = "1.10.0"
 ai_service_client = { path = "./crates/ai_service_client" }
 
-csv = "1.3.1"
-
 ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/scan-postfix-keys", features = [
     "serde",
 ] }
 
-invocation-counter = "0.1.0"
-
 tiktoken-rs = { workspace = true }
 nlp = { path = "./crates/nlp" }
-tree-sitter = "0.24"
-tree-sitter-html = "0.23.2"
-tree-sitter-javascript = "0.23.1"
-tree-sitter-typescript = "0.23.2"
 
 async-trait = "0.1.85"
 
@@ -58,12 +48,12 @@ axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10.0", features = ["typed-header"] }
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 http = "1.2.0"
-axum-openapi3 = { version = "0.2", features = ["derive"] }
+axum-openapi3 = { workspace = true }
 
 strum_macros = "0.26.4"
 
 # Tracing
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # JS
@@ -73,22 +63,19 @@ oxc_span = "0.47.1"
 
 # prometheus
 metrics-exporter-prometheus = "0.16.1"
-metrics = "0.24.1"
-metrics-util = "0.19.0"
+metrics = { workspace = true }
 
 memmap = "0.7.0"
 cuid2 = "0.1.4"
 
 mobc = "0.8"
-redact = { version = "0.1", features = ["serde"] }
+redact = { workspace = true }
 duration-str = "0.12.0"
 rabbitmq-stream-client = { version = "0.8", features = ["serde"] }
 backoff = { version = "0.4.0", features = ["tokio"] }
-pin-project-lite = "0.2.16"
 parking_lot = "0.12.3"
 serde-big-array = "0.5.1"
 debug_panic = "0.2.1"
-dedent = "0.1.1"
 hnsw2 = { path = "./crates/hnsw2" }
 repair_json = "0.1.0"
 async-openai = "0.28.0"
@@ -96,14 +83,15 @@ async-openai = "0.28.0"
 orama-js-pool = "0.1.1"
 sentry = "0.37.0"
 sentry-tracing = "0.37.0"
-arrayvec = "0.7.6"
 nvml-wrapper = "0.10.0"
 atomic-write-file = "0.2.3"
 
 reqwest = { version = "0.12", features = ["json"] }
 
+arrayvec = { workspace = true }
+types = { path = "crates/types" }
+
 [build-dependencies]
-cc = "1"
 
 [dev-dependencies]
 hurl = "6.0.0"
@@ -113,7 +101,6 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 http-body-util = "0.1.2"
 mime = "0.3.17"
 tower = { version = "0.5.2", features = ["util"] }
-assert_approx_eq = "1.1.0"
 fastembed = { version = "4.4.0", features = ["ort-download-binaries"] }
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
@@ -152,3 +139,9 @@ dashmap = { version = "6.1.0", features = ["rayon"] }
 serde = { version = "1", features = ["derive"] }
 tiktoken-rs = "0.6.0"
 tonic = { version = "0.13" }
+axum-openapi3 = { version = "0.2", features = ["derive"] }
+redact = { version = "0.1", features = ["serde"] }
+arrayvec = "0.7.6"
+serde_json = { version = "1", features = ["raw_value"] }
+tracing = "0.1"
+metrics = "0.24.1"

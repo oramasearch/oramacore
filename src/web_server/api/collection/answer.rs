@@ -81,7 +81,7 @@ async fn planned_answer_v1(
     if read_side.is_gpu_overloaded() {
         match read_side.select_random_remote_llm_service() {
             Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                info!("GPU is overloaded. Switching to \"{:?}\" as a remote LLM provider for this request.", provider);
                 interaction.llm_config = Some(InteractionLLMConfig { model, provider });
             }
             None => {
@@ -288,7 +288,7 @@ async fn answer_v1(
     if read_side.is_gpu_overloaded() {
         match read_side.select_random_remote_llm_service() {
             Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                info!("GPU is overloaded. Switching to \"{:?}\" as a remote LLM provider for this request.", provider);
                 interaction.llm_config = Some(InteractionLLMConfig { model, provider });
             }
             None => {
@@ -632,7 +632,7 @@ async fn select_triggers_and_segments(
     if read_side.is_gpu_overloaded() {
         match read_side.select_random_remote_llm_service() {
             Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                info!("GPU is overloaded. Switching to \"{:?}\" as a remote LLM provider for this request.", provider);
                 llm_config = Some(InteractionLLMConfig { model, provider });
             }
             None => {

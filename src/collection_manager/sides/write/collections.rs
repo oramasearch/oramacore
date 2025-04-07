@@ -9,18 +9,18 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
+use crate::collection_manager::dto::{
+    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
+};
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
-use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::{collection_manager::dto::CollectionDTO, types::CollectionId};
 use nlp::NLPService;
-
-use crate::collection_manager::dto::{
-    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
-};
+use types::OramaModelSerializable;
 
 use super::CollectionsWriterConfig;
 use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest};

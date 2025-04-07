@@ -7,11 +7,11 @@ use anyhow::Result;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
-
+use types::HookName;
 use crate::{
     collection_manager::{
         dto::ApiKey,
-        sides::{hooks::HookName, triggers::Trigger},
+        sides::{triggers::Trigger},
     },
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
     types::CollectionId,

@@ -14,13 +14,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};
 
+use crate::collection_manager::dto::{LanguageDTO, TypedField};
 use crate::{
     collection_manager::{
         dto::{ApiKey, CollectionDTO, FieldId},
         sides::{
-            hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
-            OperationSender, TypedFieldWrapper, WriteOperation,
+            hooks::HooksRuntime, CollectionWriteOperation, DocumentFieldsWrapper,
+            EmbeddingTypedFieldWrapper, OperationSender, TypedFieldWrapper, WriteOperation,
         },
     },
     file_utils::BufferedFile,
@@ -28,8 +28,7 @@ use crate::{
     types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
 };
 use nlp::{locales::Locale, NLPService, TextParser};
-
-use crate::collection_manager::dto::{LanguageDTO, TypedField};
+use types::HookName;
 
 use super::{
     embedding::EmbeddingCalculationRequest, CollectionFilterField, CollectionScoreField,

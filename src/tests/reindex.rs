@@ -4,11 +4,10 @@ use anyhow::Result;
 use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
-
+use types::HookName;
 use crate::{
     collection_manager::{
         dto::{ApiKey, LanguageDTO, ReindexConfig},
-        sides::hooks::HookName,
     },
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
     types::CollectionId,

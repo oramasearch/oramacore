@@ -1,3 +1,7 @@
+use crate::collection_manager::{
+    dto::{InteractionLLMConfig, InteractionMessage, RelatedRequest},
+    sides::system_prompts::SystemPrompt,
+};
 use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
@@ -12,13 +16,9 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
+use types::RemoteLLMProvider;
 
-use crate::collection_manager::{
-    dto::{InteractionLLMConfig, InteractionMessage, RelatedRequest},
-    sides::system_prompts::SystemPrompt,
-};
-
-use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
+use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMsConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
@@ -356,7 +356,7 @@ impl LLMService {
                     #[warn(unreachable_patterns)]
                     _ => {
                         return Err(anyhow::Error::msg(format!(
-                            "Unsupported remote LLM provider: {}",
+                            "Unsupported remote LLM provider: {:?}",
                             conf.provider
                         )));
                     }

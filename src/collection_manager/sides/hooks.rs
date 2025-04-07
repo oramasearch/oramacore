@@ -1,6 +1,7 @@
+use crate::metrics::js::JS_CALCULATION_TIME;
+use crate::metrics::JSOperationLabels;
+use crate::types::{CollectionId, FlattenDocument};
 use anyhow::{anyhow, Context, Result};
-use axum_openapi3::utoipa::ToSchema;
-use axum_openapi3::utoipa::{self};
 use chrono::Utc;
 use duration_string::DurationString;
 use orama_js_pool::{JSExecutorPoolConfig, OramaJSPool, OramaJSPoolConfig};
@@ -10,14 +11,10 @@ use oxc_span::SourceType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display};
-use std::str::FromStr;
+use std::fmt::Debug;
 use std::sync::Arc;
 use tracing::warn;
-
-use crate::metrics::js::JS_CALCULATION_TIME;
-use crate::metrics::JSOperationLabels;
-use crate::types::{CollectionId, FlattenDocument};
+use types::HookName;
 
 use super::generic_kv::KV;
 
@@ -33,31 +30,6 @@ pub struct HookPair(HookName, HookValue);
 impl HookValue {
     pub fn to_string(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Hash, Eq, ToSchema)]
-pub enum HookName {
-    #[serde(rename = "selectEmbeddingProperties")]
-    SelectEmbeddingsProperties,
-}
-
-impl FromStr for HookName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "selectEmbeddingProperties" => Ok(HookName::SelectEmbeddingsProperties),
-            _ => Err(anyhow::anyhow!("Invalid hook name")),
-        }
-    }
-}
-
-impl Display for HookName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HookName::SelectEmbeddingsProperties => write!(f, "selectEmbeddingProperties"),
-        }
     }
 }
 
@@ -240,6 +212,7 @@ impl Debug for HooksRuntime {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use crate::{collection_manager::sides::generic_kv::KVConfig, tests::utils::generate_new_path};
 
     use super::*;

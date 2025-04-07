@@ -21,7 +21,6 @@ use tracing::{error, info, instrument, trace, warn};
 
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
-use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::dto::{
     InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
 };
@@ -48,6 +47,7 @@ use super::{
 };
 
 pub use collection::{stats, FieldStats, FieldStatsType};
+use types::RemoteLLMProvider;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {

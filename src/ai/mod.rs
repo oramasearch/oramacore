@@ -1,63 +1,31 @@
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 
 use ai_service_client::llm_service_client::LlmServiceClient;
 use ai_service_client::{EmbeddingRequest, HealthCheckRequest, OramaIntent, OramaModel};
-use axum_openapi3::utoipa::ToSchema;
-use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;
 use mobc::{async_trait, Manager, Pool};
-use serde::{Deserialize, Deserializer, Serialize};
-
-use anyhow::{anyhow, Context, Result};
-use strum_macros::Display;
-use tonic::{transport::Channel, Request};
-use tracing::{debug, info, trace};
+use serde::{Deserialize, Deserializer};
 
 use crate::metrics::{
     ai::{EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME},
     EmbeddingCalculationLabels,
 };
+use anyhow::{anyhow, Context, Result};
+use tonic::{transport::Channel, Request};
+use tracing::{debug, info, trace};
+use types::RemoteLLMProvider;
 
 pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
 pub mod party_planner;
 
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceLLMConfig {
     pub port: u16,
     pub host: String,
     pub model: String,
-}
-
-#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
-pub enum RemoteLLMProvider {
-    OpenAI,
-    Fireworks,
-    Together,
-}
-
-impl FromStr for RemoteLLMProvider {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "openai" => Ok(RemoteLLMProvider::OpenAI),
-            _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for RemoteLLMProvider {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        FromStr::from_str(&s).map_err(serde::de::Error::custom)
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -1,6 +1,4 @@
-
 tonic::include_proto!("orama_ai_service");
-
 
 impl OramaModel {
     pub fn dimensions(&self) -> usize {

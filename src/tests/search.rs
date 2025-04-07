@@ -1,9 +1,9 @@
 #![cfg(all(feature = "reader", feature = "writer"))]
 
-use crate::ai::{AIServiceConfig};
+use crate::ai::AIServiceConfig;
 use crate::collection_manager::dto::ApiKey;
 use crate::collection_manager::sides::{
-    CollectionsWriterConfig, InputSideChannelType, OramaModelSerializable, OutputSideChannelType,
+    CollectionsWriterConfig, InputSideChannelType, OutputSideChannelType,
     ReadSideConfig,
 };
 use crate::collection_manager::sides::{IndexesConfig, WriteSideConfig};
@@ -21,7 +21,7 @@ use redact::Secret;
 use std::time::Duration;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
-
+use types::OramaModelSerializable;
 use crate::web_server::{HttpConfig, WebServer};
 
 use super::utils::{create_grpc_server, generate_new_path, hooks_runtime_config};

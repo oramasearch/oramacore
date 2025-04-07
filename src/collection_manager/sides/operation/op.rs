@@ -1,17 +1,14 @@
 use std::{collections::HashMap, str::FromStr};
 
-use redact::Secret;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
-        sides::{hooks::HookName, OramaModelSerializable},
-    },
+    collection_manager::dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
     types::{CollectionId, DocumentId, RawJSONDocument},
 };
 use nlp::locales::Locale;
+use types::{deserialize_api_key, serialize_api_key, HookName, OramaModelSerializable};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Term(pub String);
@@ -240,19 +237,6 @@ impl WriteOperation {
     }
 }
 
-pub fn serialize_api_key<S>(x: &ApiKey, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::ser::Serializer,
-{
-    s.serialize_str(x.0.expose_secret())
-}
-pub fn deserialize_api_key<'de, D>(deserializer: D) -> Result<ApiKey, D::Error>
-where
-    D: serde::de::Deserializer<'de>,
-{
-    String::deserialize(deserializer).map(|s| ApiKey(Secret::from(s)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,10 +246,7 @@ mod tests {
     use serde_json::value::RawValue;
 
     use crate::{
-        collection_manager::{
-            dto::{ApiKey, DocumentFields, FieldId},
-            sides::{hooks::HookName, OramaModelSerializable},
-        },
+        collection_manager::dto::{ApiKey, DocumentFields, FieldId},
         types::{CollectionId, DocumentId, RawJSONDocument},
     };
 

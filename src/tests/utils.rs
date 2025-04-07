@@ -6,7 +6,10 @@ use std::{
     time::Duration,
 };
 
-use ai_service_client::{llm_service_client, llm_service_server, Embedding, EmbeddingRequest, EmbeddingResponse, HealthCheckRequest, HealthCheckResponse, OramaModel};
+use ai_service_client::{
+    llm_service_client, llm_service_server, Embedding, EmbeddingRequest, EmbeddingResponse,
+    HealthCheckRequest, HealthCheckResponse, OramaModel,
+};
 use anyhow::{Context, Result};
 use duration_string::DurationString;
 use fastembed::{
@@ -20,7 +23,7 @@ use std::str::FromStr;
 use tokio::time::sleep;
 use tonic::{transport::Server, Response, Status};
 use tracing::info;
-
+use types::OramaModelSerializable;
 use crate::{
     ai::AIServiceConfig,
     build_orama,
@@ -28,7 +31,7 @@ use crate::{
         dto::{ApiKey, InsertDocumentsResult},
         sides::{
             hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
-            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
+            CollectionsWriterConfig, IndexesConfig, InputSideChannelType,
             OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
         },
     },
@@ -236,8 +239,7 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
 
     // Waiting for the server to start
     loop {
-        let c = llm_service_client::LlmServiceClient::connect(format!("http://{}", add))
-            .await;
+        let c = llm_service_client::LlmServiceClient::connect(format!("http://{}", add)).await;
         if c.is_ok() {
             break;
         }

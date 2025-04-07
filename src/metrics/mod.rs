@@ -3,7 +3,6 @@
 pub mod histogram;
 use metrics::{Label, SharedString};
 
-use crate::collection_manager::dto::FieldId;
 
 pub struct Empty {}
 impl From<Empty> for Vec<Label> {
@@ -181,10 +180,4 @@ pub mod js {
         "js_calculation_time_sec",
         JSOperationLabels
     );
-}
-
-impl From<FieldId> for SharedString {
-    fn from(val: FieldId) -> Self {
-        SharedString::from(val.0.to_string())
-    }
 }
