@@ -1,12 +1,12 @@
 #![cfg(all(feature = "reader", feature = "writer"))]
 
 use crate::ai::{AIServiceConfig, OramaModel};
-use crate::collection_manager::dto::ApiKey;
 use crate::collection_manager::sides::{
     CollectionsWriterConfig, InputSideChannelType, OramaModelSerializable, OutputSideChannelType,
     ReadSideConfig,
 };
 use crate::collection_manager::sides::{IndexesConfig, WriteSideConfig};
+use crate::types::ApiKey;
 use crate::{build_orama, OramacoreConfig};
 use anyhow::Result;
 use futures::future::Either;

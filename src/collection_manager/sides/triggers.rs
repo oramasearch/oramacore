@@ -1,8 +1,7 @@
 use super::generic_kv::{format_key, KV};
 use crate::{
     ai::llms::{self, LLMService},
-    collection_manager::dto::{InteractionLLMConfig, InteractionMessage},
-    types::CollectionId,
+    types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

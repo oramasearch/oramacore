@@ -9,14 +9,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    collection_manager::{
-        dto::{
-            ApiKey, AutoMode, InteractionLLMConfig, InteractionMessage, Limit, Role, SearchMode,
-            SearchParams, SearchResult,
-        },
-        sides::{segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide},
+    collection_manager::sides::{
+        segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide,
     },
-    types::CollectionId,
+    types::{
+        ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
+        Properties, Role, SearchMode, SearchParams, SearchResult,
+    },
 };
 
 use super::{
@@ -385,7 +384,7 @@ impl PartyPlanner {
                     limit: Limit(5),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
-                    properties: crate::collection_manager::dto::Properties::Star,
+                    properties: Properties::Star,
                     where_filter: HashMap::new(),
                 },
             )

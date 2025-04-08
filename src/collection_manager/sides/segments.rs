@@ -1,10 +1,7 @@
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
-    collection_manager::{
-        dto::{InteractionLLMConfig, InteractionMessage},
-        sides::generic_kv::{format_key, KV},
-    },
-    types::CollectionId,
+    collection_manager::sides::generic_kv::{format_key, KV},
+    types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 use anyhow::{Context, Result};
 use core::fmt;

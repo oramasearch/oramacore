@@ -14,14 +14,11 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::{
-        dto::{
-            ApiKey, DeleteSystemPromptParams, InsertSystemPromptParams, InteractionLLMConfig,
-            UpdateSystemPromptParams,
-        },
-        sides::{system_prompts::SystemPrompt, ReadSide, WriteSide},
+    collection_manager::sides::{system_prompts::SystemPrompt, ReadSide, WriteSide},
+    types::{
+        ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
+        InteractionLLMConfig, UpdateSystemPromptParams,
     },
-    types::CollectionId,
     web_server::api::collection::admin::print_error,
 };
 

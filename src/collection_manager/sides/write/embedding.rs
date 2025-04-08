@@ -5,13 +5,10 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     ai::{AIService, OramaModel},
-    collection_manager::{
-        dto::FieldId,
-        sides::{
-            CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
-        },
+    collection_manager::sides::{
+        CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
     },
-    types::{CollectionId, DocumentId},
+    types::{CollectionId, DocumentId, FieldId},
 };
 
 pub struct EmbeddingCalculationRequestInput {

@@ -6,16 +6,13 @@ use std::{
 
 use crate::{
     ai::{llms::LLMService, AIService},
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO},
-        sides::{read::notify::Notifier, Offset},
-    },
+    collection_manager::sides::{read::notify::Notifier, Offset},
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
     metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
     nlp::NLPService,
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO},
 };
 
 use anyhow::{Context, Result};

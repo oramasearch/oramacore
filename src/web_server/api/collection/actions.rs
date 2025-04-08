@@ -11,11 +11,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, ExecuteActionPayload, SearchParams},
-        sides::ReadSide,
-    },
-    types::CollectionId,
+    collection_manager::sides::ReadSide,
+    types::{ApiKey, CollectionId, ExecuteActionPayload, SearchParams},
     web_server::api::collection::admin::print_error,
 };
 

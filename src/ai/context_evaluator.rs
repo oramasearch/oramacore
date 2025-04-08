@@ -1,8 +1,8 @@
 use super::OramaModel;
 use crate::{
     ai::AIService,
-    collection_manager::dto::SearchResult,
     nlp::chunker::{Chunker, ChunkerConfig},
+    types::SearchResult,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -206,13 +206,13 @@ impl ContextEvaluator {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::sync::Arc;
 
     use crate::{
         ai::{AIService, AIServiceConfig},
-        collection_manager::dto::{SearchResult, SearchResultHit},
         tests::utils::create_grpc_server,
-        types::RawJSONDocument,
+        types::{RawJSONDocument, SearchResultHit},
     };
     use http::uri::Scheme;
     use serde_json::value::RawValue;

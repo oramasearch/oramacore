@@ -56,11 +56,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::{
-        dto::{
-            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
-            HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
-            SearchParams, Similarity, VectorMode,
-        },
+        dto::BM25Scorer,
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
     file_utils::BufferedFile,
@@ -74,7 +70,11 @@ use crate::{
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
-    types::{CollectionId, DocumentId},
+    types::{
+        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, Filter,
+        FulltextMode, HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode,
+        SearchModeResult, SearchParams, Similarity, VectorMode,
+    },
 };
 
 #[derive(Debug)]
@@ -1698,12 +1698,9 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{
-            dto::{FieldId, LanguageDTO},
-            sides::OramaModelSerializable,
-        },
+        collection_manager::sides::OramaModelSerializable,
         nlp::locales::Locale,
-        types::CollectionId,
+        types::{CollectionId, FieldId, LanguageDTO},
     };
 
     use super::committed;

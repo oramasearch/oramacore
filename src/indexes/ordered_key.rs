@@ -387,9 +387,8 @@ And this should not happen. Return the first page."#);
 #[cfg(test)]
 mod tests {
     use crate::{
-        collection_manager::dto::{Number, SerializableNumber},
         tests::utils::generate_new_path,
-        types::DocumentId,
+        types::{DocumentId, Number, SerializableNumber},
     };
 
     use super::*;

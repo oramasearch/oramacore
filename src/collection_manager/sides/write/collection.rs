@@ -15,21 +15,19 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, CollectionDTO, FieldId},
-        sides::{
-            hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
-            OperationSender, TypedFieldWrapper, WriteOperation,
-        },
+    collection_manager::sides::{
+        hooks::{HookName, HooksRuntime},
+        CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
+        OperationSender, TypedFieldWrapper, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
+    types::{
+        ApiKey, CollectionDTO, CollectionId, ComplexType, Document, DocumentId, FieldId,
+        LanguageDTO, ScalarType, TypedField, ValueType,
+    },
 };
-
-use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
     embedding::EmbeddingCalculationRequest, CollectionFilterField, CollectionScoreField,

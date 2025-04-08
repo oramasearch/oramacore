@@ -42,17 +42,15 @@ pub use fields::*;
 
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
-    collection_manager::{
-        dto::{
-            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertDocumentsResult, InteractionLLMConfig, ReindexConfig, SwapCollections,
-        },
-        sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
-    },
+    collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
-    types::{CollectionId, Document, DocumentId, DocumentList},
+    types::{
+        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
+        DeleteDocuments, Document, DocumentId, DocumentList, InsertDocumentsResult,
+        InteractionLLMConfig, ReindexConfig, SwapCollections,
+    },
 };
 
 #[derive(Debug, Deserialize, Clone)]

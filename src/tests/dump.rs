@@ -4,9 +4,8 @@ use redact::Secret;
 use serde_json::json;
 
 use crate::{
-    collection_manager::dto::ApiKey,
     tests::utils::{create, create_oramacore_config},
-    types::CollectionId,
+    types::{ApiKey, CollectionId},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 5)]

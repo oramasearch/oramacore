@@ -1,14 +1,14 @@
 use crate::ai::llms;
 use crate::ai::party_planner::PartyPlanner;
-use crate::collection_manager::dto::{
-    ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Role,
-    SearchMode, SearchParams,
-};
 use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::system_prompts::SystemPrompt;
 use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
 use crate::types::CollectionId;
+use crate::types::{
+    ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Properties,
+    Role, SearchMode, SearchParams,
+};
 use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -430,7 +430,7 @@ async fn answer_v1(
                     where_filter: HashMap::new(),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
-                    properties: crate::collection_manager::dto::Properties::Star,
+                    properties: Properties::Star,
                 },
             )
             .await

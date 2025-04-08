@@ -5,10 +5,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::{
-    collection_manager::dto::{Number, NumberFilter},
-    types::DocumentId,
-};
+use crate::types::{DocumentId, Number, NumberFilter};
 
 #[derive(Debug)]
 pub struct NumberField {

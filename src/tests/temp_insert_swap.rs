@@ -8,12 +8,9 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, CreateCollectionFrom, SwapCollections},
-        sides::notify::NotifierConfig,
-    },
+    collection_manager::sides::notify::NotifierConfig,
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId, CreateCollectionFrom, SwapCollections},
 };
 
 #[tokio::test(flavor = "multi_thread")]

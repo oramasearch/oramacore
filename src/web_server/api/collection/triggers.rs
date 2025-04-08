@@ -13,14 +13,11 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
-        sides::{
-            triggers::{parse_trigger_id, Trigger},
-            ReadSide, WriteSide,
-        },
+    collection_manager::sides::{
+        triggers::{parse_trigger_id, Trigger},
+        ReadSide, WriteSide,
     },
-    types::CollectionId,
+    types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
     web_server::api::collection::admin::print_error,
 };
 

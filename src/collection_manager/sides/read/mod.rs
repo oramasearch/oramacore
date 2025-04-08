@@ -22,19 +22,19 @@ use tracing::{error, info, instrument, trace, warn};
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
 use crate::ai::RemoteLLMProvider;
-use crate::collection_manager::dto::{
-    InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult,
-};
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
+use crate::types::{
+    ApiKey, InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult, SearchParams,
+    SearchResult, SearchResultHit, TokenScore,
+};
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
-    collection_manager::dto::{ApiKey, SearchParams, SearchResult, SearchResultHit, TokenScore},
     nlp::NLPService,
     types::{CollectionId, DocumentId},
 };

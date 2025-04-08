@@ -13,14 +13,11 @@ use serde_json::json;
 use tracing::{error, info};
 
 use crate::{
-    collection_manager::{
-        dto::{
-            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteCollection,
-            DeleteDocuments, ReindexConfig, SwapCollections,
-        },
-        sides::WriteSide,
+    collection_manager::sides::WriteSide,
+    types::{
+        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
+        DeleteCollection, DeleteDocuments, DocumentList, ReindexConfig, SwapCollections,
     },
-    types::{CollectionId, DocumentList},
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {

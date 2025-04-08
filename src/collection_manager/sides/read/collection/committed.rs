@@ -8,8 +8,8 @@ use string_filter::{StringFilterCommittedFieldStats, StringFilterField, StringFi
 use vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
 
 use crate::{
-    collection_manager::dto::{BM25Scorer, FieldId, GlobalInfo, NumberFilter},
-    types::DocumentId,
+    collection_manager::dto::{BM25Scorer, GlobalInfo},
+    types::{DocumentId, FieldId, NumberFilter},
 };
 
 mod bool;

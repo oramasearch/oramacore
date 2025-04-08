@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
-    collection_manager::dto::{InteractionLLMConfig, SystemPromptUsageMode},
-    types::CollectionId,
+    types::{CollectionId, InteractionLLMConfig, SystemPromptUsageMode},
 };
 
 use super::generic_kv::{format_key, KV};

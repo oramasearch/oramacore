@@ -12,11 +12,8 @@ use serde_json::json;
 use utoipa::IntoParams;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, SearchParams},
-        sides::ReadSide,
-    },
-    types::CollectionId,
+    collection_manager::sides::ReadSide,
+    types::{ApiKey, CollectionId, SearchParams},
     web_server::api::collection::admin::print_error,
 };
 

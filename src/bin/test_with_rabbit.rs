@@ -5,15 +5,11 @@ use std::time::Duration;
 use anyhow::Result;
 
 use oramacore::{
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO},
-        sides::{
-            channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset,
-            OutputRabbitMQConfig, OutputSideChannelType, RabbitMQConsumerConfig,
-            RabbitMQProducerConfig, WriteOperation,
-        },
+    collection_manager::sides::{
+        channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
+        OutputSideChannelType, RabbitMQConsumerConfig, RabbitMQProducerConfig, WriteOperation,
     },
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO},
 };
 use rabbitmq_stream_client::ClientOptions;
 use redact::Secret;

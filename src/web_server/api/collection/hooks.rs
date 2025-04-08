@@ -12,11 +12,8 @@ use redact::Secret;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DeleteHookParams, GetHookQueryParams, NewHookPostParams},
-        sides::WriteSide,
-    },
-    types::CollectionId,
+    collection_manager::sides::WriteSide,
+    types::{ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, NewHookPostParams},
     web_server::api::collection::admin::print_error,
 };
 

@@ -3,15 +3,12 @@ use redact::Secret;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::ApiKey,
-        sides::{
-            stats::{StringFilterCommittedFieldStats, StringFilterUncommittedFieldStats},
-            FieldStatsType,
-        },
+    collection_manager::sides::{
+        stats::{StringFilterCommittedFieldStats, StringFilterUncommittedFieldStats},
+        FieldStatsType,
     },
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 5)]

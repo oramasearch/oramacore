@@ -3,7 +3,7 @@
 pub mod histogram;
 use metrics::{Label, SharedString};
 
-use crate::collection_manager::dto::FieldId;
+use crate::types::FieldId;
 
 pub struct Empty;
 impl From<Empty> for Vec<Label> {

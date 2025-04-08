@@ -5,12 +5,12 @@ use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
-        sides::{hooks::HookName, OramaModelSerializable},
-    },
+    collection_manager::sides::{hooks::HookName, OramaModelSerializable},
     nlp::locales::Locale,
-    types::{CollectionId, DocumentId, RawJSONDocument},
+    types::{
+        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, LanguageDTO, Number,
+        RawJSONDocument,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -262,10 +262,7 @@ mod tests {
 
     use crate::{
         ai::OramaModel,
-        collection_manager::{
-            dto::{ApiKey, DocumentFields, FieldId},
-            sides::{hooks::HookName, OramaModelSerializable},
-        },
+        collection_manager::sides::{hooks::HookName, OramaModelSerializable},
         nlp::locales::Locale,
         types::{CollectionId, DocumentId, RawJSONDocument},
     };

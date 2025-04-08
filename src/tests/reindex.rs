@@ -6,12 +6,9 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO, ReindexConfig},
-        sides::hooks::HookName,
-    },
+    collection_manager::sides::hooks::HookName,
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO, ReindexConfig},
 };
 
 #[tokio::test(flavor = "multi_thread")]

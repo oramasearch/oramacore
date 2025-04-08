@@ -24,15 +24,12 @@ use tracing::info;
 use crate::{
     ai::AIServiceConfig,
     build_orama,
-    collection_manager::{
-        dto::{ApiKey, InsertDocumentsResult},
-        sides::{
-            hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
-            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-            OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
-        },
+    collection_manager::sides::{
+        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
+        CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
+        OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
     },
-    types::{CollectionId, DocumentList},
+    types::{ApiKey, CollectionId, DocumentList, InsertDocumentsResult},
     web_server::HttpConfig,
     OramacoreConfig,
 };
