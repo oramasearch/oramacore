@@ -673,11 +673,7 @@ async fn select_triggers_and_segments(
             }
             Some(segment) => {
                 let full_segment = read_side
-                    .get_segment(
-                        read_api_key,
-                        collection_id,
-                        segment.clone().id.clone(),
-                    )
+                    .get_segment(read_api_key, collection_id, segment.clone().id.clone())
                     .await
                     .expect("Failed to get full segment");
 

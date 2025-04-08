@@ -971,14 +971,9 @@ impl WriteSide {
             ..trigger
         };
 
-        self.insert_trigger(
-            write_api_key,
-            collection_id,
-            new_trigger,
-            Some(trigger.id),
-        )
-        .await
-        .context("Cannot insert updated trigger")?;
+        self.insert_trigger(write_api_key, collection_id, new_trigger, Some(trigger.id))
+            .await
+            .context("Cannot insert updated trigger")?;
 
         match parse_trigger_id(trigger_key.clone()) {
             Some(key_content) => {

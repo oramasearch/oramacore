@@ -17,8 +17,7 @@ use crate::metrics::CollectionCommitLabels;
 use crate::nlp::NLPService;
 use crate::types::CollectionId;
 use crate::types::{
-    ApiKey, CollectionDTO, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO,
-    TypedField,
+    CollectionDTO, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
 use super::CollectionsWriterConfig;
@@ -66,18 +65,17 @@ impl CollectionsWriter {
         for collection_id in collection_info.collection_ids {
             let collection_dir = data_dir.join(collection_id.as_str());
 
-            // All those values are replaced inside `load` method
-            let mut collection = CollectionWriter::new(
-                collection_id,
-                None,
-                ApiKey::try_from("a").expect("Invalid API key"),
-                LanguageDTO::English,
+            // If the collection is not loaded correctly, we bail out the error
+            // and we abort the start up process
+            // Should we instead ignore it?
+            // TODO: think about it
+            let collection = CollectionWriter::try_load(
+                collection_dir,
+                hooks_runtime.clone(),
+                nlp_service.clone(),
                 embedding_sender.clone(),
-            );
-            collection
-                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
-                .await?;
-
+            )
+            .await?;
             collections.insert(collection_id, collection);
         }
 
@@ -121,7 +119,7 @@ impl CollectionsWriter {
 
         let default_language = language.unwrap_or(LanguageDTO::English);
 
-        let collection = CollectionWriter::new(
+        let collection = CollectionWriter::empty(
             id,
             description.clone(),
             write_api_key,
