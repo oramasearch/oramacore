@@ -354,7 +354,7 @@ impl LLMService {
                             ),
                         );
                     }
-                    #[warn(unreachable_patterns)]
+                    #[allow(unreachable_patterns)]
                     _ => {
                         return Err(anyhow::Error::msg(format!(
                             "Unsupported remote LLM provider: {}",
@@ -512,7 +512,7 @@ impl LLMService {
     pub async fn run_party_planner_prompt_stream(
         &self,
         step: Step,
-        input: &String,
+        input: &str,
         history: &Vec<InteractionMessage>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<impl Stream<Item = Result<String>>> {
@@ -520,11 +520,11 @@ impl LLMService {
 
         let variables = match step_name {
             "GIVE_REPLY" => vec![
-                ("question".to_string(), input.clone()),
+                ("question".to_string(), input.to_owned()),
                 ("context".to_string(), step.description),
             ],
             _ => vec![
-                ("input".to_string(), input.clone()),
+                ("input".to_string(), input.to_owned()),
                 ("description".to_string(), step.description),
             ],
         };
@@ -626,7 +626,7 @@ impl LLMService {
     pub async fn run_party_planner_prompt(
         &self,
         step: Step,
-        input: &String,
+        input: &str,
         history: &Vec<InteractionMessage>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {

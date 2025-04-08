@@ -14,7 +14,7 @@ async fn test_list_documents() -> Result<()> {
     config.reader_side.config.insert_batch_commit_size = 1_000_000;
     config.writer_side.config.insert_batch_commit_size = 1_000_000;
 
-    let (write_side, read_side) = create(config.clone()).await?;
+    let (write_side, _) = create(config.clone()).await?;
 
     let collection_id = CollectionId::from("test-collection".to_string());
     create_collection(write_side.clone(), collection_id).await?;

@@ -1,5 +1,3 @@
-// pub mod counter;
-// pub mod gauge;
 pub mod histogram;
 use metrics::{Label, SharedString};
 
@@ -63,7 +61,7 @@ create_label_struct!(JSOperationLabels, {
 });
 
 pub mod ai {
-    use super::{ChatCalculationLabels, EmbeddingCalculationLabels};
+    use super::EmbeddingCalculationLabels;
     use crate::{create_counter_histogram, create_time_histogram};
     create_time_histogram!(
         EMBEDDING_CALCULATION_TIME,
@@ -75,6 +73,7 @@ pub mod ai {
         "embedding_calculation_batch_size",
         EmbeddingCalculationLabels
     );
+    /*
     create_time_histogram!(
         CHAT_CALCULATION_TIME,
         "chat_calculation_time_sec",
@@ -85,6 +84,7 @@ pub mod ai {
         "stream_chat_calculation_time_sec",
         ChatCalculationLabels
     );
+    */
 }
 
 pub mod document_insertion {

@@ -1948,6 +1948,7 @@ async fn get_filtered_document(
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
+    #[allow(dead_code)]
     Embedding(OramaModel),
     Text(Locale),
     ArrayText(Locale),

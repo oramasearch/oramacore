@@ -13,6 +13,7 @@ use serde::de::{Error, Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -98,9 +99,9 @@ impl CollectionId {
         CollectionId(ArrayString::try_from(s.as_str()).unwrap())
     }
 }
-impl ToString for CollectionId {
-    fn to_string(&self) -> String {
-        self.0.as_str().to_string()
+impl Display for CollectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(self.0.as_bytes()))
     }
 }
 impl AsRef<Path> for CollectionId {

@@ -18,7 +18,7 @@ use redact::Secret;
 use serde_json::json;
 use std::str::FromStr;
 use tokio::time::sleep;
-use tonic::{transport::Server, Response, Status};
+use tonic::{transport::Server, Status};
 use tracing::info;
 
 use crate::{
@@ -120,8 +120,6 @@ pub struct GRPCServer {
     fastembed_model: Arc<TextEmbedding>,
     context_evaluator: Arc<TextEmbedding>,
 }
-
-type EchoResult<T> = Result<Response<T>, Status>;
 
 #[tonic::async_trait]
 impl grpc_def::llm_service_server::LlmService for GRPCServer {

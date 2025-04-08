@@ -52,29 +52,33 @@ pub struct PartyPlannerMessage {
 }
 
 pub struct PartyPlanner {
-    chosen_model: String,
-    llm_client: async_openai::Client<OpenAIConfig>,
+    // chosen_model: String,
+    // llm_client: async_openai::Client<OpenAIConfig>,
     llm_config: Option<InteractionLLMConfig>,
 }
 
 impl PartyPlanner {
-    pub fn new(read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
-        let llm_service = read_side.get_llm_service();
+    pub fn new(_read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
+        // let llm_service = read_side.get_llm_service();
         // Let the user choose a remote LLM model / client if they want to.
+
+        /*
         let chosen_model = get_chosen_model(llm_config.clone(), llm_service.model.clone());
         let llm_client = get_chosen_llm_client(
             llm_config.clone(),
             llm_service.remote_clients.clone(),
             llm_service.local_vllm_client.clone(),
         );
+        */
 
         Self {
-            chosen_model,
-            llm_client,
+            // chosen_model,
+            // llm_client,
             llm_config,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &self,
         read_side: State<Arc<ReadSide>>,
@@ -394,6 +398,7 @@ impl PartyPlanner {
     }
 }
 
+#[allow(dead_code)]
 fn get_chosen_model(llm_config: Option<InteractionLLMConfig>, default: String) -> String {
     if let Some(config) = llm_config {
         return config.model;
@@ -402,6 +407,7 @@ fn get_chosen_model(llm_config: Option<InteractionLLMConfig>, default: String) -
     default
 }
 
+#[allow(dead_code)]
 fn get_chosen_llm_client(
     config: Option<InteractionLLMConfig>,
     remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
