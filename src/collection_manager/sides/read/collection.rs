@@ -56,7 +56,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::{
-        dto::BM25Scorer,
+        bm25::BM25Scorer,
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
     file_utils::BufferedFile,

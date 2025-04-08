@@ -6,7 +6,8 @@ use tracing::{debug, warn};
 
 use crate::{
     collection_manager::{
-        dto::{BM25Scorer, GlobalInfo},
+        bm25::BM25Scorer,
+        global_info::GlobalInfo,
         sides::{InsertStringTerms, TermStringField},
     },
     indexes::radix::RadixIndex,

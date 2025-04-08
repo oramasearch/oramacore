@@ -10,7 +10,8 @@ use tracing::info;
 
 use crate::{
     collection_manager::{
-        dto::{BM25Scorer, GlobalInfo},
+        bm25::BM25Scorer,
+        global_info::GlobalInfo,
         sides::read::collection::uncommitted::{Positions, TotalDocumentsWithTermInField},
     },
     file_utils::create_if_not_exists,
