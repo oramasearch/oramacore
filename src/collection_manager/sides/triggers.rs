@@ -70,7 +70,7 @@ impl TriggerInterface {
             return Ok(None);
         }
 
-        let trigger_prefix = format!("{}:trigger:t_{}", collection_id.0, trigger_id);
+        let trigger_prefix = format!("{}:trigger:t_{}", collection_id.as_str(), trigger_id);
 
         match triggers
             .into_iter()
@@ -99,7 +99,7 @@ impl TriggerInterface {
             None => Err(anyhow::anyhow!(
                 "No trigger {} found for collection {}",
                 trigger_id,
-                collection_id.0
+                collection_id.as_str()
             )),
         }
     }
@@ -111,11 +111,11 @@ impl TriggerInterface {
     }
 
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Trigger>> {
-        let prefix = format!("{}:trigger:", collection_id.0.clone());
+        let prefix = format!("{}:trigger:", collection_id.as_str());
 
         let triggers: Vec<Trigger> = self.kv.prefix_scan(&prefix).await.context(format!(
             "Cannot scan triggers for collection {}",
-            collection_id.0
+            collection_id.as_str()
         ))?;
 
         Ok(triggers)

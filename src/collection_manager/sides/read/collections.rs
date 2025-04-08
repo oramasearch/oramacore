@@ -104,7 +104,7 @@ impl CollectionsReader {
                 info!("Collection {:?} is deleted. Skip loading", collection_id);
                 continue;
             }
-            let collection_dir = base_dir_for_collections.join(collection_id.0);
+            let collection_dir = base_dir_for_collections.join(collection_id.as_str());
             info!("Loading collection {:?}", collection_dir);
 
             let collection = CollectionReader::try_load(
@@ -172,7 +172,7 @@ impl CollectionsReader {
         let collection_ids: Vec<_> = col.keys().cloned().collect();
         let mut deleted_collection_ids = HashSet::new();
         for (id, collection) in col {
-            let collection_dir = collections_dir.join(id.0);
+            let collection_dir = collections_dir.join(id.as_str());
 
             if collection.is_deleted() {
                 deleted_collection_ids.insert(*id);
@@ -181,7 +181,9 @@ impl CollectionsReader {
 
             create_if_not_exists_async(&collection_dir)
                 .await
-                .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
+                .with_context(|| {
+                    format!("Cannot create directory for collection '{}'", id.as_str())
+                })?;
 
             let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
                 collection: id.to_string(),
@@ -273,14 +275,14 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(collection.id.0);
+        let collection_dir = collections_dir.join(collection.id.as_str());
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
                 .with_context(|| {
                     format!(
                         "Cannot remove directory for collection '{}'",
-                        collection.id.0
+                        collection.id.as_str()
                     )
                 })?;
         }
@@ -323,13 +325,13 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(target_collection_id.0);
+        let collection_dir = collections_dir.join(target_collection_id.as_str());
         create_if_not_exists_async(&collection_dir)
             .await
             .with_context(|| {
                 format!(
                     "Cannot create directory for collection '{}'",
-                    target_collection_id.0
+                    target_collection_id.as_str()
                 )
             })?;
 
@@ -443,7 +445,6 @@ mod tests {
     use std::time::Duration;
 
     use http::uri::Scheme;
-    use redact::Secret;
 
     use crate::{ai::AIServiceConfig, tests::utils::generate_new_path};
 
@@ -502,7 +503,7 @@ mod tests {
                 target_collection_id,
                 None,
                 LanguageDTO::English,
-                ApiKey(Secret::from("read".to_string())),
+                ApiKey::try_from("read").unwrap(),
             )
             .await
             .unwrap();
@@ -514,7 +515,7 @@ mod tests {
                 tmp_collection_id,
                 None,
                 LanguageDTO::English,
-                ApiKey(Secret::from("read".to_string())),
+                ApiKey::try_from("read").unwrap(),
             )
             .await
             .unwrap();
@@ -594,7 +595,7 @@ mod tests {
                     *target_collection_id,
                     None,
                     LanguageDTO::English,
-                    ApiKey(Secret::from("read".to_string())),
+                    ApiKey::try_from("read").unwrap(),
                 )
                 .await
                 .unwrap();
@@ -606,7 +607,7 @@ mod tests {
                     *tmp_collection_id,
                     None,
                     LanguageDTO::English,
-                    ApiKey(Secret::from("read".to_string())),
+                    ApiKey::try_from("read").unwrap(),
                 )
                 .await
                 .unwrap();

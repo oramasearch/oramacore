@@ -9,7 +9,6 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use doc_id_storage::DocIdStorage;
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, instrument, trace, warn};
@@ -685,7 +684,7 @@ impl CollectionWriter {
         let dump = CollectionDump::V2(CollectionDumpV2 {
             id: self.id,
             description: self.description.clone(),
-            write_api_key: self.write_api_key.0.expose_secret().clone(),
+            write_api_key: self.write_api_key.expose().to_string(),
             default_language: self.default_language,
             document_count: self
                 .collection_document_count
@@ -799,7 +798,8 @@ impl CollectionWriter {
 
         self.id = dump.id;
         self.description = dump.description;
-        self.write_api_key = ApiKey(Secret::new(dump.write_api_key));
+        self.write_api_key =
+            ApiKey::try_new(dump.write_api_key).context("Cannot create write api key")?;
         self.default_language = dump.default_language;
         self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
 

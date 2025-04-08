@@ -1,6 +1,5 @@
 use anyhow::Result;
 use dircpy::copy_dir;
-use redact::Secret;
 use serde_json::json;
 
 use crate::{
@@ -21,7 +20,7 @@ async fn test_ensure_back_compatibility() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",
@@ -61,7 +60,7 @@ async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",
@@ -84,7 +83,7 @@ async fn test_ensure_back_compatibility_and_upgrate() -> Result<()> {
     let (_, read_side) = create(config.clone()).await?;
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",

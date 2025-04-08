@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
     Json, Router,
 };
-use axum_extra::{headers, TypedHeader};
 use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
-use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{info, warn};
@@ -21,9 +19,6 @@ use crate::{
     },
     web_server::api::collection::admin::print_error,
 };
-
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[derive(Deserialize, IntoParams)]
 struct ApiKeyQueryParams {
@@ -57,15 +52,14 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/system_prompts/get",
+    path = "/v1/collections/{collection_id}/system_prompts/get",
     description = "Get a single system prompt by ID"
 )]
 async fn get_system_prompt_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<GetSystemPromptQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let system_prompt_id = query.system_prompt_id;
     let read_api_key = query.api_key;
 
@@ -90,15 +84,14 @@ async fn get_system_prompt_v1(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/system_prompts/all",
+    path = "/v1/collections/{collection_id}/system_prompts/all",
     description = "Get all system prompts in a collection"
 )]
 async fn list_system_prompts_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
@@ -121,18 +114,15 @@ async fn list_system_prompts_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/system_prompts/validate",
+    path = "/v1/collections/{collection_id}/system_prompts/validate",
     description = "Validate a system prompt"
 )]
 async fn validate_system_prompt_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(mut params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     if write_side.is_gpu_overloaded() {
         match write_side.select_random_remote_llm_service() {
             Some((provider, model)) => {
@@ -174,18 +164,15 @@ async fn validate_system_prompt_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/system_prompts/insert",
+    path = "/v1/collections/{collection_id}/system_prompts/insert",
     description = "Insert a new system prompt"
 )]
 async fn insert_system_prompt_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let system_prompt_id = params.id.unwrap_or(cuid2::create_id());
 
     let system_prompt = SystemPrompt {
@@ -217,18 +204,15 @@ async fn insert_system_prompt_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/system_prompts/delete",
+    path = "/v1/collections/{collection_id}/system_prompts/delete",
     description = "Deletes an existing system prompt"
 )]
 async fn delete_system_prompt_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
         .delete_system_prompt(write_api_key, collection_id, params.id)
         .await
@@ -246,18 +230,15 @@ async fn delete_system_prompt_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/system_prompts/update",
+    path = "/v1/collections/{collection_id}/system_prompts/update",
     description = "Updates an existing system prompt"
 )]
 async fn update_system_prompt_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let system_prompt = SystemPrompt {
         id: params.id.clone(),
         name: params.name.clone(),

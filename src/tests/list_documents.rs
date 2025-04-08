@@ -1,5 +1,4 @@
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 
 use crate::{
@@ -22,7 +21,7 @@ async fn test_list_documents() -> Result<()> {
     let document_count = 10;
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         (0..document_count).map(|i| {
             json!({
@@ -34,10 +33,7 @@ async fn test_list_documents() -> Result<()> {
     .await?;
 
     let docs = write_side
-        .list_document(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
-            collection_id,
-        )
+        .list_document(ApiKey::try_from("my-write-api-key").unwrap(), collection_id)
         .await?;
     assert_eq!(docs.len(), document_count);
 

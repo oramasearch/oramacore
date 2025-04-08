@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -21,7 +20,7 @@ async fn test_delete_collection() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![
             json!({
@@ -40,16 +39,13 @@ async fn test_delete_collection() -> Result<()> {
     read_side.commit().await?;
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await?;
     assert_eq!(stats.document_count, 2);
 
     write_side
         .delete_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             collection_id,
         )
         .await?;
@@ -59,16 +55,13 @@ async fn test_delete_collection() -> Result<()> {
     sleep(Duration::from_millis(200)).await;
     let stats = write_side
         .get_collection_dto(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             collection_id,
         )
         .await;
     assert!(matches!(stats, Ok(None)));
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await;
     assert!(stats.is_err());
 
@@ -81,10 +74,7 @@ async fn test_delete_collection() -> Result<()> {
     sleep(Duration::from_millis(600)).await;
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     assert_eq!(stats.document_count, 0);
@@ -92,16 +82,13 @@ async fn test_delete_collection() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
     let stats = write_side
         .get_collection_dto(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             collection_id,
         )
         .await;
     assert!(matches!(stats, Ok(None)));
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await;
     assert!(stats.is_err());
 

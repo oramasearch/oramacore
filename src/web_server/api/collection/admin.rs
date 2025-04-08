@@ -1,14 +1,7 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-    Json, Router,
-};
-use axum_extra::{headers, TypedHeader};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
 use axum_openapi3::*;
-use redact::Secret;
 use serde_json::json;
 use tracing::{error, info};
 
@@ -34,9 +27,6 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .with_state(write_side)
 }
 
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
-
 #[endpoint(
     method = "GET",
     path = "/v1/collections",
@@ -44,10 +34,8 @@ type AuthorizationBearerHeader =
 )]
 async fn get_collections(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    master_api_key: ApiKey,
 ) -> Result<Json<Vec<CollectionDTO>>, (StatusCode, impl IntoResponse)> {
-    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let collections = match write_side.list_collections(master_api_key).await {
         Ok(collections) => collections,
         Err(e) => {
@@ -63,17 +51,14 @@ async fn get_collections(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}",
+    path = "/v1/collections/{collection_id}",
     description = "Get a collection by id"
 )]
 async fn get_collection_by_id(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    master_api_key: ApiKey,
 ) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
-    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
-    let collection_id = CollectionId::from(id);
     let collection_dto = write_side
         .get_collection_dto(master_api_key, collection_id)
         .await;
@@ -101,11 +86,9 @@ async fn get_collection_by_id(
 )]
 async fn create_collection(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    master_api_key: ApiKey,
     Json(json): Json<CreateCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side.create_collection(master_api_key, json).await {
         Ok(collection_id) => collection_id,
         Err(e) => {
@@ -129,12 +112,10 @@ async fn create_collection(
 )]
 async fn delete_collection(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    master_api_key: ApiKey,
     Json(json): Json<DeleteCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = json.id;
-    let master_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
         .delete_collection(master_api_key, collection_id)
         .await
@@ -162,11 +143,10 @@ async fn delete_collection(
 )]
 async fn list_document_in_collection(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<DeleteCollection>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = json.id;
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side.list_document(write_api_key, collection_id).await {
         Ok(docs) => Ok(Json(docs)),
@@ -182,19 +162,15 @@ async fn list_document_in_collection(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/insert",
+    path = "/v1/collections/{collection_id}/insert",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
-
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     info!("Adding documents to collection {:?}", collection_id);
     match write_side
         .insert_documents(write_api_key, collection_id, json)
@@ -218,11 +194,9 @@ async fn add_documents(
 )]
 async fn create_collection_from(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<CreateCollectionFrom>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side.create_collection_from(write_api_key, json).await {
         Ok(collection_id) => Ok((
             StatusCode::OK,
@@ -245,11 +219,9 @@ async fn create_collection_from(
 )]
 async fn swap_collections(
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<SwapCollections>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side.swap_collections(write_api_key, json).await {
         Ok(collection_id) => Ok((
             StatusCode::OK,
@@ -267,19 +239,15 @@ async fn swap_collections(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/delete",
+    path = "/v1/collections/{collection_id}/delete",
     description = "Delete documents from a collection"
 )]
 async fn delete_documents(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<DeleteDocuments>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
-
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     info!("Delete documents to collection {:?}", collection_id);
     match write_side
         .delete_documents(write_api_key, collection_id, json)
@@ -305,19 +273,15 @@ async fn delete_documents(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/reindex",
+    path = "/v1/collections/{collection_id}/reindex",
     description = "Reindex documents of a collection"
 )]
 async fn reindex(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(json): Json<ReindexConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
-
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     info!("Reindex collection {:?}", collection_id);
     match write_side.reindex(write_api_key, collection_id, json).await {
         Ok(_) => {

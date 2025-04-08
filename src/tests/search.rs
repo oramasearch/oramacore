@@ -16,7 +16,6 @@ use hurl::runner::{self, HurlResult, VariableSet};
 use hurl::runner::{RunnerOptionsBuilder, Value};
 use hurl::util::logger::{LoggerOptionsBuilder, Verbosity};
 use hurl_core::typing::Count;
-use redact::Secret;
 use std::time::Duration;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
@@ -77,7 +76,7 @@ async fn start_server() {
             remote_llms: None,
         },
         writer_side: WriteSideConfig {
-            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
+            master_api_key: ApiKey::try_from("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
             hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {

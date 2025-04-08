@@ -414,7 +414,7 @@ impl WriteSide {
                 .context("Cannot send delete collection operation")?;
 
             self.kv
-                .delete_with_prefix(&collection_id.0)
+                .delete_with_prefix(collection_id.as_str())
                 .await
                 .context("Cannot delete collection from KV")?;
         }
@@ -510,7 +510,7 @@ impl WriteSide {
         request: CreateCollectionFrom,
     ) -> Result<CollectionId> {
         info!("create temporary collection");
-        self.check_write_api_key(request.from, write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key)
             .await
             .context("Check write api key fails")?;
 
@@ -533,7 +533,7 @@ impl WriteSide {
 
         let hook = self
             .get_javascript_hook(
-                write_api_key.clone(),
+                write_api_key,
                 request.from,
                 HookName::SelectEmbeddingsProperties,
             )
@@ -541,7 +541,7 @@ impl WriteSide {
             .context("Cannot get embedding hook")?;
         if let Some(hook) = hook {
             self.insert_javascript_hook(
-                write_api_key.clone(),
+                write_api_key,
                 collection_id_tmp,
                 HookName::SelectEmbeddingsProperties,
                 hook,
@@ -559,7 +559,7 @@ impl WriteSide {
         request: SwapCollections,
     ) -> Result<()> {
         info!("Replacing collection");
-        self.check_write_api_key(request.from, write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key)
             .await
             .context("Check write api key fails")?;
         self.check_write_api_key(request.to, write_api_key)
@@ -597,7 +597,7 @@ impl WriteSide {
         info!("Reindexing collection {:?}", collection_id);
         let collection_id_tmp = self
             .create_collection_from(
-                write_api_key.clone(),
+                write_api_key,
                 CreateCollectionFrom {
                     from: collection_id,
                     embeddings: reindex_config.embeddings.clone(),
@@ -887,7 +887,7 @@ impl WriteSide {
 
         let final_trigger_id = match trigger_id {
             Some(mut id) => {
-                let required_prefix = format!("{}:trigger:", collection_id.0);
+                let required_prefix = format!("{}:trigger:", collection_id.as_str());
 
                 if !id.starts_with(&required_prefix) {
                     id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
@@ -972,7 +972,7 @@ impl WriteSide {
         };
 
         self.insert_trigger(
-            write_api_key.clone(),
+            write_api_key,
             collection_id,
             new_trigger,
             Some(trigger.id),

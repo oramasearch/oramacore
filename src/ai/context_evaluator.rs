@@ -199,6 +199,10 @@ impl ContextEvaluator {
         // new_value = target_min + (value - original_min) * (target_range / original_range)
         let rescaled = target_min + (similarity - original_min) * (target_range / original_range);
 
+        // threat NaN values as 0.0
+        if rescaled.is_nan() {
+            return 0.0;
+        }
         // Clamp the result to ensure it stays within [0.0, 1.0]
         rescaled.clamp(0.0, 1.0)
     }

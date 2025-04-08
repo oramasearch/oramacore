@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
@@ -65,13 +64,13 @@ impl CollectionsWriter {
         };
 
         for collection_id in collection_info.collection_ids {
-            let collection_dir = data_dir.join(collection_id.0);
+            let collection_dir = data_dir.join(collection_id.as_str());
 
             // All those values are replaced inside `load` method
             let mut collection = CollectionWriter::new(
                 collection_id,
                 None,
-                ApiKey(Secret::new("".to_string())),
+                ApiKey::try_from("a").expect("Invalid API key"),
                 LanguageDTO::English,
                 embedding_sender.clone(),
             );
@@ -160,7 +159,10 @@ impl CollectionsWriter {
         if collections.contains_key(&id) {
             // This error should be typed.
             // TODO: create a custom error type
-            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
+            return Err(anyhow!(format!(
+                "Collection \"{}\" already exists",
+                id.as_str()
+            )));
         }
 
         // Send event & Register field should be inside the lock transaction
@@ -261,7 +263,7 @@ impl CollectionsWriter {
         };
 
         let data_dir = &self.config.data_dir.join("collections");
-        let collection_dir = data_dir.join(collection_id.0);
+        let collection_dir = data_dir.join(collection_id.as_str());
 
         collection.remove_from_fs(collection_dir).await;
 

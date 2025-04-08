@@ -22,7 +22,6 @@ use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
     merge_vector_field,
 };
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{join, sync::RwLock};
 use tracing::{debug, error, info, instrument, trace};
@@ -167,7 +166,8 @@ impl CollectionReader {
             dump::CollectionInfo::V1(info) => dump::migrate_v1_to_v2(info),
             dump::CollectionInfo::V2(info) => info,
         };
-        let read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
+        let read_api_key =
+            ApiKey::try_new(collection_info.read_api_key).context("Cannot create read api key")?;
 
         let score_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
         for (field_name, (field_id, field_type)) in collection_info.score_fields {
@@ -299,7 +299,7 @@ impl CollectionReader {
                 default_language: self.default_language,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
-                read_api_key: self.read_api_key.0.expose_secret().clone(),
+                read_api_key: self.read_api_key.expose().to_string(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
@@ -331,7 +331,7 @@ impl CollectionReader {
                 default_language: self.default_language,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
-                read_api_key: self.read_api_key.0.expose_secret().clone(),
+                read_api_key: self.read_api_key.expose().to_string(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_filter_field_infos: Default::default(),

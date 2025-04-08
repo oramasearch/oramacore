@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -26,7 +25,7 @@ async fn test_delete_documents() -> Result<()> {
     let document_count = 10;
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         (0..document_count).map(|i| {
             json!({
@@ -39,7 +38,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -51,7 +50,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             vec![(document_count - 1).to_string()],
         )
@@ -59,7 +58,7 @@ async fn test_delete_documents() -> Result<()> {
     sleep(Duration::from_millis(100)).await;
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -74,7 +73,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -86,7 +85,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             vec![(document_count - 2).to_string()],
         )
@@ -95,7 +94,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -108,7 +107,7 @@ async fn test_delete_documents() -> Result<()> {
     let (write_side, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -120,7 +119,7 @@ async fn test_delete_documents() -> Result<()> {
 
     write_side
         .delete_documents(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             vec![(document_count - 2).to_string()],
         )
@@ -129,7 +128,7 @@ async fn test_delete_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -145,7 +144,7 @@ async fn test_delete_documents() -> Result<()> {
     let (_, read_side) = create(config.clone()).await?;
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -158,7 +157,7 @@ async fn test_delete_documents() -> Result<()> {
     // Deletion of non-existent document should not fail
     let output = write_side
         .delete_documents(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             vec![(document_count - 2).to_string()],
         )

@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -26,7 +25,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
     let document_count = 10;
     let result = insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         (0..document_count).map(|i| {
             json!({
@@ -42,7 +41,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "text",
@@ -54,7 +53,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
 
     let result = insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         (0..document_count).map(|i| {
             json!({
@@ -72,7 +71,7 @@ async fn test_insert_duplicate_documents() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "pippo",
@@ -94,7 +93,7 @@ async fn test_document_duplication() -> Result<()> {
     let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             json!({
                 "id": collection_id,
                 "read_api_key": "my-read-api-key",
@@ -106,7 +105,7 @@ async fn test_document_duplication() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "id": "1",
@@ -116,7 +115,7 @@ async fn test_document_duplication() -> Result<()> {
     .await?;
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "id": "1",
@@ -127,7 +126,7 @@ async fn test_document_duplication() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "B",
@@ -139,7 +138,7 @@ async fn test_document_duplication() -> Result<()> {
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "C",
@@ -161,7 +160,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() -> Result<()>
     let collection_id = CollectionId::from("test-collection".to_string());
     write_side
         .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             json!({
                 "id": collection_id,
                 "read_api_key": "my-read-api-key",
@@ -173,7 +172,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() -> Result<()>
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "id": "1",
@@ -183,10 +182,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() -> Result<()>
     .await?;
 
     let mut result = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await?;
     let FieldStatsType::Vector { uncommitted, .. } = result.fields_stats.remove(0).stats else {
         panic!("Expected vector field stats")
@@ -198,7 +194,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() -> Result<()>
 
     let result = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "foo ".repeat(256),

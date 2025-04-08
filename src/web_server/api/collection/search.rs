@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json, Router,
@@ -32,16 +32,15 @@ struct SearchQueryParams {
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/search",
+    path = "/v1/collections/{collection_id}/search",
     description = "Search Endpoint"
 )]
 async fn search(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<SearchParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     let output = read_side.search(read_api_key, collection_id, json).await;
@@ -60,15 +59,14 @@ async fn search(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/stats",
+    path = "/v1/collections/{collection_id}/stats",
     description = "Stats Endpoint"
 )]
 async fn stats(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side

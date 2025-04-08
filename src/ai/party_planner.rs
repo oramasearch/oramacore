@@ -199,7 +199,7 @@ impl PartyPlanner {
                         read_side.clone(),
                         input.clone(),
                         collection_id,
-                        api_key.clone(),
+                        api_key,
                     )
                     .await
                     .context("Unable to perform Orama Search as part of the RAG pipeline.")

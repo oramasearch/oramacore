@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
     Json, Router,
 };
-use axum_extra::{headers, TypedHeader};
 use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
-use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -17,9 +15,6 @@ use crate::{
     types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
     web_server::api::collection::admin::print_error,
 };
-
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[derive(Deserialize, IntoParams)]
 struct ApiKeyQueryParams {
@@ -52,15 +47,14 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/segments/get",
+    path = "/v1/collections/{collection_id}/segments/get",
     description = "Get a single segment by ID"
 )]
 async fn get_segment_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<GetSegmentQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let segment_id = query.segment_id;
     let read_api_key = query.api_key;
 
@@ -82,15 +76,14 @@ async fn get_segment_v1(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/segments/all",
+    path = "/v1/collections/{collection_id}/segments/all",
     description = "Get all segments in a collection"
 )]
 async fn get_all_segments_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
@@ -110,18 +103,15 @@ async fn get_all_segments_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/segments/insert",
+    path = "/v1/collections/{collection_id}/segments/insert",
     description = "Insert a new segment"
 )]
 async fn insert_segment_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let segment = Segment {
         id: params.id.unwrap_or(cuid2::create_id()),
         name: params.name.clone(),
@@ -149,18 +139,15 @@ async fn insert_segment_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/segments/delete",
+    path = "/v1/collections/{collection_id}/segments/delete",
     description = "Deletes an existing segment"
 )]
 async fn delete_segment_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
         .delete_segment(write_api_key, collection_id, params.id)
         .await
@@ -178,18 +165,15 @@ async fn delete_segment_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/segments/update",
+    path = "/v1/collections/{collection_id}/segments/update",
     description = "Updates an existing segment"
 )]
 async fn update_segment_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSegmentParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let segment = Segment {
         id: params.id.clone(),
         name: params.name.clone(),

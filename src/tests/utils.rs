@@ -14,7 +14,6 @@ use fastembed::{
 };
 use grpc_def::Embedding;
 use http::uri::Scheme;
-use redact::Secret;
 use serde_json::json;
 use std::str::FromStr;
 use tokio::time::sleep;
@@ -77,7 +76,7 @@ pub async fn create_collection(
 ) -> Result<()> {
     write_side
         .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             json!({
                 "id": collection_id,
                 "read_api_key": "my-read-api-key",
@@ -269,7 +268,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             remote_llms: None,
         },
         writer_side: WriteSideConfig {
-            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
+            master_api_key: ApiKey::try_from("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
             hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {

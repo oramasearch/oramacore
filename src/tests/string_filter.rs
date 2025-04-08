@@ -1,5 +1,4 @@
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 
 use crate::{
@@ -21,7 +20,7 @@ async fn test_string_filter() -> Result<()> {
     create_collection(write_side.clone(), collection_id).await?;
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![
             json!({
@@ -40,7 +39,7 @@ async fn test_string_filter() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",
@@ -54,10 +53,7 @@ async fn test_string_filter() -> Result<()> {
         .unwrap();
     assert_eq!(output.count, 1);
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats
@@ -93,7 +89,7 @@ async fn test_string_filter() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",
@@ -108,10 +104,7 @@ async fn test_string_filter() -> Result<()> {
     assert_eq!(output.count, 1);
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats
@@ -146,7 +139,7 @@ async fn test_string_filter() -> Result<()> {
     let (_, read_side) = create(config.clone()).await?;
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "d",
@@ -162,10 +155,7 @@ async fn test_string_filter() -> Result<()> {
     assert_eq!(output.count, 1);
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats
@@ -212,7 +202,7 @@ async fn test_string_filter_long_text() {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
@@ -222,10 +212,7 @@ async fn test_string_filter_long_text() {
     .unwrap();
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats
@@ -260,10 +247,7 @@ async fn test_string_filter_long_text() {
     read_side.commit().await.unwrap();
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats
@@ -297,10 +281,7 @@ async fn test_string_filter_long_text() {
     let (_, read_side) = create(config.clone()).await.unwrap();
 
     let stats = read_side
-        .collection_stats(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
-            collection_id,
-        )
+        .collection_stats(ApiKey::try_from("my-read-api-key").unwrap(), collection_id)
         .await
         .unwrap();
     let (uncommitted, committed) = stats

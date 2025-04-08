@@ -4,7 +4,7 @@ use crate::collection_manager::sides::{
     deserialize_api_key, serialize_api_key, OramaModelSerializable,
 };
 use crate::nlp::locales::Locale;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::{self, IntoParams};
 use axum_openapi3::utoipa::{PartialSchema, ToSchema};
@@ -73,7 +73,39 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
-pub struct CollectionId(pub ArrayString<128>);
+pub struct CollectionId(ArrayString<128>);
+
+impl CollectionId {
+    pub fn try_new(key: String) -> Result<Self> {
+        if key.is_empty() {
+            bail!("CollectionId cannot be empty");
+        }
+
+        let mut s = ArrayString::<128>::new();
+        let r = s.try_push_str(&key);
+        if let Err(e) = r {
+            bail!("CollectionId is too long. Max 128 char. {:?}", e);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn try_from(key: &str) -> Result<Self> {
+        if key.is_empty() {
+            bail!("CollectionId cannot be empty");
+        }
+
+        let mut s = ArrayString::<128>::new();
+        let r = s.try_push_str(key);
+        if let Err(e) = r {
+            bail!("CollectionId is too long. Max 128 char. {:?}", e);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 // Implement serialize for CollectionId
 impl Serialize for CollectionId {
@@ -545,8 +577,41 @@ pub struct CreateCollectionEmbeddings {
     pub document_fields: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiKey(pub Secret<String>);
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub struct ApiKey(Secret<ArrayString<64>>);
+impl ApiKey {
+    pub fn try_new(key: String) -> Result<Self> {
+        if key.is_empty() {
+            bail!("API key cannot be empty");
+        }
+
+        let mut s = ArrayString::<64>::new();
+        let r = s.try_push_str(&key);
+        if let Err(e) = r {
+            bail!("API key is too long. Max 64 char. {:?}", e);
+        }
+        let s = Secret::new(s);
+        Ok(Self(s))
+    }
+
+    pub fn try_from(key: &str) -> Result<Self> {
+        if key.is_empty() {
+            bail!("API key cannot be empty");
+        }
+
+        let mut s = ArrayString::<64>::new();
+        let r = s.try_push_str(key);
+        if let Err(e) = r {
+            bail!("API key is too long. Max 64 char. {:?}", e);
+        }
+        let s = Secret::new(s);
+        Ok(Self(s))
+    }
+
+    pub fn expose(&self) -> &str {
+        self.0.expose_secret()
+    }
+}
 
 impl<'de> Deserialize<'de> for ApiKey {
     fn deserialize<D>(deserializer: D) -> Result<ApiKey, D::Error>
@@ -554,17 +619,13 @@ impl<'de> Deserialize<'de> for ApiKey {
         D: de::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-
-        if s.is_empty() {
-            return Err(serde::de::Error::custom("API key cannot be empty"));
-        }
-
-        Ok(ApiKey(Secret::new(s)))
+        Self::try_new(s).map_err(|e| de::Error::custom(format!("error: {}", e)))
     }
 }
 
 impl PartialSchema for ApiKey {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        // TODO put the min and max size here
         String::schema()
     }
 }
