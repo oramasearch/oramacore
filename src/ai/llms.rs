@@ -25,6 +25,7 @@ use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLL
 pub enum KnownPrompts {
     Answer,
     Autoquery,
+    AutomaticEmbeddingsSelector,
     OptimizeQuery,
     PartyPlanner,
     Segmenter,
@@ -116,6 +117,12 @@ impl KnownPrompts {
             KnownPrompts::GenerateRelatedQueries => KnownPrompt {
                 system: include_str!("../prompts/v1/related_queries/system.md").to_string(),
                 user: include_str!("../prompts/v1/related_queries/user.md").to_string(),
+            },
+            KnownPrompts::AutomaticEmbeddingsSelector => KnownPrompt {
+                system: include_str!("../prompts/v1/automatic_embeddings_selector/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/automatic_embeddings_selector/user.md")
+                    .to_string(),
             },
         }
     }
