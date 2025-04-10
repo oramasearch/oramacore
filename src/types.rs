@@ -1,5 +1,6 @@
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::hooks::HookName;
+use crate::collection_manager::sides::index::FieldType;
 use crate::collection_manager::sides::{
     deserialize_api_key, serialize_api_key, OramaModelSerializable,
 };
@@ -14,7 +15,6 @@ use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -136,12 +136,6 @@ impl Display for CollectionId {
         write!(f, "{}", String::from_utf8_lossy(self.0.as_bytes()))
     }
 }
-impl AsRef<Path> for CollectionId {
-    fn as_ref(&self) -> &Path {
-        self.0.as_ref()
-    }
-}
-
 impl PartialSchema for CollectionId {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         String::schema()
@@ -390,6 +384,13 @@ pub trait StringParser: Send + Sync {
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
+
+impl PartialSchema for FieldId {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        u16::schema()
+    }
+}
+impl ToSchema for FieldId {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenScore {
@@ -704,14 +705,14 @@ impl TryFrom<serde_json::Value> for CreateCollection {
 
 pub type DeleteDocuments = Vec<String>;
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct CollectionDTO {
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DescribeCollectionResponse {
     #[schema(inline)]
     pub id: CollectionId,
     pub description: Option<String>,
-    pub document_count: u64,
+    pub document_count: usize,
     #[schema(inline)]
-    pub fields: HashMap<String, ValueType>,
+    pub indexes: Vec<DescribeCollectionIndexResponse>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone)]
@@ -1690,4 +1691,93 @@ mod tests {
             }
         }
     }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+pub struct IndexId(ArrayString<64>);
+
+impl IndexId {
+    pub fn try_new(key: String) -> Result<Self> {
+        if key.is_empty() {
+            bail!("ShardId cannot be empty");
+        }
+
+        let mut s = ArrayString::<64>::new();
+        let r = s.try_push_str(&key);
+        if let Err(e) = r {
+            bail!("ShardId is too long. Max 64 char. {:?}", e);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn try_from(key: &str) -> Result<Self> {
+        if key.is_empty() {
+            bail!("ShardId cannot be empty");
+        }
+
+        let mut s = ArrayString::<64>::new();
+        let r = s.try_push_str(key);
+        if let Err(e) = r {
+            bail!("ShardId is too long. Max 64 char. {:?}", e);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl Serialize for IndexId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for IndexId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(IndexId(ArrayString::try_from(s.as_str()).unwrap()))
+    }
+}
+impl IndexId {
+    pub fn from(s: String) -> Self {
+        IndexId(ArrayString::try_from(s.as_str()).unwrap())
+    }
+}
+impl Display for IndexId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(self.0.as_bytes()))
+    }
+}
+impl PartialSchema for IndexId {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        String::schema()
+    }
+}
+impl ToSchema for IndexId {}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateIndexRequest {
+    id: IndexId,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct IndexFieldType {
+    pub field_id: FieldId,
+    pub field_path: String,
+    pub is_array: bool,
+    pub field_type: FieldType,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DescribeCollectionIndexResponse {
+    pub id: IndexId,
+    pub document_count: usize,
+    pub fields: Vec<IndexFieldType>,
 }

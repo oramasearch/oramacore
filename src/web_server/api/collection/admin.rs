@@ -8,8 +8,8 @@ use tracing::{error, info};
 use crate::{
     collection_manager::sides::WriteSide,
     types::{
-        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
-        DeleteCollection, DeleteDocuments, DocumentList, ReindexConfig, SwapCollections,
+        ApiKey, CollectionId, CreateCollection, CreateCollectionFrom, DeleteCollection,
+        DeleteDocuments, DescribeCollectionResponse, DocumentList, ReindexConfig, SwapCollections,
     },
 };
 
@@ -35,7 +35,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 async fn get_collections(
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<Vec<CollectionDTO>>, (StatusCode, impl IntoResponse)> {
+) -> Result<Json<Vec<DescribeCollectionResponse>>, (StatusCode, impl IntoResponse)> {
     let collections = match write_side.list_collections(master_api_key).await {
         Ok(collections) => collections,
         Err(e) => {
@@ -58,7 +58,7 @@ async fn get_collection_by_id(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
+) -> Result<Json<DescribeCollectionResponse>, (StatusCode, impl IntoResponse)> {
     let collection_dto = write_side
         .get_collection_dto(master_api_key, collection_id)
         .await;

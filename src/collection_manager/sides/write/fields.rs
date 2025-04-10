@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
+        hooks::{HookName, HooksRuntime},
         CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
         Term, TermStringField, WriteOperation,
     },
@@ -744,6 +744,7 @@ impl EmbeddingField {
                 })
                 .collect(),
             DocumentFields::Hook(_) => {
+                /*
                 let hook_exec_result = self
                     .hooks_runtime
                     .calculate_text_for_embedding(self.collection_id, doc.clone()) // @todo: make sure we pass unflatten document here
@@ -764,6 +765,8 @@ impl EmbeddingField {
                         .collect(),
                     SelectEmbeddingPropertiesReturnType::Text(v) => v,
                 }
+                */
+                panic!("Hook not implemented yet")
             }
             DocumentFields::AllStringProperties => {
                 let mut input = String::new();

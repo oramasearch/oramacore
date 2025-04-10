@@ -15,8 +15,14 @@ pub struct DocIdStorage {
 }
 
 impl DocIdStorage {
-    pub fn remove_document_id(&mut self, doc_id: Vec<String>) -> Vec<DocumentId> {
-        doc_id
+    pub fn empty() -> Self {
+        Self {
+            document_id: HashMap::new(),
+        }
+    }
+
+    pub fn remove_document_ids(&mut self, doc_ids: Vec<String>) -> Vec<DocumentId> {
+        doc_ids
             .into_iter()
             .filter_map(|doc_id| self.document_id.remove(&doc_id))
             .collect()
@@ -38,6 +44,16 @@ impl DocIdStorage {
 
     pub fn get_document_ids(&self) -> impl Iterator<Item = DocumentId> + '_ {
         self.document_id.values().copied()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.document_id.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {

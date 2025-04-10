@@ -4,10 +4,10 @@ use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::sides::{hooks::HookName, OramaModelSerializable},
+    collection_manager::sides::{hooks::HookName, index::IndexedValue, OramaModelSerializable},
     nlp::locales::Locale,
     types::{
-        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, LanguageDTO, Number,
+        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, LanguageDTO, Number,
         RawJSONDocument,
     },
 };
@@ -129,6 +129,31 @@ pub enum CollectionWriteOperation {
         field: TypedFieldWrapper,
     },
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
+
+    CreateIndex2 {
+        index_id: IndexId,
+        locale: Locale,
+    },
+    InsertDocument2 {
+        index_id: IndexId,
+        doc_id: DocumentId,
+        doc_id_str: String,
+        json: String,
+    },
+    CreateField2 {
+        index_id: IndexId,
+        field_id: FieldId,
+        field_path: Box<[String]>,
+    },
+    IndexDocument2 {
+        index_id: IndexId,
+        doc_id: DocumentId,
+        indexed_values: Vec<IndexedValue>,
+    },
+    DeleteDocuments2 {
+        index_id: IndexId,
+        doc_ids: Vec<DocumentId>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,7 +231,7 @@ pub enum WriteOperation {
         )]
         read_api_key: ApiKey,
         description: Option<String>,
-        default_language: LanguageDTO,
+        default_locale: Locale,
     },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
@@ -235,6 +260,19 @@ impl WriteOperation {
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
             WriteOperation::SubstituteCollection { .. } => "substitute_collection",
+            WriteOperation::CreateCollection { .. } => "create_collection",
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateField2 { .. }) => {
+                "create_field_2"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::InsertDocument2 { .. }) => {
+                "insert_document_2"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
+                "create_index"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::IndexDocument2 { .. }) => {
+                "index_document"
+            }
         }
     }
 }

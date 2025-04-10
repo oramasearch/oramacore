@@ -964,6 +964,9 @@ impl CollectionReader {
 
                 trace!("Value indexed");
             }
+            _ => {
+                unimplemented!("Implement read side")
+            }
         };
 
         Ok(())

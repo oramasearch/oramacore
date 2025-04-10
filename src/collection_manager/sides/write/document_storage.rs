@@ -33,12 +33,14 @@ impl DocumentStorage {
         Ok(())
     }
 
-    pub async fn remove(&self, id: DocumentId) -> Result<()> {
-        let doc_path = self.data_dir.join(id.0.to_string());
-        tokio::fs::remove_file(doc_path)
-            .await
-            .context("Cannot remove document data")?;
-        Ok(())
+    pub async fn remove(&self, ids: Vec<DocumentId>) {
+        for id in ids {
+            let doc_path = self.data_dir.join(id.0.to_string());
+            if let Err(e) = tokio::fs::remove_file(doc_path).await {
+                // We ignore the error because we want to proceed with the next document
+                error!(error = ?e, "Cannot remove document data");
+            }
+        }
     }
 
     pub async fn stream_documents(

@@ -36,8 +36,6 @@ create_label_struct!(ChatCalculationLabels, {
     model: &'static str,
 });
 create_label_struct!(FieldCalculationLabels, {
-    collection: SharedString,
-    field: SharedString,
     field_type: SharedString,
 });
 create_label_struct!(CollectionCommitLabels, {
@@ -88,7 +86,7 @@ pub mod ai {
 }
 
 pub mod document_insertion {
-    use super::{CollectionLabels, FieldCalculationLabels};
+    use super::{Empty, FieldCalculationLabels};
     use crate::create_time_histogram;
     create_time_histogram!(
         FIELD_CALCULATION_TIME,
@@ -96,9 +94,9 @@ pub mod document_insertion {
         FieldCalculationLabels
     );
     create_time_histogram!(
-        DOCUMENT_CALCULATION_TIME,
+        DOCUMENTS_INSERTION_TIME,
         "writer_doc_calculation_time_sec",
-        CollectionLabels
+        Empty
     );
 }
 

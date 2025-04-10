@@ -8,7 +8,7 @@ use crate::{
     collection_manager::sides::{
         CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
     },
-    types::{CollectionId, DocumentId, FieldId},
+    types::{CollectionId, DocumentId, FieldId, IndexId},
 };
 
 pub struct EmbeddingCalculationRequestInput {
@@ -22,6 +22,17 @@ pub struct EmbeddingCalculationRequestInput {
 pub struct EmbeddingCalculationRequest {
     pub model: OramaModel,
     pub input: EmbeddingCalculationRequestInput,
+}
+
+#[derive(Debug)]
+pub struct MultiEmbeddingCalculationRequest {
+    pub model: OramaModel,
+    pub coll_id: CollectionId,
+    pub doc_id: DocumentId,
+    pub field_id: FieldId,
+    pub index_id: IndexId,
+    pub op_sender: OperationSender,
+    pub text: Vec<String>,
 }
 
 async fn process<I>(ai_service: Arc<AIService>, cache: I)
@@ -78,7 +89,7 @@ where
 
 pub fn start_calculate_embedding_loop(
     ai_service: Arc<AIService>,
-    mut receiver: Receiver<EmbeddingCalculationRequest>,
+    mut receiver: Receiver<MultiEmbeddingCalculationRequest>,
     limit: u32,
 ) {
     // `limit` is the number of items to process in a batch
@@ -101,10 +112,27 @@ pub fn start_calculate_embedding_loop(
             }
 
             for item in buffer.drain(..) {
-                let EmbeddingCalculationRequest { model, input } = item;
+                let MultiEmbeddingCalculationRequest {
+                    model,
+                    coll_id,
+                    doc_id,
+                    field_id,
+                    index_id,
+                    op_sender,
+                    text,
+                } = item;
 
                 let inputs = cache.entry(model).or_default();
-                inputs.push(input);
+                for t in text {
+                    let input = EmbeddingCalculationRequestInput {
+                        text: t,
+                        coll_id,
+                        doc_id,
+                        field_id,
+                        op_sender: op_sender.clone(),
+                    };
+                    inputs.push(input);
+                }
             }
 
             process(ai_service.clone(), cache.drain()).await;

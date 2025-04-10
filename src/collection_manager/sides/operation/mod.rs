@@ -33,6 +33,17 @@ pub enum OperationSender {
     RabbitMQ(RabbitOperationSender),
 }
 
+impl Debug for OperationSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationSender::InMemory { .. } => {
+                f.debug_struct("OperationSender::InMemory").finish()
+            }
+            OperationSender::RabbitMQ(_) => f.debug_struct("OperationSender::RabbitMQ").finish(),
+        }
+    }
+}
+
 impl OperationSender {
     pub fn get_offset(&self) -> Offset {
         match self {
@@ -79,6 +90,31 @@ pub enum OperationReceiver {
 impl OperationReceiver {
     pub fn should_reconnect(&self) -> bool {
         matches!(self, Self::RabbitMQ(_))
+    }
+
+    pub fn try_recv(&mut self) -> Option<Result<(Offset, WriteOperation)>> {
+        match self {
+            Self::InMemory { receiver } => match receiver.try_recv() {
+                Ok((offset, data)) => {
+                    let message_body: WriteOperation =
+                        match bincode::deserialize(&data).context("Cannot deserialize operation") {
+                            Ok(op) => op,
+                            Err(e) => {
+                                error!("Error deserializing message: {:?}", e);
+                                return None;
+                            }
+                        };
+
+                    Some(Ok((offset, message_body)))
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+                Err(e) => {
+                    error!("Error receiving message: {:?}", e);
+                    None
+                }
+            },
+            Self::RabbitMQ(_) => None,
+        }
     }
 
     pub async fn recv(&mut self) -> Option<Result<(Offset, WriteOperation)>> {
