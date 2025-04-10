@@ -18,6 +18,7 @@ use crate::metrics::{
     EmbeddingCalculationLabels,
 };
 
+pub mod automatic_embeddings_selector;
 pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
