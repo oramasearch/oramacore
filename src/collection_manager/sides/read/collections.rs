@@ -350,14 +350,22 @@ impl CollectionsReader {
         drop(m);
 
         if let Some(notifier) = &self.notifier {
-            notifier
+            if let Err(error) = notifier
                 .notify_collection_substitution(
                     target_collection_id,
                     source_collection_id,
                     reference,
                 )
                 .await
-                .context("Cannot notify collection substitution")?;
+                .context("Cannot notify collection substitution")
+            {
+                error!(
+                    error = ?error,
+                    target_collection_id=?target_collection_id,
+                    source_collection_id=?source_collection_id,
+                    "Cannot notify collection substitution. Skip it"
+                );
+            };
         }
 
         info!(
