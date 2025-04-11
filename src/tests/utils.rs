@@ -14,25 +14,21 @@ use fastembed::{
 };
 use grpc_def::Embedding;
 use http::uri::Scheme;
-use redact::Secret;
 use serde_json::json;
 use std::str::FromStr;
 use tokio::time::sleep;
-use tonic::{transport::Server, Response, Status};
+use tonic::{transport::Server, Status};
 use tracing::info;
 
 use crate::{
     ai::AIServiceConfig,
     build_orama,
-    collection_manager::{
-        dto::{ApiKey, InsertDocumentsResult},
-        sides::{
-            hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
-            CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-            OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
-        },
+    collection_manager::sides::{
+        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
+        CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
+        OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
     },
-    types::{CollectionId, DocumentList},
+    types::{ApiKey, CollectionId, DocumentList, InsertDocumentsResult},
     web_server::HttpConfig,
     OramacoreConfig,
 };
@@ -80,7 +76,7 @@ pub async fn create_collection(
 ) -> Result<()> {
     write_side
         .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             json!({
                 "id": collection_id,
                 "read_api_key": "my-read-api-key",
@@ -123,8 +119,6 @@ pub struct GRPCServer {
     fastembed_model: Arc<TextEmbedding>,
     context_evaluator: Arc<TextEmbedding>,
 }
-
-type EchoResult<T> = Result<Response<T>, Status>;
 
 #[tonic::async_trait]
 impl grpc_def::llm_service_server::LlmService for GRPCServer {
@@ -274,7 +268,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             remote_llms: None,
         },
         writer_side: WriteSideConfig {
-            master_api_key: ApiKey(Secret::new("my-master-api-key".to_string())),
+            master_api_key: ApiKey::try_from("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
             hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {

@@ -32,7 +32,7 @@ async fn test_search_mem_allocation() -> Result<()> {
     let document_count = 10;
     let result = insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         (0..document_count).map(|i| {
             json!({
@@ -54,7 +54,7 @@ async fn test_search_mem_allocation() -> Result<()> {
     for _ in 0..10 {
         read_side
             .search(
-                ApiKey(Secret::new("my-read-api-key".to_string())),
+                ApiKey::try_from("my-read-api-key").unwrap(),
                 collection_id,
                 json!({
                     "term": "text",
@@ -71,7 +71,7 @@ async fn test_search_mem_allocation() -> Result<()> {
     ALLOCATOR.start_track();
     read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             params,
         )

@@ -200,9 +200,14 @@ impl<
             prev = value.clone();
             current_page_count += doc_ids.len();
 
+            items.push(Item {
+                key: value.clone(),
+                values: doc_ids,
+            });
+
             if current_page_count > MAX_NUMBER_PER_PAGE {
                 let min = items.first().expect("The item is empty").key.clone();
-                let max = value.clone();
+                let max = value;
 
                 let page_id = pages.len();
                 let page_file = data_dir.join(format!("page_{}.bin", page_id));
@@ -228,35 +233,32 @@ impl<
                 items = Vec::new();
                 current_page_count = 0;
             }
-
-            items.push(Item {
-                key: value,
-                values: doc_ids,
-            });
         }
 
-        let page_id = pages.len();
-        let max = Key::max_value();
-        let min = items.first().expect("The item is empty").key.clone();
-        let page_file = data_dir.join(format!("page_{}.bin", page_id));
-        let current_page = Page {
-            id: ChunkId(page_id),
-            pointer: PagePointer::<Key, Value>::InMemory {
-                path: page_file.clone(),
-                items,
-            },
-            min: min.clone(),
-            max: max.clone(),
-        };
-        current_page.save_on_disk()?;
+        if let Some(first) = items.first() {
+            let page_id = pages.len();
+            let max = Key::max_value();
+            let min = first.key.clone();
+            let page_file = data_dir.join(format!("page_{}.bin", page_id));
+            let current_page = Page {
+                id: ChunkId(page_id),
+                pointer: PagePointer::<Key, Value>::InMemory {
+                    path: page_file.clone(),
+                    items,
+                },
+                min: min.clone(),
+                max: max.clone(),
+            };
+            current_page.save_on_disk()?;
 
-        bounds.push((min.clone(), max.clone()));
-        pages.push(Page {
-            id: ChunkId(pages.len()),
-            pointer: PagePointer::<Key, Value>::OnFile { path: page_file },
-            min: current_page.min,
-            max: current_page.max,
-        });
+            bounds.push((min.clone(), max.clone()));
+            pages.push(Page {
+                id: ChunkId(pages.len()),
+                pointer: PagePointer::<Key, Value>::OnFile { path: page_file },
+                min: current_page.min,
+                max: current_page.max,
+            });
+        }
 
         pages[0].min = Key::min_value();
         bounds[0].0 = Key::min_value();
@@ -386,10 +388,11 @@ And this should not happen. Return the first page."#);
 
 #[cfg(test)]
 mod tests {
+    use core::f32;
+
     use crate::{
-        collection_manager::dto::{Number, SerializableNumber},
         tests::utils::generate_new_path,
-        types::DocumentId,
+        types::{DocumentId, Number, SerializableNumber},
     };
 
     use super::*;
@@ -455,5 +458,28 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_not_panic() {
+        let data_dir = generate_new_path();
+
+        let mut set = HashSet::new();
+        for i in 0..(MAX_NUMBER_PER_PAGE + 1) {
+            set.insert(i);
+        }
+
+        let key = SerializableNumber(Number::I32(1));
+        let input = vec![(key, set)].into_iter();
+
+        let index = OrderedKeyIndex::from_iter(input, data_dir).unwrap();
+
+        assert_eq!(
+            index.bounds,
+            vec![(
+                SerializableNumber(Number::F32(f32::NEG_INFINITY)),
+                SerializableNumber(Number::I32(1))
+            )]
+        );
     }
 }

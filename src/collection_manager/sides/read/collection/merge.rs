@@ -3,10 +3,9 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
-use crate::collection_manager::dto::SerializableNumber;
 use crate::file_utils::create_if_not_exists;
 use crate::merger::MergedIterator;
-use crate::types::DocumentId;
+use crate::types::{DocumentId, SerializableNumber};
 
 use super::committed::fields as committed_fields;
 use super::uncommitted::fields as uncommitted_fields;

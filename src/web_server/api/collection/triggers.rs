@@ -1,31 +1,23 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
     Json, Router,
 };
-use axum_extra::{headers, TypedHeader};
 use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
-use redact::Secret;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
-        sides::{
-            triggers::{parse_trigger_id, Trigger},
-            ReadSide, WriteSide,
-        },
+    collection_manager::sides::{
+        triggers::{parse_trigger_id, Trigger},
+        ReadSide, WriteSide,
     },
-    types::CollectionId,
+    types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
     web_server::api::collection::admin::print_error,
 };
-
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 #[derive(Deserialize, IntoParams)]
 struct ApiKeyQueryParams {
@@ -58,15 +50,14 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/triggers/get",
+    path = "/v1/collections/{collection_id}/triggers/get",
     description = "Get a single trigger by ID"
 )]
 async fn get_trigger_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<GetTriggerQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let trigger_id = query.trigger_id;
     let read_api_key = query.api_key;
 
@@ -74,7 +65,19 @@ async fn get_trigger_v1(
         .get_trigger(read_api_key, collection_id, trigger_id)
         .await
     {
-        Ok(Some(trigger)) => Ok((StatusCode::OK, Json(json!({ "trigger": trigger })))),
+        Ok(Some(trigger)) => match parse_trigger_id(trigger.id.clone()) {
+            Some(parsed_trigger_id) => Ok((
+                StatusCode::OK,
+                Json(json!({ "success": true, "trigger": Trigger {
+                            id: parsed_trigger_id.trigger_id,
+                            ..trigger
+                        } })),
+            )),
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Failed to parse trigger ID" })),
+            )),
+        },
         Ok(None) => Ok((StatusCode::OK, Json(json!({ "trigger": null })))),
         Err(e) => {
             print_error(&e, "Error getting trigger");
@@ -88,22 +91,41 @@ async fn get_trigger_v1(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/collections/{id}/triggers/all",
+    path = "/v1/collections/{collection_id}/triggers/all",
     description = "Get all triggers in a collection"
 )]
 async fn get_all_triggers_v1(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let read_api_key = query.api_key;
 
     match read_side
         .get_all_triggers_by_collection(read_api_key, collection_id)
         .await
     {
-        Ok(triggers) => Ok((StatusCode::OK, Json(json!({ "triggers": triggers })))),
+        Ok(triggers) => {
+            let mut output = vec![];
+            for trigger in triggers.iter() {
+                match parse_trigger_id(trigger.id.clone()) {
+                    Some(parsed_trigger_id) => {
+                        output.push(Trigger {
+                            id: parsed_trigger_id.trigger_id,
+                            ..trigger.clone()
+                        });
+                    }
+                    None => {
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": "Failed to parse trigger ID" })),
+                        ));
+                    }
+                }
+            }
+
+            Ok((StatusCode::OK, Json(json!({ "triggers": output }))))
+        }
         Err(e) => {
             print_error(&e, "Error getting all triggers");
             Err((
@@ -116,18 +138,15 @@ async fn get_all_triggers_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/triggers/insert",
+    path = "/v1/collections/{collection_id}/triggers/insert",
     description = "Insert a new trigger"
 )]
 async fn insert_trigger_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let trigger = Trigger {
         id: params.id.unwrap_or(cuid2::create_id()),
         name: params.name.clone(),
@@ -172,18 +191,15 @@ async fn insert_trigger_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/triggers/delete",
+    path = "/v1/collections/{collection_id}/triggers/delete",
     description = "Deletes an existing trigger"
 )]
 async fn delete_trigger_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
         .delete_trigger(write_api_key, collection_id, params.id)
         .await
@@ -201,20 +217,17 @@ async fn delete_trigger_v1(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/triggers/update",
+    path = "/v1/collections/{collection_id}/triggers/update",
     description = "Updates an existing trigger"
 )]
 async fn update_trigger_v1(
-    Path(id): Path<String>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    collection_id: CollectionId,
+    write_api_key: ApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
-        .get_trigger(write_api_key.clone(), collection_id, params.id.clone())
+        .get_trigger(write_api_key, collection_id, params.id.clone())
         .await
     {
         Ok(existing_trigger) => {

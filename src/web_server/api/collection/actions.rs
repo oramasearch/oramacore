@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
     Json, Router,
 };
@@ -11,11 +11,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, ExecuteActionPayload, SearchParams},
-        sides::ReadSide,
-    },
-    types::CollectionId,
+    collection_manager::sides::ReadSide,
+    types::{ApiKey, CollectionId, ExecuteActionPayload, SearchParams},
     web_server::api::collection::admin::print_error,
 };
 
@@ -37,12 +34,11 @@ struct ActionQueryParams {
 )]
 #[axum::debug_handler]
 async fn execute_action_v0(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<ActionQueryParams>,
     Json(params): Json<ExecuteActionPayload>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
     let ExecuteActionPayload { name, context } = params;
 
     let read_api_key = query.api_key;

@@ -5,7 +5,7 @@ mod read;
 pub mod segments;
 pub mod system_prompts;
 pub mod triggers;
-mod write;
+pub mod write;
 
 pub use operation::*;
 

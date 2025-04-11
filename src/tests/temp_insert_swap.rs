@@ -3,17 +3,13 @@ use std::time::Duration;
 use anyhow::Result;
 use axum::{Json, Router};
 use axum_extra::{headers, TypedHeader};
-use redact::Secret;
 use serde_json::{json, Value};
 use tokio::time::sleep;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, CreateCollectionFrom, SwapCollections},
-        sides::notify::NotifierConfig,
-    },
+    collection_manager::sides::notify::NotifierConfig,
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId, CreateCollectionFrom, SwapCollections},
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -25,12 +21,12 @@ async fn test_temp_insert_swap() -> Result<()> {
     let collection_id = CollectionId::from("test-collection".to_string());
     create_collection(write_side.clone(), collection_id).await?;
 
-    let write_api_key = ApiKey(Secret::new("my-write-api-key".to_string()));
-    let read_api_key = ApiKey(Secret::new("my-read-api-key".to_string()));
+    let write_api_key = ApiKey::try_from("my-write-api-key").unwrap();
+    let read_api_key = ApiKey::try_from("my-read-api-key").unwrap();
 
     let temp_coll_id = write_side
         .create_collection_from(
-            write_api_key.clone(),
+            write_api_key,
             CreateCollectionFrom {
                 from: collection_id,
                 embeddings: None,
@@ -41,7 +37,7 @@ async fn test_temp_insert_swap() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        write_api_key.clone(),
+        write_api_key,
         temp_coll_id,
         vec![json!({
             "title": "avvocata",
@@ -51,7 +47,7 @@ async fn test_temp_insert_swap() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             temp_coll_id,
             json!({
                 "term": "avvocata",
@@ -63,7 +59,7 @@ async fn test_temp_insert_swap() -> Result<()> {
 
     write_side
         .swap_collections(
-            write_api_key.clone(),
+            write_api_key,
             SwapCollections {
                 from: temp_coll_id,
                 to: collection_id,
@@ -76,7 +72,7 @@ async fn test_temp_insert_swap() -> Result<()> {
 
     let output = read_side
         .search(
-            read_api_key.clone(),
+            read_api_key,
             collection_id,
             json!({
                 "term": "avvocata",
@@ -87,12 +83,12 @@ async fn test_temp_insert_swap() -> Result<()> {
     assert_eq!(output.count, 1);
 
     let stats = read_side
-        .collection_stats(read_api_key.clone(), collection_id)
+        .collection_stats(read_api_key, collection_id)
         .await?;
     assert_eq!(stats.document_count, 1);
 
     let output = write_side
-        .list_collections(ApiKey(Secret::new("my-master-api-key".to_string())))
+        .list_collections(ApiKey::try_from("my-master-api-key").unwrap())
         .await?;
 
     assert!(!output.iter().any(|c| c.id == temp_coll_id));
@@ -137,11 +133,11 @@ async fn test_external_notification_on_swap() -> Result<()> {
     let collection_id = CollectionId::from("test-collection".to_string());
     create_collection(write_side.clone(), collection_id).await?;
 
-    let write_api_key = ApiKey(Secret::new("my-write-api-key".to_string()));
+    let write_api_key = ApiKey::try_from("my-write-api-key").unwrap();
 
     let temp_coll_id = write_side
         .create_collection_from(
-            write_api_key.clone(),
+            write_api_key,
             CreateCollectionFrom {
                 from: collection_id,
                 embeddings: None,
@@ -152,7 +148,7 @@ async fn test_external_notification_on_swap() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        write_api_key.clone(),
+        write_api_key,
         temp_coll_id,
         vec![json!({
             "title": "avvocata",
@@ -162,7 +158,7 @@ async fn test_external_notification_on_swap() -> Result<()> {
 
     write_side
         .swap_collections(
-            write_api_key.clone(),
+            write_api_key,
             SwapCollections {
                 from: temp_coll_id,
                 to: collection_id,

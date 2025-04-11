@@ -1,27 +1,19 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     response::IntoResponse,
     Json, Router,
 };
-use axum_extra::{headers, TypedHeader};
 use axum_openapi3::*;
 use http::StatusCode;
-use redact::Secret;
 use serde_json::json;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DeleteHookParams, GetHookQueryParams, NewHookPostParams},
-        sides::WriteSide,
-    },
-    types::CollectionId,
+    collection_manager::sides::WriteSide,
+    types::{ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, NewHookPostParams},
     web_server::api::collection::admin::print_error,
 };
-
-type AuthorizationBearerHeader =
-    TypedHeader<headers::Authorization<headers::authorization::Bearer>>;
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
@@ -34,18 +26,15 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{id}/hooks/create",
+    path = "/v1/collections/{collection_id}/hooks/create",
     description = "Add a new JavaScript hook"
 )]
 async fn add_hook_v0(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let NewHookPostParams { name, code } = params;
     match write_side
         .insert_javascript_hook(write_api_key, collection_id, name, code)
@@ -68,14 +57,11 @@ async fn add_hook_v0(
     description = "Get an existing JavaScript hook"
 )]
 async fn get_hook_v0(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     params: Query<GetHookQueryParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, impl IntoResponse)> {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     let GetHookQueryParams { name } = params.0;
     match write_side
         .get_javascript_hook(write_api_key, collection_id, name)
@@ -99,14 +85,12 @@ async fn get_hook_v0(
     description = "Delete an existing JavaScript hook"
 )]
 async fn delete_hook_v0(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
     Json(params): Json<DeleteHookParams>,
 ) -> impl IntoResponse {
     let name = params.name;
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
 
     match write_side
         .delete_javascript_hook(write_api_key, collection_id, name)
@@ -133,13 +117,10 @@ async fn delete_hook_v0(
     description = "Get an existing JavaScript hook"
 )]
 async fn list_hooks_v0(
-    Path(id): Path<String>,
+    collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    TypedHeader(auth): AuthorizationBearerHeader,
+    write_api_key: ApiKey,
 ) -> impl IntoResponse {
-    let collection_id = CollectionId::from(id);
-    let write_api_key = ApiKey(Secret::new(auth.0.token().to_string()));
-
     match write_side
         .list_javascript_hooks(write_api_key, collection_id)
         .await

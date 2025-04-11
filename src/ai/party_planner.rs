@@ -9,14 +9,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    collection_manager::{
-        dto::{
-            ApiKey, AutoMode, InteractionLLMConfig, InteractionMessage, Limit, Role, SearchMode,
-            SearchParams, SearchResult,
-        },
-        sides::{segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide},
+    collection_manager::sides::{
+        segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide,
     },
-    types::CollectionId,
+    types::{
+        ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
+        Properties, Role, SearchMode, SearchParams, SearchResult,
+    },
 };
 
 use super::{
@@ -53,29 +52,33 @@ pub struct PartyPlannerMessage {
 }
 
 pub struct PartyPlanner {
-    chosen_model: String,
-    llm_client: async_openai::Client<OpenAIConfig>,
+    // chosen_model: String,
+    // llm_client: async_openai::Client<OpenAIConfig>,
     llm_config: Option<InteractionLLMConfig>,
 }
 
 impl PartyPlanner {
-    pub fn new(read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
-        let llm_service = read_side.get_llm_service();
+    pub fn new(_read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
+        // let llm_service = read_side.get_llm_service();
         // Let the user choose a remote LLM model / client if they want to.
+
+        /*
         let chosen_model = get_chosen_model(llm_config.clone(), llm_service.model.clone());
         let llm_client = get_chosen_llm_client(
             llm_config.clone(),
             llm_service.remote_clients.clone(),
             llm_service.local_vllm_client.clone(),
         );
+        */
 
         Self {
-            chosen_model,
-            llm_client,
+            // chosen_model,
+            // llm_client,
             llm_config,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &self,
         read_side: State<Arc<ReadSide>>,
@@ -196,7 +199,7 @@ impl PartyPlanner {
                         read_side.clone(),
                         input.clone(),
                         collection_id,
-                        api_key.clone(),
+                        api_key,
                     )
                     .await
                     .context("Unable to perform Orama Search as part of the RAG pipeline.")
@@ -385,7 +388,7 @@ impl PartyPlanner {
                     limit: Limit(5),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
-                    properties: crate::collection_manager::dto::Properties::Star,
+                    properties: Properties::Star,
                     where_filter: HashMap::new(),
                 },
             )
@@ -395,6 +398,7 @@ impl PartyPlanner {
     }
 }
 
+#[allow(dead_code)]
 fn get_chosen_model(llm_config: Option<InteractionLLMConfig>, default: String) -> String {
     if let Some(config) = llm_config {
         return config.model;
@@ -403,6 +407,7 @@ fn get_chosen_model(llm_config: Option<InteractionLLMConfig>, default: String) -
     default
 }
 
+#[allow(dead_code)]
 fn get_chosen_llm_client(
     config: Option<InteractionLLMConfig>,
     remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,

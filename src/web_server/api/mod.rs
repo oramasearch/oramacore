@@ -20,6 +20,7 @@ use crate::{
     collection_manager::sides::{ReadSide, WriteSide},
 };
 mod collection;
+mod util;
 
 pub fn api_config(
     write_side: Option<Arc<WriteSide>>,

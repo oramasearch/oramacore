@@ -63,7 +63,7 @@ impl Display for HookName {
 
 #[inline]
 fn prefix(collection_id: &CollectionId) -> String {
-    format!("{}:hook:", collection_id.0)
+    format!("{}:hook:", collection_id.as_str())
 }
 #[inline]
 fn hook_key(collection_id: &CollectionId, name: &HookName) -> String {

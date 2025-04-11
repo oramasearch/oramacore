@@ -1,14 +1,12 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    collection_manager::dto::ApiKey,
     tests::utils::{create, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId},
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -21,7 +19,7 @@ async fn test_vector_search_empty_document_fields() -> Result<()> {
 
     write_side
         .create_collection(
-            ApiKey(Secret::new("my-master-api-key".to_string())),
+            ApiKey::try_from("my-master-api-key").unwrap(),
             json!({
                 "id": collection_id,
                 "write_api_key": "write",
@@ -37,7 +35,7 @@ async fn test_vector_search_empty_document_fields() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("write".to_string())),
+        ApiKey::try_from("write").unwrap(),
         collection_id,
         vec![
             json!({
@@ -60,7 +58,7 @@ async fn test_vector_search_empty_document_fields() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("read".to_string())),
+            ApiKey::try_from("read").unwrap(),
             collection_id,
             json!({
                 "term": "A cat sleeps",

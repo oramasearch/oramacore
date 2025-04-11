@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
 use dashmap::DashMap;
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
@@ -16,10 +15,9 @@ use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::nlp::NLPService;
-use crate::{collection_manager::dto::CollectionDTO, types::CollectionId};
-
-use crate::collection_manager::dto::{
-    ApiKey, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
+use crate::types::CollectionId;
+use crate::types::{
+    CollectionDTO, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
 };
 
 use super::CollectionsWriterConfig;
@@ -65,20 +63,19 @@ impl CollectionsWriter {
         };
 
         for collection_id in collection_info.collection_ids {
-            let collection_dir = data_dir.join(collection_id.0);
+            let collection_dir = data_dir.join(collection_id.as_str());
 
-            // All those values are replaced inside `load` method
-            let mut collection = CollectionWriter::new(
-                collection_id,
-                None,
-                ApiKey(Secret::new("".to_string())),
-                LanguageDTO::English,
+            // If the collection is not loaded correctly, we bail out the error
+            // and we abort the start up process
+            // Should we instead ignore it?
+            // TODO: think about it
+            let collection = CollectionWriter::try_load(
+                collection_dir,
+                hooks_runtime.clone(),
+                nlp_service.clone(),
                 embedding_sender.clone(),
-            );
-            collection
-                .load(collection_dir, hooks_runtime.clone(), nlp_service.clone())
-                .await?;
-
+            )
+            .await?;
             collections.insert(collection_id, collection);
         }
 
@@ -122,7 +119,7 @@ impl CollectionsWriter {
 
         let default_language = language.unwrap_or(LanguageDTO::English);
 
-        let collection = CollectionWriter::new(
+        let collection = CollectionWriter::empty(
             id,
             description.clone(),
             write_api_key,
@@ -160,7 +157,10 @@ impl CollectionsWriter {
         if collections.contains_key(&id) {
             // This error should be typed.
             // TODO: create a custom error type
-            return Err(anyhow!(format!("Collection \"{}\" already exists", id.0)));
+            return Err(anyhow!(format!(
+                "Collection \"{}\" already exists",
+                id.as_str()
+            )));
         }
 
         // Send event & Register field should be inside the lock transaction
@@ -261,7 +261,7 @@ impl CollectionsWriter {
         };
 
         let data_dir = &self.config.data_dir.join("collections");
-        let collection_dir = data_dir.join(collection_id.0);
+        let collection_dir = data_dir.join(collection_id.as_str());
 
         collection.remove_from_fs(collection_dir).await;
 

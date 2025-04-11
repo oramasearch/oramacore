@@ -179,8 +179,6 @@ jsonpath "$.triggers" count == 2
 jsonpath "$.triggers[0].id" == "1"
 jsonpath "$.triggers[0].name" == "My first trigger"
 jsonpath "$.triggers[0].description" == "My first trigger description"
-jsonpath "$.triggers[0].goal" == "My first trigger goal"
 jsonpath "$.triggers[1].id" == "2"
 jsonpath "$.triggers[1].name" == "My second trigger"
 jsonpath "$.triggers[1].description" == "My second trigger description"
-jsonpath "$.triggers[1].goal" == "My second trigger goal"

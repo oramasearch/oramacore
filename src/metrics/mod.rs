@@ -1,11 +1,9 @@
-// pub mod counter;
-// pub mod gauge;
 pub mod histogram;
 use metrics::{Label, SharedString};
 
-use crate::collection_manager::dto::FieldId;
+use crate::types::FieldId;
 
-pub struct Empty {}
+pub struct Empty;
 impl From<Empty> for Vec<Label> {
     fn from(_: Empty) -> Self {
         vec![]
@@ -63,7 +61,7 @@ create_label_struct!(JSOperationLabels, {
 });
 
 pub mod ai {
-    use super::{ChatCalculationLabels, EmbeddingCalculationLabels};
+    use super::EmbeddingCalculationLabels;
     use crate::{create_counter_histogram, create_time_histogram};
     create_time_histogram!(
         EMBEDDING_CALCULATION_TIME,
@@ -75,6 +73,7 @@ pub mod ai {
         "embedding_calculation_batch_size",
         EmbeddingCalculationLabels
     );
+    /*
     create_time_histogram!(
         CHAT_CALCULATION_TIME,
         "chat_calculation_time_sec",
@@ -85,6 +84,7 @@ pub mod ai {
         "stream_chat_calculation_time_sec",
         ChatCalculationLabels
     );
+    */
 }
 
 pub mod document_insertion {
@@ -123,9 +123,9 @@ pub mod commit {
 }
 
 pub mod operations {
-    use super::CollectionLabels;
-    use crate::create_counter_histogram;
-    create_counter_histogram!(OPERATION_COUNT, "operation_count", CollectionLabels);
+    use super::Empty;
+    use crate::create_time_histogram;
+    create_time_histogram!(OPERATION_COUNT, "operation_count", Empty);
 }
 
 pub mod search {

@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
-    collection_manager::dto::{InteractionLLMConfig, SystemPromptUsageMode},
-    types::CollectionId,
+    types::{CollectionId, InteractionLLMConfig, SystemPromptUsageMode},
 };
 
 use super::generic_kv::{format_key, KV};
@@ -126,11 +125,11 @@ impl SystemPromptInterface {
         &self,
         collection_id: CollectionId,
     ) -> Result<Vec<SystemPrompt>> {
-        let prefix = format!("{}:system_prompt:", collection_id.0.clone());
+        let prefix = format!("{}:system_prompt:", collection_id.as_str());
 
         let system_prompts = self.kv.prefix_scan(&prefix).await.context(format!(
             "Cannot scan system prompts for collection {}",
-            collection_id.0
+            collection_id.as_str()
         ))?;
 
         Ok(system_prompts)

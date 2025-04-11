@@ -6,16 +6,13 @@ use std::{
 
 use crate::{
     ai::{llms::LLMService, AIService},
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO},
-        sides::{read::notify::Notifier, Offset},
-    },
+    collection_manager::sides::{read::notify::Notifier, Offset},
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
     metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
     nlp::NLPService,
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO},
 };
 
 use anyhow::{Context, Result};
@@ -107,7 +104,7 @@ impl CollectionsReader {
                 info!("Collection {:?} is deleted. Skip loading", collection_id);
                 continue;
             }
-            let collection_dir = base_dir_for_collections.join(collection_id.0);
+            let collection_dir = base_dir_for_collections.join(collection_id.as_str());
             info!("Loading collection {:?}", collection_dir);
 
             let collection = CollectionReader::try_load(
@@ -175,15 +172,18 @@ impl CollectionsReader {
         let collection_ids: Vec<_> = col.keys().cloned().collect();
         let mut deleted_collection_ids = HashSet::new();
         for (id, collection) in col {
-            let collection_dir = collections_dir.join(id.0);
+            let collection_dir = collections_dir.join(id.as_str());
 
             if collection.is_deleted() {
+                deleted_collection_ids.insert(*id);
                 continue;
             }
 
             create_if_not_exists_async(&collection_dir)
                 .await
-                .with_context(|| format!("Cannot create directory for collection '{}'", id.0))?;
+                .with_context(|| {
+                    format!("Cannot create directory for collection '{}'", id.as_str())
+                })?;
 
             let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
                 collection: id.to_string(),
@@ -196,16 +196,15 @@ impl CollectionsReader {
                 }
             }
             drop(m);
-
-            if collection.is_deleted() {
-                deleted_collection_ids.insert(*id);
-            }
         }
 
         let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
-            collection_ids: collection_ids.into_iter().collect(),
-            deleted_collection_ids,
+            collection_ids: collection_ids
+                .into_iter()
+                .filter(|id| !deleted_collection_ids.contains(id))
+                .collect(),
+            deleted_collection_ids: Default::default(),
             last_reindexed_collections: guard.iter().cloned().collect(),
         });
         drop(guard);
@@ -276,14 +275,14 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(collection.id.0);
+        let collection_dir = collections_dir.join(collection.id.as_str());
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
                 .with_context(|| {
                     format!(
                         "Cannot remove directory for collection '{}'",
-                        collection.id.0
+                        collection.id.as_str()
                     )
                 })?;
         }
@@ -326,13 +325,13 @@ impl CollectionsReader {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(target_collection_id.0);
+        let collection_dir = collections_dir.join(target_collection_id.as_str());
         create_if_not_exists_async(&collection_dir)
             .await
             .with_context(|| {
                 format!(
                     "Cannot create directory for collection '{}'",
-                    target_collection_id.0
+                    target_collection_id.as_str()
                 )
             })?;
 
@@ -351,14 +350,22 @@ impl CollectionsReader {
         drop(m);
 
         if let Some(notifier) = &self.notifier {
-            notifier
+            if let Err(error) = notifier
                 .notify_collection_substitution(
                     target_collection_id,
                     source_collection_id,
                     reference,
                 )
                 .await
-                .context("Cannot notify collection substitution")?;
+                .context("Cannot notify collection substitution")
+            {
+                error!(
+                    error = ?error,
+                    target_collection_id=?target_collection_id,
+                    source_collection_id=?source_collection_id,
+                    "Cannot notify collection substitution. Skip it"
+                );
+            };
         }
 
         info!(
@@ -446,7 +453,6 @@ mod tests {
     use std::time::Duration;
 
     use http::uri::Scheme;
-    use redact::Secret;
 
     use crate::{ai::AIServiceConfig, tests::utils::generate_new_path};
 
@@ -505,7 +511,7 @@ mod tests {
                 target_collection_id,
                 None,
                 LanguageDTO::English,
-                ApiKey(Secret::from("read".to_string())),
+                ApiKey::try_from("read").unwrap(),
             )
             .await
             .unwrap();
@@ -517,7 +523,7 @@ mod tests {
                 tmp_collection_id,
                 None,
                 LanguageDTO::English,
-                ApiKey(Secret::from("read".to_string())),
+                ApiKey::try_from("read").unwrap(),
             )
             .await
             .unwrap();
@@ -597,7 +603,7 @@ mod tests {
                     *target_collection_id,
                     None,
                     LanguageDTO::English,
-                    ApiKey(Secret::from("read".to_string())),
+                    ApiKey::try_from("read").unwrap(),
                 )
                 .await
                 .unwrap();
@@ -609,7 +615,7 @@ mod tests {
                     *tmp_collection_id,
                     None,
                     LanguageDTO::English,
-                    ApiKey(Secret::from("read".to_string())),
+                    ApiKey::try_from("read").unwrap(),
                 )
                 .await
                 .unwrap();

@@ -1,8 +1,8 @@
 use super::OramaModel;
 use crate::{
     ai::AIService,
-    collection_manager::dto::SearchResult,
     nlp::chunker::{Chunker, ChunkerConfig},
+    types::SearchResult,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -61,9 +61,9 @@ impl ContextEvaluator {
         let formatted_hits = hits
             .iter()
             .filter_map(|hit| match &hit.document {
-                Some(document) => match self.convert_raw_to_value(document.inner.clone()) {
+                Some(document) => match self.convert_raw_to_value(&document.inner) {
                     Ok(raw_document) => {
-                        let flat_values = self.extract_flat_values(&raw_document);
+                        let flat_values = Self::extract_flat_values(&raw_document);
                         Some(flat_values)
                     }
                     Err(_) => None,
@@ -117,14 +117,14 @@ impl ContextEvaluator {
         Ok(result)
     }
 
-    fn extract_flat_values(&self, value: &Value) -> String {
+    fn extract_flat_values(value: &Value) -> String {
         match value {
             Value::Object(map) => {
                 let mut values = Vec::new();
                 for val in map.values() {
                     match val {
                         Value::Object(_) | Value::Array(_) => {
-                            values.push(self.extract_flat_values(val));
+                            values.push(Self::extract_flat_values(val));
                         }
                         Value::String(s) => values.push(s.clone()),
                         Value::Number(n) => values.push(n.to_string()),
@@ -137,7 +137,7 @@ impl ContextEvaluator {
             Value::Array(arr) => {
                 let mut values = Vec::new();
                 for item in arr {
-                    values.push(self.extract_flat_values(item));
+                    values.push(Self::extract_flat_values(item));
                 }
                 values.join(" ")
             }
@@ -150,7 +150,7 @@ impl ContextEvaluator {
 
     fn convert_raw_to_value(
         &self,
-        raw: Box<serde_json::value::RawValue>,
+        raw: &serde_json::value::RawValue,
     ) -> Result<Value, serde_json::Error> {
         let json_str = raw.get();
 
@@ -199,20 +199,24 @@ impl ContextEvaluator {
         // new_value = target_min + (value - original_min) * (target_range / original_range)
         let rescaled = target_min + (similarity - original_min) * (target_range / original_range);
 
+        // threat NaN values as 0.0
+        if rescaled.is_nan() {
+            return 0.0;
+        }
         // Clamp the result to ensure it stays within [0.0, 1.0]
-        rescaled.max(0.0).min(1.0)
+        rescaled.clamp(0.0, 1.0)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::sync::Arc;
 
     use crate::{
         ai::{AIService, AIServiceConfig},
-        collection_manager::dto::{SearchResult, SearchResultHit},
         tests::utils::create_grpc_server,
-        types::RawJSONDocument,
+        types::{RawJSONDocument, SearchResultHit},
     };
     use http::uri::Scheme;
     use serde_json::value::RawValue;
@@ -521,7 +525,7 @@ mod tests {
     #[test]
     fn test_rescale_similarity_nan_handling() {
         let evaluator = create_context_evaluator();
-        let result = evaluator.rescale_similarity(0.7, std::f32::NAN);
+        let result = evaluator.rescale_similarity(0.7, f32::NAN);
         // NaN should be converted to 0.0 - you might want to handle this differently
         assert_eq!(result, 0.0);
     }

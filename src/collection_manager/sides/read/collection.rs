@@ -22,7 +22,6 @@ use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
     merge_vector_field,
 };
-use redact::Secret;
 use serde::{Deserialize, Serialize};
 use tokio::{join, sync::RwLock};
 use tracing::{debug, error, info, instrument, trace};
@@ -56,11 +55,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::{
-        dto::{
-            ApiKey, BM25Scorer, FacetDefinition, FacetResult, FieldId, Filter, FulltextMode,
-            HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
-            SearchParams, Similarity, VectorMode,
-        },
+        bm25::BM25Scorer,
         sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
     },
     file_utils::BufferedFile,
@@ -74,7 +69,11 @@ use crate::{
     },
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
-    types::{CollectionId, DocumentId},
+    types::{
+        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, Filter,
+        FulltextMode, HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode,
+        SearchModeResult, SearchParams, Similarity, VectorMode,
+    },
 };
 
 #[derive(Debug)]
@@ -167,7 +166,8 @@ impl CollectionReader {
             dump::CollectionInfo::V1(info) => dump::migrate_v1_to_v2(info),
             dump::CollectionInfo::V2(info) => info,
         };
-        let read_api_key = ApiKey(Secret::new(collection_info.read_api_key));
+        let read_api_key =
+            ApiKey::try_new(collection_info.read_api_key).context("Cannot create read api key")?;
 
         let score_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
         for (field_name, (field_id, field_type)) in collection_info.score_fields {
@@ -299,7 +299,7 @@ impl CollectionReader {
                 default_language: self.default_language,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
-                read_api_key: self.read_api_key.0.expose_secret().clone(),
+                read_api_key: self.read_api_key.expose().to_string(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_field_infos: Default::default(),
@@ -331,7 +331,7 @@ impl CollectionReader {
                 default_language: self.default_language,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
-                read_api_key: self.read_api_key.0.expose_secret().clone(),
+                read_api_key: self.read_api_key.expose().to_string(),
                 used_models: Default::default(),
                 number_field_infos: Default::default(),
                 string_filter_field_infos: Default::default(),
@@ -1660,22 +1660,21 @@ impl CollectionReader {
             let e = vectors.entry(k).or_default();
             e.1 = Some(v);
         }
-        fields_stats.extend(vectors.into_iter().map(|(k, v)| {
+        fields_stats.extend(vectors.into_iter().filter_map(|(k, v)| {
             let name = self
                 .score_fields
                 .iter()
-                .find(|e| e.value().0 == k)
-                .expect("Field not found")
+                .find(|e| e.value().0 == k)?
                 .key()
                 .to_string();
-            FieldStats {
+            Some(FieldStats {
                 field_id: k,
                 name,
                 stats: FieldStatsType::Vector {
                     uncommitted: v.1,
                     committed: v.0,
                 },
-            }
+            })
         }));
 
         fields_stats.sort_by_key(|e| e.field_id.0);
@@ -1699,12 +1698,9 @@ mod dump {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        collection_manager::{
-            dto::{FieldId, LanguageDTO},
-            sides::OramaModelSerializable,
-        },
+        collection_manager::sides::OramaModelSerializable,
         nlp::locales::Locale,
-        types::CollectionId,
+        types::{CollectionId, FieldId, LanguageDTO},
     };
 
     use super::committed;
@@ -1952,6 +1948,7 @@ async fn get_filtered_document(
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
+    #[allow(dead_code)]
     Embedding(OramaModel),
     Text(Locale),
     ArrayText(Locale),

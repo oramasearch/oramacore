@@ -1,17 +1,13 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use redact::Secret;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO, ReindexConfig},
-        sides::hooks::HookName,
-    },
+    collection_manager::sides::hooks::HookName,
     tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO, ReindexConfig},
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -25,7 +21,7 @@ async fn test_reindex_change_language() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "title": "avvocata",
@@ -35,7 +31,7 @@ async fn test_reindex_change_language() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "avvocato",
@@ -47,7 +43,7 @@ async fn test_reindex_change_language() -> Result<()> {
 
     write_side
         .reindex(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             ReindexConfig {
                 description: None,
@@ -63,7 +59,7 @@ async fn test_reindex_change_language() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "avvocato",
@@ -89,7 +85,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "title1": "title1",
@@ -107,7 +103,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "title1",
@@ -120,7 +116,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
     for _ in 0..50 {
         write_side
             .reindex(
-                ApiKey(Secret::new("my-write-api-key".to_string())),
+                ApiKey::try_from("my-write-api-key").unwrap(),
                 collection_id,
                 ReindexConfig {
                     description: None,
@@ -137,7 +133,7 @@ async fn test_reindex_field_reorder() -> Result<()> {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "term": "title1",
@@ -172,7 +168,7 @@ export default {
 
     insert_docs(
         write_side.clone(),
-        ApiKey(Secret::new("my-write-api-key".to_string())),
+        ApiKey::try_from("my-write-api-key").unwrap(),
         collection_id,
         vec![json!({
             "title": "Today I want to listen only Max Pezzali.",
@@ -184,7 +180,7 @@ export default {
 
     write_side
         .insert_javascript_hook(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             HookName::SelectEmbeddingsProperties,
             code.to_string(),
@@ -193,7 +189,7 @@ export default {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "mode": "vector",
@@ -207,7 +203,7 @@ export default {
     // Hook change the meaning of the text, so the exact match should not work
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "mode": "vector",
@@ -220,7 +216,7 @@ export default {
 
     write_side
         .reindex(
-            ApiKey(Secret::new("my-write-api-key".to_string())),
+            ApiKey::try_from("my-write-api-key").unwrap(),
             collection_id,
             ReindexConfig {
                 description: None,
@@ -235,7 +231,7 @@ export default {
 
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "mode": "vector",
@@ -249,7 +245,7 @@ export default {
     // Hook change the meaning of the text, so the exact match should not work
     let output = read_side
         .search(
-            ApiKey(Secret::new("my-read-api-key".to_string())),
+            ApiKey::try_from("my-read-api-key").unwrap(),
             collection_id,
             json!({
                 "mode": "vector",

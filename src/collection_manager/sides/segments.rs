@@ -1,10 +1,7 @@
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
-    collection_manager::{
-        dto::{InteractionLLMConfig, InteractionMessage},
-        sides::generic_kv::{format_key, KV},
-    },
-    types::CollectionId,
+    collection_manager::sides::generic_kv::{format_key, KV},
+    types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 use anyhow::{Context, Result};
 use core::fmt;
@@ -94,11 +91,11 @@ impl SegmentInterface {
     }
 
     pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Segment>> {
-        let prefix = format!("{}:segment:", collection_id.0.clone());
+        let prefix = format!("{}:segment:", collection_id.as_str());
 
         let segments = self.kv.prefix_scan(&prefix).await.context(format!(
             "Cannot scan segments for collection {}",
-            collection_id.0
+            collection_id.as_str()
         ))?;
 
         Ok(segments)

@@ -13,9 +13,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
-use crate::collection_manager::{
-    dto::{InteractionLLMConfig, InteractionMessage, RelatedRequest},
-    sides::system_prompts::SystemPrompt,
+use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest};
+use crate::{
+    collection_manager::sides::system_prompts::SystemPrompt,
+    types::{RelatedQueriesFormat, Role},
 };
 
 use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
@@ -353,7 +354,7 @@ impl LLMService {
                             ),
                         );
                     }
-                    #[warn(unreachable_patterns)]
+                    #[allow(unreachable_patterns)]
                     _ => {
                         return Err(anyhow::Error::msg(format!(
                             "Unsupported remote LLM provider: {}",
@@ -511,7 +512,7 @@ impl LLMService {
     pub async fn run_party_planner_prompt_stream(
         &self,
         step: Step,
-        input: &String,
+        input: &str,
         history: &Vec<InteractionMessage>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<impl Stream<Item = Result<String>>> {
@@ -519,11 +520,11 @@ impl LLMService {
 
         let variables = match step_name {
             "GIVE_REPLY" => vec![
-                ("question".to_string(), input.clone()),
+                ("question".to_string(), input.to_owned()),
                 ("context".to_string(), step.description),
             ],
             _ => vec![
-                ("input".to_string(), input.clone()),
+                ("input".to_string(), input.to_owned()),
                 ("description".to_string(), step.description),
             ],
         };
@@ -540,13 +541,13 @@ impl LLMService {
 
         for message in history {
             match message.role {
-                crate::collection_manager::dto::Role::System => {
+                Role::System => {
                     // @todo: make sure there are no multiple system messages in the history
                     // return Err(anyhow::Error::msg(
                     //     "Found multiple system messages in Party Planner chat history",
                     // ));
                 }
-                crate::collection_manager::dto::Role::User => {
+                Role::User => {
                     full_history.push(
                         ChatCompletionRequestUserMessageArgs::default()
                             .content(message.content.clone())
@@ -555,7 +556,7 @@ impl LLMService {
                             .into(),
                     );
                 }
-                crate::collection_manager::dto::Role::Assistant => {
+                Role::Assistant => {
                     full_history.push(
                         ChatCompletionRequestAssistantMessageArgs::default()
                             .content(message.content.clone())
@@ -625,7 +626,7 @@ impl LLMService {
     pub async fn run_party_planner_prompt(
         &self,
         step: Step,
-        input: &String,
+        input: &str,
         history: &Vec<InteractionMessage>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
@@ -675,8 +676,6 @@ impl LLMService {
         &self,
         related: Option<RelatedRequest>,
     ) -> Vec<(String, String)> {
-        use crate::collection_manager::dto::RelatedQueriesFormat;
-
         if let Some(related_config) = related {
             if let Some(enabled) = related_config.enabled {
                 if enabled {

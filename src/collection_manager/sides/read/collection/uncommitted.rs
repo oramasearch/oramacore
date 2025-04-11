@@ -10,10 +10,9 @@ use vector::{VectorField, VectorUncommittedFieldStats};
 
 use crate::{
     collection_manager::{
-        dto::{BM25Scorer, FieldId, GlobalInfo, NumberFilter},
-        sides::DocumentFieldIndexOperation,
+        bm25::BM25Scorer, global_info::GlobalInfo, sides::DocumentFieldIndexOperation,
     },
-    types::DocumentId,
+    types::{DocumentId, FieldId, NumberFilter},
 };
 
 mod bool;

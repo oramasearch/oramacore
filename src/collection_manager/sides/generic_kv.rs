@@ -222,7 +222,7 @@ impl KV {
 }
 
 pub fn format_key(collection_id: CollectionId, key: &str) -> String {
-    format!("{}:{}", collection_id.0, key)
+    format!("{}:{}", collection_id.as_str(), key)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

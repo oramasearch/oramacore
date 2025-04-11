@@ -1,6 +1,6 @@
-mod collection;
+pub mod collection;
 mod collections;
-mod document_storage;
+pub mod document_storage;
 mod embedding;
 mod fields;
 
@@ -42,17 +42,15 @@ pub use fields::*;
 
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
-    collection_manager::{
-        dto::{
-            ApiKey, CollectionDTO, CreateCollection, CreateCollectionFrom, DeleteDocuments,
-            InsertDocumentsResult, InteractionLLMConfig, ReindexConfig, SwapCollections,
-        },
-        sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
-    },
+    collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
     nlp::NLPService,
-    types::{CollectionId, Document, DocumentId, DocumentList},
+    types::{
+        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
+        DeleteDocuments, Document, DocumentId, DocumentList, InsertDocumentsResult,
+        InteractionLLMConfig, ReindexConfig, SwapCollections,
+    },
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -416,12 +414,47 @@ impl WriteSide {
                 .context("Cannot send delete collection operation")?;
 
             self.kv
-                .delete_with_prefix(&collection_id.0)
+                .delete_with_prefix(collection_id.as_str())
                 .await
                 .context("Cannot delete collection from KV")?;
         }
 
         Ok(())
+    }
+
+    pub async fn list_document(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Document>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        let document_ids = collection.get_document_ids().await;
+
+        let stream = self.document_storage.stream_documents(document_ids).await;
+        let docs = stream
+            .filter_map(|(_, doc)| {
+                let inner = doc.inner;
+                let inner: Map<String, Value> = match serde_json::from_str(inner.get()) {
+                    Ok(inner) => inner,
+                    Err(e) => {
+                        error!(error = ?e, "Cannot deserialize document");
+                        return None;
+                    }
+                };
+                let doc = Document { inner };
+                Some(doc)
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        Ok(docs)
     }
 
     pub async fn insert_javascript_hook(
@@ -477,7 +510,7 @@ impl WriteSide {
         request: CreateCollectionFrom,
     ) -> Result<CollectionId> {
         info!("create temporary collection");
-        self.check_write_api_key(request.from, write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key)
             .await
             .context("Check write api key fails")?;
 
@@ -500,7 +533,7 @@ impl WriteSide {
 
         let hook = self
             .get_javascript_hook(
-                write_api_key.clone(),
+                write_api_key,
                 request.from,
                 HookName::SelectEmbeddingsProperties,
             )
@@ -508,7 +541,7 @@ impl WriteSide {
             .context("Cannot get embedding hook")?;
         if let Some(hook) = hook {
             self.insert_javascript_hook(
-                write_api_key.clone(),
+                write_api_key,
                 collection_id_tmp,
                 HookName::SelectEmbeddingsProperties,
                 hook,
@@ -526,7 +559,7 @@ impl WriteSide {
         request: SwapCollections,
     ) -> Result<()> {
         info!("Replacing collection");
-        self.check_write_api_key(request.from, write_api_key.clone())
+        self.check_write_api_key(request.from, write_api_key)
             .await
             .context("Check write api key fails")?;
         self.check_write_api_key(request.to, write_api_key)
@@ -564,7 +597,7 @@ impl WriteSide {
         info!("Reindexing collection {:?}", collection_id);
         let collection_id_tmp = self
             .create_collection_from(
-                write_api_key.clone(),
+                write_api_key,
                 CreateCollectionFrom {
                     from: collection_id,
                     embeddings: reindex_config.embeddings.clone(),
@@ -854,7 +887,7 @@ impl WriteSide {
 
         let final_trigger_id = match trigger_id {
             Some(mut id) => {
-                let required_prefix = format!("{}:trigger:", collection_id.0);
+                let required_prefix = format!("{}:trigger:", collection_id.as_str());
 
                 if !id.starts_with(&required_prefix) {
                     id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
@@ -938,14 +971,9 @@ impl WriteSide {
             ..trigger
         };
 
-        self.insert_trigger(
-            write_api_key.clone(),
-            collection_id,
-            new_trigger,
-            Some(trigger.id),
-        )
-        .await
-        .context("Cannot insert updated trigger")?;
+        self.insert_trigger(write_api_key, collection_id, new_trigger, Some(trigger.id))
+            .await
+            .context("Cannot insert updated trigger")?;
 
         match parse_trigger_id(trigger_key.clone()) {
             Some(key_content) => {

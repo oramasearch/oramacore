@@ -4,9 +4,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::dto::{Number, NumberFilter, SerializableNumber},
     indexes::ordered_key::{BoundedValue, OrderedKeyIndex},
-    types::DocumentId,
+    types::{DocumentId, Number, NumberFilter, SerializableNumber},
 };
 
 #[derive(Debug)]

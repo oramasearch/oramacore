@@ -5,18 +5,13 @@ use std::time::Duration;
 use anyhow::Result;
 
 use oramacore::{
-    collection_manager::{
-        dto::{ApiKey, LanguageDTO},
-        sides::{
-            channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset,
-            OutputRabbitMQConfig, OutputSideChannelType, RabbitMQConsumerConfig,
-            RabbitMQProducerConfig, WriteOperation,
-        },
+    collection_manager::sides::{
+        channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
+        OutputSideChannelType, RabbitMQConsumerConfig, RabbitMQProducerConfig, WriteOperation,
     },
-    types::CollectionId,
+    types::{ApiKey, CollectionId, LanguageDTO},
 };
 use rabbitmq_stream_client::ClientOptions;
-use redact::Secret;
 use tokio::time::sleep;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
@@ -59,7 +54,7 @@ async fn main2() -> Result<()> {
     producer
         .send(WriteOperation::CreateCollection {
             id: CollectionId::from("foo".to_string()),
-            read_api_key: ApiKey(Secret::from("too".to_string())),
+            read_api_key: ApiKey::try_from("too").unwrap(),
             default_language: LanguageDTO::English,
             description: None,
         })

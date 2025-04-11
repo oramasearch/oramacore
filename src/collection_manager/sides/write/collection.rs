@@ -9,34 +9,31 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use doc_id_storage::DocIdStorage;
-use redact::Secret;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, CollectionDTO, FieldId},
-        sides::{
-            hooks::{HookName, HooksRuntime},
-            CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
-            OperationSender, TypedFieldWrapper, WriteOperation,
-        },
+    collection_manager::sides::{
+        hooks::{HookName, HooksRuntime},
+        CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
+        OperationSender, TypedFieldWrapper, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{CollectionId, ComplexType, Document, DocumentId, ScalarType, ValueType},
+    types::{
+        ApiKey, CollectionDTO, CollectionId, ComplexType, Document, DocumentId, FieldId,
+        LanguageDTO, ScalarType, TypedField, ValueType,
+    },
 };
-
-use crate::collection_manager::dto::{LanguageDTO, TypedField};
 
 use super::{
     embedding::EmbeddingCalculationRequest, CollectionFilterField, CollectionScoreField,
     SerializedFieldIndexer,
 };
 
-mod doc_id_storage;
+pub mod doc_id_storage;
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
@@ -61,7 +58,7 @@ pub struct CollectionWriter {
 }
 
 impl CollectionWriter {
-    pub fn new(
+    pub fn empty(
         id: CollectionId,
         description: Option<String>,
         write_api_key: ApiKey,
@@ -82,6 +79,171 @@ impl CollectionWriter {
             embedding_sender,
             doc_id_storage: Default::default(),
         }
+    }
+
+    pub async fn try_load(
+        path: PathBuf,
+        hooks_runtime: Arc<HooksRuntime>,
+        nlp_service: Arc<NLPService>,
+        embedding_sender: Sender<EmbeddingCalculationRequest>,
+    ) -> Result<Self> {
+        let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
+            .context("Cannot open info.json file")?
+            .read_json_data()
+            .context("Cannot deserialize collection info")?;
+
+        let dump: CollectionDumpV2 = match dump {
+            CollectionDump::V1(dump) => {
+                let mut score_field_id_by_name = vec![];
+                let mut score_fields = vec![];
+                let mut filter_field_id_by_name = vec![];
+                let mut filter_fields = vec![];
+                for (field_name, indexer) in dump.fields {
+                    let field_id = dump
+                        .field_id_by_name
+                        .iter()
+                        .find(|(n, _)| n == &field_name)
+                        .unwrap()
+                        .1;
+                    match indexer {
+                        SerializedFieldIndexer::Number => {
+                            filter_field_id_by_name.push((field_name.clone(), field_id));
+                            filter_fields.push((field_id, indexer))
+                        }
+                        SerializedFieldIndexer::Bool => {
+                            filter_field_id_by_name.push((field_name.clone(), field_id));
+                            filter_fields.push((field_id, indexer))
+                        }
+                        // This never happens, but it's here to make the compiler happy
+                        SerializedFieldIndexer::StringFilter => {
+                            filter_field_id_by_name.push((field_name.clone(), field_id));
+                            filter_fields.push((field_id, indexer))
+                        }
+                        SerializedFieldIndexer::Embedding(_, _) => {
+                            score_field_id_by_name.push((field_name.clone(), field_id));
+                            score_fields.push((field_id, indexer))
+                        }
+                        SerializedFieldIndexer::String(_) => {
+                            score_field_id_by_name.push((field_name.clone(), field_id));
+                            score_fields.push((field_id, indexer))
+                        }
+                    }
+                }
+                CollectionDumpV2 {
+                    id: dump.id,
+                    description: dump.description,
+                    write_api_key: dump.write_api_key,
+                    default_language: dump.default_language,
+                    document_count: dump.document_count,
+                    field_id_generator: dump.field_id_generator,
+                    score_fields,
+                    filter_fields,
+                    score_field_id_by_name,
+                    filter_field_id_by_name: dump.field_id_by_name,
+                    doc_id_storage_path: dump.doc_id_storage_path,
+                }
+            }
+            CollectionDump::V2(dump) => dump,
+        };
+
+        let id = dump.id;
+
+        let mut filter_fields = HashMap::new();
+        for (field_id, serialized) in dump.filter_fields {
+            let field_name = dump
+                .filter_field_id_by_name
+                .iter()
+                .find(|(_, id)| id == &field_id)
+                .with_context(|| format!("Field id not found: {:?}", field_id))?
+                .0
+                .clone();
+
+            let collection_field: CollectionFilterField = match serialized {
+                SerializedFieldIndexer::Number => {
+                    CollectionFilterField::new_number(id, field_id, field_name.clone())
+                }
+                SerializedFieldIndexer::Bool => {
+                    CollectionFilterField::new_bool(id, field_id, field_name.clone())
+                }
+                SerializedFieldIndexer::StringFilter => {
+                    CollectionFilterField::new_string(id, field_id, field_name.clone())
+                }
+                SerializedFieldIndexer::Embedding(_, _) => {
+                    return Err(anyhow!("Embedding field not supported"))
+                }
+                SerializedFieldIndexer::String(_) => {
+                    return Err(anyhow!("String field not supported"))
+                }
+            };
+            filter_fields.insert(field_id, collection_field);
+        }
+
+        let mut score_fields = HashMap::new();
+        for (field_id, serialized) in dump.score_fields {
+            let field_name = dump
+                .score_field_id_by_name
+                .iter()
+                .find(|(_, id)| id == &field_id)
+                .with_context(|| format!("Field id not found: {:?}", field_id))?
+                .0
+                .clone();
+
+            let collection_field: CollectionScoreField = match serialized {
+                SerializedFieldIndexer::String(locale) => CollectionScoreField::new_string(
+                    nlp_service.get(locale),
+                    id,
+                    field_id,
+                    field_name.clone(),
+                ),
+                SerializedFieldIndexer::Embedding(model, fields) => {
+                    CollectionScoreField::new_embedding(
+                        model.0,
+                        fields,
+                        embedding_sender.clone(),
+                        hooks_runtime.clone(),
+                        id,
+                        field_id,
+                        field_name.clone(),
+                    )
+                }
+                SerializedFieldIndexer::Number => {
+                    return Err(anyhow!("Number field not supported"))
+                }
+                SerializedFieldIndexer::Bool => return Err(anyhow!("Bool field not supported")),
+                SerializedFieldIndexer::StringFilter => {
+                    return Err(anyhow!("String filter field not supported"))
+                }
+            };
+            score_fields.insert(field_id, collection_field);
+        }
+
+        let description = dump.description;
+        let write_api_key =
+            ApiKey::try_new(dump.write_api_key).context("Cannot create write api key")?;
+        let default_language = dump.default_language;
+        let doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
+
+        let filter_field_id_by_name =
+            RwLock::new(dump.filter_field_id_by_name.into_iter().collect());
+        let score_field_id_by_name = RwLock::new(dump.score_field_id_by_name.into_iter().collect());
+
+        let collection_document_count = AtomicU64::new(dump.document_count);
+        let field_id_generator = AtomicU16::new(dump.field_id_generator);
+
+        Ok(Self {
+            id: dump.id,
+            collection_document_count,
+            description,
+            write_api_key,
+            default_language,
+            filter_fields: RwLock::new(filter_fields),
+            score_fields: RwLock::new(score_fields),
+            field_id_generator,
+            filter_field_id_by_name,
+            score_field_id_by_name,
+            embedding_sender,
+            doc_id_storage,
+        })
     }
 
     pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<()> {
@@ -687,7 +849,7 @@ impl CollectionWriter {
         let dump = CollectionDump::V2(CollectionDumpV2 {
             id: self.id,
             description: self.description.clone(),
-            write_api_key: self.write_api_key.0.expose_secret().clone(),
+            write_api_key: self.write_api_key.expose().to_string(),
             default_language: self.default_language,
             document_count: self
                 .collection_document_count
@@ -730,158 +892,6 @@ impl CollectionWriter {
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
-
-        Ok(())
-    }
-
-    pub async fn load(
-        &mut self,
-        path: PathBuf,
-        hooks_runtime: Arc<HooksRuntime>,
-        nlp_service: Arc<NLPService>,
-    ) -> Result<()> {
-        let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
-            .context("Cannot open info.json file")?
-            .read_json_data()
-            .context("Cannot deserialize collection info")?;
-
-        let dump: CollectionDumpV2 = match dump {
-            CollectionDump::V1(dump) => {
-                let mut score_field_id_by_name = vec![];
-                let mut score_fields = vec![];
-                let mut filter_field_id_by_name = vec![];
-                let mut filter_fields = vec![];
-                for (field_name, indexer) in dump.fields {
-                    let field_id = dump
-                        .field_id_by_name
-                        .iter()
-                        .find(|(n, _)| n == &field_name)
-                        .unwrap()
-                        .1;
-                    match indexer {
-                        SerializedFieldIndexer::Number => {
-                            filter_field_id_by_name.push((field_name.clone(), field_id));
-                            filter_fields.push((field_id, indexer))
-                        }
-                        SerializedFieldIndexer::Bool => {
-                            filter_field_id_by_name.push((field_name.clone(), field_id));
-                            filter_fields.push((field_id, indexer))
-                        }
-                        // This never happens, but it's here to make the compiler happy
-                        SerializedFieldIndexer::StringFilter => {
-                            filter_field_id_by_name.push((field_name.clone(), field_id));
-                            filter_fields.push((field_id, indexer))
-                        }
-                        SerializedFieldIndexer::Embedding(_, _) => {
-                            score_field_id_by_name.push((field_name.clone(), field_id));
-                            score_fields.push((field_id, indexer))
-                        }
-                        SerializedFieldIndexer::String(_) => {
-                            score_field_id_by_name.push((field_name.clone(), field_id));
-                            score_fields.push((field_id, indexer))
-                        }
-                    }
-                }
-                CollectionDumpV2 {
-                    id: dump.id,
-                    description: dump.description,
-                    write_api_key: dump.write_api_key,
-                    default_language: dump.default_language,
-                    document_count: dump.document_count,
-                    field_id_generator: dump.field_id_generator,
-                    score_fields,
-                    filter_fields,
-                    score_field_id_by_name,
-                    filter_field_id_by_name: dump.field_id_by_name,
-                    doc_id_storage_path: dump.doc_id_storage_path,
-                }
-            }
-            CollectionDump::V2(dump) => dump,
-        };
-
-        self.id = dump.id;
-        self.description = dump.description;
-        self.write_api_key = ApiKey(Secret::new(dump.write_api_key));
-        self.default_language = dump.default_language;
-        self.doc_id_storage = RwLock::new(DocIdStorage::load(dump.doc_id_storage_path)?);
-
-        for (field_id, serialized) in dump.filter_fields {
-            let field_name = dump
-                .filter_field_id_by_name
-                .iter()
-                .find(|(_, id)| id == &field_id)
-                .with_context(|| format!("Field id not found: {:?}", field_id))?
-                .0
-                .clone();
-
-            let collection_field: CollectionFilterField = match serialized {
-                SerializedFieldIndexer::Number => {
-                    CollectionFilterField::new_number(self.id, field_id, field_name.clone())
-                }
-                SerializedFieldIndexer::Bool => {
-                    CollectionFilterField::new_bool(self.id, field_id, field_name.clone())
-                }
-                SerializedFieldIndexer::StringFilter => {
-                    CollectionFilterField::new_string(self.id, field_id, field_name.clone())
-                }
-                SerializedFieldIndexer::Embedding(_, _) => {
-                    return Err(anyhow!("Embedding field not supported"))
-                }
-                SerializedFieldIndexer::String(_) => {
-                    return Err(anyhow!("String field not supported"))
-                }
-            };
-            let mut w = self.filter_fields.write().await;
-            w.insert(field_id, collection_field);
-        }
-
-        for (field_id, serialized) in dump.score_fields {
-            let field_name = dump
-                .score_field_id_by_name
-                .iter()
-                .find(|(_, id)| id == &field_id)
-                .with_context(|| format!("Field id not found: {:?}", field_id))?
-                .0
-                .clone();
-
-            let collection_field: CollectionScoreField = match serialized {
-                SerializedFieldIndexer::String(locale) => CollectionScoreField::new_string(
-                    nlp_service.get(locale),
-                    self.id,
-                    field_id,
-                    field_name.clone(),
-                ),
-                SerializedFieldIndexer::Embedding(model, fields) => {
-                    CollectionScoreField::new_embedding(
-                        model.0,
-                        fields,
-                        self.embedding_sender.clone(),
-                        hooks_runtime.clone(),
-                        self.id,
-                        field_id,
-                        field_name.clone(),
-                    )
-                }
-                SerializedFieldIndexer::Number => {
-                    return Err(anyhow!("Number field not supported"))
-                }
-                SerializedFieldIndexer::Bool => return Err(anyhow!("Bool field not supported")),
-                SerializedFieldIndexer::StringFilter => {
-                    return Err(anyhow!("String filter field not supported"))
-                }
-            };
-            let mut w = self.score_fields.write().await;
-            w.insert(field_id, collection_field);
-        }
-
-        self.filter_field_id_by_name =
-            RwLock::new(dump.filter_field_id_by_name.into_iter().collect());
-        self.score_field_id_by_name =
-            RwLock::new(dump.score_field_id_by_name.into_iter().collect());
-
-        self.collection_document_count
-            .store(dump.document_count, std::sync::atomic::Ordering::Relaxed);
-        self.field_id_generator = AtomicU16::new(dump.field_id_generator);
 
         Ok(())
     }

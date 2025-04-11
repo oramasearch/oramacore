@@ -1,16 +1,15 @@
 use std::{collections::HashMap, str::FromStr};
 
-use redact::Secret;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::{
-        dto::{ApiKey, DocumentFields, FieldId, LanguageDTO, Number},
-        sides::{hooks::HookName, OramaModelSerializable},
-    },
+    collection_manager::sides::{hooks::HookName, OramaModelSerializable},
     nlp::locales::Locale,
-    types::{CollectionId, DocumentId, RawJSONDocument},
+    types::{
+        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, LanguageDTO, Number,
+        RawJSONDocument,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -244,28 +243,27 @@ pub fn serialize_api_key<S>(x: &ApiKey, s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::ser::Serializer,
 {
-    s.serialize_str(x.0.expose_secret())
+    s.serialize_str(x.expose())
 }
 pub fn deserialize_api_key<'de, D>(deserializer: D) -> Result<ApiKey, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
-    String::deserialize(deserializer).map(|s| ApiKey(Secret::from(s)))
+    String::deserialize(deserializer).and_then(|s| {
+        ApiKey::try_new(s)
+            .map_err(|e| serde::de::Error::custom(format!("Invalid API key: {:?}", e)))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use redact::Secret;
     use serde_json::value::RawValue;
 
     use crate::{
         ai::OramaModel,
-        collection_manager::{
-            dto::{ApiKey, DocumentFields, FieldId},
-            sides::{hooks::HookName, OramaModelSerializable},
-        },
+        collection_manager::sides::{hooks::HookName, OramaModelSerializable},
         nlp::locales::Locale,
         types::{CollectionId, DocumentId, RawJSONDocument},
     };
@@ -275,7 +273,7 @@ mod tests {
         let ops = [
             WriteOperation::CreateCollection {
                 id: CollectionId::from("col".to_string()),
-                read_api_key: ApiKey(Secret::from("foo".to_string())),
+                read_api_key: ApiKey::try_from("foo").unwrap(),
                 description: Some("bar".to_string()),
                 default_language: LanguageDTO::English,
             },

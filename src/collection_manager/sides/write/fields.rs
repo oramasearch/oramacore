@@ -10,20 +10,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ai::OramaModel,
-    collection_manager::{
-        dto::{DocumentFields, FieldId, Number},
-        sides::{
-            hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
-            CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
-            Term, TermStringField, WriteOperation,
-        },
+    collection_manager::sides::{
+        hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
+        CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
+        Term, TermStringField, WriteOperation,
     },
     nlp::{
         chunker::{Chunker, ChunkerConfig},
         locales::Locale,
         TextParser,
     },
-    types::{CollectionId, DocumentId, FlattenDocument, ValueType},
+    types::{
+        CollectionId, DocumentFields, DocumentId, FieldId, FlattenDocument, Number, ValueType,
+    },
 };
 
 use super::embedding::{EmbeddingCalculationRequest, EmbeddingCalculationRequestInput};
