@@ -1,10 +1,31 @@
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::{collection_manager::sides::generic_kv::KV, types::CollectionId};
 
 use super::llms::LLMService;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChosenProperties {
+    pub properties: Vec<String>,
+    #[serde(rename = "includeKeys")]
+    pub include_keys: Vec<String>,
+    pub rename: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChosenPropertiesError {
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ChosenPropertiesResult {
+    Properties(ChosenProperties),
+    Error(ChosenPropertiesError),
+}
 
 pub struct AutomaticEmbeddingsSelector {
     pub llm_service: Arc<LLMService>,
@@ -19,7 +40,41 @@ impl AutomaticEmbeddingsSelector {
         }
     }
 
-    pub fn get_key(&self, collection_id: CollectionId, documents: Vec<Value>) -> String {
+    async fn get_properties(&self, collection_id: CollectionId, documents: Vec<Value>) {
+        let key = self.get_key(collection_id.clone(), documents.clone());
+
+        if self.key_exists(&key).await {
+            return; // @todo: return keys here
+        }
+    }
+
+    async fn choose_properties(
+        &self,
+        documents: Vec<Value>,
+        llm_config: Option<crate::types::InteractionLLMConfig>,
+    ) -> Result<ChosenProperties> {
+        let documents_as_json = serde_json::to_string(&documents)?;
+        let variables = vec![("documents".to_string(), documents_as_json)];
+
+        let result = self
+            .llm_service
+            .run_known_prompt(
+                super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
+                variables,
+                llm_config,
+            )
+            .await?;
+
+        let result: ChosenPropertiesResult = serde_json::from_str(&result)?;
+
+        match &result {}
+    }
+
+    async fn key_exists(&self, key: &str) -> bool {
+        self.kv_service.get::<String>(key).await.is_some()
+    }
+
+    fn get_key(&self, collection_id: CollectionId, documents: Vec<Value>) -> String {
         use std::collections::HashSet;
         let mut all_keys = HashSet::new();
 
