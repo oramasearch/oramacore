@@ -49,6 +49,7 @@ pub struct AIServiceLLMConfig {
 
 #[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
 pub enum RemoteLLMProvider {
+    OramaCore,
     OpenAI,
     Fireworks,
     Together,

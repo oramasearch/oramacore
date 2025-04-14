@@ -111,6 +111,23 @@ async fn planned_answer_v1(
             )))
             .await;
 
+        let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = read_side.get_default_llm_config();
+
+            InteractionLLMConfig { model, provider }
+        });
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serialize_response(
+                    "SELECTED_LLM",
+                    &serde_json::to_string(&llm_config).unwrap(),
+                    true,
+                )
+                .unwrap(),
+            )))
+            .await;
+
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
         let mut system_prompt: Option<SystemPrompt> = None;
@@ -315,6 +332,25 @@ async fn answer_v1(
 
     tokio::spawn(async move {
         let llm_service = read_side.clone().get_llm_service();
+
+        dbg!(interaction.llm_config.clone());
+
+        let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = read_side.get_default_llm_config();
+
+            InteractionLLMConfig { model, provider }
+        });
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serialize_response(
+                    "SELECTED_LLM",
+                    &serde_json::to_string(&llm_config).unwrap(),
+                    true,
+                )
+                .unwrap(),
+            )))
+            .await;
 
         let _ = tx
             .send(Ok(Event::default().data(
