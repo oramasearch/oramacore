@@ -614,6 +614,10 @@ impl ReadSide {
             }
         }
     }
+
+    pub fn get_default_llm_config(&self) -> (RemoteLLMProvider, String) {
+        (RemoteLLMProvider::OramaCore, self.llm_service.model.clone())
+    }
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
