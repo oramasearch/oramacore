@@ -223,6 +223,7 @@ impl ReadSide {
     ) -> Result<SearchResult> {
         let facets = std::mem::take(&mut search_params.facets);
         let limit = search_params.limit;
+        let offset = search_params.offset;
 
         let collection = self
             .collections
@@ -248,16 +249,22 @@ impl ReadSide {
 
         let count = token_scores.len();
 
-        let top_results: Vec<TokenScore> = top_n(token_scores, limit.0);
-
+        let top_results: Vec<TokenScore> = top_n(token_scores, limit.0 + offset.0);
         trace!("Top results: {:?}", top_results);
+
+        let result = top_results
+            .into_iter()
+            .skip(offset.0)
+            .take(limit.0)
+            .collect::<Vec<_>>();
+
         let docs = self
             .document_storage
-            .get_documents_by_ids(top_results.iter().map(|m| m.document_id).collect())
+            .get_documents_by_ids(result.iter().map(|m| m.document_id).collect())
             .await?;
 
         trace!("Calculates hits");
-        let hits: Vec<_> = top_results
+        let hits: Vec<_> = result
             .into_iter()
             .zip(docs)
             .map(|(token_score, document)| {
@@ -785,5 +792,57 @@ mod tests {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsReader>();
         assert_sync_send::<CollectionReader>();
+    }
+
+    #[test]
+    fn test_top_n() {
+        let search_result = HashMap::from([
+            (DocumentId(1), 0.1),
+            (DocumentId(2), 0.2),
+            (DocumentId(3), 0.3),
+            (DocumentId(4), 0.4),
+            (DocumentId(5), 0.5),
+            (DocumentId(6), 0.6),
+            (DocumentId(7), 0.7),
+            (DocumentId(8), 0.8),
+            (DocumentId(9), 0.9),
+            (DocumentId(10), 1.0),
+            (DocumentId(11), 1.1),
+            (DocumentId(12), 1.2),
+            (DocumentId(13), 1.3),
+            (DocumentId(14), 1.4),
+            (DocumentId(15), 1.5),
+        ]);
+
+        let r1 = top_n(search_result.clone(), 5);
+        assert_eq!(r1.len(), 5);
+        assert_eq!(
+            vec![
+                DocumentId(15),
+                DocumentId(14),
+                DocumentId(13),
+                DocumentId(12),
+                DocumentId(11),
+            ],
+            r1.iter().map(|x| x.document_id).collect::<Vec<_>>()
+        );
+
+        let r2 = top_n(search_result.clone(), 10);
+        assert_eq!(r2.len(), 10);
+        assert_eq!(
+            vec![
+                DocumentId(15),
+                DocumentId(14),
+                DocumentId(13),
+                DocumentId(12),
+                DocumentId(11),
+                DocumentId(10),
+                DocumentId(9),
+                DocumentId(8),
+                DocumentId(7),
+                DocumentId(6),
+            ],
+            r2.iter().map(|x| x.document_id).collect::<Vec<_>>()
+        );
     }
 }

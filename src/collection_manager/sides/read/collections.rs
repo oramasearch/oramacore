@@ -430,7 +430,7 @@ impl Deref for CollectionReadLock<'_> {
     fn deref(&self) -> &Self::Target {
         // Safety: the collection contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
-        self.lock.get(&self.id).unwrap()
+        self.lock.get(&self.id).expect("THe colleciton alwaus contains id because we changed it before and we hold a read lock")
     }
 }
 

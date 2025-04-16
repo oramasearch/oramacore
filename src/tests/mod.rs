@@ -1,4 +1,4 @@
-mod search;
+mod hurl_search;
 
 mod all;
 mod delete_collection;
@@ -10,6 +10,10 @@ mod kv_actions;
 mod mem_allocation;
 mod reindex;
 mod string_filter;
+
+mod fulltext_search;
+
+mod string_facets;
 
 mod list_documents;
 

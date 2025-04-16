@@ -24,7 +24,7 @@ impl StringFilterField {
         self.inner.entry(value).or_default().insert(doc_id);
     }
 
-    pub fn filter<'s, 'iter>(&'s self, filter: &String) -> impl Iterator<Item = DocumentId> + 'iter
+    pub fn filter<'s, 'iter>(&'s self, filter: &str) -> impl Iterator<Item = DocumentId> + 'iter
     where
         's: 'iter,
     {
@@ -32,6 +32,13 @@ impl StringFilterField {
             .get(filter)
             .map(|doc_ids| doc_ids.iter().cloned())
             .unwrap_or_default()
+    }
+
+    pub fn get_string_values<'s, 'iter>(&'s self) -> impl Iterator<Item = &'s str> + 'iter
+    where
+        's: 'iter,
+    {
+        self.inner.keys().map(|k| k.as_str())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (String, HashSet<DocumentId>)> + '_ {
