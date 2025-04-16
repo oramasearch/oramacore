@@ -472,6 +472,7 @@ mod tests {
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
         }));
 
         let llm_service = Arc::new(
@@ -560,6 +561,7 @@ mod tests {
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
         }));
         let nlp_service = Arc::new(NLPService::new());
         let llm_service = Arc::new(

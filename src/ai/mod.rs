@@ -1,6 +1,5 @@
 use std::{str::FromStr, time::Duration};
 
-use automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use axum_openapi3::utoipa::ToSchema;
 use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;

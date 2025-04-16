@@ -260,6 +260,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             api_key: None,
             max_connections: 1,
             scheme: Scheme::HTTP,
+            embeddings: None,
             llm: crate::ai::AIServiceLLMConfig {
                 host: "localhost".to_string(),
                 port: 8000,

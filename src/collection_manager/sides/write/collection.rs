@@ -270,6 +270,7 @@ impl CollectionWriter {
             )
             .collect();
 
+        // FieldId(0) is the default embedding field by construction
         let automatically_chosen_properties = match score_fields.get(&FieldId(0)) {
             Some(field) => field.get_automatic_embeddings_selector().await,
             None => None,

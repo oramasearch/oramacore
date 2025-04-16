@@ -1,11 +1,10 @@
 use crate::types::InteractionLLMConfig;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::llms::LLMService;
@@ -22,7 +21,131 @@ pub struct ChosenProperties {
 
 impl ChosenProperties {
     pub fn format(&self, document: &JSONDocument) -> String {
-        unimplemented!()
+        let mut formatted_parts = Vec::new();
+
+        // Process each property in order specified by properties array
+        for property in &self.properties {
+            if let Some(value) = document.get(property) {
+                // Get the display name (either from rename map or original key)
+                let raw_display_name = self.rename.get(property).unwrap_or(property);
+
+                // Convert the key name to human-readable format
+                let display_name = Self::humanize_key(raw_display_name);
+
+                let formatted_value = match value {
+                    Value::String(s) => {
+                        if s.is_empty() {
+                            continue; // Skip empty strings
+                        }
+
+                        if self.include_keys.contains(property) {
+                            format!("{} {}", display_name, s)
+                        } else {
+                            s.clone()
+                        }
+                    }
+                    Value::Number(n) => {
+                        if self.include_keys.contains(property) {
+                            format!("{} {}", display_name, n)
+                        } else {
+                            n.to_string()
+                        }
+                    }
+                    Value::Array(arr) => {
+                        if arr.is_empty() {
+                            continue; // Skip empty arrays
+                        }
+
+                        // Format array elements as strings
+                        let values: Vec<String> = arr
+                            .iter()
+                            .filter_map(|v| match v {
+                                Value::String(s) => Some(s.clone()),
+                                Value::Number(n) => Some(n.to_string()),
+                                _ => None, // Skip other types in arrays
+                            })
+                            .collect();
+
+                        if values.is_empty() {
+                            continue;
+                        }
+
+                        if self.include_keys.contains(property) {
+                            format!("{} {}", display_name, values.join(", "))
+                        } else {
+                            values.join(", ")
+                        }
+                    }
+                    // Skip other types
+                    _ => continue,
+                };
+
+                formatted_parts.push(formatted_value);
+            }
+        }
+
+        println!("\n\n\n");
+        dbg!(&formatted_parts.join(". "));
+        println!("\n\n\n");
+
+        // Join all parts with periods and spaces
+        formatted_parts.join(". ")
+    }
+
+    fn humanize_key(key: &str) -> String {
+        if key.is_empty() {
+            return String::new();
+        }
+
+        // First, handle snake_case and kebab-case by replacing separators with spaces
+        let with_spaces = key.replace('_', " ").replace('-', " ");
+
+        // Buffer to build our humanized string
+        let mut result = String::with_capacity(with_spaces.len());
+
+        // Track if we need to insert a space
+        let mut prev_was_lower = false;
+        let mut prev_was_upper = false;
+
+        for (i, c) in with_spaces.chars().enumerate() {
+            if c == ' ' {
+                // Keep existing spaces
+                result.push(' ');
+                prev_was_lower = false;
+                prev_was_upper = false;
+                continue;
+            }
+
+            let is_upper = c.is_uppercase();
+
+            if i > 0 {
+                // Add space when transitioning from lowercase to uppercase (camelCase)
+                // Or when going from uppercase to uppercase followed by lowercase (ABCdef)
+                if (prev_was_lower && is_upper)
+                    || (prev_was_upper
+                        && is_upper
+                        && with_spaces
+                            .chars()
+                            .nth(i + 1)
+                            .map_or(false, |next| next.is_lowercase()))
+                {
+                    result.push(' ');
+                }
+            }
+
+            // For the first character or after a space, keep the case as is
+            // For others, preserve the original case
+            if i == 0 || with_spaces.chars().nth(i - 1) == Some(' ') {
+                result.extend(c.to_uppercase());
+            } else {
+                result.push(c);
+            }
+
+            prev_was_lower = c.is_lowercase();
+            prev_was_upper = c.is_uppercase();
+        }
+
+        result
     }
 }
 
@@ -32,6 +155,7 @@ pub struct ChosenPropertiesError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ChosenPropertiesResult {
     Properties(ChosenProperties),
     Error(ChosenPropertiesError),
@@ -61,221 +185,16 @@ impl AutomaticEmbeddingsSelector {
                 variables,
                 self.llm_config.clone(), // @todo: avoid this cloning when possible
             )
-            .await?;
+            .await
+            .with_context(|| "Unable to determine which properties to use for embeddings")?;
+
+        println!("\n\n\n");
+        dbg!(&result);
+        println!("\n\n\n");
 
         match serde_json::from_str(&result)? {
             ChosenPropertiesResult::Properties(properties) => Ok(properties),
             ChosenPropertiesResult::Error(error) => Err(anyhow::anyhow!(error.error)),
-        }
-    }
-
-    fn get_key(&self, document: &JSONDocument) -> String {
-        let all_keys = self.extract_keys_with_dot_notation(document, "");
-
-        let mut keys: Vec<String> = all_keys.into_iter().collect();
-
-        keys.sort();
-
-        if keys.is_empty() {
-            return String::new();
-        }
-
-        keys.join(":")
-    }
-
-    fn extract_keys_with_dot_notation(&self, obj: &JSONDocument, prefix: &str) -> HashSet<String> {
-        let mut keys = HashSet::new();
-
-        for (key, value) in obj.iter() {
-            let current_key = if prefix.is_empty() {
-                key.clone()
-            } else {
-                format!("{}.{}", prefix, key)
-            };
-
-            keys.insert(current_key.clone());
-
-            if let Value::Object(nested_obj) = value {
-                keys.extend(self.extract_keys_with_dot_notation(nested_obj, &current_key));
-            }
-        }
-
-        keys
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{collection_manager::sides::generic_kv::KVConfig, tests::utils::generate_new_path};
-
-    use super::*;
-    use serde_json::json;
-
-    fn create_selector() -> AutomaticEmbeddingsSelector {
-        let llm_service = Arc::new(
-            LLMService::try_new(
-                crate::ai::AIServiceLLMConfig {
-                    host: "localhost".to_string(),
-                    port: 8000,
-                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-                },
-                None,
-            )
-            .unwrap(),
-        );
-
-        let kv_service = Arc::new(
-            KV::try_load(KVConfig {
-                data_dir: generate_new_path(),
-                sender: None,
-            })
-            .unwrap(),
-        );
-
-        AutomaticEmbeddingsSelector { llm_service }
-    }
-
-    #[test]
-    fn test_different_order_nested_objects_produce_same_key() {
-        let selector = create_selector();
-        let collection_id = CollectionId::try_new("test_collection".to_string()).unwrap();
-
-        // Create first document with a specific order of nested keys
-        let doc1 = json!({
-            "user": {
-                "name": "John",
-                "address": {
-                    "city": "New York",
-                    "zip": "10001"
-                }
-            },
-            "active": true
-        });
-
-        // Create second document with the same structure but different order of keys
-        let doc2 = json!({
-            "active": true,
-            "user": {
-                "address": {
-                    "zip": "10001",
-                    "city": "New York"
-                },
-                "name": "John"
-            }
-        });
-
-        // Get keys for each document individually
-        let key1 = selector.get_key(collection_id, vec![doc1.clone()]);
-        let key2 = selector.get_key(collection_id, vec![doc2.clone()]);
-
-        // Test that the keys are identical
-        assert_eq!(key1, key2);
-
-        // Verify the expected key format
-        let expected_keys = format!(
-            "{}:{}:{}:{}:{}:{}:{}",
-            collection_id,
-            "active",
-            "user",
-            "user.address",
-            "user.address.city",
-            "user.address.zip",
-            "user.name"
-        );
-        assert_eq!(key1, expected_keys);
-    }
-
-    #[test]
-    fn test_deeply_nested_objects_with_different_order() {
-        let selector = create_selector();
-        let collection_id = CollectionId::try_new("nested_collection".to_string()).unwrap();
-
-        // First document with deep nesting
-        let doc1 = json!({
-            "metadata": {
-                "created_at": "2023-01-01",
-                "config": {
-                    "settings": {
-                        "enabled": true,
-                        "options": {
-                            "color": "blue",
-                            "size": "medium"
-                        }
-                    },
-                    "version": "1.0"
-                }
-            },
-            "data": {
-                "items": [1, 2, 3]
-            }
-        });
-
-        // Second document with same structure but different order
-        let doc2 = json!({
-            "data": {
-                "items": [1, 2, 3]
-            },
-            "metadata": {
-                "config": {
-                    "version": "1.0",
-                    "settings": {
-                        "options": {
-                            "size": "medium",
-                            "color": "blue"
-                        },
-                        "enabled": true
-                    }
-                },
-                "created_at": "2023-01-01"
-            }
-        });
-
-        // Get keys for each document
-        let key1 = selector.get_key(collection_id, vec![doc1]);
-        let key2 = selector.get_key(collection_id, vec![doc2]);
-
-        // Test that the keys are identical
-        assert_eq!(key1, key2);
-    }
-
-    #[test]
-    fn test_mixed_documents_produce_combined_key() {
-        let selector = create_selector();
-        let collection_id = CollectionId::try_new("mixed_collection".to_string()).unwrap();
-
-        // Create documents with different structures
-        let doc1 = json!({
-            "id": 1,
-            "name": "Document 1"
-        });
-
-        let doc2 = json!({
-            "id": 2,
-            "attributes": {
-                "tags": ["important", "urgent"]
-            }
-        });
-
-        // Get keys for individual documents
-        let key1 = selector.get_key(collection_id, vec![doc1.clone()]);
-        let key2 = selector.get_key(collection_id, vec![doc2.clone()]);
-
-        // Get key for combined documents
-        let combined_key = selector.get_key(collection_id, vec![doc1, doc2]);
-
-        // Verify that combined key contains all keys from both documents
-        assert_ne!(key1, combined_key);
-        assert_ne!(key2, combined_key);
-
-        // Check if combined key has all expected keys
-        let expected_keys = ["attributes", "attributes.tags", "id", "name"];
-
-        for key in expected_keys {
-            assert!(
-                combined_key.contains(key),
-                "Combined key should contain '{}'",
-                key
-            );
         }
     }
 }
