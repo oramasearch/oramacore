@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use crate::{
-    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
+    ai::{
+        automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
+        OramaModel,
+    },
     collection_manager::sides::{
         hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
         CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
@@ -664,7 +667,7 @@ pub struct EmbeddingField {
     hooks_runtime: Arc<HooksRuntime>,
 
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-    embeddings_selector_cache: RwLock<HashMap<String, String>>,
+    embeddings_selector_cache: RwLock<HashMap<String, ChosenProperties>>,
 
     chunker: Chunker,
 }
@@ -775,17 +778,34 @@ impl EmbeddingField {
                 }
             }
             DocumentFields::AllStringProperties => {
-                let mut input = String::new();
-                for (k, value) in doc.iter() {
-                    // Don't include the id in the input
-                    if k == "id" {
-                        continue;
-                    }
-                    if let Some(value) = value.as_str() {
-                        input.push_str(value);
-                    }
+                let cache_read = self.embeddings_selector_cache.read().await;
+                let mut cache_key: Vec<String> = Vec::new();
+
+                for (key, _value) in doc.iter() {
+                    cache_key.push(key.to_string());
                 }
-                input
+
+                cache_key.sort();
+
+                if let Some(cached_value) = cache_read.get(&cache_key.join(":")) {
+                    cached_value.format(doc.get_inner())
+                } else {
+                    drop(cache_read);
+                    let mut cache_write = self.embeddings_selector_cache.write().await;
+                    let cache_key = cache_key.join(":");
+
+                    let chosen_properties = self
+                        .automatic_embeddings_selector
+                        .choose_properties(doc.get_inner())
+                        .await
+                        .context("Unable to choose embedding properties")?;
+
+                    let embeddable_value = chosen_properties.format(doc.get_inner());
+
+                    cache_write.insert(cache_key.clone(), chosen_properties.clone());
+
+                    embeddable_value
+                }
             }
         };
 

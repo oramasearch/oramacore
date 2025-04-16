@@ -18,6 +18,12 @@ pub struct ChosenProperties {
     pub rename: HashMap<String, String>,
 }
 
+impl ChosenProperties {
+    pub fn format(&self, document: &JSONDocument) -> String {
+        unimplemented!()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChosenPropertiesError {
     pub error: String,

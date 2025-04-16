@@ -323,6 +323,10 @@ impl FlattenDocument {
         self.0
     }
 
+    pub fn get_inner(&self) -> &Map<String, Value> {
+        &self.0
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.0.iter()
     }
