@@ -13,7 +13,7 @@ use crate::{
         segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, ReadSide,
     },
     types::{
-        ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
+        ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit, Offset,
         Properties, Role, SearchMode, SearchParams, SearchResult,
     },
 };
@@ -386,6 +386,7 @@ impl PartyPlanner {
                 SearchParams {
                     mode: SearchMode::Auto(AutoMode { term: input }),
                     limit: Limit(5),
+                    offset: Offset(0),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
                     properties: Properties::Star,

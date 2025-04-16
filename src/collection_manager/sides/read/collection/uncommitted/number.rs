@@ -1,3 +1,4 @@
+use core::f32;
 use std::{
     collections::{BTreeMap, HashSet},
     ops::Bound,
@@ -46,17 +47,25 @@ impl NumberField {
     pub fn get_stats(&self) -> NumberUncommittedFieldStats {
         if self.inner.is_empty() {
             return NumberUncommittedFieldStats {
-                min: Number::I32(0),
-                max: Number::I32(0),
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
                 count: 0,
             };
         }
-        let min = *self.inner.first_key_value().unwrap().0;
-        let max = *self.inner.last_key_value().unwrap().0;
+
+        let (Some((min, _)), Some((max, _))) =
+            (self.inner.first_key_value(), self.inner.last_key_value())
+        else {
+            return NumberUncommittedFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+                count: 0,
+            };
+        };
 
         NumberUncommittedFieldStats {
-            min,
-            max,
+            min: *min,
+            max: *max,
             count: self.len(),
         }
     }

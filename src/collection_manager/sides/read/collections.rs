@@ -350,14 +350,22 @@ impl CollectionsReader {
         drop(m);
 
         if let Some(notifier) = &self.notifier {
-            notifier
+            if let Err(error) = notifier
                 .notify_collection_substitution(
                     target_collection_id,
                     source_collection_id,
                     reference,
                 )
                 .await
-                .context("Cannot notify collection substitution")?;
+                .context("Cannot notify collection substitution")
+            {
+                error!(
+                    error = ?error,
+                    target_collection_id=?target_collection_id,
+                    source_collection_id=?source_collection_id,
+                    "Cannot notify collection substitution. Skip it"
+                );
+            };
         }
 
         info!(
@@ -422,7 +430,7 @@ impl Deref for CollectionReadLock<'_> {
     fn deref(&self) -> &Self::Target {
         // Safety: the collection contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
-        self.lock.get(&self.id).unwrap()
+        self.lock.get(&self.id).expect("THe colleciton alwaus contains id because we changed it before and we hold a read lock")
     }
 }
 

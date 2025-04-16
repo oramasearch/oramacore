@@ -4,11 +4,11 @@ use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::system_prompts::SystemPrompt;
 use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
-use crate::types::CollectionId;
 use crate::types::{
     ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Properties,
     Role, SearchMode, SearchParams,
 };
+use crate::types::{CollectionId, Offset};
 use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -107,6 +107,23 @@ async fn planned_answer_v1(
                 serde_json::to_string(&SseMessage::Acknowledge {
                     message: "Acknowledged".to_string(),
                 })
+                .unwrap(),
+            )))
+            .await;
+
+        let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = read_side.get_default_llm_config();
+
+            InteractionLLMConfig { model, provider }
+        });
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serialize_response(
+                    "SELECTED_LLM",
+                    &serde_json::to_string(&llm_config).unwrap(),
+                    true,
+                )
                 .unwrap(),
             )))
             .await;
@@ -316,6 +333,23 @@ async fn answer_v1(
     tokio::spawn(async move {
         let llm_service = read_side.clone().get_llm_service();
 
+        let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = read_side.get_default_llm_config();
+
+            InteractionLLMConfig { model, provider }
+        });
+
+        let _ = tx
+            .send(Ok(Event::default().data(
+                serialize_response(
+                    "SELECTED_LLM",
+                    &serde_json::to_string(&llm_config).unwrap(),
+                    true,
+                )
+                .unwrap(),
+            )))
+            .await;
+
         let _ = tx
             .send(Ok(Event::default().data(
                 serde_json::to_string(&SseMessage::Acknowledge {
@@ -427,6 +461,7 @@ async fn answer_v1(
                         term: optimized_query,
                     }),
                     limit: Limit(5),
+                    offset: Offset(0),
                     where_filter: HashMap::new(),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
