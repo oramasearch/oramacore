@@ -65,9 +65,10 @@ impl AutomaticEmbeddingsSelector {
             )
             .await?;
 
-        let result: ChosenPropertiesResult = serde_json::from_str(&result)?;
-
-        match &result {}
+        match serde_json::from_str(&result)? {
+            ChosenPropertiesResult::Properties(properties) => Ok(properties),
+            ChosenPropertiesResult::Error(error) => Err(anyhow::anyhow!(error.error)),
+        }
     }
 
     async fn key_exists(&self, key: &str) -> bool {
