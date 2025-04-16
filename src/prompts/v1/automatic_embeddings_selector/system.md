@@ -9,8 +9,8 @@ generating meaningful, context-rich text embeddings**.
 
 ## Instructions
 
-You will receive an array of documents in JSON format under the section
-(`## Documents`).\
+You will receive a single document in JSON format under the section
+(`## Document`).\
 Your task is to analyze the structure and determine which fields should be
 selected for generating embeddings, following these rules:
 
@@ -56,20 +56,12 @@ formatting, or surrounding text.
 ### Input
 
 ```json
-[
-  {
-    "id": "123",
-    "title": "The Lord of the Rings",
-    "content": "The Lord of the Rings is a trilogy of epic fantasy adventure films directed by Peter Jackson...",
-    "published": 2001
-  },
-  {
-    "id": "456",
-    "title": "The Metamorphosis",
-    "content": "The Metamorphosis is a novella by Franz Kafka published in 1915...",
-    "published": 1915
-  }
-]
+{
+  "id": "456",
+  "title": "The Metamorphosis",
+  "content": "The Metamorphosis is a novella by Franz Kafka published in 1915...",
+  "published": 1915
+}
 ```
 
 ### Output

@@ -1,6 +1,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use ai::{gpu::LocalGPUManager, llms::LLMService, AIService, AIServiceConfig};
+use ai::{
+    automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
+    llms::LLMService, AIService, AIServiceConfig,
+};
 use anyhow::{Context, Result};
 use collection_manager::sides::{
     channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
@@ -156,6 +159,14 @@ pub async fn build_orama(
     #[cfg(feature = "writer")]
     let write_side = {
         info!("Building write_side");
+        let automatic_embeddings_selector = Arc::new(AutomaticEmbeddingsSelector::new(
+            llm_service.clone(),
+            config
+                .ai_server
+                .embeddings
+                .and_then(|e| e.automatic_embeddings_selector),
+        ));
+
         let sender_creator = sender_creator.expect("Sender is not created");
 
         let write_side = WriteSide::try_load(
@@ -165,6 +176,7 @@ pub async fn build_orama(
             nlp_service.clone(),
             llm_service.clone(),
             local_gpu_manager.clone(),
+            automatic_embeddings_selector,
         )
         .await
         .context("Cannot create write side")?;

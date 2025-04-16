@@ -14,6 +14,7 @@ use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::{
+    ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector,
     collection_manager::sides::{
         hooks::{HookName, HooksRuntime},
         CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
@@ -86,6 +87,7 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         embedding_sender: Sender<EmbeddingCalculationRequest>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
@@ -204,6 +206,7 @@ impl CollectionWriter {
                         id,
                         field_id,
                         field_name.clone(),
+                        automatic_embeddings_selector.clone(),
                     )
                 }
                 SerializedFieldIndexer::Number => {
@@ -314,6 +317,7 @@ impl CollectionWriter {
         doc: Document,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<()> {
         // Those `?` is never triggered, but it's here to make the compiler happy:
         // The "id" property is always present in the document.
@@ -336,7 +340,12 @@ impl CollectionWriter {
         drop(doc_id_storage);
 
         let fields_to_index = self
-            .get_fields_to_index(doc.clone(), sender.clone(), hooks_runtime)
+            .get_fields_to_index(
+                doc.clone(),
+                sender.clone(),
+                hooks_runtime,
+                automatic_embeddings_selector,
+            )
             .await
             .context("Cannot get fields to index")?;
         trace!("Fields to index: {:?}", fields_to_index);
@@ -422,6 +431,7 @@ impl CollectionWriter {
         typed_fields: HashMap<String, TypedField>,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<()> {
         for (field_name, field_type) in typed_fields {
             debug!(
@@ -453,6 +463,7 @@ impl CollectionWriter {
                 self.embedding_sender.clone(),
                 sender.clone(),
                 hooks_runtime.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .await
             .context("Cannot create field")?;
@@ -461,7 +472,13 @@ impl CollectionWriter {
         Ok(())
     }
 
-    #[instrument(skip(self, sender, embedding_sender, hooks_runtime))]
+    #[instrument(skip(
+        self,
+        sender,
+        embedding_sender,
+        hooks_runtime,
+        automatic_embeddings_selector
+    ))]
     async fn create_field(
         &self,
         field_name: String,
@@ -469,6 +486,7 @@ impl CollectionWriter {
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Vec<FieldId>> {
         // We don't index the "id" field at all.
         if field_name == "id" {
@@ -532,6 +550,7 @@ impl CollectionWriter {
                         self.id,
                         field_id,
                         field_name.clone(),
+                        automatic_embeddings_selector,
                     ),
                 );
                 send(
@@ -735,12 +754,13 @@ impl CollectionWriter {
         Ok(added_fields)
     }
 
-    #[instrument(skip(self, doc, sender, hooks_runtime))]
+    #[instrument(skip(self, doc, sender, hooks_runtime, automatic_embeddings_selector))]
     async fn get_fields_to_index(
         &self,
         doc: Document,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Vec<FieldId>> {
         let flatten = doc.clone().into_flatten();
         let schema = flatten.get_field_schema();
@@ -786,6 +806,7 @@ impl CollectionWriter {
                         self.embedding_sender.clone(),
                         sender.clone(),
                         hooks_runtime.clone(),
+                        automatic_embeddings_selector.clone(),
                     )
                     .await
                     .context("Cannot create field")?;

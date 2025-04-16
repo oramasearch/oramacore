@@ -7,9 +7,10 @@ use std::{
 use anyhow::{Context, Result};
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use crate::{
-    ai::OramaModel,
+    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
         hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
         CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
@@ -190,6 +191,7 @@ impl CollectionScoreField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         Self::Embedding(EmbeddingField::new(
             model,
@@ -199,6 +201,7 @@ impl CollectionScoreField {
             collection_id,
             field_id,
             field_name,
+            automatic_embeddings_selector,
         ))
     }
 
@@ -660,6 +663,9 @@ pub struct EmbeddingField {
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     hooks_runtime: Arc<HooksRuntime>,
 
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+    embeddings_selector_cache: RwLock<HashMap<String, String>>,
+
     chunker: Chunker,
 }
 
@@ -705,7 +711,10 @@ impl EmbeddingField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
+        let embeddings_selector_cache = RwLock::new(HashMap::new());
+
         let max_tokens = model.senquence_length();
         let overlap = model.overlap();
 
@@ -724,11 +733,11 @@ impl EmbeddingField {
             field_id,
             field_name,
             chunker,
+            embeddings_selector_cache,
+            automatic_embeddings_selector,
         }
     }
-}
 
-impl EmbeddingField {
     async fn get_write_operations(
         &self,
         doc_id: DocumentId,

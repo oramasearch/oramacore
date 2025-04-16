@@ -1,3 +1,3 @@
-## Documents
+## Document
 
-{documents}
+{document}

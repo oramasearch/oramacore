@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
+use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
@@ -36,6 +37,7 @@ impl CollectionsWriter {
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
@@ -74,6 +76,7 @@ impl CollectionsWriter {
                 hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .await?;
             collections.insert(collection_id, collection);
@@ -105,6 +108,7 @@ impl CollectionsWriter {
         collection_option: CreateCollection,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<()> {
         let CreateCollection {
             id,
@@ -174,7 +178,12 @@ impl CollectionsWriter {
             .await
             .context("Cannot send create collection")?;
         collection
-            .register_fields(typed_fields, sender.clone(), hooks_runtime)
+            .register_fields(
+                typed_fields,
+                sender.clone(),
+                hooks_runtime,
+                automatic_embeddings_selector,
+            )
             .await
             .context("Cannot register fields")?;
 

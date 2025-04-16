@@ -1,12 +1,14 @@
+use crate::types::InteractionLLMConfig;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::{collection_manager::sides::generic_kv::KV, types::CollectionId};
-
 use super::llms::LLMService;
+
+pub type JSONDocument = Map<String, Value>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChosenProperties {
@@ -29,39 +31,27 @@ pub enum ChosenPropertiesResult {
 
 pub struct AutomaticEmbeddingsSelector {
     pub llm_service: Arc<LLMService>,
-    pub kv_service: Arc<KV>,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 impl AutomaticEmbeddingsSelector {
-    pub fn new(llm_service: Arc<LLMService>, kv_service: Arc<KV>) -> Self {
+    pub fn new(llm_service: Arc<LLMService>, llm_config: Option<InteractionLLMConfig>) -> Self {
         Self {
             llm_service,
-            kv_service,
+            llm_config,
         }
     }
 
-    async fn get_properties(&self, collection_id: CollectionId, documents: Vec<Value>) {
-        let key = self.get_key(collection_id.clone(), documents.clone());
-
-        if self.key_exists(&key).await {
-            return; // @todo: return keys here
-        }
-    }
-
-    async fn choose_properties(
-        &self,
-        documents: Vec<Value>,
-        llm_config: Option<crate::types::InteractionLLMConfig>,
-    ) -> Result<ChosenProperties> {
-        let documents_as_json = serde_json::to_string(&documents)?;
-        let variables = vec![("documents".to_string(), documents_as_json)];
+    pub async fn choose_properties(&self, document: &JSONDocument) -> Result<ChosenProperties> {
+        let documents_as_json = serde_json::to_string(document)?;
+        let variables = vec![("document".to_string(), documents_as_json)];
 
         let result = self
             .llm_service
             .run_known_prompt(
                 super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
                 variables,
-                llm_config,
+                self.llm_config.clone(), // @todo: avoid this cloning when possible
             )
             .await?;
 
@@ -71,19 +61,8 @@ impl AutomaticEmbeddingsSelector {
         }
     }
 
-    async fn key_exists(&self, key: &str) -> bool {
-        self.kv_service.get::<String>(key).await.is_some()
-    }
-
-    fn get_key(&self, collection_id: CollectionId, documents: Vec<Value>) -> String {
-        use std::collections::HashSet;
-        let mut all_keys = HashSet::new();
-
-        for doc in documents.iter() {
-            if let Value::Object(map) = doc {
-                self.extract_keys_with_dot_notation(map, "", &mut all_keys);
-            }
-        }
+    fn get_key(&self, document: &JSONDocument) -> String {
+        let all_keys = self.extract_keys_with_dot_notation(document, "");
 
         let mut keys: Vec<String> = all_keys.into_iter().collect();
 
@@ -93,15 +72,12 @@ impl AutomaticEmbeddingsSelector {
             return String::new();
         }
 
-        format!("{}:{}", collection_id, keys.join(":"))
+        keys.join(":")
     }
 
-    fn extract_keys_with_dot_notation(
-        &self,
-        obj: &serde_json::Map<String, Value>,
-        prefix: &str,
-        keys: &mut HashSet<String>,
-    ) {
+    fn extract_keys_with_dot_notation(&self, obj: &JSONDocument, prefix: &str) -> HashSet<String> {
+        let mut keys = HashSet::new();
+
         for (key, value) in obj.iter() {
             let current_key = if prefix.is_empty() {
                 key.clone()
@@ -112,9 +88,11 @@ impl AutomaticEmbeddingsSelector {
             keys.insert(current_key.clone());
 
             if let Value::Object(nested_obj) = value {
-                self.extract_keys_with_dot_notation(nested_obj, &current_key, keys);
+                keys.extend(self.extract_keys_with_dot_notation(nested_obj, &current_key));
             }
         }
+
+        keys
     }
 }
 
@@ -182,8 +160,8 @@ mod tests {
         });
 
         // Get keys for each document individually
-        let key1 = selector.get_key(collection_id.clone(), vec![doc1.clone()]);
-        let key2 = selector.get_key(collection_id.clone(), vec![doc2.clone()]);
+        let key1 = selector.get_key(collection_id, vec![doc1.clone()]);
+        let key2 = selector.get_key(collection_id, vec![doc2.clone()]);
 
         // Test that the keys are identical
         assert_eq!(key1, key2);
@@ -248,8 +226,8 @@ mod tests {
         });
 
         // Get keys for each document
-        let key1 = selector.get_key(collection_id.clone(), vec![doc1]);
-        let key2 = selector.get_key(collection_id.clone(), vec![doc2]);
+        let key1 = selector.get_key(collection_id, vec![doc1]);
+        let key2 = selector.get_key(collection_id, vec![doc2]);
 
         // Test that the keys are identical
         assert_eq!(key1, key2);
@@ -274,11 +252,11 @@ mod tests {
         });
 
         // Get keys for individual documents
-        let key1 = selector.get_key(collection_id.clone(), vec![doc1.clone()]);
-        let key2 = selector.get_key(collection_id.clone(), vec![doc2.clone()]);
+        let key1 = selector.get_key(collection_id, vec![doc1.clone()]);
+        let key2 = selector.get_key(collection_id, vec![doc2.clone()]);
 
         // Get key for combined documents
-        let combined_key = selector.get_key(collection_id.clone(), vec![doc1, doc2]);
+        let combined_key = selector.get_key(collection_id, vec![doc1, doc2]);
 
         // Verify that combined key contains all keys from both documents
         assert_ne!(key1, combined_key);

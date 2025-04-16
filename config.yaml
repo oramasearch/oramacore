@@ -87,6 +87,9 @@ ai_server:
             - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
+        automatic_embeddings_selector:
+            model: gpt-4o
+            provider: openai
 
     llm:
         port: 8000
