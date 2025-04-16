@@ -270,6 +270,11 @@ impl CollectionWriter {
             )
             .collect();
 
+        let automatically_chosen_properties = match score_fields.get(&FieldId(0)) {
+            Some(field) => field.get_automatic_embeddings_selector().await,
+            None => None,
+        };
+
         CollectionDTO {
             id: self.id,
             description: self.description.clone(),
@@ -277,6 +282,7 @@ impl CollectionWriter {
                 .collection_document_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             fields,
+            automatically_chosen_properties,
         }
     }
 

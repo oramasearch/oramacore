@@ -1,5 +1,7 @@
 use crate::types::InteractionLLMConfig;
 use anyhow::Result;
+use axum_openapi3::utoipa;
+use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -10,7 +12,7 @@ use super::llms::LLMService;
 
 pub type JSONDocument = Map<String, Value>;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, ToSchema)]
 pub struct ChosenProperties {
     pub properties: Vec<String>,
     #[serde(rename = "includeKeys")]
@@ -130,10 +132,7 @@ mod tests {
             .unwrap(),
         );
 
-        AutomaticEmbeddingsSelector {
-            llm_service,
-            kv_service,
-        }
+        AutomaticEmbeddingsSelector { llm_service }
     }
 
     #[test]

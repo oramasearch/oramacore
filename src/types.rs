@@ -1,3 +1,4 @@
+use crate::ai::automatic_embeddings_selector::ChosenProperties;
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::{
@@ -716,6 +717,7 @@ pub struct CollectionDTO {
     pub document_count: u64,
     #[schema(inline)]
     pub fields: HashMap<String, ValueType>,
+    pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone)]

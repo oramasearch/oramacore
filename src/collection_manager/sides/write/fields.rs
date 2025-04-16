@@ -208,6 +208,17 @@ impl CollectionScoreField {
         ))
     }
 
+    pub async fn get_automatic_embeddings_selector(
+        &self,
+    ) -> Option<HashMap<String, ChosenProperties>> {
+        match self {
+            CollectionScoreField::String(_) => None,
+            CollectionScoreField::Embedding(f) => {
+                Some(f.embeddings_selector_cache.read().await.clone())
+            }
+        }
+    }
+
     pub fn set_embedding_hook(&mut self, name: HookName) {
         if let Self::Embedding(f) = self {
             f.document_fields = DocumentFields::Hook(name)
