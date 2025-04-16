@@ -84,10 +84,6 @@ impl ChosenProperties {
             }
         }
 
-        println!("\n\n\n");
-        dbg!(&formatted_parts.join(". "));
-        println!("\n\n\n");
-
         // Join all parts with periods and spaces
         formatted_parts.join(". ")
     }
@@ -187,10 +183,6 @@ impl AutomaticEmbeddingsSelector {
             )
             .await
             .with_context(|| "Unable to determine which properties to use for embeddings")?;
-
-        println!("\n\n\n");
-        dbg!(&result);
-        println!("\n\n\n");
 
         match serde_json::from_str(&result)? {
             ChosenPropertiesResult::Properties(properties) => Ok(properties),
