@@ -312,12 +312,13 @@ impl<
         Ok(count)
     }
 
-    pub fn min_max(&self) -> Result<(Key, Key)> {
-        let min = self.pages.first().expect("The page is empty");
+    pub fn min_max(&self) -> Result<Option<(Key, Key)>> {
+        let (Some(min), Some(max)) = (self.pages.first(), self.pages.last()) else {
+            return Ok(None);
+        };
         let min = min.min_item_key()?;
-        let max = self.pages.last().expect("The page is empty");
         let max = max.max_item_key()?;
-        Ok((min, max))
+        Ok(Some((min, max)))
     }
 
     pub fn get_items(

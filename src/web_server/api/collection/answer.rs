@@ -4,11 +4,11 @@ use crate::collection_manager::sides::segments::Segment;
 use crate::collection_manager::sides::system_prompts::SystemPrompt;
 use crate::collection_manager::sides::triggers::Trigger;
 use crate::collection_manager::sides::ReadSide;
-use crate::types::CollectionId;
 use crate::types::{
     ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Properties,
     Role, SearchMode, SearchParams,
 };
+use crate::types::{CollectionId, Offset};
 use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -461,6 +461,7 @@ async fn answer_v1(
                         term: optimized_query,
                     }),
                     limit: Limit(5),
+                    offset: Offset(0),
                     where_filter: HashMap::new(),
                     boost: HashMap::new(),
                     facets: HashMap::new(),

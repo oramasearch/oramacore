@@ -1,3 +1,4 @@
+use core::f32;
 use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
@@ -36,10 +37,17 @@ impl NumberField {
     }
 
     pub fn get_stats(&self) -> Result<NumberCommittedFieldStats> {
-        let (min, max) = self
+        let s = self
             .inner
             .min_max()
             .context("Cannot get min madn max key for number index")?;
+        let Some((min, max)) = s else {
+            return Ok(NumberCommittedFieldStats {
+                min: Number::F32(f32::INFINITY),
+                max: Number::F32(f32::NEG_INFINITY),
+            });
+        };
+
         Ok(NumberCommittedFieldStats {
             min: min.0,
             max: max.0,

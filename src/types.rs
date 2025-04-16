@@ -718,9 +718,12 @@ pub struct CollectionDTO {
 pub struct Limit(#[schema(inline)] pub usize);
 impl Default for Limit {
     fn default() -> Self {
-        Limit(10)
+        Self(10)
     }
 }
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone, Default)]
+pub struct Offset(#[schema(inline)] pub usize);
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 #[serde(untagged)]
@@ -752,6 +755,34 @@ pub struct BoolFacetDefinition {
     pub r#false: bool,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct StringFacetDefinition;
+impl<'de> Deserialize<'de> for StringFacetDefinition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct StringFacetDefinitionVisitor;
+
+        impl<'de> Visitor<'de> for StringFacetDefinitionVisitor {
+            type Value = StringFacetDefinition;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a string facet definition")
+            }
+
+            fn visit_map<V>(self, _visitor: V) -> Result<Self::Value, V::Error>
+            where
+                V: de::MapAccess<'de>,
+            {
+                Ok(StringFacetDefinition)
+            }
+        }
+
+        deserializer.deserialize_any(StringFacetDefinitionVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 
 pub enum FacetDefinition {
@@ -759,6 +790,8 @@ pub enum FacetDefinition {
     Number(#[schema(inline)] NumberFacetDefinition),
     #[serde(untagged)]
     Bool(#[schema(inline)] BoolFacetDefinition),
+    #[serde(untagged)]
+    String(#[schema(inline)] StringFacetDefinition),
 }
 
 #[derive(Debug, Clone, ToSchema)]
@@ -984,6 +1017,9 @@ pub struct SearchParams {
     #[serde(default)]
     #[schema(inline)]
     pub limit: Limit,
+    #[serde(default)]
+    #[schema(inline)]
+    pub offset: Offset,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
     #[serde(default, deserialize_with = "deserialize_properties")]
