@@ -221,7 +221,7 @@ impl UncommittedCollection {
     pub fn calculate_string_filter<'s, 'iter>(
         &'s self,
         field_id: FieldId,
-        filter: &String,
+        filter: &str,
     ) -> Result<Option<impl Iterator<Item = DocumentId> + 'iter>>
     where
         's: 'iter,
@@ -248,6 +248,21 @@ impl UncommittedCollection {
         };
 
         Ok(Some(bool_index.filter(value)))
+    }
+
+    pub fn get_string_values<'s, 'iter>(
+        &'s self,
+        field_id: FieldId,
+    ) -> Result<Option<impl Iterator<Item = &'s str> + 'iter>>
+    where
+        's: 'iter,
+    {
+        let string_filter_index = match self.string_filter_index.get(&field_id) {
+            Some(index) => index,
+            None => return Ok(None),
+        };
+
+        Ok(Some(string_filter_index.get_string_values()))
     }
 
     pub fn insert(

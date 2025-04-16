@@ -1477,6 +1477,52 @@ impl CollectionReader {
                         },
                     );
                 }
+                FacetDefinition::String(_) => {
+                    let mut values = HashMap::new();
+
+                    let committed = self.committed_collection.read().await;
+                    let uncommitted = self.uncommitted_collection.read().await;
+
+                    let mut all_values = HashSet::new();
+                    if let Some(values) = committed.get_string_values(field_id)? {
+                        all_values.extend(values);
+                    }
+                    if let Some(values) = uncommitted.get_string_values(field_id)? {
+                        all_values.extend(values);
+                    }
+
+                    for filter in all_values {
+                        let committed_output =
+                            committed.calculate_string_filter(field_id, filter)?;
+                        let uncommitted_output =
+                            uncommitted.calculate_string_filter(field_id, filter)?;
+
+                        let mut facets = HashSet::new();
+                        if let Some(committed_output) = committed_output {
+                            facets.extend(
+                                committed_output
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect::<HashSet<_>>(),
+                            );
+                        }
+                        if let Some(uncommitted_output) = uncommitted_output {
+                            facets.extend(
+                                uncommitted_output
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect::<HashSet<_>>(),
+                            );
+                        }
+                        values.insert(filter.to_string(), facets.len());
+                    }
+
+                    res_facets.insert(
+                        field_name,
+                        FacetResult {
+                            count: values.len(),
+                            values,
+                        },
+                    );
+                }
             }
         }
 
