@@ -789,6 +789,19 @@ impl EmbeddingField {
                 }
             }
             DocumentFields::AllStringProperties => {
+                let mut input = String::new();
+                for (k, value) in doc.iter() {
+                    // Don't include the id in the input
+                    if k == "id" {
+                        continue;
+                    }
+                    if let Some(value) = value.as_str() {
+                        input.push_str(value);
+                    }
+                }
+                input
+            }
+            DocumentFields::Automatic => {
                 let cache_read = self.embeddings_selector_cache.read().await;
                 let mut cache_key: Vec<String> = Vec::new();
 

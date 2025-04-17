@@ -122,6 +122,11 @@ impl CollectionsWriter {
         info!("Creating collection {:?}", id);
 
         let default_language = language.unwrap_or(LanguageDTO::English);
+        let default_embedding_fields = if cfg!(test) {
+            DocumentFields::AllStringProperties
+        } else {
+            DocumentFields::Automatic
+        };
 
         let collection = CollectionWriter::empty(
             id,
@@ -141,12 +146,12 @@ impl CollectionsWriter {
                 .map(|embeddings| {
                     // Empty array means all string properties
                     if embeddings.document_fields.is_empty() {
-                        DocumentFields::AllStringProperties
+                        default_embedding_fields.clone()
                     } else {
                         DocumentFields::Properties(embeddings.document_fields)
                     }
                 })
-                .unwrap_or(DocumentFields::AllStringProperties);
+                .unwrap_or(default_embedding_fields);
             let typed_field = TypedField::Embedding(EmbeddingTypedField {
                 model: OramaModelSerializable(model),
                 document_fields,

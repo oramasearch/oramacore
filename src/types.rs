@@ -557,6 +557,7 @@ pub enum DocumentFields {
     Properties(Vec<String>),
     Hook(HookName),
     AllStringProperties,
+    Automatic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

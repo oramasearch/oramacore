@@ -162,6 +162,7 @@ impl Serialize for DocumentFieldsWrapper {
             DocumentFields::AllStringProperties => (1_u8, None),
             DocumentFields::Properties(ref props) => (2, Some(props.clone())),
             DocumentFields::Hook(ref hook) => (3, Some(vec![hook.to_string()])),
+            DocumentFields::Automatic => (4, None),
         };
         seq.serialize_element(&id)?;
         seq.serialize_element(&opt)?;
@@ -178,6 +179,7 @@ impl<'de> Deserialize<'de> for DocumentFieldsWrapper {
             1 => DocumentFields::AllStringProperties,
             2 => DocumentFields::Properties(a.1.unwrap()),
             3 => DocumentFields::Hook(HookName::from_str(&a.1.unwrap()[0]).unwrap()),
+            4 => DocumentFields::Automatic,
             _ => {
                 return Err(serde::de::Error::custom(format!(
                     "Invalid tag value: {}",
