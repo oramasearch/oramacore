@@ -86,10 +86,7 @@ The Metamorphosis. The Metamorphosis is a novella by Franz Kafka published in 19
 
 ### Input
 
-[
-  { "xyz": "Michele", "abc": "Riva", "qwe": 30 }
-]
-
+{ "xyz": "Michele", "abc": "Riva", "qwe": 30 }
 
 ### Output
 
