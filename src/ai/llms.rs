@@ -5,7 +5,7 @@ use async_openai::{
         ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessageArgs,
         ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
         ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolArgs,
-        ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionObject,
+        ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall, FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -400,7 +400,7 @@ impl LLMService {
         message: String,
         tools: Vec<FunctionObject>,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<Vec<ChatCompletionMessageToolCall>>> {
+    ) -> Result<Option<Vec<FunctionCall>>> {
         let chosen_model = self.get_chosen_model(llm_config.clone());
         let llm_client = self.get_chosen_llm_client(llm_config);
 
@@ -437,7 +437,12 @@ impl LLMService {
             .message
             .clone();
 
-        Ok(response_message.tool_calls)
+        match response_message.tool_calls {
+            Some(calls) => Ok(Some(
+                calls.iter().map(|call| call.function.clone()).collect(),
+            )),
+            None => Ok(None),
+        }
     }
 
     pub async fn run_known_prompt(

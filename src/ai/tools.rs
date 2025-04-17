@@ -1,10 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use async_openai::types::{ChatCompletionToolType, FunctionObject, FunctionObjectArgs};
+use async_openai::types::{
+    ChatCompletionToolType, FunctionCall, FunctionObject, FunctionObjectArgs,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::{collection_manager::sides::generic_kv::KV, types::CollectionId};
+use crate::{
+    collection_manager::sides::generic_kv::KV,
+    types::{CollectionId, InteractionLLMConfig},
+};
 
 use super::llms::LLMService;
 
@@ -96,8 +101,10 @@ impl ToolsManager {
     pub async fn execute_tools(
         &self,
         collection_id: CollectionId,
+        message: String,
         tool_id: Option<String>,
-    ) -> Result<()> {
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Option<Vec<FunctionCall>>> {
         let tools = match tool_id {
             Some(tool_id) => match self.get(collection_id, tool_id.clone()).await? {
                 Some(tool) => vec![tool],
@@ -119,7 +126,12 @@ impl ToolsManager {
             .map(|tool| tool.to_openai_tool())
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(())
+        let chosen_tools = self
+            .llm_service
+            .execute_tools(message, tools_to_function_objects, llm_config)
+            .await?;
+
+        Ok(chosen_tools)
     }
 
     fn format_key(&self, collection_id: CollectionId, tool_id: &str) -> String {
