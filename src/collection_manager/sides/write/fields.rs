@@ -7,9 +7,13 @@ use std::{
 use anyhow::{Context, Result};
 use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use crate::{
-    ai::OramaModel,
+    ai::{
+        automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
+        OramaModel,
+    },
     collection_manager::sides::{
         hooks::{HookName, HooksRuntime, SelectEmbeddingPropertiesReturnType},
         CollectionWriteOperation, DocumentFieldIndexOperation, NumberWrapper, OperationSender,
@@ -190,6 +194,7 @@ impl CollectionScoreField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         Self::Embedding(EmbeddingField::new(
             model,
@@ -199,7 +204,19 @@ impl CollectionScoreField {
             collection_id,
             field_id,
             field_name,
+            automatic_embeddings_selector,
         ))
+    }
+
+    pub async fn get_automatic_embeddings_selector(
+        &self,
+    ) -> Option<HashMap<String, ChosenProperties>> {
+        match self {
+            CollectionScoreField::String(_) => None,
+            CollectionScoreField::Embedding(f) => {
+                Some(f.embeddings_selector_cache.read().await.clone())
+            }
+        }
     }
 
     pub fn set_embedding_hook(&mut self, name: HookName) {
@@ -660,6 +677,9 @@ pub struct EmbeddingField {
     embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
     hooks_runtime: Arc<HooksRuntime>,
 
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+    embeddings_selector_cache: RwLock<HashMap<String, ChosenProperties>>,
+
     chunker: Chunker,
 }
 
@@ -705,7 +725,10 @@ impl EmbeddingField {
         collection_id: CollectionId,
         field_id: FieldId,
         field_name: String,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
+        let embeddings_selector_cache = RwLock::new(HashMap::new());
+
         let max_tokens = model.senquence_length();
         let overlap = model.overlap();
 
@@ -724,11 +747,11 @@ impl EmbeddingField {
             field_id,
             field_name,
             chunker,
+            embeddings_selector_cache,
+            automatic_embeddings_selector,
         }
     }
-}
 
-impl EmbeddingField {
     async fn get_write_operations(
         &self,
         doc_id: DocumentId,
@@ -777,6 +800,36 @@ impl EmbeddingField {
                     }
                 }
                 input
+            }
+            DocumentFields::Automatic => {
+                let cache_read = self.embeddings_selector_cache.read().await;
+                let mut cache_key: Vec<String> = Vec::new();
+
+                for (key, _value) in doc.iter() {
+                    cache_key.push(key.to_string());
+                }
+
+                cache_key.sort();
+
+                if let Some(cached_value) = cache_read.get(&cache_key.join(":")) {
+                    cached_value.format(doc.get_inner())
+                } else {
+                    drop(cache_read);
+                    let mut cache_write = self.embeddings_selector_cache.write().await;
+                    let cache_key = cache_key.join(":");
+
+                    let chosen_properties = self
+                        .automatic_embeddings_selector
+                        .choose_properties(doc.get_inner())
+                        .await
+                        .context("Unable to choose embedding properties")?;
+
+                    let embeddable_value = chosen_properties.format(doc.get_inner());
+
+                    cache_write.insert(cache_key.clone(), chosen_properties.clone());
+
+                    embeddable_value
+                }
             }
         };
 

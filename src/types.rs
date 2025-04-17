@@ -1,3 +1,4 @@
+use crate::ai::automatic_embeddings_selector::ChosenProperties;
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::{
@@ -323,6 +324,10 @@ impl FlattenDocument {
         self.0
     }
 
+    pub fn get_inner(&self) -> &Map<String, Value> {
+        &self.0
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.0.iter()
     }
@@ -552,6 +557,7 @@ pub enum DocumentFields {
     Properties(Vec<String>),
     Hook(HookName),
     AllStringProperties,
+    Automatic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -712,6 +718,7 @@ pub struct CollectionDTO {
     pub document_count: u64,
     #[schema(inline)]
     pub fields: HashMap<String, ValueType>,
+    pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone)]

@@ -17,7 +17,9 @@ use crate::metrics::{
     ai::{EMBEDDING_CALCULATION_PARALLEL_COUNT, EMBEDDING_CALCULATION_TIME},
     EmbeddingCalculationLabels,
 };
+use crate::types::InteractionLLMConfig;
 
+pub mod automatic_embeddings_selector;
 pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
@@ -85,6 +87,11 @@ pub struct RemoteLLMsConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct AIServiceEmbeddingsConfig {
+    pub automatic_embeddings_selector: Option<InteractionLLMConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceConfig {
     #[serde(deserialize_with = "deserialize_scheme")]
     #[serde(default = "default_scheme")]
@@ -96,6 +103,7 @@ pub struct AIServiceConfig {
     pub max_connections: u64,
     pub llm: AIServiceLLMConfig,
     pub remote_llms: Option<Vec<RemoteLLMsConfig>>,
+    pub embeddings: Option<AIServiceEmbeddingsConfig>,
 }
 
 #[derive(Debug)]

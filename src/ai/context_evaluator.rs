@@ -234,6 +234,7 @@ mod tests {
                 model: "".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
             max_connections: 1,
             scheme: Scheme::HTTP,
         }));
@@ -300,6 +301,7 @@ mod tests {
                 model: "".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));
@@ -373,6 +375,7 @@ mod tests {
                 model: "".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));
@@ -446,6 +449,7 @@ mod tests {
                 model: "".to_string(),
             },
             remote_llms: None,
+            embeddings: None,
             max_connections: 4,
             scheme: Scheme::HTTP,
         }));

@@ -73,6 +73,7 @@ async fn start_server() {
                 host: "localhost".to_string(),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
+            embeddings: None,
             remote_llms: None,
         },
         writer_side: WriteSideConfig {

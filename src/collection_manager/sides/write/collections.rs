@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
+use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
 use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
@@ -36,6 +37,7 @@ impl CollectionsWriter {
         embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
@@ -74,6 +76,7 @@ impl CollectionsWriter {
                 hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .await?;
             collections.insert(collection_id, collection);
@@ -105,6 +108,7 @@ impl CollectionsWriter {
         collection_option: CreateCollection,
         sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<()> {
         let CreateCollection {
             id,
@@ -118,6 +122,11 @@ impl CollectionsWriter {
         info!("Creating collection {:?}", id);
 
         let default_language = language.unwrap_or(LanguageDTO::English);
+        let default_embedding_fields = if cfg!(test) {
+            DocumentFields::AllStringProperties
+        } else {
+            DocumentFields::Automatic
+        };
 
         let collection = CollectionWriter::empty(
             id,
@@ -137,12 +146,12 @@ impl CollectionsWriter {
                 .map(|embeddings| {
                     // Empty array means all string properties
                     if embeddings.document_fields.is_empty() {
-                        DocumentFields::AllStringProperties
+                        default_embedding_fields.clone()
                     } else {
                         DocumentFields::Properties(embeddings.document_fields)
                     }
                 })
-                .unwrap_or(DocumentFields::AllStringProperties);
+                .unwrap_or(default_embedding_fields);
             let typed_field = TypedField::Embedding(EmbeddingTypedField {
                 model: OramaModelSerializable(model),
                 document_fields,
@@ -174,7 +183,12 @@ impl CollectionsWriter {
             .await
             .context("Cannot send create collection")?;
         collection
-            .register_fields(typed_fields, sender.clone(), hooks_runtime)
+            .register_fields(
+                typed_fields,
+                sender.clone(),
+                hooks_runtime,
+                automatic_embeddings_selector,
+            )
             .await
             .context("Cannot register fields")?;
 

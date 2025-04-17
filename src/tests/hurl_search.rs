@@ -68,6 +68,7 @@ async fn start_server() {
             port: address.port(),
             api_key: None,
             max_connections: 1,
+            embeddings: None,
             llm: crate::ai::AIServiceLLMConfig {
                 port: 8000,
                 host: "localhost".to_string(),

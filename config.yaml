@@ -87,19 +87,22 @@ ai_server:
             - CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
+        # automatic_embeddings_selector:
+        #     model: "gpt-4.1"
+        #     provider: openai
 
     llm:
         port: 8000
         host: 0.0.0.0
         model: "Qwen/Qwen2.5-3B-Instruct"
 
-    # remote_llms:
-    #     - provider: openai
-    #       api_key: "sk-"
-    #       default_model: "gpt-4o"
-    #     - provider: together
-    #       api_key: "sk-"
-    #       default_model: "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF"
-    #     - provider: fireworks
-    #       api_key: "sk-"
-    #       default_model: "accounts/fireworks/models/llama-v3p1-8b-instruct"
+    remote_llms:
+# - provider: openai
+#   api_key: sk-
+#   default_model: "gpt-4.1"
+# - provider: together
+#   api_key: "sk-"
+#   default_model: "nvidia/Llama-3.1-Nemotron-70B-Instruct-HF"
+# - provider: fireworks
+#   api_key: "sk-"
+#   default_model: "accounts/fireworks/models/llama-v3p1-8b-instruct"

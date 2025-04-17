@@ -41,7 +41,10 @@ use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
 pub use fields::*;
 
 use crate::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
+    ai::{
+        automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
+        llms::LLMService, AIService, RemoteLLMProvider,
+    },
     collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
@@ -93,6 +96,8 @@ pub struct WriteSide {
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl WriteSide {
@@ -103,6 +108,7 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         local_gpu_manager: Arc<LocalGPUManager>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -153,6 +159,7 @@ impl WriteSide {
             sx,
             hook_runtime.clone(),
             nlp_service.clone(),
+            automatic_embeddings_selector.clone(),
         )
         .await
         .context("Cannot load collections")?;
@@ -176,6 +183,7 @@ impl WriteSide {
             kv,
             local_gpu_manager,
             llm_service,
+            automatic_embeddings_selector,
         };
 
         let write_side = Arc::new(write_side);
@@ -220,7 +228,12 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .create_collection(
+                option,
+                self.sender.clone(),
+                self.hook_runtime.clone(),
+                self.automatic_embeddings_selector.clone(),
+            )
             .await?;
 
         Ok(())
@@ -316,7 +329,13 @@ impl WriteSide {
 
             info!(?doc_id, "Inserting document");
             match collection
-                .process_new_document(doc_id, doc, sender.clone(), self.hook_runtime.clone())
+                .process_new_document(
+                    doc_id,
+                    doc,
+                    sender.clone(),
+                    self.hook_runtime.clone(),
+                    self.automatic_embeddings_selector.clone(),
+                )
                 .await
                 .context("Cannot process document")
             {
@@ -528,7 +547,12 @@ impl WriteSide {
         option.id = collection_id_tmp;
 
         self.collections
-            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .create_collection(
+                option,
+                self.sender.clone(),
+                self.hook_runtime.clone(),
+                self.automatic_embeddings_selector.clone(),
+            )
             .await?;
 
         let hook = self
@@ -631,7 +655,13 @@ impl WriteSide {
                 serde_json::from_str(inner.get()).context("Cannot deserialize document")?;
             let doc = Document { inner };
             match collection
-                .process_new_document(doc_id, doc, self.sender.clone(), self.hook_runtime.clone())
+                .process_new_document(
+                    doc_id,
+                    doc,
+                    self.sender.clone(),
+                    self.hook_runtime.clone(),
+                    self.automatic_embeddings_selector.clone(),
+                )
                 .await
                 .context("Cannot process document")
             {
