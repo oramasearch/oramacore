@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use async_openai::types::{ChatCompletionToolType, FunctionObject, FunctionObjectArgs};
 use serde::{Deserialize, Serialize};
 
 use crate::{collection_manager::sides::generic_kv::KV, types::CollectionId};
+
+use super::llms::LLMService;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Tool {
@@ -23,18 +26,28 @@ impl Tool {
         }
     }
 
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self)
+    pub fn to_openai_tool(&self) -> Result<FunctionObject> {
+        let function_params = serde_json::to_value(&self.parameters).context(format!(
+            "Cannot parameters for tool {}. Not a valid JSON.",
+            &self.id
+        ))?;
+
+        Ok(FunctionObjectArgs::default()
+            .name(&self.name)
+            .description(&self.description)
+            .parameters(function_params)
+            .build()?)
     }
 }
 
 pub struct ToolsManager {
     pub kv: Arc<KV>,
+    pub llm_service: Arc<LLMService>,
 }
 
 impl ToolsManager {
-    pub fn new(kv: Arc<KV>) -> Self {
-        ToolsManager { kv }
+    pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        ToolsManager { kv, llm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<()> {
@@ -78,6 +91,35 @@ impl ToolsManager {
         ))?;
 
         Ok(segments)
+    }
+
+    pub async fn execute_tools(
+        &self,
+        collection_id: CollectionId,
+        tool_id: Option<String>,
+    ) -> Result<()> {
+        let tools = match tool_id {
+            Some(tool_id) => match self.get(collection_id, tool_id.clone()).await? {
+                Some(tool) => vec![tool],
+                None => anyhow::bail!("Tool with id {} not found", tool_id),
+            },
+            None => {
+                let all_tools = self.list_by_collection(collection_id).await?;
+
+                if all_tools.is_empty() {
+                    anyhow::bail!("No tools found for collection {}", collection_id.as_str());
+                }
+
+                all_tools
+            }
+        };
+
+        let tools_to_function_objects: Vec<FunctionObject> = tools
+            .iter()
+            .map(|tool| tool.to_openai_tool())
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(())
     }
 
     fn format_key(&self, collection_id: CollectionId, tool_id: &str) -> String {

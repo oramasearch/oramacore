@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs,
+        ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessageArgs,
+        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
+        ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolArgs,
+        ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -19,7 +20,9 @@ use crate::{
     types::{RelatedQueriesFormat, Role},
 };
 
-use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
+use super::{
+    party_planner::Step, tools::Tool, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
@@ -390,6 +393,51 @@ impl LLMService {
             remote_clients,
             model: local_vllm_config.model,
         })
+    }
+
+    pub async fn execute_tools(
+        &self,
+        message: String,
+        tools: Vec<FunctionObject>,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Option<Vec<ChatCompletionMessageToolCall>>> {
+        let chosen_model = self.get_chosen_model(llm_config.clone());
+        let llm_client = self.get_chosen_llm_client(llm_config);
+
+        // @todo: accept a list of chat messages
+        let user_message = ChatCompletionRequestUserMessageArgs::default()
+            .content(message)
+            .build()
+            .unwrap()
+            .into();
+
+        let all_tools: Vec<ChatCompletionTool> = tools
+            .iter()
+            .map(|tool| ChatCompletionTool {
+                r#type: ChatCompletionToolType::Function,
+                function: tool.clone(),
+            })
+            .collect();
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .max_tokens(1024u32)
+            .temperature(0.0)
+            .model(chosen_model)
+            .messages([user_message])
+            .tools(all_tools)
+            .build()?;
+
+        let response_message = llm_client
+            .chat()
+            .create(request)
+            .await?
+            .choices
+            .first()
+            .unwrap()
+            .message
+            .clone();
+
+        Ok(response_message.tool_calls)
     }
 
     pub async fn run_known_prompt(
