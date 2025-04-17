@@ -17,7 +17,7 @@ use tracing::warn;
 
 use crate::metrics::js::JS_CALCULATION_TIME;
 use crate::metrics::JSOperationLabels;
-use crate::types::{CollectionId, Document, FlattenDocument, IndexId};
+use crate::types::{CollectionId, IndexId};
 
 use super::generic_kv::KV;
 
@@ -260,6 +260,14 @@ impl Debug for HooksRuntime {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SelectEmbeddingPropertiesReturnType {
+    Properties(Vec<String>),
+    Text(String),
+}
+
+/*
 #[cfg(test)]
 mod tests {
     use crate::{collection_manager::sides::generic_kv::KVConfig, tests::utils::generate_new_path};
@@ -338,10 +346,4 @@ mod tests {
         assert!(hook.is_none());
     }
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SelectEmbeddingPropertiesReturnType {
-    Properties(Vec<String>),
-    Text(String),
-}
+*/

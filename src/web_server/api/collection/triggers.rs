@@ -16,7 +16,7 @@ use crate::{
         ReadSide, WriteSide,
     },
     types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
-    web_server::api::collection::admin::print_error,
+    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]

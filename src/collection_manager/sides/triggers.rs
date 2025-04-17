@@ -187,7 +187,8 @@ pub fn get_trigger_key(
 
 pub fn parse_trigger_id(trigger_id: String) -> Option<TriggerIdContent> {
     let parts = trigger_id.split(':').collect::<Vec<&str>>();
-    let collection_id = CollectionId::from(parts[0].to_string());
+    let collection_id =
+        CollectionId::try_new(parts[0]).expect("Invalid collection ID in trigger ID");
 
     let segment_id = parts
         .iter()

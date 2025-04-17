@@ -133,8 +133,8 @@ mod tests {
     #[test]
     fn test_notification_serialization() {
         let notification = Notification::CollectionSubstituted {
-            target_collection: CollectionId::from("target_collection".to_string()),
-            source_collection: CollectionId::from("source_collection".to_string()),
+            target_collection: CollectionId::try_new("target_collection").unwrap(),
+            source_collection: CollectionId::try_new("source_collection").unwrap(),
             reference: Some("reference".to_string()),
         };
         let json = serde_json::to_string(&notification).unwrap();

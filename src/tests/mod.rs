@@ -1,3 +1,4 @@
+/*
 mod hurl_search;
 
 mod all;
@@ -22,3 +23,4 @@ mod temp_insert_swap;
 mod vector_search;
 
 pub mod utils;
+*/

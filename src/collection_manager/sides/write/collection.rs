@@ -1,41 +1,21 @@
-use std::{
-    collections::HashMap,
-    ops::Deref,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU16, AtomicU64},
-        Arc,
-    },
-};
+use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Context, Result};
-use doc_id_storage::DocIdStorage;
-use rand::seq::index;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{info, warn};
 
 use crate::{
     collection_manager::sides::{
-        hooks::{HookName, HooksRuntime},
-        index::CreateIndexRequest,
-        CollectionWriteOperation, DocumentFieldsWrapper, EmbeddingTypedFieldWrapper,
-        OperationSender, TypedFieldWrapper, WriteOperation,
+        hooks::HooksRuntime, index::CreateIndexRequest, CollectionWriteOperation, OperationSender,
+        WriteOperation,
     },
     file_utils::BufferedFile,
-    metrics::{document_insertion::FIELD_CALCULATION_TIME, FieldCalculationLabels},
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{
-        ApiKey, CollectionId, ComplexType, DescribeCollectionResponse, Document, DocumentId,
-        FieldId, IndexId, LanguageDTO, ReindexConfig, ScalarType, TypedField, ValueType,
-    },
+    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexId, ReindexConfig},
 };
 
-use super::{
-    embedding::{EmbeddingCalculationRequest, MultiEmbeddingCalculationRequest},
-    index::Index,
-    CollectionFilterField, CollectionScoreField, SerializedFieldIndexer,
-};
+use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
 
 pub mod doc_id_storage;
 
@@ -58,6 +38,8 @@ pub struct CollectionWriter {
     // doc_id_storage: RwLock<DocIdStorage>,
     indexes: RwLock<HashMap<IndexId, Index>>,
 
+    temp_indexes: RwLock<HashMap<IndexId, Index>>,
+
     op_sender: OperationSender,
 }
 
@@ -77,6 +59,7 @@ impl CollectionWriter {
             default_locale,
             embedding_sender,
             indexes: Default::default(),
+            temp_indexes: Default::default(),
             op_sender,
         }
     }
@@ -122,22 +105,13 @@ impl CollectionWriter {
             default_locale,
             embedding_sender,
             indexes: RwLock::new(HashMap::new()),
+            temp_indexes: RwLock::new(HashMap::new()),
             op_sender,
         })
     }
 
     pub async fn create_index(&self, request: CreateIndexRequest) -> Result<()> {
         let index_id = request.id;
-        self.op_sender
-            .send(WriteOperation::Collection(
-                self.id,
-                CollectionWriteOperation::CreateIndex2 {
-                    index_id,
-                    locale: self.default_locale,
-                },
-            ))
-            .await
-            .context("Cannot send create index operation")?;
 
         let index = Index::empty(
             self.id,
@@ -153,33 +127,91 @@ impl CollectionWriter {
         indexes.insert(index_id, index);
         drop(indexes);
 
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::CreateIndex2 {
+                    index_id,
+                    locale: self.default_locale,
+                },
+            ))
+            .await
+            .context("Cannot send create index operation")?;
+
         Ok(())
     }
 
     pub async fn create_temporary_index_from(
         &self,
         index_id: IndexId,
+        temporary_index_id: IndexId,
         reindex_config: ReindexConfig,
-    ) -> Result<TemporaryIndex> {
-        let index = self
-            .get_index(index_id)
+    ) -> Result<()> {
+        let index = self.get_index(index_id).await.context("Cannot get index")?;
+
+        let locale: Locale = reindex_config
+            .language
+            .map(|l| l.into())
+            .unwrap_or(index.get_locale());
+
+        let embedding_field_definition = index
+            .get_embedding_field_definition()
             .await
-            .context("Cannot get index")?;
+            .context("Cannot get embedding field definition")?;
 
-        let temp_index = TemporaryIndex {};
-        let mut indexes = self.indexes.write().await;
-        indexes.insert(index_id, temp_index.clone());
-        drop(indexes);
+        let req = CreateIndexRequest {
+            id: temporary_index_id,
+            embedding_field_definition,
+        };
 
-        Ok(temp_index)
+        let temp_index = Index::empty(
+            self.id,
+            req,
+            self.embedding_sender.clone(),
+            self.get_text_parser(locale),
+            self.op_sender.clone(),
+        )
+        .await
+        .context("Cannot create index")?;
+
+        let mut temp_indexes = self.temp_indexes.write().await;
+        temp_indexes.insert(temporary_index_id, temp_index);
+        drop(temp_indexes);
+
+        Ok(())
     }
 
-    pub async fn replace_temp_index(
-        &self,
-        index_id: IndexId,
-        temp_index: TemporaryIndex,
-    ) -> Result<()> {
-        panic!()
+    pub async fn get_temporary_index<'s, 'index>(
+        &'s self,
+        id: IndexId,
+    ) -> Option<IndexReadLock<'index>>
+    where
+        's: 'index,
+    {
+        let lock = self.temp_indexes.read().await;
+        IndexReadLock::try_new(lock, id)
+    }
+
+    pub async fn promote_temp_index(&self, index_id: IndexId, temp_index: IndexId) -> Result<()> {
+        let mut temp_index_lock = self.indexes.write().await;
+        let mut index_lock = self.indexes.write().await;
+
+        let temp_index = match temp_index_lock.remove(&temp_index) {
+            Some(index) => index,
+            None => bail!("Temporary index not found"),
+        };
+        match index_lock.insert(index_id, temp_index) {
+            Some(_) => {
+                info!(coll_id= ?self.id, "Index replaced");
+            }
+            None => {
+                warn!(coll_id= ?self.id, "Index replaced but before it was not found. This is just a warning");
+            }
+        }
+        drop(temp_index_lock);
+        drop(index_lock);
+
+        panic!();
     }
 
     pub async fn get_document_ids(&self) -> Vec<DocumentId> {
@@ -336,6 +368,8 @@ impl CollectionWriter {
 
         let indexes_lock = self.indexes.read().await;
         let indexes = indexes_lock.keys().copied().collect::<Vec<_>>();
+        let temp_indexes_lock = self.indexes.read().await;
+        let temporary_indexes = temp_indexes_lock.keys().copied().collect::<Vec<_>>();
 
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id,
@@ -343,6 +377,7 @@ impl CollectionWriter {
             write_api_key: self.write_api_key.expose().to_string(),
             default_locale: self.default_locale,
             indexes,
+            temporary_indexes,
         });
 
         BufferedFile::create_or_overwrite(path.join("info.json"))
@@ -368,6 +403,7 @@ struct CollectionDumpV1 {
     write_api_key: String,
     default_locale: Locale,
     indexes: Vec<IndexId>,
+    temporary_indexes: Vec<IndexId>,
 }
 
 pub struct IndexReadLock<'guard> {
@@ -398,12 +434,5 @@ impl Deref for IndexReadLock<'_> {
         // safety: the collection contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
-    }
-}
-
-struct TemporaryIndex {}
-impl TemporaryIndex {
-    pub async fn process_new_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
-        Ok(())
     }
 }

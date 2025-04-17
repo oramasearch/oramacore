@@ -3,14 +3,15 @@ use std::sync::Arc;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
 use axum_openapi3::*;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     collection_manager::sides::WriteSide,
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateCollectionFrom, DeleteCollection,
-        DeleteDocuments, DescribeCollectionResponse, DocumentList, ReindexConfig, SwapCollections,
+        ApiKey, CollectionId, CreateCollection, DeleteCollection, DeleteDocuments,
+        DescribeCollectionResponse, DocumentList, IndexId,
     },
+    web_server::api::util::print_error,
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
@@ -21,9 +22,9 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(add_documents())
         .add(delete_documents())
         .add(delete_collection())
-        .add(reindex())
-        .add(create_collection_from())
-        .add(swap_collections())
+        // .add(reindex())
+        // .add(create_collection_from())
+        // .add(swap_collections())
         .with_state(write_side)
 }
 
@@ -162,18 +163,19 @@ async fn list_document_in_collection(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/insert",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/insert",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     info!("Adding documents to collection {:?}", collection_id);
     match write_side
-        .insert_documents(write_api_key, collection_id, json)
+        .insert_documents(write_api_key, collection_id, index_id, json)
         .await
     {
         Ok(r) => Ok((StatusCode::OK, Json(r))),
@@ -186,7 +188,7 @@ async fn add_documents(
         }
     }
 }
-
+/*
 #[endpoint(
     method = "POST",
     path = "/v1/collections/create-from",
@@ -236,21 +238,22 @@ async fn swap_collections(
         }
     }
 }
-
+*/
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/delete",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/delete",
     description = "Delete documents from a collection"
 )]
 async fn delete_documents(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DeleteDocuments>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     info!("Delete documents to collection {:?}", collection_id);
     match write_side
-        .delete_documents(write_api_key, collection_id, json)
+        .delete_documents(write_api_key, collection_id, index_id, json)
         .await
     {
         Ok(_) => {
@@ -271,6 +274,7 @@ async fn delete_documents(
     ))
 }
 
+/*
 #[endpoint(
     method = "POST",
     path = "/v1/collections/{collection_id}/reindex",
@@ -301,10 +305,4 @@ async fn reindex(
         Json(json!({ "message": "collection re-indexed" })),
     ))
 }
-
-pub fn print_error(e: &anyhow::Error, msg: &'static str) {
-    error!(error = ?e, msg);
-    e.chain()
-        .skip(1)
-        .for_each(|cause| eprintln!("because: {}", cause));
-}
+*/

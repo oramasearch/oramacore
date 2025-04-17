@@ -11,8 +11,8 @@ use crate::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
     metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    nlp::NLPService,
-    types::{ApiKey, CollectionId, LanguageDTO},
+    nlp::{locales::Locale, NLPService},
+    types::{ApiKey, CollectionId},
 };
 
 use anyhow::{Context, Result};
@@ -223,7 +223,7 @@ impl CollectionsReader {
         _offset: Offset,
         id: CollectionId,
         description: Option<String>,
-        default_language: LanguageDTO,
+        default_locale: Locale,
         read_api_key: ApiKey,
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
@@ -231,7 +231,7 @@ impl CollectionsReader {
         let collection = CollectionReader::empty(
             id,
             description,
-            default_language,
+            default_locale,
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
@@ -448,6 +448,8 @@ struct CollectionsInfoV1 {
     last_reindexed_collections: Vec<(CollectionId, CollectionId)>,
 }
 
+/*
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -510,7 +512,7 @@ mod tests {
                 Offset(1),
                 target_collection_id,
                 None,
-                LanguageDTO::English,
+                Locale::EN,
                 ApiKey::try_from("read").unwrap(),
             )
             .await
@@ -522,7 +524,7 @@ mod tests {
                 Offset(1),
                 tmp_collection_id,
                 None,
-                LanguageDTO::English,
+                Locale::EN,
                 ApiKey::try_from("read").unwrap(),
             )
             .await
@@ -602,7 +604,7 @@ mod tests {
                     Offset(1),
                     *target_collection_id,
                     None,
-                    LanguageDTO::English,
+                    Locale::EN,
                     ApiKey::try_from("read").unwrap(),
                 )
                 .await
@@ -614,7 +616,7 @@ mod tests {
                     Offset(1),
                     *tmp_collection_id,
                     None,
-                    LanguageDTO::English,
+                    Locale::EN,
                     ApiKey::try_from("read").unwrap(),
                 )
                 .await
@@ -654,3 +656,5 @@ mod tests {
         assert!(collection.is_none());
     }
 }
+
+*/

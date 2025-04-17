@@ -330,11 +330,11 @@ impl ReadSide {
             WriteOperation::CreateCollection {
                 id,
                 read_api_key,
-                default_language,
+                default_locale,
                 description,
             } => {
                 self.collections
-                    .create_collection(offset, id, description, default_language, read_api_key)
+                    .create_collection(offset, id, description, default_locale, read_api_key)
                     .await?;
             }
             WriteOperation::DeleteCollection(coll_id) => {

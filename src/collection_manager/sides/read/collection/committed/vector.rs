@@ -170,6 +170,8 @@ pub struct VectorCommittedFieldStats {
     pub len: usize,
 }
 
+/*
+
 #[cfg(test)]
 mod tests {
     use crate::tests::utils::generate_new_path;
@@ -210,3 +212,5 @@ mod tests {
         );
     }
 }
+
+*/

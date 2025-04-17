@@ -71,8 +71,8 @@ use crate::{
     offset_storage::OffsetStorage,
     types::{
         ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, Filter,
-        FulltextMode, HybridMode, LanguageDTO, Limit, NumberFilter, Properties, SearchMode,
-        SearchModeResult, SearchParams, Similarity, VectorMode,
+        FulltextMode, HybridMode, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
+        SearchParams, Similarity, VectorMode,
     },
 };
 
@@ -80,7 +80,7 @@ use crate::{
 pub struct CollectionReader {
     pub(super) id: CollectionId,
     description: Option<String>,
-    default_language: LanguageDTO,
+    default_locale: Locale,
     deleted: bool,
 
     read_api_key: ApiKey,
@@ -108,7 +108,7 @@ impl CollectionReader {
     pub fn empty(
         id: CollectionId,
         description: Option<String>,
-        default_language: LanguageDTO,
+        default_locale: Locale,
         read_api_key: ApiKey,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
@@ -117,7 +117,7 @@ impl CollectionReader {
         Self {
             id,
             description,
-            default_language,
+            default_locale,
             deleted: false,
 
             read_api_key,
@@ -229,7 +229,7 @@ impl CollectionReader {
         Ok(Self {
             id: collection_info.id,
             description: collection_info.description,
-            default_language: collection_info.default_language,
+            default_locale: collection_info.default_locale,
             deleted: false,
             read_api_key,
             ai_service,
@@ -296,7 +296,7 @@ impl CollectionReader {
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
-                default_language: self.default_language,
+                default_locale: self.default_locale,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
                 read_api_key: self.read_api_key.expose().to_string(),
@@ -328,7 +328,7 @@ impl CollectionReader {
                 description: self.description.clone(),
                 document_count: 0,
                 deleted: false,
-                default_language: self.default_language,
+                default_locale: self.default_locale,
                 filter_fields: Default::default(),
                 score_fields: Default::default(),
                 read_api_key: self.read_api_key.expose().to_string(),
@@ -1731,7 +1731,7 @@ impl CollectionReader {
         Ok(CollectionStats {
             id: self.get_id(),
             description: self.description.clone(),
-            default_language: self.default_language,
+            default_locale: self.default_locale,
             document_count: self.document_count.load(Ordering::Relaxed),
             fields_stats,
         })
@@ -1749,7 +1749,7 @@ mod dump {
     use crate::{
         collection_manager::sides::OramaModelSerializable,
         nlp::locales::Locale,
-        types::{CollectionId, FieldId, LanguageDTO},
+        types::{CollectionId, FieldId},
     };
 
     use super::committed;
@@ -1791,7 +1791,7 @@ mod dump {
             description: info.description,
             document_count: info.document_count,
             deleted: info.deleted,
-            default_language: info.default_language,
+            default_locale: info.default_locale,
             filter_fields,
             score_fields,
             read_api_key: info.read_api_key,
@@ -1808,7 +1808,7 @@ mod dump {
     pub struct CollectionInfoV1 {
         pub id: CollectionId,
         pub description: Option<String>,
-        pub default_language: LanguageDTO,
+        pub default_locale: Locale,
         #[serde(default)]
         pub deleted: bool,
         pub document_count: u64,
@@ -1825,7 +1825,7 @@ mod dump {
     pub struct CollectionInfoV2 {
         pub id: CollectionId,
         pub description: Option<String>,
-        pub default_language: LanguageDTO,
+        pub default_locale: Locale,
         #[serde(default)]
         pub deleted: bool,
         pub document_count: u64,
@@ -2021,7 +2021,7 @@ pub struct FieldStats {
 pub struct CollectionStats {
     pub id: CollectionId,
     pub description: Option<String>,
-    pub default_language: LanguageDTO,
+    pub default_locale: Locale,
     pub document_count: u64,
     pub fields_stats: Vec<FieldStats>,
 }

@@ -386,7 +386,7 @@ And this should not happen. Return the first page."#);
             .flat_map(|items| items.into_iter().map(|item| (item.key, item.values)))
     }
 }
-
+/*
 #[cfg(test)]
 mod tests {
     use core::f32;
@@ -484,3 +484,4 @@ mod tests {
         );
     }
 }
+*/

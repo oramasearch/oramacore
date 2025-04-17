@@ -1,4 +1,4 @@
-use crate::ai::RemoteLLMProvider;
+use crate::ai::{OramaModel, RemoteLLMProvider};
 use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::index::FieldType;
 use crate::collection_manager::sides::{
@@ -7,14 +7,14 @@ use crate::collection_manager::sides::{
 use crate::nlp::locales::Locale;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
-use axum_openapi3::utoipa::{self, IntoParams};
-use axum_openapi3::utoipa::{PartialSchema, ToSchema};
+use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
+use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
 use redact::Secret;
 use serde::de::{Error, Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -72,84 +72,31 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
-pub struct CollectionId(ArrayString<128>);
-
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
+pub struct CollectionId(StackString<128>);
 impl CollectionId {
-    pub fn try_new(key: String) -> Result<Self> {
-        if key.is_empty() {
-            bail!("CollectionId cannot be empty");
-        }
-
-        let mut s = ArrayString::<128>::new();
-        let r = s.try_push_str(&key);
-        if let Err(e) = r {
-            bail!("CollectionId is too long. Max 128 char. {:?}", e);
-        }
-        Ok(Self(s))
-    }
-
-    pub fn try_from(key: &str) -> Result<Self> {
-        if key.is_empty() {
-            bail!("CollectionId cannot be empty");
-        }
-
-        let mut s = ArrayString::<128>::new();
-        let r = s.try_push_str(key);
-        if let Err(e) = r {
-            bail!("CollectionId is too long. Max 128 char. {:?}", e);
-        }
-        Ok(Self(s))
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::try_new(key)
+            .map(CollectionId)
+            .context("CollectionId is too long. Max 128 char")
     }
 
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
-
-// Implement serialize for CollectionId
-impl Serialize for CollectionId {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
-    }
-}
-// Implement deserialize for CollectionId
-impl<'de> Deserialize<'de> for CollectionId {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(CollectionId(ArrayString::try_from(s.as_str()).unwrap()))
-    }
-}
-impl CollectionId {
-    pub fn from(s: String) -> Self {
-        CollectionId(ArrayString::try_from(s.as_str()).unwrap())
-    }
-}
 impl Display for CollectionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", String::from_utf8_lossy(self.0.as_bytes()))
+        write!(f, "{}", self.0)
     }
 }
-impl PartialSchema for CollectionId {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        String::schema()
-    }
-}
-impl ToSchema for CollectionId {}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct DocumentId(pub u64);
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     #[serde(flatten)]
-    #[schema(inline)]
     pub inner: Map<String, Value>,
 }
 impl Document {
@@ -204,7 +151,7 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ScalarType {
     String,
     Number,
@@ -223,16 +170,16 @@ impl TryFrom<&Value> for ScalarType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ComplexType {
-    Array(#[schema(inline)] ScalarType),
+    Array(ScalarType),
     Embedding,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ValueType {
-    Scalar(#[schema(inline)] ScalarType),
-    Complex(#[schema(inline)] ComplexType),
+    Scalar(ScalarType),
+    Complex(ComplexType),
 }
 
 impl TryFrom<&Value> for ValueType {
@@ -322,8 +269,8 @@ impl FlattenDocument {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct DocumentList(#[schema(inline)] Vec<Document>);
+#[derive(Debug, Deserialize)]
+pub struct DocumentList(Vec<Document>);
 impl DocumentList {
     #[inline]
     pub fn len(&self) -> usize {
@@ -343,6 +290,12 @@ impl IntoIterator for DocumentList {
         self.0.into_iter()
     }
 }
+impl PartialSchema for DocumentList {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        Value::schema()
+    }
+}
+impl ToSchema for DocumentList {}
 
 impl From<Vec<Document>> for DocumentList {
     fn from(docs: Vec<Document>) -> Self {
@@ -385,20 +338,13 @@ pub trait StringParser: Send + Sync {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldId(pub u16);
 
-impl PartialSchema for FieldId {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        u16::schema()
-    }
-}
-impl ToSchema for FieldId {}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenScore {
     pub document_id: DocumentId,
     pub score: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, ToSchema)]
 pub enum LanguageDTO {
     #[serde(rename = "arabic")]
     Arabic,
@@ -547,7 +493,7 @@ impl From<Locale> for LanguageDTO {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
@@ -572,72 +518,61 @@ pub enum TypedField {
     ArrayBoolean,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct CreateCollectionEmbeddings {
     pub model: Option<OramaModelSerializable>,
     pub document_fields: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub struct ApiKey(Secret<ArrayString<64>>);
-impl ApiKey {
-    pub fn try_new(key: String) -> Result<Self> {
-        if key.is_empty() {
-            bail!("API key cannot be empty");
-        }
-
-        let mut s = ArrayString::<64>::new();
-        let r = s.try_push_str(&key);
-        if let Err(e) = r {
-            bail!("API key is too long. Max 64 char. {:?}", e);
-        }
-        let s = Secret::new(s);
-        Ok(Self(s))
+impl PartialSchema for OramaModelSerializable {
+    fn schema(
+    ) -> axum_openapi3::utoipa::openapi::RefOr<axum_openapi3::utoipa::openapi::schema::Schema> {
+        let b = AnyOfBuilder::new()
+            .item(OramaModel::BgeSmall.as_str_name())
+            .item(OramaModel::BgeBase.as_str_name())
+            .item(OramaModel::BgeLarge.as_str_name())
+            .item(OramaModel::MultilingualE5Small.as_str_name())
+            .item(OramaModel::MultilingualE5Base.as_str_name())
+            .item(OramaModel::MultilingualE5Large.as_str_name());
+        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
     }
+}
+impl ToSchema for OramaModelSerializable {}
 
-    pub fn try_from(key: &str) -> Result<Self> {
-        if key.is_empty() {
-            bail!("API key cannot be empty");
-        }
-
-        let mut s = ArrayString::<64>::new();
-        let r = s.try_push_str(key);
-        if let Err(e) = r {
-            bail!("API key is too long. Max 64 char. {:?}", e);
-        }
-        let s = Secret::new(s);
-        Ok(Self(s))
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Deserialize)]
+pub struct ApiKey(Secret<StackString<64>>);
+impl ApiKey {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::try_new(key.as_ref())
+            .map(|s| ApiKey(Secret::new(s)))
+            .context("API key is too long. Max 64 char")
     }
 
     pub fn expose(&self) -> &str {
-        self.0.expose_secret()
+        self.0.expose_secret().as_str()
     }
 }
-
-impl<'de> Deserialize<'de> for ApiKey {
-    fn deserialize<D>(deserializer: D) -> Result<ApiKey, D::Error>
+impl Serialize for ApiKey {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
-        D: de::Deserializer<'de>,
+        S: serde::ser::Serializer,
     {
-        let s = String::deserialize(deserializer)?;
-        Self::try_new(s).map_err(|e| de::Error::custom(format!("error: {}", e)))
+        serializer.serialize_str(self.expose())
     }
 }
-
 impl PartialSchema for ApiKey {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        // TODO put the min and max size here
-        String::schema()
+        StackString::<64>::schema()
     }
 }
 impl ToSchema for ApiKey {}
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct DeleteCollection {
     pub id: CollectionId,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
@@ -653,41 +588,35 @@ pub struct CreateCollection {
     )]
     pub write_api_key: ApiKey,
 
-    #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]
-    #[schema(inline)]
     pub embeddings: Option<CreateCollectionEmbeddings>,
 }
 
-#[derive(Debug, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ReindexConfig {
     #[serde(default)]
     pub description: Option<String>,
 
     #[serde(default)]
-    #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]
-    #[schema(inline)]
     pub embeddings: Option<CreateCollectionEmbeddings>,
 
     pub reference: Option<String>,
 }
 
-#[derive(Debug, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct CreateCollectionFrom {
     pub r#from: CollectionId,
 
     #[serde(default)]
-    #[schema(inline)]
     pub language: Option<LanguageDTO>,
     #[serde(default)]
-    #[schema(inline)]
     pub embeddings: Option<CreateCollectionEmbeddings>,
 }
 
-#[derive(Debug, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SwapCollections {
     pub from: CollectionId,
     pub to: CollectionId,
@@ -705,50 +634,47 @@ impl TryFrom<serde_json::Value> for CreateCollection {
 
 pub type DeleteDocuments = Vec<String>;
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize)]
 pub struct DescribeCollectionResponse {
-    #[schema(inline)]
     pub id: CollectionId,
     pub description: Option<String>,
     pub document_count: usize,
-    #[schema(inline)]
+
     pub indexes: Vec<DescribeCollectionIndexResponse>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone)]
-pub struct Limit(#[schema(inline)] pub usize);
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+pub struct Limit(pub usize);
 impl Default for Limit {
     fn default() -> Self {
         Self(10)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, Copy, Clone, Default)]
-pub struct Offset(#[schema(inline)] pub usize);
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+pub struct Offset(pub usize);
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Filter {
-    Number(#[schema(inline)] NumberFilter),
+    Number(NumberFilter),
     Bool(bool),
     String(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NumberFacetDefinitionRange {
-    #[schema(inline)]
     pub from: Number,
-    #[schema(inline)]
+
     pub to: Number,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NumberFacetDefinition {
-    #[schema(inline)]
     pub ranges: Vec<NumberFacetDefinitionRange>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoolFacetDefinition {
     #[serde(rename = "true")]
     pub r#true: bool,
@@ -756,7 +682,7 @@ pub struct BoolFacetDefinition {
     pub r#false: bool,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StringFacetDefinition;
 impl<'de> Deserialize<'de> for StringFacetDefinition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -784,23 +710,23 @@ impl<'de> Deserialize<'de> for StringFacetDefinition {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 
 pub enum FacetDefinition {
     #[serde(untagged)]
-    Number(#[schema(inline)] NumberFacetDefinition),
+    Number(NumberFacetDefinition),
     #[serde(untagged)]
-    Bool(#[schema(inline)] BoolFacetDefinition),
+    Bool(BoolFacetDefinition),
     #[serde(untagged)]
-    String(#[schema(inline)] StringFacetDefinition),
+    String(StringFacetDefinition),
 }
 
-#[derive(Debug, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct FulltextMode {
     pub term: String,
 }
 
-#[derive(Debug, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -808,11 +734,11 @@ pub struct VectorMode {
     // For simplicity, we only support "term" for now
     // TODO: support "vector"
     pub term: String,
-    #[schema(inline)]
+
     pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct Similarity(pub f32);
 
 impl Default for Similarity {
@@ -892,29 +818,29 @@ impl<'de> Deserialize<'de> for Similarity {
     }
 }
 
-#[derive(Debug, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoMode {
     pub term: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchModeResult {
     pub mode: String,
 }
 
-#[derive(Debug, Clone, ToSchema)]
+#[derive(Debug, Clone)]
 pub enum SearchMode {
-    FullText(#[schema(inline)] FulltextMode),
-    Vector(#[schema(inline)] VectorMode),
-    Hybrid(#[schema(inline)] HybridMode),
-    Auto(#[schema(inline)] AutoMode),
-    Default(#[schema(inline)] FulltextMode),
+    FullText(FulltextMode),
+    Vector(VectorMode),
+    Hybrid(HybridMode),
+    Auto(AutoMode),
+    Default(FulltextMode),
 }
 
 impl<'de> Deserialize<'de> for SearchMode {
@@ -997,7 +923,7 @@ impl SearchMode {
     }
 }
 
-#[derive(Debug, Clone, ToSchema, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Properties {
     None,
     Star,
@@ -1010,28 +936,28 @@ impl Default for Properties {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchParams {
     #[serde(flatten)]
-    #[schema(inline)]
     pub mode: SearchMode,
     #[serde(default)]
-    #[schema(inline)]
     pub limit: Limit,
     #[serde(default)]
-    #[schema(inline)]
     pub offset: Offset,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
     #[serde(default, deserialize_with = "deserialize_properties")]
-    #[schema(inline)]
     pub properties: Properties,
     #[serde(default, rename = "where")]
-    #[schema(inline)]
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
-    #[schema(inline)]
     pub facets: HashMap<String, FacetDefinition>,
+}
+impl PartialSchema for SearchParams {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        let b = AnyOfBuilder::new();
+        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
+    }
 }
 
 fn deserialize_properties<'de, D>(deserializer: D) -> Result<Properties, D::Error>
@@ -1109,7 +1035,7 @@ pub struct SearchResult {
     pub facets: Option<HashMap<String, FacetResult>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RelatedQueriesFormat {
     #[serde(rename = "question")]
     Question,
@@ -1117,21 +1043,21 @@ pub enum RelatedQueriesFormat {
     Query,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelatedRequest {
     pub enabled: Option<bool>,
     pub size: Option<usize>,
     pub format: Option<RelatedQueriesFormat>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy)]
 pub enum Role {
     System,
     Assistant,
     User,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionMessage {
     pub role: Role,
     pub content: String,
@@ -1143,7 +1069,7 @@ pub struct InteractionLLMConfig {
     pub model: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Interaction {
     pub interaction_id: String,
     pub system_prompt_id: Option<String>,
@@ -1157,20 +1083,17 @@ pub struct Interaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NewHookPostParams {
-    #[schema(inline)]
     pub name: HookName,
     pub code: String,
 }
 
-#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
 pub struct GetHookQueryParams {
-    #[schema(inline)]
     pub name: HookName,
 }
 
-#[derive(Deserialize, Clone, Serialize, ToSchema, IntoParams)]
+#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
 pub struct DeleteHookParams {
-    #[schema(inline)]
     pub name: HookName,
 }
 
@@ -1254,7 +1177,7 @@ pub struct UpdateTriggerParams {
     pub segment_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertDocumentsResult {
     pub inserted: usize,
     pub replaced: usize,
@@ -1363,11 +1286,11 @@ mod test {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Number {
-    I32(#[schema(inline)] i32),
-    F32(#[schema(inline)] f32),
+    I32(i32),
+    F32(f32),
 }
 
 impl std::fmt::Display for Number {
@@ -1550,20 +1473,20 @@ impl<'de> Deserialize<'de> for SerializableNumber {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NumberFilter {
     #[serde(rename = "eq")]
-    Equal(#[schema(inline)] Number),
+    Equal(Number),
     #[serde(rename = "gt")]
-    GreaterThan(#[schema(inline)] Number),
+    GreaterThan(Number),
     #[serde(rename = "gte")]
-    GreaterThanOrEqual(#[schema(inline)] Number),
+    GreaterThanOrEqual(Number),
     #[serde(rename = "lt")]
-    LessThan(#[schema(inline)] Number),
+    LessThan(Number),
     #[serde(rename = "lte")]
-    LessThanOrEqual(#[schema(inline)] Number),
+    LessThanOrEqual(Number),
     #[serde(rename = "between")]
-    Between(#[schema(inline)] (Number, Number)),
+    Between((Number, Number)),
 }
 
 #[cfg(test)]
@@ -1693,32 +1616,83 @@ mod tests {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct IndexId(ArrayString<64>);
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub struct IndexId(StackString<64>);
 
 impl IndexId {
-    pub fn try_new(key: String) -> Result<Self> {
-        if key.is_empty() {
-            bail!("ShardId cannot be empty");
-        }
-
-        let mut s = ArrayString::<64>::new();
-        let r = s.try_push_str(&key);
-        if let Err(e) = r {
-            bail!("ShardId is too long. Max 64 char. {:?}", e);
-        }
-        Ok(Self(s))
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::<64>::try_new(key)
+            .map(IndexId)
+            .map_err(|e| anyhow::anyhow!("IndexId is too long. Max 64 char. {:?}", e))
     }
 
-    pub fn try_from(key: &str) -> Result<Self> {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl Display for IndexId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateIndexRequest {
+    id: IndexId,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IndexFieldType {
+    pub field_id: FieldId,
+    pub field_path: String,
+    pub is_array: bool,
+    pub field_type: FieldType,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DescribeCollectionIndexResponse {
+    pub id: IndexId,
+    pub document_count: usize,
+    pub fields: Vec<IndexFieldType>,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
+struct StackString<const N: usize>(ArrayString<N>);
+impl<const N: usize> PartialSchema for StackString<N> {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        // TODO: put a max length
+        String::schema()
+    }
+}
+impl<const N: usize> ToSchema for StackString<N> {}
+impl<const N: usize> Serialize for StackString<N> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
+    }
+}
+impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
+    }
+}
+impl<const N: usize> StackString<N> {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        let key = key.as_ref();
         if key.is_empty() {
-            bail!("ShardId cannot be empty");
+            bail!("StackString cannot be empty");
         }
 
-        let mut s = ArrayString::<64>::new();
+        let mut s = ArrayString::<N>::new();
         let r = s.try_push_str(key);
         if let Err(e) = r {
-            bail!("ShardId is too long. Max 64 char. {:?}", e);
+            bail!("Parameter is too long. Max {} char. {:?}", N, e);
         }
         Ok(Self(s))
     }
@@ -1727,57 +1701,8 @@ impl IndexId {
         self.0.as_str()
     }
 }
-
-impl Serialize for IndexId {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
+impl<const N: usize> Display for StackString<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
     }
-}
-impl<'de> Deserialize<'de> for IndexId {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(IndexId(ArrayString::try_from(s.as_str()).unwrap()))
-    }
-}
-impl IndexId {
-    pub fn from(s: String) -> Self {
-        IndexId(ArrayString::try_from(s.as_str()).unwrap())
-    }
-}
-impl Display for IndexId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", String::from_utf8_lossy(self.0.as_bytes()))
-    }
-}
-impl PartialSchema for IndexId {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        String::schema()
-    }
-}
-impl ToSchema for IndexId {}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct CreateIndexRequest {
-    id: IndexId,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct IndexFieldType {
-    pub field_id: FieldId,
-    pub field_path: String,
-    pub is_array: bool,
-    pub field_type: FieldType,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct DescribeCollectionIndexResponse {
-    pub id: IndexId,
-    pub document_count: usize,
-    pub fields: Vec<IndexFieldType>,
 }

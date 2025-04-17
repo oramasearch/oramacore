@@ -17,7 +17,7 @@ use crate::{
         ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
         InteractionLLMConfig, UpdateSystemPromptParams,
     },
-    web_server::api::collection::admin::print_error,
+    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]

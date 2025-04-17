@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use axum_openapi3::utoipa::{openapi::schema::AnyOfBuilder, PartialSchema, ToSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -274,21 +273,6 @@ impl<'de> Deserialize<'de> for OramaModelSerializable {
         Ok(OramaModelSerializable(model))
     }
 }
-
-impl PartialSchema for OramaModelSerializable {
-    fn schema(
-    ) -> axum_openapi3::utoipa::openapi::RefOr<axum_openapi3::utoipa::openapi::schema::Schema> {
-        let b = AnyOfBuilder::new()
-            .item(OramaModel::BgeSmall.as_str_name())
-            .item(OramaModel::BgeBase.as_str_name())
-            .item(OramaModel::BgeLarge.as_str_name())
-            .item(OramaModel::MultilingualE5Small.as_str_name())
-            .item(OramaModel::MultilingualE5Base.as_str_name())
-            .item(OramaModel::MultilingualE5Large.as_str_name());
-        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
-    }
-}
-impl ToSchema for OramaModelSerializable {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SerializedFieldIndexer {

@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use nvml_wrapper::{enum_wrappers, sys_exports::field_id};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::Sender;
@@ -25,8 +24,9 @@ use crate::{
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, SerializableNumber},
 };
 
-use super::{get_value, EmbeddingStringCalculation};
+use super::{get_value, CreateIndexEmbeddingFieldDefintionRequest, EmbeddingStringCalculation};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldType {
     Filter(FilterFieldType),
     Score(ScoreFieldType),
@@ -444,6 +444,23 @@ impl IndexScoreField {
         }
     }
 
+    pub fn get_embedding_field_definition(
+        &self,
+    ) -> Option<CreateIndexEmbeddingFieldDefintionRequest> {
+        match self {
+            IndexScoreField::String(_) => None,
+            IndexScoreField::Embedding(field) => {
+                let r = CreateIndexEmbeddingFieldDefintionRequest {
+                    field_path: field.field_path.clone(),
+                    model: field.model,
+                    string_calculation: field.calculation.clone(),
+                };
+
+                Some(r)
+            }
+        }
+    }
+
     pub fn serialize(&self) -> SerializedScoreFieldType {
         match self {
             IndexScoreField::String(f) => SerializedScoreFieldType::String(
@@ -462,7 +479,7 @@ impl IndexScoreField {
                     is_array: self.is_array(),
                     field_type: FilterFieldType::Number,
                 },
-                OramaModelSerializable(f.model.clone()),
+                OramaModelSerializable(f.model),
                 match &f.calculation {
                     EmbeddingStringCalculation::AllProperties => {
                         SerializedEmbeddingStringCalculation::AllProperties

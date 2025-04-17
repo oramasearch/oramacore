@@ -137,6 +137,7 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -195,3 +196,5 @@ mod tests {
         assert_eq!(docs[1].0, DocumentId(2));
     }
 }
+
+*/

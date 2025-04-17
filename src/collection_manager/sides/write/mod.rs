@@ -24,10 +24,9 @@ use super::{
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
-use index::Index;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -35,12 +34,10 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace};
 
 use collections::CollectionsWriter;
-use embedding::{
-    start_calculate_embedding_loop, MultiEmbeddingCalculationRequest,
-};
+use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 pub use fields::*;
 
@@ -51,9 +48,9 @@ use crate::{
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, DeleteDocuments,
-        DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexId,
-        InsertDocumentsResult, InteractionLLMConfig, ReindexConfig,
+        ApiKey, CollectionId, CreateCollection, DeleteDocuments, DescribeCollectionResponse,
+        Document, DocumentId, DocumentList, IndexId, InsertDocumentsResult, InteractionLLMConfig,
+        ReindexConfig,
     },
 };
 
@@ -306,19 +303,17 @@ impl WriteSide {
                     // If the document cannot be processed, we should remove it from the document storage
                     // and from the read side
                     // NB: check if the error handling is correct
-                    self.document_storage
-                        .remove(vec![doc_id])
-                        .await;
+                    self.document_storage.remove(vec![doc_id]).await;
 
                     tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
                 }
             };
 
-            info!("Document inserted");
-
-            info!("Doc inserted");
+            debug!("Document inserted");
         }
+
+        info!("All documents are inserted");
 
         drop(metric);
 
@@ -339,8 +334,6 @@ impl WriteSide {
             trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
 
-        info!("Batch of documents inserted");
-
         Ok(result)
     }
 
@@ -357,7 +350,10 @@ impl WriteSide {
             .await
             .context("Collection not found")?;
         collection.check_write_api_key(write_api_key)?;
-        let index = collection.get_index(index_id).await.context("Cannot get index")?;
+        let index = collection
+            .get_index(index_id)
+            .await
+            .context("Cannot get index")?;
         let doc_ids = index.delete_documents(document_ids_to_delete).await?;
 
         self.document_storage.remove(doc_ids).await;
@@ -573,6 +569,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
+        temp_index_id: IndexId,
         reindex_config: ReindexConfig,
     ) -> Result<()> {
         let collection = self
@@ -582,16 +579,20 @@ impl WriteSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
 
+        collection
+            .create_temporary_index_from(index_id, temp_index_id, reindex_config)
+            .await
+            .context("Cannot create temporary index")?;
+        let temp_index = collection
+            .get_temporary_index(temp_index_id)
+            .await
+            // This should never happen because we just created it above
+            .expect("Temporary index not found but it should be there because already created");
+
         let index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
-
-        let temp_index = collection
-            .create_temporary_index_from(index_id, reindex_config)
-            .await
-            .context("Cannot create temporary index")?;
-
         let document_ids = index.get_document_ids().await;
         drop(index);
 
@@ -629,9 +630,10 @@ impl WriteSide {
             };
             info!("Document reindexed");
         }
+        drop(temp_index);
 
         collection
-            .replace_temp_index(index_id, temp_index)
+            .promote_temp_index(index_id, temp_index_id)
             .await
             .context("Cannot replace index")?;
 

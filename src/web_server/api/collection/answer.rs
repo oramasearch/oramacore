@@ -9,6 +9,7 @@ use crate::types::{
     Role, SearchMode, SearchParams,
 };
 use crate::types::{CollectionId, Offset};
+use crate::web_server::api::util::print_error;
 use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -29,8 +30,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
-
-use super::admin::print_error;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
@@ -71,7 +70,7 @@ async fn planned_answer_v1(
     Query(query_params): Query<AnswerQueryParams>,
     Json(mut interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId::from(id);
+    let collection_id = CollectionId::try_new(id).expect("Invalid collection ID");
     let read_side = read_side.clone();
 
     let query = interaction.query.clone();
@@ -298,7 +297,7 @@ async fn answer_v1(
     Query(query): Query<AnswerQueryParams>,
     Json(mut interaction): Json<Interaction>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let collection_id = CollectionId::from(id);
+    let collection_id = CollectionId::try_new(id).expect("Invalid collection ID");
     let read_side = read_side.clone();
     let read_api_key = query.api_key;
 

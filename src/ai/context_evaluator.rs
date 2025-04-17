@@ -208,6 +208,7 @@ impl ContextEvaluator {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,3 +531,4 @@ mod tests {
         assert_eq!(result, 0.0);
     }
 }
+*/

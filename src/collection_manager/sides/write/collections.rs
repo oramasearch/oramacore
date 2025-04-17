@@ -3,28 +3,23 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
 use crate::collection_manager::sides::hooks::HooksRuntime;
-use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
-use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::CollectionCommitLabels;
 use crate::nlp::locales::Locale;
 use crate::nlp::NLPService;
 use crate::types::CollectionId;
-use crate::types::{
-    CreateCollection, DescribeCollectionResponse, DocumentFields, EmbeddingTypedField, LanguageDTO,
-    TypedField,
-};
+use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 
+use super::collection::CollectionWriter;
 use super::embedding::MultiEmbeddingCalculationRequest;
 use super::CollectionsWriterConfig;
-use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
@@ -39,7 +34,7 @@ impl CollectionsWriter {
         embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
-        op_sender : OperationSender,
+        op_sender: OperationSender,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
@@ -136,6 +131,7 @@ impl CollectionsWriter {
             self.op_sender.clone(),
         );
 
+        /*
         let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
             let model = embeddings
                 .as_ref()
@@ -160,6 +156,7 @@ impl CollectionsWriter {
         } else {
             HashMap::new()
         };
+        */
 
         let mut collections = self.collections.write().await;
 

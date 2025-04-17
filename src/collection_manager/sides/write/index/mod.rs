@@ -33,6 +33,7 @@ use super::{
 };
 pub use fields::{FieldType, IndexedValue};
 
+#[derive(Clone)]
 pub enum EmbeddingStringCalculation {
     AllProperties,
     Properties(Box<[Box<[String]>]>),
@@ -47,7 +48,7 @@ pub struct CreateIndexEmbeddingFieldDefintionRequest {
 
 pub struct CreateIndexRequest {
     pub id: IndexId,
-    embedding_field_definition: Vec<CreateIndexEmbeddingFieldDefintionRequest>,
+    pub embedding_field_definition: Vec<CreateIndexEmbeddingFieldDefintionRequest>,
 }
 
 pub struct Index {
@@ -143,7 +144,7 @@ impl Index {
         let filter_fields = dump
             .filter_fields
             .into_iter()
-            .map(|d| IndexFilterField::load_from(d))
+            .map(IndexFilterField::load_from)
             .collect();
         let score_fields = dump
             .score_fields
@@ -177,6 +178,25 @@ impl Index {
 
             op_sender,
         })
+    }
+
+    pub fn get_locale(&self) -> Locale {
+        self.locale
+    }
+
+    pub async fn get_embedding_field_definition(
+        &self,
+    ) -> Result<Vec<CreateIndexEmbeddingFieldDefintionRequest>> {
+        let score_fields = self.score_fields.read().await;
+
+        let mut a: Vec<CreateIndexEmbeddingFieldDefintionRequest> = vec![];
+        for f in score_fields.iter() {
+            if let Some(f) = f.get_embedding_field_definition() {
+                a.push(f);
+            }
+        }
+
+        Ok(a)
     }
 
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
@@ -676,9 +696,9 @@ mod tests {
         let (embedding_sender, _) = tokio::sync::mpsc::channel(10);
 
         let index = Index::empty(
-            CollectionId::try_from("the-collection-id").unwrap(),
+            CollectionId::try_new("the-collection-id").unwrap(),
             CreateIndexRequest {
-                id: IndexId::try_from("the-index-id").unwrap(),
+                id: IndexId::try_new("the-index-id").unwrap(),
                 embedding_field_definition: vec![],
             },
             embedding_sender,
@@ -752,9 +772,9 @@ mod tests {
         let (embedding_sender, mut embedding_receiver) = tokio::sync::mpsc::channel(10);
 
         let index = Index::empty(
-            CollectionId::try_from("the-collection-id").unwrap(),
+            CollectionId::try_new("the-collection-id").unwrap(),
             CreateIndexRequest {
-                id: IndexId::try_from("the-index-id").unwrap(),
+                id: IndexId::try_new("the-index-id").unwrap(),
                 embedding_field_definition: vec![CreateIndexEmbeddingFieldDefintionRequest {
                     field_path: vec!["__orama_embedding_field".to_string()].into_boxed_slice(),
                     model: OramaModel::BgeBase,
