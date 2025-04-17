@@ -21,6 +21,7 @@ use tracing::{error, info, instrument, trace, warn};
 
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
+use crate::ai::tools::{Tool, ToolsInterface};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
@@ -78,6 +79,7 @@ pub struct ReadSide {
     triggers: TriggerInterface,
     segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
+    tools: ToolsInterface,
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
@@ -139,6 +141,7 @@ impl ReadSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
+        let tools = ToolsInterface::new(kv.clone(), llm_service.clone());
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, stop_receiver) = tokio::sync::mpsc::channel(1);
@@ -155,6 +158,7 @@ impl ReadSide {
             segments,
             triggers,
             system_prompts,
+            tools,
             kv,
             llm_service,
             local_gpu_manager,
@@ -624,6 +628,25 @@ impl ReadSide {
 
     pub fn get_default_llm_config(&self) -> (RemoteLLMProvider, String) {
         (RemoteLLMProvider::OramaCore, self.llm_service.model.clone())
+    }
+
+    pub async fn get_tool(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool_id: String,
+    ) -> Result<Option<Tool>> {
+        self.check_read_api_key(collection_id, read_api_key).await?;
+        self.tools.get(collection_id, tool_id).await
+    }
+
+    pub async fn get_all_tools_by_collection(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Tool>> {
+        self.check_read_api_key(collection_id, read_api_key).await?;
+        self.tools.list_by_collection(collection_id).await
     }
 }
 

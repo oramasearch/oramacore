@@ -1267,6 +1267,27 @@ pub struct InsertDocumentsResult {
     pub failed: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertToolsParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub parameters: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteToolParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateToolParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub parameters: String,
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;

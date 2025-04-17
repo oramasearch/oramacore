@@ -42,8 +42,11 @@ pub use fields::*;
 
 use crate::{
     ai::{
-        automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager,
-        llms::LLMService, AIService, RemoteLLMProvider,
+        automatic_embeddings_selector::AutomaticEmbeddingsSelector,
+        gpu::LocalGPUManager,
+        llms::LLMService,
+        tools::{Tool, ToolsInterface},
+        AIService, RemoteLLMProvider,
     },
     collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
     file_utils::BufferedFile,
@@ -92,6 +95,7 @@ pub struct WriteSide {
     segments: SegmentInterface,
     triggers: TriggerInterface,
     system_prompts: SystemPromptInterface,
+    tools: ToolsInterface,
     kv: Arc<KV>,
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
@@ -151,6 +155,7 @@ impl WriteSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
+        let tools = ToolsInterface::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
@@ -180,6 +185,7 @@ impl WriteSide {
             segments,
             triggers,
             system_prompts,
+            tools,
             kv,
             local_gpu_manager,
             llm_service,
@@ -1025,6 +1031,53 @@ impl WriteSide {
                 bail!("Cannot parse trigger id")
             }
         }
+    }
+
+    pub async fn insert_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool: Tool,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.tools
+            .insert(collection_id, tool.clone())
+            .await
+            .context("Cannot insert tool")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool_id: String,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.tools
+            .delete(collection_id, tool_id.clone())
+            .await
+            .context("Cannot delete tool")?;
+
+        Ok(())
+    }
+
+    pub async fn update_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool: Tool,
+    ) -> Result<()> {
+        self.delete_tool(write_api_key, collection_id, tool.id.clone())
+            .await?;
+        self.insert_tool(write_api_key, collection_id, tool).await?;
+
+        Ok(())
     }
 
     pub fn is_gpu_overloaded(&self) -> bool {

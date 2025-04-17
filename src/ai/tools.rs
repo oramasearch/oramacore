@@ -45,14 +45,14 @@ impl Tool {
     }
 }
 
-pub struct ToolsManager {
+pub struct ToolsInterface {
     pub kv: Arc<KV>,
     pub llm_service: Arc<LLMService>,
 }
 
-impl ToolsManager {
+impl ToolsInterface {
     pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
-        ToolsManager { kv, llm_service }
+        ToolsInterface { kv, llm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<()> {
