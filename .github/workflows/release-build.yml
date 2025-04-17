@@ -1,4 +1,4 @@
-name: Build and Upload Release
+name: Build and Release
 
 on:
   release:
@@ -6,24 +6,16 @@ on:
 
 jobs:
   build-and-upload:
-    name: Build and Upload - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: oramacore
-            asset_name: oramacore-linux-amd64
-          - os: windows-latest
-            artifact_name: oramacore.exe
-            asset_name: oramacore-windows-amd64.exe
-          - os: macos-latest
-            artifact_name: oramacore
-            asset_name: oramacore-macos-amd64
-
+    name: Build and Upload Release Asset
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install Protocol Buffers Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -44,6 +36,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./target/release/${{ matrix.artifact_name }}
-          asset_name: ${{ matrix.asset_name }}
+          asset_path: ./target/release/oramacore
+          asset_name: oramacore
           asset_content_type: application/octet-stream
