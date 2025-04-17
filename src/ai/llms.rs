@@ -297,9 +297,11 @@ impl LLMService {
                         remote_llm_providers.insert(
                             RemoteLLMProvider::OpenAI,
                             async_openai::Client::with_config(
-                                OpenAIConfig::new().with_api_key(&conf.api_key), // .with_api_base(conf.url.unwrap_or_else(|| {
-                                                                                 //     "https://api.openai.com/v1".to_string()
-                                                                                 // })),
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
+                                        "https://api.openai.com/v1".to_string()
+                                    })),
                             ),
                         );
                     }

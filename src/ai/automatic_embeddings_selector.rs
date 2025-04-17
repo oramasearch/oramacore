@@ -171,22 +171,78 @@ impl AutomaticEmbeddingsSelector {
     }
 
     pub async fn choose_properties(&self, document: &JSONDocument) -> Result<ChosenProperties> {
-        let documents_as_json = serde_json::to_string(document)?;
-        let variables = vec![("document".to_string(), documents_as_json)];
+        const MAX_RETRIES: u32 = 5; // @todo: do we want to make this configurable?
+        let mut attempts = 0;
+        let mut last_error = None;
 
-        let result = self
-            .llm_service
-            .run_known_prompt(
-                super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
-                variables,
-                self.llm_config.clone(), // @todo: avoid this cloning when possible
-            )
-            .await
-            .with_context(|| "Unable to determine which properties to use for embeddings")?;
+        while attempts < MAX_RETRIES {
+            attempts += 1;
 
-        match serde_json::from_str(&result)? {
-            ChosenPropertiesResult::Properties(properties) => Ok(properties),
-            ChosenPropertiesResult::Error(error) => Err(anyhow::anyhow!(error.error)),
+            let documents_as_json = serde_json::to_string(document)?;
+
+            let variables = vec![("document".to_string(), documents_as_json)];
+
+            let result = match self
+                .llm_service
+                .run_known_prompt(
+                    super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
+                    variables,
+                    self.llm_config.clone(),
+                )
+                .await
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    let error_msg = format!(
+                        "LLM request failed (attempt {}/{}): {}",
+                        attempts, MAX_RETRIES, err
+                    );
+
+                    tracing::error!(error_msg);
+                    last_error = Some(anyhow::anyhow!(error_msg));
+
+                    if attempts < MAX_RETRIES {
+                        let backoff_ms = 100 * (1 << attempts); // 200ms, 400ms, 800ms, 1600ms
+                        tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                        continue;
+                    } else {
+                        return Err(last_error.unwrap());
+                    }
+                }
+            };
+
+            match serde_json::from_str::<ChosenPropertiesResult>(&result) {
+                Ok(ChosenPropertiesResult::Properties(properties)) => {
+                    return Ok(properties);
+                }
+                Ok(ChosenPropertiesResult::Error(error)) => {
+                    return Err(anyhow::anyhow!(error.error));
+                }
+                Err(err) => {
+                    let error_msg = format!(
+                        "Failed to parse LLM response (attempt {}/{}): {}",
+                        attempts, MAX_RETRIES, err
+                    );
+
+                    tracing::error!(error_msg);
+                    last_error = Some(anyhow::anyhow!(error_msg));
+
+                    if attempts < MAX_RETRIES {
+                        let backoff_ms = 100 * (1 << attempts);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                        continue;
+                    } else {
+                        return Err(last_error.unwrap());
+                    }
+                }
+            }
         }
+
+        Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!(
+                "Failed after {} attempts with no specific error",
+                MAX_RETRIES
+            )
+        }))
     }
 }
