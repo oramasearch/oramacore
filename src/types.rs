@@ -7,6 +7,10 @@ use crate::collection_manager::sides::{
 use crate::nlp::locales::Locale;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
+use async_openai::types::{
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+};
 use axum_openapi3::utoipa::{self, IntoParams};
 use axum_openapi3::utoipa::{PartialSchema, ToSchema};
 use redact::Secret;
@@ -1132,8 +1136,11 @@ pub struct RelatedRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
 pub enum Role {
+    #[serde(rename = "system")]
     System,
+    #[serde(rename = "assistant")]
     Assistant,
+    #[serde(rename = "user")]
     User,
 }
 
@@ -1141,6 +1148,28 @@ pub enum Role {
 pub struct InteractionMessage {
     pub role: Role,
     pub content: String,
+}
+
+impl InteractionMessage {
+    pub fn to_async_openai_message(&self) -> ChatCompletionRequestMessage {
+        match &self.role {
+            Role::System => ChatCompletionRequestSystemMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+            Role::Assistant => ChatCompletionRequestAssistantMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+            Role::User => ChatCompletionRequestUserMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1265,6 +1294,34 @@ pub struct InsertDocumentsResult {
     pub inserted: usize,
     pub replaced: usize,
     pub failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertToolsParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub parameters: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteToolParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateToolParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub parameters: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RunToolsParams {
+    pub tool_ids: Option<Vec<String>>,
+    pub messages: Vec<InteractionMessage>,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[cfg(test)]

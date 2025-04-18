@@ -1,5 +1,5 @@
 use crate::types::InteractionLLMConfig;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum_openapi3::utoipa;
 use axum_openapi3::utoipa::ToSchema;
 use serde::{Deserialize, Serialize};

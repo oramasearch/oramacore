@@ -24,6 +24,7 @@ pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
 pub mod party_planner;
+pub mod tools;
 
 tonic::include_proto!("orama_ai_service");
 
