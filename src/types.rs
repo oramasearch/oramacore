@@ -1136,8 +1136,11 @@ pub struct RelatedRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Eq, PartialEq, Copy)]
 pub enum Role {
+    #[serde(rename = "system")]
     System,
+    #[serde(rename = "assistant")]
     Assistant,
+    #[serde(rename = "user")]
     User,
 }
 

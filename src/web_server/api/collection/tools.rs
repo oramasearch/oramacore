@@ -37,6 +37,7 @@ pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(get_tool_v1())
         .add(get_all_tools_v1())
+        .add(run_tools_v1())
         .with_state(read_side)
 }
 

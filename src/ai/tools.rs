@@ -32,10 +32,15 @@ impl Tool {
     }
 
     pub fn to_openai_tool(&self) -> Result<FunctionObject> {
-        let function_params = serde_json::to_value(&self.parameters).context(format!(
-            "Cannot parameters for tool {}. Not a valid JSON.",
-            &self.id
-        ))?;
+        let function_params: serde_json::Value =
+            serde_json::from_str(&self.parameters).context(format!(
+                "Cannot deserialize parameters for tool {}. Not a valid JSON.",
+                &self.id
+            ))?;
+
+        println!("\n\n\n");
+        dbg!(function_params.clone());
+        println!("\n\n\n");
 
         Ok(FunctionObjectArgs::default()
             .name(&self.name)
