@@ -397,19 +397,12 @@ impl LLMService {
 
     pub async fn execute_tools(
         &self,
-        message: String,
+        messages: Vec<ChatCompletionRequestMessage>,
         tools: Vec<FunctionObject>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<Vec<FunctionCall>>> {
         let chosen_model = self.get_chosen_model(llm_config.clone());
         let llm_client = self.get_chosen_llm_client(llm_config);
-
-        // @todo: accept a list of chat messages
-        let user_message = ChatCompletionRequestUserMessageArgs::default()
-            .content(message)
-            .build()
-            .unwrap()
-            .into();
 
         let all_tools: Vec<ChatCompletionTool> = tools
             .iter()
@@ -423,7 +416,7 @@ impl LLMService {
             .max_tokens(1024u32)
             .temperature(0.0)
             .model(chosen_model)
-            .messages([user_message])
+            .messages(messages)
             .tools(all_tools)
             .build()?;
 

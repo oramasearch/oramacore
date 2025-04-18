@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_openai::types::{
-    ChatCompletionToolType, FunctionCall, FunctionObject, FunctionObjectArgs,
+    ChatCompletionRequestMessage, FunctionCall, FunctionObject, FunctionObjectArgs,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::generic_kv::KV,
-    types::{CollectionId, InteractionLLMConfig},
+    types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 
 use super::llms::LLMService;
@@ -101,15 +101,21 @@ impl ToolsInterface {
     pub async fn execute_tools(
         &self,
         collection_id: CollectionId,
-        message: String,
-        tool_id: Option<String>,
+        messages: Vec<InteractionMessage>,
+        tool_ids: Option<Vec<String>>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<Option<Vec<FunctionCall>>> {
-        let tools = match tool_id {
-            Some(tool_id) => match self.get(collection_id, tool_id.clone()).await? {
-                Some(tool) => vec![tool],
-                None => anyhow::bail!("Tool with id {} not found", tool_id),
-            },
+        let tools = match tool_ids {
+            Some(tool_ids) => {
+                let mut tools = Vec::new();
+                for tool_id in tool_ids {
+                    match self.get(collection_id.clone(), tool_id.clone()).await? {
+                        Some(tool) => tools.push(tool),
+                        None => anyhow::bail!("Tool with id {} not found", tool_id),
+                    }
+                }
+                tools
+            }
             None => {
                 let all_tools = self.list_by_collection(collection_id).await?;
 
@@ -126,9 +132,14 @@ impl ToolsInterface {
             .map(|tool| tool.to_openai_tool())
             .collect::<Result<Vec<_>>>()?;
 
+        let conversation: Vec<ChatCompletionRequestMessage> = messages
+            .iter()
+            .map(|m| m.to_async_openai_message())
+            .collect();
+
         let chosen_tools = self
             .llm_service
-            .execute_tools(message, tools_to_function_objects, llm_config)
+            .execute_tools(conversation, tools_to_function_objects, llm_config)
             .await?;
 
         Ok(chosen_tools)

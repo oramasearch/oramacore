@@ -3,6 +3,7 @@ mod collections;
 mod document_storage;
 pub mod notify;
 
+use async_openai::types::FunctionCall;
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
@@ -647,6 +648,20 @@ impl ReadSide {
     ) -> Result<Vec<Tool>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
         self.tools.list_by_collection(collection_id).await
+    }
+
+    pub async fn execute_tools(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        messages: Vec<InteractionMessage>,
+        tool_ids: Option<Vec<String>>,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Option<Vec<FunctionCall>>> {
+        self.check_read_api_key(collection_id, read_api_key).await?;
+        self.tools
+            .execute_tools(collection_id, messages, tool_ids, llm_config)
+            .await
     }
 }
 

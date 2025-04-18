@@ -13,7 +13,9 @@ use serde_json::json;
 use crate::{
     ai::tools::Tool,
     collection_manager::sides::{ReadSide, WriteSide},
-    types::{ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, UpdateToolParams},
+    types::{
+        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams,
+    },
     web_server::api::collection::admin::print_error,
 };
 
@@ -189,6 +191,39 @@ async fn update_tool_v1(
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
         Err(e) => {
             print_error(&e, "Error updating tool");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/tools/run",
+    description = "Run one or more tools"
+)]
+async fn run_tools_v1(
+    collection_id: CollectionId,
+    read_api_key: ApiKey,
+    read_side: State<Arc<ReadSide>>,
+    Json(params): Json<RunToolsParams>,
+) -> impl IntoResponse {
+    let tools_result = read_side
+        .execute_tools(
+            read_api_key,
+            collection_id,
+            params.messages,
+            params.tool_ids,
+            params.llm_config,
+        )
+        .await;
+
+    match tools_result {
+        Ok(results) => Ok((StatusCode::OK, Json(json!({ "results": results })))),
+        Err(e) => {
+            print_error(&e, "Error running tools");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
