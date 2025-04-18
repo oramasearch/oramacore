@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessageArgs,
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolArgs,
-        ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall, FunctionObject,
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall,
+        FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -20,9 +20,7 @@ use crate::{
     types::{RelatedQueriesFormat, Role},
 };
 
-use super::{
-    party_planner::Step, tools::Tool, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig,
-};
+use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
