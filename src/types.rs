@@ -1299,7 +1299,6 @@ pub struct InsertDocumentsResult {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertToolsParams {
     pub id: String,
-    pub name: String,
     pub description: String,
     pub parameters: String,
     pub code: Option<String>,

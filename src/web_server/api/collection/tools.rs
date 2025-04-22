@@ -200,6 +200,7 @@ async fn update_tool_v1(
     }
 }
 
+// #[axum::debug_handler]
 #[endpoint(
     method = "POST",
     path = "/v1/collections/{collection_id}/tools/run",

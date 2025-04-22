@@ -2,9 +2,13 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{JSExecutorConfig, JSExecutorPoolConfig, OramaJSPool, OramaJSPoolConfig};
+use orama_js_pool::{
+    JSExecutor, JSExecutorConfig, JSExecutorError, JSExecutorPoolConfig, OramaJSPool,
+    OramaJSPoolConfig,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::{runtime::Builder, task::LocalSet};
 
 use crate::{
     collection_manager::sides::generic_kv::KV,
@@ -61,32 +65,11 @@ impl Tool {
 pub struct ToolsRuntime {
     pub kv: Arc<KV>,
     pub llm_service: Arc<LLMService>,
-    pub tools_js_runtime: OramaJSPool<Value, Value>,
 }
 
 impl ToolsRuntime {
     pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
-        let tools_js_runtime = OramaJSPool::new(OramaJSPoolConfig {
-            check_interval: Duration::from_secs(5), // @todo: make it configurable
-            max_idle_time: Duration::from_secs(5),  // @todo: make it configurable
-            pool_config: JSExecutorPoolConfig {
-                instances_count_per_code: 3usize, // @todo: make it configurable
-                queue_capacity: 10usize,          // @todo: make it configurable
-                executor_config: JSExecutorConfig {
-                    allowed_hosts: vec![],
-                    function_name: "oramacore_tools".to_string(),
-                    is_async: true,
-                    max_execution_time: Duration::from_secs(5), // @todo: make it configurable
-                    max_startup_time: Duration::from_millis(500), // @todo: make it configurable
-                },
-            },
-        });
-
-        ToolsRuntime {
-            kv,
-            llm_service,
-            tools_js_runtime,
-        }
+        ToolsRuntime { kv, llm_service }
     }
 
     pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<()> {
@@ -211,18 +194,58 @@ impl ToolsRuntime {
                         // LLMs will typically return the arguments as a JSON string, so we should be fine with deserializing it.
                         // But as a general rule, I'd prefer to use something like `json-repair` to ensure the JSON integrity.
                         // @todo: check if we want to use json-repair here
-                        let arguments_as_json_value = serde_json::from_str(&tool.arguments)
+                        let arguments_as_json_value: Value = serde_json::from_str(&tool.arguments)
                             .context(format!(
                                 "Cannot deserialize arguments for tool {}. Not a valid JSON.",
                                 &tool.name
                             ))?;
 
-                        // Let's call the function with the deserialized arguments.
-                        // We should assume that it'll always return a JSON object or a valid JSON string.
-                        let function_call = self
-                            .tools_js_runtime
-                            .execute(&code, arguments_as_json_value)
-                            .await;
+                        let (sx, rx) = tokio::sync::oneshot::channel();
+                        let function_name = full_tool.id.clone();
+
+                        std::thread::spawn(|| {
+                            let local = LocalSet::new();
+
+                            local.spawn_local(async move {
+                                match JSExecutor::try_new(
+                                    JSExecutorConfig {
+                                        allowed_hosts: vec![],
+                                        max_startup_time: Duration::from_millis(500),
+                                        max_execution_time: Duration::from_secs(3),
+                                        function_name: function_name.clone(),
+                                        is_async: true,
+                                    },
+                                    code,
+                                )
+                                .await
+                                {
+                                    Ok(mut tools_js_runtime) => {
+                                        // Let's call the function with the deserialized arguments.
+                                        // We should assume that it'll always return a JSON object or a valid JSON string.
+                                        let function_call: Result<Value, JSExecutorError> =
+                                            tools_js_runtime.exec(arguments_as_json_value).await;
+
+                                        sx.send(function_call)
+                                            .expect("Failed to send function call result");
+                                    }
+                                    Err(e) => {
+                                        sx.send(Err(e))
+                                            .expect("Failed to send function call error");
+                                    }
+                                }
+                            });
+
+                            Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .unwrap()
+                                .block_on(local)
+                        });
+
+                        let function_call = rx.await.context(format!(
+                            "Failed to execute tool {}. Timeout.",
+                            &full_tool.id
+                        ))?;
 
                         // If the function call was successful, we push the result to the results vector.
                         // For now, we'll bail if the function call fails.
