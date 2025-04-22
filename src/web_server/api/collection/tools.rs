@@ -179,10 +179,10 @@ async fn update_tool_v1(
     Json(params): Json<UpdateToolParams>,
 ) -> impl IntoResponse {
     let tool = Tool {
-        id: params.id.clone(),
-        description: params.description.clone(),
-        parameters: params.parameters.clone(),
-        code: params.code.clone(),
+        id: params.id,
+        description: params.description,
+        parameters: params.parameters,
+        code: params.code,
     };
 
     match write_side
