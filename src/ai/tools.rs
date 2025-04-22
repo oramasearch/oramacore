@@ -242,7 +242,7 @@ impl ToolsRuntime {
                             local.spawn_local(async move {
                                 match JSExecutor::try_new(
                                     JSExecutorConfig {
-                                        allowed_hosts: vec!["en.wikipedia.org".to_string()],
+                                        allowed_hosts: vec![],
                                         max_startup_time: Duration::from_millis(500), // @todo: make this configurable
                                         max_execution_time: Duration::from_secs(3), // @todo: make this configurable
                                         function_name: function_name.clone(),
