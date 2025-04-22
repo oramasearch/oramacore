@@ -80,8 +80,7 @@ impl ToolsRuntime {
         // 3. The object must contain exactly one property
         // 4. That property's value must be a function (regular or arrow)
         // 5. The function must have a name
-        // When the function has been validated, we can use the function name as the key in the KV store.
-        let function_name = if let Some(code) = &tool.code {
+        if let Some(code) = &tool.code {
             match validate_js_exports(code) {
                 Ok(validation) => {
                     if !validation.is_valid {
@@ -104,11 +103,7 @@ impl ToolsRuntime {
             None
         };
 
-        // In the case the user doesn't provide a function name, we can use the tool id as the key.
-        let key = match function_name {
-            Some(name) => self.format_key(collection_id.clone(), &name),
-            None => self.format_key(collection_id.clone(), &tool.id),
-        };
+        let key = self.format_key(collection_id.clone(), &tool.id);
 
         // Since we use function names as keys, it may be easier to unintentionally overwrite a tool.
         // Users should delete the tool first and then insert it again (or update an existing one).
