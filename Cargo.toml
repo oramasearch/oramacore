@@ -79,6 +79,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 oxc_parser = "0.47.1"
 oxc_allocator = "0.47.1"
 oxc_span = "0.47.1"
+oxc_ast = "0.65.0"
+oxc_traverse = "0.65.0"
+oxc = "0.47.1"
 
 # prometheus
 metrics-exporter-prometheus = "0.16.1"

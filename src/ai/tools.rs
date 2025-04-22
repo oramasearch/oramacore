@@ -8,6 +8,7 @@ use serde_json::Value;
 use tokio::{runtime::Builder, task::LocalSet};
 
 use crate::{
+    code_parser::tool_parser::validate_js_exports,
     collection_manager::sides::generic_kv::KV,
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
