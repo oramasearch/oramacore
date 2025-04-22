@@ -9,13 +9,15 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct BoolField {
+pub struct CommittedBoolField {
+    field_path: Box<[String]>,
     inner: OrderedKeyIndex<BoolWrapper, DocumentId>,
     data_dir: PathBuf,
 }
 
-impl BoolField {
+impl CommittedBoolField {
     pub fn from_data(
+        field_path: Box<[String]>,
         true_docs: HashSet<DocumentId>,
         false_docs: HashSet<DocumentId>,
         data_dir: PathBuf,
@@ -29,30 +31,47 @@ impl BoolField {
             data_dir.clone(),
         )?;
 
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            field_path,
+            inner,
+            data_dir,
+        })
     }
 
-    pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
+    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (BoolWrapper, HashSet<DocumentId>)>,
     {
         let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            field_path,
+            inner,
+            data_dir,
+        })
     }
 
     pub fn load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let inner = OrderedKeyIndex::load(data_dir.clone())?;
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            field_path: info.field_path,
+            inner,
+            data_dir,
+        })
     }
 
     pub fn get_field_info(&self) -> BoolFieldInfo {
         BoolFieldInfo {
+            field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
     }
 
-    pub fn get_stats(&self) -> Result<BoolCommittedFieldStats> {
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
+    }
+
+    pub fn stats(&self) -> Result<CommittedBoolFieldStats> {
         let false_count = self
             .inner
             .count(BoolWrapper::False)
@@ -61,7 +80,7 @@ impl BoolField {
             .inner
             .count(BoolWrapper::True)
             .context("Cannot count true values")?;
-        Ok(BoolCommittedFieldStats {
+        Ok(CommittedBoolFieldStats {
             false_count,
             true_count,
         })
@@ -177,11 +196,12 @@ impl BoundedValue for BoolWrapper {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BoolFieldInfo {
+    pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
 }
 
 #[derive(Serialize, Debug)]
-pub struct BoolCommittedFieldStats {
+pub struct CommittedBoolFieldStats {
     pub false_count: usize,
     pub true_count: usize,
 }

@@ -23,8 +23,8 @@ impl DocumentStorage {
         Ok(Self { data_dir })
     }
 
-    pub async fn insert(&self, id: DocumentId, document: Document) -> Result<()> {
-        let document: RawJSONDocument = document.into_raw()?;
+    pub async fn insert(&self, id: DocumentId, doc_id_str: String, document: Document) -> Result<()> {
+        let document: RawJSONDocument = document.into_raw(doc_id_str)?;
         let doc_path = self.data_dir.join(id.0.to_string());
         let data = RawJSONDocumentWrapper(document);
         create_or_overwrite(doc_path, &data)

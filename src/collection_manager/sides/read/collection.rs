@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    ops::Deref,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -7,47 +8,17 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, Context, Result};
-use committed::{
-    fields::{
-        BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
-        StringFilterCommittedFieldStats, VectorCommittedFieldStats,
-    },
-    CommittedCollection,
-};
+use anyhow::{anyhow, bail, Context, Result};
+
 use dashmap::DashMap;
+
 use debug_panic::debug_panic;
-use dump::CollectionInfo;
-use merge::{
-    merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
-    merge_vector_field,
-};
 use serde::{Deserialize, Serialize};
-use tokio::{join, sync::RwLock};
-use tracing::{debug, error, info, instrument, trace};
-use uncommitted::{
-    fields::{
-        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringFilterField,
-        StringFilterUncommittedFieldStats, StringUncommittedFieldStats,
-        VectorUncommittedFieldStats,
-    },
-    UncommittedCollection,
+use tokio::{
+    join,
+    sync::{RwLock, RwLockReadGuard},
 };
-
-pub mod stats {
-    pub use super::committed::fields::{
-        BoolCommittedFieldStats, NumberCommittedFieldStats, StringCommittedFieldStats,
-        StringFilterCommittedFieldStats, VectorCommittedFieldStats,
-    };
-    pub use super::uncommitted::fields::{
-        BoolUncommittedFieldStats, NumberUncommittedFieldStats, StringFilterUncommittedFieldStats,
-        StringUncommittedFieldStats, VectorUncommittedFieldStats,
-    };
-}
-
-mod committed;
-mod merge;
-mod uncommitted;
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     ai::{
@@ -71,12 +42,19 @@ use crate::{
     offset_storage::OffsetStorage,
     types::{
         ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, Filter,
-        FulltextMode, HybridMode, Limit, NumberFilter, Properties, SearchMode, SearchModeResult,
-        SearchParams, Similarity, VectorMode,
+        FulltextMode, HybridMode, IndexId, Limit, NumberFilter, Properties, SearchMode,
+        SearchModeResult, SearchParams, Similarity, VectorMode,
     },
 };
 
-#[derive(Debug)]
+use super::{
+    index::{Index, IndexStats},
+    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, UncommittedBoolFieldStats,
+    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
+    UncommittedVectorFieldStats,
+};
+
 pub struct CollectionReader {
     pub(super) id: CollectionId,
     description: Option<String>,
@@ -88,14 +66,14 @@ pub struct CollectionReader {
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
 
-    document_count: AtomicU64,
-
+    // document_count: AtomicU64,
     score_fields: DashMap<String, (FieldId, TypedField)>,
     filter_fields: DashMap<String, (FieldId, TypedField)>,
 
-    uncommitted_collection: RwLock<UncommittedCollection>,
-    committed_collection: RwLock<CommittedCollection>,
+    // uncommitted_collection: RwLock<UncommittedCollection>,
+    // committed_collection: RwLock<CommittedCollection>,
     uncommitted_deleted_documents: RwLock<HashSet<DocumentId>>,
+    indexes: RwLock<HashMap<IndexId, Index>>,
 
     fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
 
@@ -124,13 +102,14 @@ impl CollectionReader {
             ai_service,
             nlp_service,
             llm_service,
-            document_count: AtomicU64::new(0),
+            // document_count: AtomicU64::new(0),
             filter_fields: Default::default(),
             score_fields: Default::default(),
 
-            uncommitted_collection: RwLock::new(UncommittedCollection::new()),
-            committed_collection: RwLock::new(CommittedCollection::empty()),
+            // uncommitted_collection: RwLock::new(UncommittedCollection::new()),
+            // committed_collection: RwLock::new(CommittedCollection::empty()),
             uncommitted_deleted_documents: Default::default(),
+            indexes: Default::default(),
 
             fields_per_model: Default::default(),
 
@@ -146,6 +125,7 @@ impl CollectionReader {
         llm_service: Arc<LLMService>,
         data_dir: PathBuf,
     ) -> Result<Self> {
+        /*
         info!("Loading collection from {:?}", data_dir);
 
         let collection_info_path = data_dir.join("info.info");
@@ -235,7 +215,7 @@ impl CollectionReader {
             ai_service,
             nlp_service,
             llm_service,
-            document_count: AtomicU64::new(collection_info.document_count),
+            // document_count: AtomicU64::new(collection_info.document_count),
             fields_per_model,
             text_parser_per_field,
             filter_fields,
@@ -247,14 +227,39 @@ impl CollectionReader {
 
             offset_storage,
         })
+        */
+        panic!()
+    }
+
+    /*
+    pub async fn create_index(&self, index_id: IndexId, locale: Locale) {
+        let mut indexes_lock = self.indexes.write().await;
+        let index = Index::new(index_id, locale, self.llm_service.clone());
+        if indexes_lock.insert(index_id, index).is_some() {
+            warn!("Index {} already exists", index_id);
+            debug_panic!("Index {} already exists", index_id);
+        }
+    }
+
+
+    pub async fn get_index_mut(&mut self, index_id: IndexId) -> Option<IndexReadLock> {
+        let indexes_lock = self.indexes.read().await;
+        if !indexes_lock.contains_key(&index_id) {
+            return None;
+        }
+        Some(IndexReadLock {
+            lock: indexes_lock,
+            id: index_id,
+        })
+    }
+    */
+
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
     }
 
     pub fn mark_as_deleted(&mut self) {
         self.deleted = true;
-    }
-
-    pub fn is_deleted(&self) -> bool {
-        self.deleted
     }
 
     #[inline]
@@ -270,6 +275,21 @@ impl CollectionReader {
         self.id
     }
 
+    #[instrument(skip(self, search_params), level="debug", fields(coll_id = ?self.id))]
+    pub async fn search(
+        &self,
+        search_params: SearchParams,
+    ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
+        let mut result: HashMap<DocumentId, f32> = HashMap::new();
+        let indexes_lock = self.indexes.read().await;
+        for (_, index) in indexes_lock.iter() {
+            index.search(&search_params, &mut result).await?;
+        }
+
+        Ok(result)
+    }
+
+    /*
     #[instrument(skip(self, data_dir), fields(coll_id = ?self.id))]
     pub async fn commit(&self, data_dir: PathBuf, force_new: bool) -> Result<()> {
         info!("Committing collection");
@@ -850,7 +870,44 @@ impl CollectionReader {
 
         Ok(())
     }
+    */
 
+    pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
+        match collection_operation {
+            CollectionWriteOperation::CreateIndex2 { index_id, locale } => {
+                let mut indexes_lock = self.indexes.write().await;
+                let index = Index::new(
+                    index_id,
+                    locale,
+                    self.llm_service.clone(),
+                    self.ai_service.clone(),
+                );
+                if indexes_lock.insert(index_id, index).is_some() {
+                    warn!("Index {} already exists", index_id);
+                    debug_panic!("Index {} already exists", index_id);
+                }
+                drop(indexes_lock);
+            }
+            CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
+                let mut indexes_lock = self.indexes.write().await;
+                let Some(index) = indexes_lock.get_mut(&index_id) else {
+                    bail!("Index {} not found", index_id)
+                };
+                index
+                    .update(index_op)
+                    .with_context(|| format!("Cannot update index {:?}", index_id))?;
+                drop(indexes_lock);
+            }
+            _ => panic!(
+                "Unimplemented read side operation: {:?}",
+                collection_operation
+            ),
+        }
+
+        Ok(())
+    }
+
+    /*
     pub fn increment_document_count(&self) {
         self.document_count.fetch_add(1, Ordering::Relaxed);
     }
@@ -964,7 +1021,32 @@ impl CollectionReader {
 
                 trace!("Value indexed");
             }
+            CollectionWriteOperation::CreateIndex2 {
+                index_id,
+                locale,
+            } => {
+                let mut uncommitted = self.uncommitted_collection.write().await;
+                uncommitted
+                    .create_index(index_id, locale);
+
+                self.offset_storage.set_offset(offset);
+            }
+            CollectionWriteOperation::CreateField2 { index_id, field_id, field_path } => {
+                let mut uncommitted = self.uncommitted_collection.write().await;
+
+                match uncommitted.get_index_mut(index_id) {
+                    Some(index_ref) => {
+                        index_ref.create_field(field_id, field_path);
+                    },
+                    None => {
+                        warn!("Index {:?} not found", index_id);
+                    }
+                };
+
+                self.offset_storage.set_offset(offset);
+            }
             _ => {
+                println!("Unimplemented read side operation: {:?}", collection_operation);
                 unimplemented!("Implement read side")
             }
         };
@@ -1532,208 +1614,21 @@ impl CollectionReader {
         Ok(Some(res_facets))
     }
 
+    */
+
     pub async fn stats(&self) -> Result<CollectionStats> {
-        let mut fields_stats = Vec::new();
-
-        let mut bools: HashMap<
-            FieldId,
-            (
-                Option<BoolCommittedFieldStats>,
-                Option<BoolUncommittedFieldStats>,
-            ),
-        > = HashMap::new();
-        let bool_committed_fields_stats =
-            self.committed_collection.read().await.get_bool_stats()?;
-        bools.extend(
-            bool_committed_fields_stats
-                .into_iter()
-                .map(|(k, v)| (k, (Some(v), None))),
-        );
-        let bool_uncommitted_fields_stats =
-            self.uncommitted_collection.read().await.get_bool_stats();
-        for (k, v) in bool_uncommitted_fields_stats {
-            let e = bools.entry(k).or_default();
-            e.1 = Some(v);
+        let indexes_lock = self.indexes.read().await;
+        let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
+        for (_, i) in indexes_lock.iter() {
+            indexes_stats.push(i.stats().await?);
         }
-        fields_stats.extend(bools.into_iter().map(|(k, v)| {
-            let name = self
-                .filter_fields
-                .iter()
-                .find(|e| e.value().0 == k)
-                .map(|e| e.key().to_string())
-                .unwrap_or_default();
-            FieldStats {
-                field_id: k,
-                name,
-                stats: FieldStatsType::Bool {
-                    uncommitted: v.1,
-                    committed: v.0,
-                },
-            }
-        }));
-
-        let mut numbers: HashMap<
-            FieldId,
-            (
-                Option<NumberCommittedFieldStats>,
-                Option<NumberUncommittedFieldStats>,
-            ),
-        > = HashMap::new();
-        let number_committed_fields_stats =
-            self.committed_collection.read().await.get_number_stats()?;
-        numbers.extend(
-            number_committed_fields_stats
-                .into_iter()
-                .map(|(k, v)| (k, (Some(v), None))),
-        );
-        let number_uncommitted_fields_stats =
-            self.uncommitted_collection.read().await.get_number_stats();
-        for (k, v) in number_uncommitted_fields_stats {
-            let e = numbers.entry(k).or_default();
-            e.1 = Some(v);
-        }
-        fields_stats.extend(numbers.into_iter().map(|(k, v)| {
-            let name = self
-                .filter_fields
-                .iter()
-                .find(|e| e.value().0 == k)
-                .map(|e| e.key().to_string())
-                .unwrap_or_default();
-            FieldStats {
-                field_id: k,
-                name,
-                stats: FieldStatsType::Number {
-                    uncommitted: v.1,
-                    committed: v.0,
-                },
-            }
-        }));
-
-        let mut string_filters: HashMap<
-            FieldId,
-            (
-                Option<StringFilterCommittedFieldStats>,
-                Option<StringFilterUncommittedFieldStats>,
-            ),
-        > = HashMap::new();
-        let string_filter_committed_fields_stats = self
-            .committed_collection
-            .read()
-            .await
-            .get_string_filter_stats();
-        string_filters.extend(
-            string_filter_committed_fields_stats
-                .into_iter()
-                .map(|(k, v)| (k, (Some(v), None))),
-        );
-        let string_filter_uncommitted_fields_stats = self
-            .uncommitted_collection
-            .read()
-            .await
-            .get_string_filter_stats();
-        for (k, v) in string_filter_uncommitted_fields_stats {
-            let e = string_filters.entry(k).or_default();
-            e.1 = Some(v);
-        }
-        fields_stats.extend(string_filters.into_iter().map(|(k, v)| {
-            let name = self
-                .filter_fields
-                .iter()
-                .find(|e| e.value().0 == k)
-                .map(|e| e.key().to_string())
-                .unwrap_or_default();
-            FieldStats {
-                field_id: k,
-                name,
-                stats: FieldStatsType::StringFilter {
-                    uncommitted: v.1,
-                    committed: v.0,
-                },
-            }
-        }));
-
-        let mut strings: HashMap<
-            FieldId,
-            (
-                Option<StringCommittedFieldStats>,
-                Option<StringUncommittedFieldStats>,
-            ),
-        > = HashMap::new();
-        let string_committed_fields_stats =
-            self.committed_collection.read().await.get_string_stats()?;
-        strings.extend(
-            string_committed_fields_stats
-                .into_iter()
-                .map(|(k, v)| (k, (Some(v), None))),
-        );
-        let string_uncommitted_fields_stats =
-            self.uncommitted_collection.read().await.get_string_stats();
-        for (k, v) in string_uncommitted_fields_stats {
-            let e = strings.entry(k).or_default();
-            e.1 = Some(v);
-        }
-        fields_stats.extend(strings.into_iter().map(|(k, v)| {
-            let name = self
-                .score_fields
-                .iter()
-                .find(|e| e.value().0 == k)
-                .map(|e| e.key().to_string())
-                .unwrap_or_default();
-            FieldStats {
-                field_id: k,
-                name,
-                stats: FieldStatsType::String {
-                    uncommitted: v.1,
-                    committed: v.0,
-                },
-            }
-        }));
-
-        let mut vectors: HashMap<
-            FieldId,
-            (
-                Option<VectorCommittedFieldStats>,
-                Option<VectorUncommittedFieldStats>,
-            ),
-        > = HashMap::new();
-        let vector_committed_fields_stats =
-            self.committed_collection.read().await.get_vector_stats()?;
-        vectors.extend(
-            vector_committed_fields_stats
-                .into_iter()
-                .map(|(k, v)| (k, (Some(v), None))),
-        );
-        let vector_uncommitted_fields_stats =
-            self.uncommitted_collection.read().await.get_vector_stats();
-        for (k, v) in vector_uncommitted_fields_stats {
-            let e = vectors.entry(k).or_default();
-            e.1 = Some(v);
-        }
-        fields_stats.extend(vectors.into_iter().filter_map(|(k, v)| {
-            let name = self
-                .score_fields
-                .iter()
-                .find(|e| e.value().0 == k)?
-                .key()
-                .to_string();
-            Some(FieldStats {
-                field_id: k,
-                name,
-                stats: FieldStatsType::Vector {
-                    uncommitted: v.1,
-                    committed: v.0,
-                },
-            })
-        }));
-
-        fields_stats.sort_by_key(|e| e.field_id.0);
+        drop(indexes_lock);
 
         Ok(CollectionStats {
             id: self.get_id(),
             description: self.description.clone(),
             default_locale: self.default_locale,
-            document_count: self.document_count.load(Ordering::Relaxed),
-            fields_stats,
+            indexes_stats,
         })
     }
 }
@@ -1743,6 +1638,7 @@ pub struct Committed {
     pub epoch: u64,
 }
 
+/*
 mod dump {
     use serde::{Deserialize, Serialize};
 
@@ -1855,7 +1751,8 @@ mod dump {
         String,
     }
 }
-
+ */
+/*
 async fn get_bool_filtered_document(
     reader: &CollectionReader,
     field_id: FieldId,
@@ -1994,6 +1891,7 @@ async fn get_filtered_document(
         }
     }
 }
+*/
 
 #[derive(Debug, Clone)]
 pub enum TypedField {
@@ -2010,11 +1908,40 @@ pub enum TypedField {
 }
 
 #[derive(Serialize, Debug)]
-pub struct FieldStats {
-    pub name: String,
+#[serde(tag = "type")]
+pub enum IndexFieldStatsType {
+    #[serde(rename = "uncommitted_bool")]
+    UncommittedBoolean(UncommittedBoolFieldStats),
+    #[serde(rename = "committed_bool")]
+    CommittedBoolean(CommittedBoolFieldStats),
+
+    #[serde(rename = "uncommitted_number")]
+    UncommittedNumber(UncommittedNumberFieldStats),
+    #[serde(rename = "committed_number")]
+    CommittedNumber(CommittedNumberFieldStats),
+
+    #[serde(rename = "uncommitted_string_filter")]
+    UncommittedStringFilter(UncommittedStringFilterFieldStats),
+    #[serde(rename = "committed_string_filter")]
+    CommittedStringFilter(CommittedStringFilterFieldStats),
+
+    #[serde(rename = "uncommitted_string")]
+    UncommittedString(UncommittedStringFieldStats),
+    #[serde(rename = "committed_string")]
+    CommittedString(CommittedStringFieldStats),
+
+    #[serde(rename = "uncommitted_vector")]
+    UncommittedVector(UncommittedVectorFieldStats),
+    #[serde(rename = "committed_vector")]
+    CommittedVector(CommittedVectorFieldStats),
+}
+
+#[derive(Serialize, Debug)]
+pub struct IndexFieldStats {
     pub field_id: FieldId,
+    pub path: String,
     #[serde(flatten)]
-    pub stats: FieldStatsType,
+    pub stats: IndexFieldStatsType,
 }
 
 #[derive(Serialize, Debug)]
@@ -2022,36 +1949,42 @@ pub struct CollectionStats {
     pub id: CollectionId,
     pub description: Option<String>,
     pub default_locale: Locale,
-    pub document_count: u64,
-    pub fields_stats: Vec<FieldStats>,
+    // pub document_count: u64,
+    pub indexes_stats: Vec<IndexStats>,
 }
 
-#[derive(Serialize, Debug)]
-#[serde(tag = "type")]
-pub enum FieldStatsType {
-    #[serde(rename = "bool")]
-    Bool {
-        uncommitted: Option<BoolUncommittedFieldStats>,
-        committed: Option<BoolCommittedFieldStats>,
-    },
-    #[serde(rename = "number")]
-    Number {
-        uncommitted: Option<NumberUncommittedFieldStats>,
-        committed: Option<NumberCommittedFieldStats>,
-    },
-    #[serde(rename = "string_filter")]
-    StringFilter {
-        uncommitted: Option<StringFilterUncommittedFieldStats>,
-        committed: Option<StringFilterCommittedFieldStats>,
-    },
-    #[serde(rename = "string")]
-    String {
-        uncommitted: Option<StringUncommittedFieldStats>,
-        committed: Option<StringCommittedFieldStats>,
-    },
-    #[serde(rename = "vector")]
-    Vector {
-        uncommitted: Option<VectorUncommittedFieldStats>,
-        committed: Option<VectorCommittedFieldStats>,
-    },
+pub struct IndexReadLock<'guard> {
+    lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
+    id: IndexId,
+}
+
+impl<'guard> IndexReadLock<'guard> {
+    pub fn try_new(
+        indexes_lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
+        id: IndexId,
+    ) -> Option<Self> {
+        let guard = indexes_lock.get(&id);
+        match &guard {
+            Some(_) => {
+                let _ = guard;
+                Some(Self {
+                    lock: indexes_lock,
+                    id,
+                })
+            }
+            None => None,
+        }
+    }
+}
+
+impl Deref for IndexReadLock<'_> {
+    type Target = Index;
+
+    fn deref(&self) -> &Self::Target {
+        // Safety: the index map contains the id because we checked it before
+        // no one can remove the collection from the map because we hold a read lock
+        self.lock.get(&self.id).expect(
+            "The index map always contains id because we checked it before and we hold a read lock",
+        )
+    }
 }

@@ -47,7 +47,9 @@ impl TotalDocumentsWithTermInField {
 pub struct Positions(pub Vec<usize>);
 
 #[derive(Debug)]
-pub struct StringField {
+pub struct UncommittedStringField {
+    field_path: Box<[String]>,
+
     /// The sum of the length of all the content in the field in the collection
     total_field_length: usize,
     /// Set of document ids that has the field
@@ -61,9 +63,10 @@ pub struct StringField {
     )>,
 }
 
-impl StringField {
-    pub fn empty() -> Self {
+impl UncommittedStringField {
+    pub fn empty(field_path: Box<[String]>) -> Self {
         Self {
+            field_path,
             total_field_length: 0,
             document_ids: HashSet::new(),
             field_length_per_doc: HashMap::new(),
@@ -76,6 +79,10 @@ impl StringField {
             total_document_length: self.total_field_length,
             total_documents: self.document_ids.len(),
         }
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn len(&self) -> usize {
@@ -211,8 +218,8 @@ impl StringField {
         self.inner.inner.iter()
     }
 
-    pub fn get_stats(&self) -> StringUncommittedFieldStats {
-        StringUncommittedFieldStats {
+    pub fn stats(&self) -> UncommittedStringFieldStats {
+        UncommittedStringFieldStats {
             key_count: self.inner.len(),
             global_info: self.global_info(),
         }
@@ -220,7 +227,7 @@ impl StringField {
 }
 
 #[derive(Serialize, Debug)]
-pub struct StringUncommittedFieldStats {
+pub struct UncommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
 }

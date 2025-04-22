@@ -5,15 +5,21 @@ use serde::Serialize;
 use crate::types::DocumentId;
 
 #[derive(Debug)]
-pub struct BoolField {
+pub struct UncommittedBoolField {
+    field_path: Box<[String]>,
     inner: (HashSet<DocumentId>, HashSet<DocumentId>),
 }
 
-impl BoolField {
-    pub fn empty() -> Self {
+impl UncommittedBoolField {
+    pub fn empty(field_path: Box<[String]>) -> Self {
         Self {
+            field_path,
             inner: (HashSet::new(), HashSet::new()),
         }
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn len(&self) -> usize {
@@ -28,8 +34,8 @@ impl BoolField {
         }
     }
 
-    pub fn get_stats(&self) -> BoolUncommittedFieldStats {
-        BoolUncommittedFieldStats {
+    pub fn stats(&self) -> UncommittedBoolFieldStats {
+        UncommittedBoolFieldStats {
             false_count: self.inner.1.len(),
             true_count: self.inner.0.len(),
         }
@@ -56,7 +62,7 @@ fn f(d: &DocumentId) -> DocumentId {
 }
 
 #[derive(Serialize, Debug)]
-pub struct BoolUncommittedFieldStats {
+pub struct UncommittedBoolFieldStats {
     pub false_count: usize,
     pub true_count: usize,
 }

@@ -119,15 +119,10 @@ impl Document {
         FlattenDocument(inner)
     }
 
-    pub fn into_raw(&self) -> Result<RawJSONDocument> {
-        let id = self
-            .inner
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    pub fn into_raw(&self, doc_id_str: String) -> Result<RawJSONDocument> {
         let inner =
             serde_json::value::to_raw_value(&self.inner).context("Cannot serialize document")?;
-        Ok(RawJSONDocument { inner, id })
+        Ok(RawJSONDocument { inner, id: Some(doc_id_str) })
     }
 
     pub fn get(&self, key: &str) -> Option<&Value> {
@@ -738,7 +733,7 @@ pub struct VectorMode {
     pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Similarity(pub f32);
 
 impl Default for Similarity {

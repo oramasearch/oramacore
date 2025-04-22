@@ -1,7 +1,10 @@
 mod collection;
 mod collections;
 mod document_storage;
+mod index;
 pub mod notify;
+
+pub use index::*;
 
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
@@ -43,11 +46,8 @@ use super::segments::{Segment, SelectedSegment};
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
-    CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
-    OperationReceiverCreator, WriteOperation,
+    InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
-
-pub use collection::{stats, FieldStats, FieldStatsType};
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -215,6 +215,73 @@ impl ReadSide {
         Ok(())
     }
 
+    pub async fn collection_stats(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionStats> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
+        collection.stats().await
+    }
+
+    pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {
+        trace!(offset=?offset, "Updating read side");
+
+        let m = OPERATION_COUNT.create(Empty);
+
+        // We stop commit operations while we are updating
+        // The lock is released at the end of this function
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
+        // Already applied. We can skip this operation.
+        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+            warn!(offset=?offset, "Operation already applied. Skipping");
+            return Ok(());
+        }
+
+        let mut live_offset = self.live_offset.write().await;
+        *live_offset = offset;
+        drop(live_offset);
+
+        match op {
+            WriteOperation::CreateCollection {
+                id,
+                read_api_key,
+                default_locale,
+                description,
+            } => {
+                self.collections
+                    .create_collection(offset, id, description, default_locale, read_api_key)
+                    .await?;
+            }
+            WriteOperation::Collection(collection_id, collection_operation) => {
+                let collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                collection.update(collection_operation).await?;
+            }
+            WriteOperation::DocumentStorage(op) => {
+                self.document_storage
+                    .update(op)
+                    .await
+                    .context("Cannot update document storage")?;
+            }
+            _ => panic!("Unsupported operation: {:?}", op),
+        }
+
+        drop(m);
+
+        Ok(())
+    }
+
     pub async fn search(
         &self,
         read_api_key: ApiKey,
@@ -245,7 +312,10 @@ impl ReadSide {
 
         let token_scores = collection.search(search_params).await?;
 
-        let facets = collection.calculate_facets(&token_scores, facets).await?;
+        if !facets.is_empty() {
+            panic!("Facets are not supported yet");
+        }
+        let facets = None; // collection.calculate_facets(&token_scores, facets).await?;
 
         let count = token_scores.len();
 
@@ -289,20 +359,7 @@ impl ReadSide {
         })
     }
 
-    pub async fn collection_stats(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<CollectionStats> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_read_api_key(read_api_key)?;
-
-        collection.stats().await
-    }
+    /*
 
     #[instrument(skip(self, op), fields(offset=?op.0))]
     pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
@@ -420,6 +477,8 @@ impl ReadSide {
         Ok(())
     }
 
+    */
+
     // This is wrong. We should not expose the ai service to the read side.
     // TODO: Remove this method.
     pub fn get_ai_service(&self) -> Arc<AIService> {
@@ -432,10 +491,12 @@ impl ReadSide {
         self.llm_service.clone()
     }
 
+    /*
     pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
         let collection = self.collections.get_collection(collection_id).await?;
         Some(collection.count_documents())
     }
+    */
 
     pub async fn get_system_prompt(
         &self,

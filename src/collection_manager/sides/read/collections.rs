@@ -39,7 +39,6 @@ const LIMIT: usize = 100;
 /// The old collection id is added to the `last_reindexed_collections`
 ///
 
-#[derive(Debug)]
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
@@ -69,28 +68,23 @@ impl CollectionsReader {
             notifier = Some(n);
         }
 
-        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot deserialize info.json file")
-        {
-            Ok(info) => info,
-            Err(e) => {
-                warn!(
-                    "Cannot read info.json file: {:?}. Skip loading collections",
-                    e
-                );
-                return Ok(Self {
-                    ai_service,
-                    nlp_service,
-                    llm_service,
-                    notifier,
+        let collections_info: CollectionsInfo =
+            match BufferedFile::open(data_dir.join("info.json")).and_then(|f| f.read_json_data()) {
+                Ok(info) => info,
+                Err(_) => {
+                    warn!("Cannot read info.json file. Skip loading collections",);
+                    return Ok(Self {
+                        ai_service,
+                        nlp_service,
+                        llm_service,
+                        notifier,
 
-                    collections: Default::default(),
-                    indexes_config,
-                    last_reindexed_collections: Default::default(),
-                });
-            }
-        };
+                        collections: Default::default(),
+                        indexes_config,
+                        last_reindexed_collections: Default::default(),
+                    });
+                }
+            };
 
         let CollectionsInfo::V1(collections_info) = collections_info;
 
@@ -189,12 +183,14 @@ impl CollectionsReader {
                 collection: id.to_string(),
                 side: "read",
             });
+            /*
             match collection.commit(collection_dir, false).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
                 }
             }
+            */
             drop(m);
         }
 
@@ -343,10 +339,12 @@ impl CollectionsReader {
             .get_collection(target_collection_id)
             .await
             .context("Cannot get collection")?;
+        /*
         collection
             .commit(collection_dir, true)
             .await
             .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
+        */
         drop(m);
 
         if let Some(notifier) = &self.notifier {

@@ -3,26 +3,39 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::types::DocumentId;
+use crate::{ai::OramaModel, types::DocumentId};
 
 type VectorWithMagnetude = (f32, Vec<f32>);
 
 #[derive(Debug)]
-pub struct VectorField {
+pub struct UncommittedVectorField {
+    field_path: Box<[String]>,
+    model: OramaModel,
+
     pub data: Vec<(DocumentId, Vec<VectorWithMagnetude>)>,
     pub dimension: usize,
 }
 
-impl VectorField {
-    pub fn empty(dimension: usize) -> Self {
+impl UncommittedVectorField {
+    pub fn empty(field_path: Box<[String]>, model: OramaModel) -> Self {
         Self {
+            field_path,
             data: Vec::new(),
-            dimension,
+            dimension: model.dimensions(),
+            model,
         }
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn get_model(&self) -> OramaModel {
+        self.model
     }
 
     pub fn search(
@@ -88,8 +101,8 @@ impl VectorField {
             .map(|(id, vectors)| (*id, vectors.iter().map(|(_, v)| v.clone()).collect()))
     }
 
-    pub fn get_stats(&self) -> VectorUncommittedFieldStats {
-        VectorUncommittedFieldStats {
+    pub fn stats(&self) -> UncommittedVectorFieldStats {
+        UncommittedVectorFieldStats {
             len: self.data.len(),
         }
     }
@@ -125,7 +138,7 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
 }
 
 #[derive(Serialize, Debug)]
-pub struct VectorUncommittedFieldStats {
+pub struct UncommittedVectorFieldStats {
     pub len: usize,
 }
 
@@ -135,7 +148,10 @@ mod tests {
 
     #[test]
     fn test_uncommitted_vector() {
-        let mut index = VectorField::empty(3);
+        let mut index = UncommittedVectorField::empty(
+            vec!["".to_string()].into_boxed_slice(),
+            OramaModel::BgeBase,
+        );
         index
             .insert(DocumentId(0), vec![vec![1.0, 0.0, 0.0]])
             .unwrap();

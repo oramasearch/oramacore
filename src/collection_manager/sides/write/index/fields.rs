@@ -216,7 +216,7 @@ impl IndexFilterField {
     }
 }
 
-struct NumberFilterField {
+pub struct NumberFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
@@ -268,7 +268,7 @@ impl NumberFilterField {
     }
 }
 
-struct BoolFilterField {
+pub struct BoolFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
@@ -308,7 +308,7 @@ impl BoolFilterField {
     }
 }
 
-struct StringFilterField {
+pub struct StringFilterField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
@@ -546,7 +546,7 @@ impl IndexScoreField {
     }
 }
 
-struct StringScoreField {
+pub struct StringScoreField {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
@@ -642,7 +642,7 @@ impl StringScoreField {
     }
 }
 
-struct EmbeddingField {
+pub struct EmbeddingField {
     field_id: FieldId,
     collection_id: CollectionId,
     index_id: IndexId,
@@ -684,6 +684,10 @@ impl EmbeddingField {
             embedding_sender,
             op_sender,
         }
+    }
+
+    pub fn get_model(&self) -> OramaModel {
+        self.model
     }
 
     fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {

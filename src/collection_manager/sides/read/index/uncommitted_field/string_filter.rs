@@ -5,15 +5,21 @@ use serde::Serialize;
 use crate::types::DocumentId;
 
 #[derive(Debug)]
-pub struct StringFilterField {
+pub struct UncommittedStringFilterField {
+    field_path: Box<[String]>,
     inner: HashMap<String, HashSet<DocumentId>>,
 }
 
-impl StringFilterField {
-    pub fn empty() -> Self {
+impl UncommittedStringFilterField {
+    pub fn empty(field_path: Box<[String]>) -> Self {
         Self {
+            field_path,
             inner: Default::default(),
         }
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn len(&self) -> usize {
@@ -47,10 +53,10 @@ impl StringFilterField {
             .map(|(k, doc_ids)| (k.clone(), doc_ids.clone()))
     }
 
-    pub fn get_stats(&self) -> StringFilterUncommittedFieldStats {
+    pub fn stats(&self) -> UncommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
 
-        StringFilterUncommittedFieldStats {
+        UncommittedStringFilterFieldStats {
             variant_count: self.inner.len(),
             doc_count,
         }
@@ -58,7 +64,7 @@ impl StringFilterField {
 }
 
 #[derive(Serialize, Debug)]
-pub struct StringFilterUncommittedFieldStats {
+pub struct UncommittedStringFilterFieldStats {
     pub variant_count: usize,
     pub doc_count: usize,
 }

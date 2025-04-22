@@ -9,15 +9,21 @@ use serde::Serialize;
 use crate::types::{DocumentId, Number, NumberFilter};
 
 #[derive(Debug)]
-pub struct NumberField {
+pub struct UncommittedNumberField {
+    field_path: Box<[String]>,
     inner: BTreeMap<Number, HashSet<DocumentId>>,
 }
 
-impl NumberField {
-    pub fn empty() -> Self {
+impl UncommittedNumberField {
+    pub fn empty(field_path: Box<[String]>) -> Self {
         Self {
+            field_path,
             inner: BTreeMap::new(),
         }
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn len(&self) -> usize {
@@ -44,9 +50,9 @@ impl NumberField {
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))
     }
 
-    pub fn get_stats(&self) -> NumberUncommittedFieldStats {
+    pub fn stats(&self) -> UncommittedNumberFieldStats {
         if self.inner.is_empty() {
-            return NumberUncommittedFieldStats {
+            return UncommittedNumberFieldStats {
                 min: Number::F32(f32::INFINITY),
                 max: Number::F32(f32::NEG_INFINITY),
                 count: 0,
@@ -56,14 +62,14 @@ impl NumberField {
         let (Some((min, _)), Some((max, _))) =
             (self.inner.first_key_value(), self.inner.last_key_value())
         else {
-            return NumberUncommittedFieldStats {
+            return UncommittedNumberFieldStats {
                 min: Number::F32(f32::INFINITY),
                 max: Number::F32(f32::NEG_INFINITY),
                 count: 0,
             };
         };
 
-        NumberUncommittedFieldStats {
+        UncommittedNumberFieldStats {
             min: *min,
             max: *max,
             count: self.len(),
@@ -108,7 +114,7 @@ where
 }
 
 #[derive(Serialize, Debug)]
-pub struct NumberUncommittedFieldStats {
+pub struct UncommittedNumberFieldStats {
     pub min: Number,
     pub max: Number,
     pub count: usize,

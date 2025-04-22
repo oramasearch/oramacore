@@ -13,23 +13,29 @@ use crate::{
     types::DocumentId,
 };
 
-pub struct VectorField {
+pub struct CommittedVectorField {
+    field_path: Box<[String]>,
     inner: HNSW2Index,
     data_dir: PathBuf,
 }
 
-impl Debug for VectorField {
+impl Debug for CommittedVectorField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let inner = serde_json::to_string(&self.inner).unwrap();
-        f.debug_struct("VectorField")
+        f.debug_struct("EmbeddingField")
             .field("inner", &inner)
             .field("data_dir", &self.data_dir)
             .finish()
     }
 }
 
-impl VectorField {
-    pub fn from_iter<I>(iter: I, dim: usize, data_dir: PathBuf) -> Result<Self>
+impl CommittedVectorField {
+    pub fn from_iter<I>(
+        field_path: Box<[String]>,
+        iter: I,
+        dim: usize,
+        data_dir: PathBuf,
+    ) -> Result<Self>
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
@@ -47,10 +53,15 @@ impl VectorField {
             .write_bincode_data(&inner)
             .context("Cannot write hnsw file")?;
 
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            inner,
+            data_dir,
+            field_path,
+        })
     }
 
     pub fn from_dump_and_iter(
+        field_path: Box<[String]>,
         data_dir: PathBuf,
         iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
@@ -85,6 +96,7 @@ impl VectorField {
             .context("Cannot write hnsw file")?;
 
         Ok(Self {
+            field_path,
             inner: new_inner,
             data_dir: new_data_dir,
         })
@@ -99,13 +111,19 @@ impl VectorField {
             .map_err(|e| anyhow!("Cannot read hnsw file: {}", e))?;
 
         Ok(Self {
+            field_path: info.field_path,
             inner,
             data_dir: info.data_dir,
         })
     }
 
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
+    }
+
     pub fn get_field_info(&self) -> VectorFieldInfo {
         VectorFieldInfo {
+            field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
     }
@@ -153,21 +171,24 @@ impl VectorField {
         Ok(())
     }
 
-    pub fn get_stats(&self) -> Result<VectorCommittedFieldStats> {
-        Ok(VectorCommittedFieldStats {
-            len: self.inner.len(),
+    pub fn stats(&self) -> Result<CommittedVectorFieldStats> {
+        Ok(CommittedVectorFieldStats {
+            dimensions: self.inner.dim(),
+            count: self.inner.len(),
         })
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VectorFieldInfo {
-    pub data_dir: PathBuf,
+    field_path: Box<[String]>,
+    data_dir: PathBuf,
 }
 
 #[derive(Serialize, Debug)]
-pub struct VectorCommittedFieldStats {
-    pub len: usize,
+pub struct CommittedVectorFieldStats {
+    pub dimensions: usize,
+    pub count: usize,
 }
 
 /*

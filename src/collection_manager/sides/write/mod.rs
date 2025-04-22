@@ -27,6 +27,7 @@ use super::{
 use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
+use index::CreateIndexRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -43,7 +44,9 @@ pub use fields::*;
 
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
-    collection_manager::sides::{CollectionWriteOperation, WriteOperation},
+    collection_manager::sides::{
+        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert, WriteOperation,
+    },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
@@ -78,7 +81,7 @@ pub struct WriteSideConfig {
 }
 
 pub struct WriteSide {
-    sender: OperationSender,
+    op_sender: OperationSender,
     collections: CollectionsWriter,
     document_count: AtomicU64,
     data_dir: PathBuf,
@@ -171,7 +174,7 @@ impl WriteSide {
             insert_batch_commit_size,
             master_api_key,
             operation_counter: Default::default(),
-            sender: op_sender,
+            op_sender,
             segments,
             triggers,
             system_prompts,
@@ -196,7 +199,7 @@ impl WriteSide {
 
         self.kv.commit().await?;
 
-        let offset = self.sender.get_offset();
+        let offset = self.op_sender.get_offset();
         // This load is not atomic with the commit.
         // This means, we save a document count possible higher.
         // Anyway it is not a problem, because the document count is only used for the document id generation
@@ -222,8 +225,26 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .create_collection(option, self.op_sender.clone(), self.hook_runtime.clone())
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        req: CreateIndexRequest,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection.create_index(req).await?;
 
         Ok(())
     }
@@ -286,9 +307,25 @@ impl WriteSide {
             let doc_id = DocumentId(doc_id);
 
             self.document_storage
-                .insert(doc_id, doc.clone())
+                .insert(doc_id, doc_id_str.clone(), doc.clone())
                 .await
                 .context("Cannot inser document into document storage")?;
+
+            // High inefficiency here: we send a message for each document
+            // We could send a unique message with a batch of documents
+            // Anyway, for now, we keep it simple
+            // TODO: check if we can send a batch of documents
+            self.op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocument {
+                        doc_id,
+                        doc: DocumentToInsert(
+                            doc.clone().into_raw(format!("{}:{}", index_id, doc_id_str)).expect("Cannot get raw document"),
+                        ),
+                    },
+                ))
+                .await
+                .context("Cannot send document storage operation")?;
 
             trace!(?doc_id, "Inserting document");
             match index
@@ -374,7 +411,7 @@ impl WriteSide {
                 .await
                 .context("Cannot commit collections after collection deletion")?;
 
-            self.sender
+            self.op_sender
                 .send(WriteOperation::DeleteCollection(collection_id))
                 .await
                 .context("Cannot send delete collection operation")?;
@@ -615,7 +652,7 @@ impl WriteSide {
                     // and from the read side
                     // NB: check if the error handling is correct
 
-                    self.sender
+                    self.op_sender
                         .send(WriteOperation::Collection(
                             collection_id,
                             CollectionWriteOperation::DeleteDocuments {

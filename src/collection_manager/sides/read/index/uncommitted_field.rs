@@ -1,56 +1,45 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use bool::{BoolField, BoolUncommittedFieldStats};
-use number::{NumberField, NumberUncommittedFieldStats};
-use string::{StringField, StringUncommittedFieldStats};
-use string_filter::{StringFilterField, StringFilterUncommittedFieldStats};
-use tracing::trace;
-use vector::{VectorField, VectorUncommittedFieldStats};
+pub use bool::{UncommittedBoolField, UncommittedBoolFieldStats};
+use debug_panic::debug_panic;
+pub use number::{UncommittedNumberField, UncommittedNumberFieldStats};
+use serde::Serialize;
+pub use string::{UncommittedStringField, UncommittedStringFieldStats};
+pub use string_filter::{UncommittedStringFilterField, UncommittedStringFilterFieldStats};
+use tracing::{trace, warn};
+pub use vector::{UncommittedVectorField, UncommittedVectorFieldStats};
 
 use crate::{
     collection_manager::{
-        bm25::BM25Scorer, global_info::GlobalInfo, sides::DocumentFieldIndexOperation,
+        bm25::BM25Scorer,
+        global_info::GlobalInfo,
+        sides::{index::Index, DocumentFieldIndexOperation},
     },
-    types::{DocumentId, FieldId, NumberFilter},
+    nlp::locales::Locale,
+    types::{DocumentId, FieldId, IndexId, NumberFilter},
 };
 
-mod bool;
-mod number;
-mod string;
-mod string_filter;
-mod vector;
-
-pub mod fields {
-    pub use super::bool::{BoolField, BoolUncommittedFieldStats};
-    pub use super::number::{NumberField, NumberUncommittedFieldStats};
-    pub use super::string::{StringField, StringUncommittedFieldStats};
-    pub use super::string_filter::{StringFilterField, StringFilterUncommittedFieldStats};
-    pub use super::vector::{VectorField, VectorUncommittedFieldStats};
-}
+pub mod bool;
+pub mod number;
+pub mod string;
+pub mod string_filter;
+pub mod vector;
 
 pub use string::{Positions, TotalDocumentsWithTermInField};
 
-#[derive(Debug)]
 pub struct UncommittedCollection {
-    pub number_index: HashMap<FieldId, NumberField>,
-    pub bool_index: HashMap<FieldId, BoolField>,
-    pub string_filter_index: HashMap<FieldId, StringFilterField>,
-    pub string_index: HashMap<FieldId, StringField>,
-    pub vector_index: HashMap<FieldId, VectorField>,
+    indexes: HashMap<IndexId, Index>,
 }
 
 impl UncommittedCollection {
     pub fn new() -> Self {
         Self {
-            number_index: HashMap::new(),
-            bool_index: HashMap::new(),
-            string_filter_index: HashMap::new(),
-            string_index: HashMap::new(),
-            vector_index: HashMap::new(),
+            indexes: HashMap::new(),
         }
     }
 
+    /*
     pub fn global_info(&self, field_id: &FieldId) -> GlobalInfo {
         self.string_index
             .get(field_id)
@@ -309,6 +298,19 @@ impl UncommittedCollection {
 
         Ok(())
     }
+
+    */
+
+    pub fn get_stats(&self) -> UncommittedStats {
+        let keys = self.indexes.keys().cloned().collect();
+
+        UncommittedStats { keys }
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct UncommittedStats {
+    pub keys: Vec<IndexId>,
 }
 
 #[derive(Debug)]

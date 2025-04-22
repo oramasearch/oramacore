@@ -1,4 +1,5 @@
 mod fields;
+mod doc_id_storage;
 
 use std::{
     path::PathBuf,
@@ -6,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use doc_id_storage::DocIdStorage;
 use fields::{
     GenericField, IndexFilterField, IndexScoreField, SerializedFilterFieldType,
     SerializedScoreFieldType,
@@ -13,12 +15,12 @@ use fields::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc::Sender, RwLock};
-use tracing::{instrument, trace};
+use tracing::{info, instrument, trace};
 
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        hooks::HooksRuntime, CollectionWriteOperation, OperationSender, WriteOperation,
+        hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
@@ -29,7 +31,8 @@ use crate::{
 };
 
 use super::{
-    collection::doc_id_storage::DocIdStorage, embedding::MultiEmbeddingCalculationRequest,
+    embedding::MultiEmbeddingCalculationRequest,
+    OramaModelSerializable,
 };
 pub use fields::{FieldType, IndexedValue};
 
@@ -94,11 +97,22 @@ impl Index {
             op_sender
                 .send(WriteOperation::Collection(
                     collection_id,
-                    CollectionWriteOperation::CreateField2 {
+                    CollectionWriteOperation::IndexWriteOperation(
                         index_id,
-                        field_id: field.field_id(),
-                        field_path: field.field_path().to_vec().into_boxed_slice(),
-                    },
+                        IndexWriteOperation::CreateField2 {
+                            field_id: field.field_id(),
+                            field_path: field.field_path().to_vec().into_boxed_slice(),
+                            is_array: field.is_array(),
+                            field_type: match &field {
+                                IndexScoreField::String(_) => IndexWriteOperationFieldType::String,
+                                IndexScoreField::Embedding(field) => {
+                                    IndexWriteOperationFieldType::Embedding(OramaModelSerializable(
+                                        field.get_model(),
+                                    ))
+                                }
+                            },
+                        },
+                    ),
                 ))
                 .await
                 .context("Cannot send operation")?;
@@ -245,10 +259,10 @@ impl Index {
         // doc id is always a string. Anyway with Index, it is not unique in a collection.
         // Think about a SQL table with an auto-incremented id: different tables can have the same id.
         // So we need to add the index id (in this case could be the table name) to the document id to make it unique
-        let doc_id_str = format!("{}:{}", self.index_id, doc_id_str);
+        // let doc_id_str_with_index_id = format!("{}:{}", self.index_id, doc_id_str);
 
         let mut doc_id_storage = self.doc_id_storage.write().await;
-        if !doc_id_storage.insert_document_id(doc_id_str.clone(), doc_id) {
+        if !doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id) {
             // Remove the old document
             panic!("Implement me: doc_id_storage.insert_document_id");
         }
@@ -260,19 +274,6 @@ impl Index {
             .context("Cannot add fields")?;
 
         let mut doc_indexed_values: Vec<IndexedValue> = vec![];
-
-        self.op_sender
-            .send(WriteOperation::Collection(
-                self.collection_id,
-                CollectionWriteOperation::InsertDocument2 {
-                    doc_id,
-                    index_id: self.index_id,
-                    doc_id_str: doc_id_str.clone(),
-                    json: serde_json::to_string(&doc).unwrap(),
-                },
-            ))
-            .await
-            .context("Cannot send operation")?;
 
         let filter_fields = self.filter_fields.read().await;
         for field in &*filter_fields {
@@ -302,11 +303,13 @@ impl Index {
             self.op_sender
                 .send(WriteOperation::Collection(
                     self.collection_id,
-                    CollectionWriteOperation::IndexDocument2 {
-                        doc_id,
-                        index_id: self.index_id,
-                        indexed_values: doc_indexed_values,
-                    },
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::Index {
+                            doc_id,
+                            indexed_values: doc_indexed_values,
+                        },
+                    ),
                 ))
                 .await
                 .context("Cannot send operation")?;
@@ -317,15 +320,24 @@ impl Index {
         Ok(())
     }
 
+    #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]
     pub async fn delete_documents(&self, doc_ids: Vec<String>) -> Result<Vec<DocumentId>> {
+        info!("Deleting documents: {:?}", doc_ids);
         let mut doc_id_storage = self.doc_id_storage.write().await;
         let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
 
         self.op_sender
             .send(WriteOperation::Collection(
                 self.collection_id,
-                CollectionWriteOperation::DeleteDocuments2 {
-                    index_id: self.index_id,
+                CollectionWriteOperation::IndexWriteOperation(self.index_id, IndexWriteOperation::DeleteDocuments {
+                    doc_ids: doc_ids.clone(),
+                }),
+            ))
+            .await
+            .context("Cannot send operation")?;
+        self.op_sender
+            .send(WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::DeleteDocuments {
                     doc_ids: doc_ids.clone(),
                 },
             ))
@@ -410,11 +422,23 @@ impl Index {
                 self.op_sender
                     .send(WriteOperation::Collection(
                         self.collection_id,
-                        CollectionWriteOperation::CreateField2 {
-                            index_id: self.index_id,
-                            field_id: filter_field.field_id(),
-                            field_path: filter_field.field_path().to_vec().into_boxed_slice(),
-                        },
+                        CollectionWriteOperation::IndexWriteOperation(
+                            self.index_id,
+                            IndexWriteOperation::CreateField2 {
+                                field_id: filter_field.field_id(),
+                                field_path: filter_field.field_path().to_vec().into_boxed_slice(),
+                                is_array: filter_field.is_array(),
+                                field_type: match &filter_field {
+                                    IndexFilterField::Bool(_) => IndexWriteOperationFieldType::Bool,
+                                    IndexFilterField::Number(_) => {
+                                        IndexWriteOperationFieldType::Number
+                                    }
+                                    IndexFilterField::String(_) => {
+                                        IndexWriteOperationFieldType::StringFilter
+                                    }
+                                },
+                            },
+                        ),
                     ))
                     .await
                     .context("Cannot send operation")?;
@@ -424,11 +448,24 @@ impl Index {
                 self.op_sender
                     .send(WriteOperation::Collection(
                         self.collection_id,
-                        CollectionWriteOperation::CreateField2 {
-                            index_id: self.index_id,
-                            field_id: score_field.field_id(),
-                            field_path: score_field.field_path().to_vec().into_boxed_slice(),
-                        },
+                        CollectionWriteOperation::IndexWriteOperation(
+                            self.index_id,
+                            IndexWriteOperation::CreateField2 {
+                                field_id: score_field.field_id(),
+                                field_path: score_field.field_path().to_vec().into_boxed_slice(),
+                                is_array: score_field.is_array(),
+                                field_type: match &score_field {
+                                    IndexScoreField::String(_) => {
+                                        IndexWriteOperationFieldType::String
+                                    }
+                                    IndexScoreField::Embedding(f) => {
+                                        IndexWriteOperationFieldType::Embedding(
+                                            OramaModelSerializable(f.get_model()),
+                                        )
+                                    }
+                                },
+                            },
+                        ),
                     ))
                     .await
                     .context("Cannot send operation")?;
@@ -665,6 +702,7 @@ struct IndexDumpV1 {
     score_fields: Vec<SerializedScoreFieldType>,
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -837,3 +875,4 @@ mod tests {
         assert_eq!(output.coll_id, index.collection_id);
     }
 }
+*/

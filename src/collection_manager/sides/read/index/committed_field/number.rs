@@ -10,45 +10,59 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct NumberField {
+pub struct CommittedNumberField {
+    field_path: Box<[String]>,
     inner: OrderedKeyIndex<SerializableNumber, DocumentId>,
     data_dir: PathBuf,
 }
 
-impl NumberField {
-    pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
+impl CommittedNumberField {
+    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (SerializableNumber, HashSet<DocumentId>)>,
     {
         let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            field_path,
+            inner,
+            data_dir,
+        })
     }
 
     pub fn load(info: NumberFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let inner = OrderedKeyIndex::load(data_dir.clone())?;
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            inner,
+            field_path: info.field_path,
+            data_dir,
+        })
     }
 
     pub fn get_field_info(&self) -> NumberFieldInfo {
         NumberFieldInfo {
+            field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
     }
 
-    pub fn get_stats(&self) -> Result<NumberCommittedFieldStats> {
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
+    }
+
+    pub fn stats(&self) -> Result<CommittedNumberFieldStats> {
         let s = self
             .inner
             .min_max()
             .context("Cannot get min madn max key for number index")?;
         let Some((min, max)) = s else {
-            return Ok(NumberCommittedFieldStats {
+            return Ok(CommittedNumberFieldStats {
                 min: Number::F32(f32::INFINITY),
                 max: Number::F32(f32::NEG_INFINITY),
             });
         };
 
-        Ok(NumberCommittedFieldStats {
+        Ok(CommittedNumberFieldStats {
             min: min.0,
             max: max.0,
         })
@@ -105,11 +119,12 @@ impl BoundedValue for SerializableNumber {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NumberFieldInfo {
+    pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
 }
 
 #[derive(Serialize, Debug)]
-pub struct NumberCommittedFieldStats {
+pub struct CommittedNumberFieldStats {
     pub min: Number,
     pub max: Number,
 }

@@ -114,6 +114,32 @@ impl<'de> Deserialize<'de> for DocumentToInsert {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexWriteOperationFieldType {
+    Number,
+    Bool,
+    StringFilter,
+    String,
+    Embedding(OramaModelSerializable),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexWriteOperation {
+    CreateField2 {
+        field_id: FieldId,
+        field_path: Box<[String]>,
+        is_array: bool,
+        field_type: IndexWriteOperationFieldType,
+    },
+    Index {
+        doc_id: DocumentId,
+        indexed_values: Vec<IndexedValue>,
+    },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectionWriteOperation {
     InsertDocument {
         doc_id: DocumentId,
@@ -133,16 +159,12 @@ pub enum CollectionWriteOperation {
         index_id: IndexId,
         locale: Locale,
     },
+    IndexWriteOperation(IndexId, IndexWriteOperation),
     InsertDocument2 {
         index_id: IndexId,
         doc_id: DocumentId,
         doc_id_str: String,
         json: String,
-    },
-    CreateField2 {
-        index_id: IndexId,
-        field_id: FieldId,
-        field_path: Box<[String]>,
     },
     IndexDocument2 {
         index_id: IndexId,
@@ -220,6 +242,17 @@ pub enum KVWriteOperation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DocumentStorageWriteOperation {
+    InsertDocument {
+        doc_id: DocumentId,
+        doc: DocumentToInsert,
+    },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WriteOperation {
     KV(KVWriteOperation),
     CreateCollection {
@@ -239,6 +272,7 @@ pub enum WriteOperation {
         target_collection_id: CollectionId,
         reference: Option<String>,
     },
+    DocumentStorage(DocumentStorageWriteOperation),
 }
 
 impl WriteOperation {
@@ -259,9 +293,21 @@ impl WriteOperation {
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
             WriteOperation::SubstituteCollection { .. } => "substitute_collection",
-            WriteOperation::Collection(_, CollectionWriteOperation::CreateField2 { .. }) => {
-                "create_field_2"
-            }
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::CreateField2 { .. },
+                ),
+            ) => "create_field_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::Index { .. }),
+            ) => "index_document_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::DeleteDocuments { .. }),
+            ) => "delete_document_2",
             WriteOperation::Collection(_, CollectionWriteOperation::InsertDocument2 { .. }) => {
                 "insert_document_2"
             }
@@ -273,6 +319,12 @@ impl WriteOperation {
             }
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteDocuments2 { .. }) => {
                 "delete_documents_2"
+            }
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
+                ..
+            }) => "document_storage_insert_document",
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments { .. }) => {
+                "document_storage_delete_documents"
             }
         }
     }

@@ -12,13 +12,14 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct StringFilterField {
+pub struct CommittedStringFilterField {
+    field_path: Box<[String]>,
     inner: HashMap<String, HashSet<DocumentId>>,
     data_dir: PathBuf,
 }
 
-impl StringFilterField {
-    pub fn from_iter<I>(iter: I, data_dir: PathBuf) -> Result<Self>
+impl CommittedStringFilterField {
+    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
     where
         I: Iterator<Item = (String, HashSet<DocumentId>)>,
     {
@@ -41,6 +42,7 @@ impl StringFilterField {
         let StringFilterFieldDump::V1(inner) = data;
 
         Ok(Self {
+            field_path,
             inner: inner.data,
             data_dir,
         })
@@ -57,18 +59,27 @@ impl StringFilterField {
         let inner = match inner {
             StringFilterFieldDump::V1(inner) => inner.data,
         };
-        Ok(Self { inner, data_dir })
+        Ok(Self {
+            inner,
+            data_dir,
+            field_path: info.field_path,
+        })
+    }
+
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
     }
 
     pub fn get_field_info(&self) -> StringFilterFieldInfo {
         StringFilterFieldInfo {
+            field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
         }
     }
 
-    pub fn get_stats(&self) -> StringFilterCommittedFieldStats {
+    pub fn stats(&self) -> CommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
-        StringFilterCommittedFieldStats {
+        CommittedStringFilterFieldStats {
             variant_count: self.inner.len(),
             doc_count,
         }
@@ -100,11 +111,12 @@ impl StringFilterField {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFilterFieldInfo {
+    field_path: Box<[String]>,
     pub data_dir: PathBuf,
 }
 
 #[derive(Serialize, Debug)]
-pub struct StringFilterCommittedFieldStats {
+pub struct CommittedStringFilterFieldStats {
     pub variant_count: usize,
     pub doc_count: usize,
 }

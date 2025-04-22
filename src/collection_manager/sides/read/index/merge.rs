@@ -11,11 +11,11 @@ use super::committed::fields as committed_fields;
 use super::uncommitted::fields as uncommitted_fields;
 
 pub fn merge_number_field(
-    uncommitted: Option<&uncommitted_fields::NumberField>,
-    committed: Option<&committed_fields::NumberField>,
+    uncommitted: Option<&uncommitted_fields::UncommittedNumberField>,
+    committed: Option<&committed_fields::CommittedNumberField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::NumberField>> {
+) -> Result<Option<committed_fields::CommittedNumberField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
@@ -31,7 +31,7 @@ pub fn merge_number_field(
                 (k, d)
             });
 
-            Ok(Some(committed_fields::NumberField::from_iter(
+            Ok(Some(committed_fields::CommittedNumberField::from_iter(
                 committed_iter,
                 data_dir,
             )?))
@@ -44,7 +44,7 @@ pub fn merge_number_field(
                     d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                     (k, d)
                 });
-            Ok(Some(committed_fields::NumberField::from_iter(
+            Ok(Some(committed_fields::CommittedNumberField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -69,7 +69,7 @@ pub fn merge_number_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::NumberField::from_iter(
+            Ok(Some(committed_fields::CommittedNumberField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -77,11 +77,11 @@ pub fn merge_number_field(
 }
 
 pub fn merge_string_filter_field(
-    uncommitted: Option<&uncommitted_fields::StringFilterField>,
-    committed: Option<&committed_fields::StringFilterField>,
+    uncommitted: Option<&uncommitted_fields::UncommittedStringFilterField>,
+    committed: Option<&committed_fields::CommittedStringFilterField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::StringFilterField>> {
+) -> Result<Option<committed_fields::CommittedStringFilterField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
@@ -97,7 +97,7 @@ pub fn merge_string_filter_field(
                 (k, d)
             });
 
-            Ok(Some(committed_fields::StringFilterField::from_iter(
+            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
                 committed_iter,
                 data_dir,
             )?))
@@ -107,7 +107,7 @@ pub fn merge_string_filter_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::StringFilterField::from_iter(
+            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -132,7 +132,7 @@ pub fn merge_string_filter_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::StringFilterField::from_iter(
+            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -140,11 +140,11 @@ pub fn merge_string_filter_field(
 }
 
 pub fn merge_bool_field(
-    uncommitted: Option<&uncommitted_fields::BoolField>,
-    committed: Option<&committed_fields::BoolField>,
+    uncommitted: Option<&uncommitted_fields::UncommittedBoolField>,
+    committed: Option<&committed_fields::CommittedBoolField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::BoolField>> {
+) -> Result<Option<committed_fields::CommittedBoolField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
@@ -166,7 +166,7 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::BoolField::from_iter(
+            Ok(Some(committed_fields::CommittedBoolField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -182,7 +182,7 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::BoolField::from_iter(
+            Ok(Some(committed_fields::CommittedBoolField::from_iter(
                 iter, data_dir,
             )?))
         }
@@ -197,7 +197,7 @@ pub fn merge_bool_field(
             committed_true_docs.extend(uncommitted_true_docs);
             committed_false_docs.extend(uncommitted_false_docs);
 
-            Ok(Some(committed_fields::BoolField::from_data(
+            Ok(Some(committed_fields::CommittedBoolField::from_data(
                 committed_true_docs,
                 committed_false_docs,
                 data_dir,
@@ -207,11 +207,11 @@ pub fn merge_bool_field(
 }
 
 pub fn merge_string_field(
-    uncommitted: Option<&uncommitted_fields::StringField>,
-    committed: Option<&committed_fields::StringField>,
+    uncommitted: Option<&uncommitted_fields::UncommittedStringField>,
+    committed: Option<&committed_fields::CommittedStringField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::StringField>> {
+) -> Result<Option<committed_fields::CommittedStringField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");
@@ -222,7 +222,7 @@ pub fn merge_string_field(
                 return Ok(None);
             }
 
-            Ok(Some(committed_fields::StringField::from_committed(
+            Ok(Some(committed_fields::CommittedStringField::from_committed(
                 committed,
                 data_dir,
                 uncommitted_document_deletions,
@@ -234,7 +234,7 @@ pub fn merge_string_field(
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            Ok(Some(committed_fields::StringField::from_iter(
+            Ok(Some(committed_fields::CommittedStringField::from_iter(
                 entries.into_iter(),
                 length_per_documents,
                 data_dir,
@@ -253,7 +253,7 @@ pub fn merge_string_field(
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             Ok(Some(
-                committed_fields::StringField::from_iter_and_committed(
+                committed_fields::CommittedStringField::from_iter_and_committed(
                     entries.into_iter(),
                     committed,
                     length_per_documents,
@@ -267,11 +267,11 @@ pub fn merge_string_field(
 }
 
 pub fn merge_vector_field(
-    uncommitted: Option<&uncommitted_fields::VectorField>,
-    committed: Option<&committed_fields::VectorField>,
+    uncommitted: Option<&uncommitted_fields::UncommittedEmbeddingField>,
+    committed: Option<&committed_fields::CommittedEmbeddingField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::VectorField>> {
+) -> Result<Option<committed_fields::CommittedEmbeddingField>> {
     create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
     match (uncommitted, committed) {
@@ -284,7 +284,7 @@ pub fn merge_vector_field(
                 Ok(None)
             } else {
                 let info = committed.get_field_info();
-                let new_field = committed_fields::VectorField::from_dump_and_iter(
+                let new_field = committed_fields::CommittedEmbeddingField::from_dump_and_iter(
                     info.data_dir,
                     std::iter::empty(),
                     uncommitted_document_deletions,
@@ -294,7 +294,7 @@ pub fn merge_vector_field(
             }
         }
         (Some(uncommitted), None) => {
-            let new_field = committed_fields::VectorField::from_iter(
+            let new_field = committed_fields::CommittedEmbeddingField::from_iter(
                 uncommitted
                     .iter()
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
@@ -309,7 +309,7 @@ pub fn merge_vector_field(
             }
 
             let info = committed.get_field_info();
-            let new_field = committed_fields::VectorField::from_dump_and_iter(
+            let new_field = committed_fields::CommittedEmbeddingField::from_dump_and_iter(
                 info.data_dir,
                 uncommitted.iter(),
                 uncommitted_document_deletions,

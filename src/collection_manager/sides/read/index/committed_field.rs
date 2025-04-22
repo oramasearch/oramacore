@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
-use bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
-use number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
-use string::{StringCommittedFieldStats, StringField, StringFieldInfo};
-use string_filter::{StringFilterCommittedFieldStats, StringFilterField, StringFilterFieldInfo};
-use vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
+pub use bool::{BoolFieldInfo, CommittedBoolField, CommittedBoolFieldStats};
+pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
+pub use string::{CommittedStringField, CommittedStringFieldStats, StringFieldInfo};
+pub use string_filter::{
+    CommittedStringFilterField, CommittedStringFilterFieldStats, StringFilterFieldInfo,
+};
+pub use vector::{CommittedVectorField, CommittedVectorFieldStats, VectorFieldInfo};
 
 use crate::{
     collection_manager::{bm25::BM25Scorer, global_info::GlobalInfo},
@@ -18,25 +20,13 @@ mod string;
 mod string_filter;
 mod vector;
 
-pub mod fields {
-    pub use super::bool::{BoolCommittedFieldStats, BoolField, BoolFieldInfo};
-    pub use super::number::{NumberCommittedFieldStats, NumberField, NumberFieldInfo};
-    pub use super::string::{StringCommittedFieldStats, StringField, StringFieldInfo};
-    pub use super::string_filter::{
-        StringFilterCommittedFieldStats, StringFilterField, StringFilterFieldInfo,
-    };
-    pub use super::vector::{VectorCommittedFieldStats, VectorField, VectorFieldInfo};
-
-    pub use super::bool::BoolWrapper;
-}
-
 #[derive(Debug)]
 pub struct CommittedCollection {
-    pub number_index: HashMap<FieldId, NumberField>,
-    pub bool_index: HashMap<FieldId, BoolField>,
-    pub string_filter_index: HashMap<FieldId, StringFilterField>,
-    pub string_index: HashMap<FieldId, StringField>,
-    pub vector_index: HashMap<FieldId, VectorField>,
+    pub number_index: HashMap<FieldId, CommittedNumberField>,
+    pub bool_index: HashMap<FieldId, CommittedBoolField>,
+    pub string_filter_index: HashMap<FieldId, CommittedStringFilterField>,
+    pub string_index: HashMap<FieldId, CommittedStringField>,
+    pub vector_index: HashMap<FieldId, CommittedVectorField>,
 }
 
 impl CommittedCollection {
@@ -57,34 +47,35 @@ impl CommittedCollection {
         string_field_infos: Vec<(FieldId, StringFieldInfo)>,
         vector_field_infos: Vec<(FieldId, VectorFieldInfo)>,
     ) -> Result<Self> {
-        let mut number_index: HashMap<FieldId, NumberField> = Default::default();
-        let mut bool_index: HashMap<FieldId, BoolField> = Default::default();
-        let mut string_filter_index: HashMap<FieldId, StringFilterField> = Default::default();
-        let mut string_index: HashMap<FieldId, StringField> = Default::default();
-        let mut vector_index: HashMap<FieldId, VectorField> = Default::default();
+        let mut number_index: HashMap<FieldId, CommittedNumberField> = Default::default();
+        let mut bool_index: HashMap<FieldId, CommittedBoolField> = Default::default();
+        let mut string_filter_index: HashMap<FieldId, CommittedStringFilterField> =
+            Default::default();
+        let mut string_index: HashMap<FieldId, CommittedStringField> = Default::default();
+        let mut vector_index: HashMap<FieldId, CommittedVectorField> = Default::default();
 
         for (field_id, info) in number_field_infos {
-            let number_field = NumberField::load(info)
+            let number_field = CommittedNumberField::load(info)
                 .with_context(|| format!("Cannot load number {:?} field", field_id))?;
             number_index.insert(field_id, number_field);
         }
         for (field_id, info) in bool_field_infos {
-            let bool_field = BoolField::load(info)
+            let bool_field = CommittedBoolField::load(info)
                 .with_context(|| format!("Cannot load bool {:?} field", field_id))?;
             bool_index.insert(field_id, bool_field);
         }
         for (field_id, info) in string_field_infos {
-            let string_field = StringField::load(info)
+            let string_field = CommittedStringField::load(info)
                 .with_context(|| format!("Cannot load string {:?} field", field_id))?;
             string_index.insert(field_id, string_field);
         }
         for (field_id, info) in vector_field_infos {
-            let vector_field = VectorField::load(info)
+            let vector_field = CommittedVectorField::load(info)
                 .with_context(|| format!("Cannot load vector {:?} field", field_id))?;
             vector_index.insert(field_id, vector_field);
         }
         for (field_id, info) in string_filter_field_infos {
-            let vector_field = StringFilterField::load(info)
+            let vector_field = CommittedStringFilterField::load(info)
                 .with_context(|| format!("Cannot load string filter  {:?} field", field_id))?;
             string_filter_index.insert(field_id, vector_field);
         }
@@ -101,7 +92,7 @@ impl CommittedCollection {
     pub fn global_info(&self, field_id: &FieldId) -> GlobalInfo {
         self.string_index
             .get(field_id)
-            .map(StringField::global_info)
+            .map(CommittedStringField::global_info)
             .unwrap_or_default()
     }
 
@@ -112,51 +103,6 @@ impl CommittedCollection {
             bool_fields: self.bool_index.keys().copied().collect(),
             vector_fields: self.vector_index.keys().copied().collect(),
         }
-    }
-
-    pub fn get_bool_stats(&self) -> Result<HashMap<FieldId, BoolCommittedFieldStats>> {
-        let mut stats = HashMap::new();
-        for (field_id, field) in &self.bool_index {
-            let field_stats = field.get_stats()?;
-            stats.insert(*field_id, field_stats);
-        }
-        Ok(stats)
-    }
-
-    pub fn get_number_stats(&self) -> Result<HashMap<FieldId, NumberCommittedFieldStats>> {
-        let mut stats = HashMap::new();
-        for (field_id, field) in &self.number_index {
-            let field_stats = field.get_stats()?;
-            stats.insert(*field_id, field_stats);
-        }
-        Ok(stats)
-    }
-
-    pub fn get_string_filter_stats(&self) -> HashMap<FieldId, StringFilterCommittedFieldStats> {
-        let mut ret = HashMap::new();
-        for (field_id, field) in &self.string_filter_index {
-            let field_stats = field.get_stats();
-            ret.insert(*field_id, field_stats);
-        }
-        ret
-    }
-
-    pub fn get_string_stats(&self) -> Result<HashMap<FieldId, StringCommittedFieldStats>> {
-        let mut stats = HashMap::new();
-        for (field_id, field) in &self.string_index {
-            let field_stats = field.get_stats()?;
-            stats.insert(*field_id, field_stats);
-        }
-        Ok(stats)
-    }
-
-    pub fn get_vector_stats(&self) -> Result<HashMap<FieldId, VectorCommittedFieldStats>> {
-        let mut stats = HashMap::new();
-        for (field_id, field) in &self.vector_index {
-            let field_stats = field.get_stats()?;
-            stats.insert(*field_id, field_stats);
-        }
-        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -11,26 +11,30 @@ const DOC_ID_STORAGE_FILE_NAME: &str = "doc_id_storage.bin";
 
 #[derive(Debug, Default)]
 pub struct DocIdStorage {
-    document_id: HashMap<String, DocumentId>,
+    document_ids: HashMap<String, DocumentId>,
 }
 
 impl DocIdStorage {
     pub fn empty() -> Self {
         Self {
-            document_id: HashMap::new(),
+            document_ids: HashMap::new(),
         }
     }
 
     pub fn remove_document_ids(&mut self, doc_ids: Vec<String>) -> Vec<DocumentId> {
+
+        println!("Removing document ids: {:?}", doc_ids);
+        println!("Current document ids: {:?}", self.document_ids);
+
         doc_ids
             .into_iter()
-            .filter_map(|doc_id| self.document_id.remove(&doc_id))
+            .filter_map(|doc_id| self.document_ids.remove(&doc_id))
             .collect()
     }
 
     #[must_use]
     pub fn insert_document_id(&mut self, doc_id: String, document_id: DocumentId) -> bool {
-        if let std::collections::hash_map::Entry::Vacant(e) = self.document_id.entry(doc_id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.document_ids.entry(doc_id) {
             e.insert(document_id);
             true
         } else {
@@ -39,16 +43,16 @@ impl DocIdStorage {
     }
 
     pub fn contains(&self, doc_id: &str) -> bool {
-        self.document_id.contains_key(doc_id)
+        self.document_ids.contains_key(doc_id)
     }
 
     pub fn get_document_ids(&self) -> impl Iterator<Item = DocumentId> + '_ {
-        self.document_id.values().copied()
+        self.document_ids.values().copied()
     }
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.document_id.len()
+        self.document_ids.len()
     }
 
     #[inline]
@@ -63,7 +67,7 @@ impl DocIdStorage {
         let file_path = data_dir.join(DOC_ID_STORAGE_FILE_NAME);
         BufferedFile::create_or_overwrite(file_path)
             .context("Cannot create file")?
-            .write_bincode_data(&self.document_id)
+            .write_bincode_data(&self.document_ids)
             .context("Cannot write map to file")?;
 
         Ok(())
@@ -76,6 +80,6 @@ impl DocIdStorage {
             .read_bincode_data()
             .context("Cannot read doc_id_storage from file")?;
 
-        Ok(Self { document_id })
+        Ok(Self { document_ids: document_id })
     }
 }

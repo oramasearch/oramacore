@@ -17,8 +17,6 @@ use crate::{
 
 use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
 
-pub mod doc_id_storage;
-
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 pub struct CollectionWriter {

@@ -1,12 +1,12 @@
 use std::{
-    fs,
     net::{SocketAddr, TcpListener},
     path::PathBuf,
+    str::FromStr,
     sync::{Arc, OnceLock},
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use duration_string::DurationString;
 use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
@@ -14,30 +14,35 @@ use fastembed::{
 };
 use grpc_def::Embedding;
 use http::uri::Scheme;
-use serde_json::json;
-use std::str::FromStr;
 use tokio::time::sleep;
 use tonic::{transport::Server, Status};
 use tracing::info;
 
 use crate::{
-    ai::AIServiceConfig,
-    build_orama,
+    ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     collection_manager::sides::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         CollectionsWriterConfig, IndexesConfig, InputSideChannelType, OramaModelSerializable,
-        OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide, WriteSideConfig,
+        OutputSideChannelType, ReadSideConfig, WriteSideConfig,
     },
-    types::{ApiKey, CollectionId, DocumentList, InsertDocumentsResult},
+    types::ApiKey,
     web_server::HttpConfig,
     OramacoreConfig,
 };
+use anyhow::Context;
+
+pub fn init_log() {
+    if std::env::var("LOG").is_ok() {
+        let _ = std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+    }
+    let _ = tracing_subscriber::fmt::try_init();
+}
 
 pub fn generate_new_path() -> PathBuf {
     let tmp_dir = tempfile::tempdir().expect("Cannot create temp dir");
-    println!("Temp dir: {:?}", tmp_dir.path());
+    info!("Temp dir: {:?}", tmp_dir.path());
     let dir = tmp_dir.path().to_path_buf();
-    fs::create_dir_all(dir.clone()).expect("Cannot create dir");
+    std::fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
 }
 
@@ -54,112 +59,58 @@ pub fn hooks_runtime_config() -> HooksRuntimeConfig {
     }
 }
 
-pub async fn create(mut config: OramacoreConfig) -> Result<(Arc<WriteSide>, Arc<ReadSide>)> {
-    if config.ai_server.port == 0 {
-        let address = create_grpc_server().await?;
-        config.ai_server.host = address.ip().to_string();
-        config.ai_server.port = address.port();
-        info!("AI server started on {}", address);
-    }
-
-    let (write_side, read_side) = build_orama(config).await?;
-
-    let write_side = write_side.unwrap();
-    let read_side = read_side.unwrap();
-
-    Ok((write_side, read_side))
-}
-
-pub async fn create_collection(
-    write_side: Arc<WriteSide>,
-    collection_id: CollectionId,
-) -> Result<()> {
-    write_side
-        .create_collection(
-            ApiKey::try_from("my-master-api-key").unwrap(),
-            json!({
-                "id": collection_id,
-                "read_api_key": "my-read-api-key",
-                "write_api_key": "my-write-api-key",
-            })
-            .try_into()?,
-        )
-        .await?;
-    sleep(Duration::from_millis(100)).await;
-
-    Ok(())
-}
-
-pub async fn insert_docs<I>(
-    write_side: Arc<WriteSide>,
-    write_api_key: ApiKey,
-    collection_id: CollectionId,
-    docs: I,
-) -> Result<InsertDocumentsResult>
-where
-    I: IntoIterator<Item = serde_json::Value>,
-{
-    let document_list: Vec<serde_json::value::Value> = docs.into_iter().collect();
-    let document_list: DocumentList = document_list.try_into()?;
-
-    let result = write_side
-        .insert_documents(write_api_key, collection_id, document_list)
-        .await?;
-
-    sleep(Duration::from_millis(1_000)).await;
-
-    Ok(result)
-}
-
-pub mod grpc_def {
-    tonic::include_proto!("orama_ai_service");
-}
-
-pub struct GRPCServer {
-    fastembed_model: Arc<TextEmbedding>,
-    context_evaluator: Arc<TextEmbedding>,
-}
-
-#[tonic::async_trait]
-impl grpc_def::llm_service_server::LlmService for GRPCServer {
-    async fn check_health(
-        &self,
-        _req: tonic::Request<grpc_def::HealthCheckRequest>,
-    ) -> Result<tonic::Response<grpc_def::HealthCheckResponse>, Status> {
-        Ok(tonic::Response::new(grpc_def::HealthCheckResponse {
-            status: "ok".to_string(),
-        }))
-    }
-
-    async fn get_embedding(
-        &self,
-        req: tonic::Request<grpc_def::EmbeddingRequest>,
-    ) -> Result<tonic::Response<grpc_def::EmbeddingResponse>, Status> {
-        let req = req.into_inner();
-        // `0` means `BgeSmall`
-        // `6` means `SentenceTransformersParaphraseMultilingualMiniLML12v2`
-        let model = match req.model {
-            0 => self.fastembed_model.clone(),
-            6 => self.context_evaluator.clone(),
-            _ => return Err(Status::invalid_argument("Invalid model")),
-        };
-
-        let embed = model
-            .embed(req.input, None)
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        Ok(tonic::Response::new(grpc_def::EmbeddingResponse {
-            embeddings_result: embed
-                .into_iter()
-                .map(|v| Embedding { embeddings: v })
-                .collect(),
-            dimensions: 384,
-        }))
+pub fn create_oramacore_config() -> OramacoreConfig {
+    OramacoreConfig {
+        log: Default::default(),
+        http: HttpConfig {
+            host: "127.0.0.1".parse().unwrap(),
+            port: 2222,
+            allow_cors: false,
+            with_prometheus: false,
+        },
+        ai_server: AIServiceConfig {
+            host: "0.0.0.0".parse().unwrap(),
+            port: 0,
+            api_key: None,
+            max_connections: 1,
+            scheme: Scheme::HTTP,
+            llm: AIServiceLLMConfig {
+                host: "localhost".to_string(),
+                port: 8000,
+                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+            },
+            remote_llms: None,
+        },
+        writer_side: WriteSideConfig {
+            master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
+            output: OutputSideChannelType::InMemory { capacity: 100 },
+            hooks: hooks_runtime_config(),
+            config: CollectionsWriterConfig {
+                data_dir: generate_new_path(),
+                embedding_queue_limit: 50,
+                default_embedding_model: OramaModelSerializable(OramaModel::BgeSmall),
+                // Lot of tests commit to test it.
+                // So, we put an high value to avoid problems.
+                insert_batch_commit_size: 10_000,
+                javascript_queue_limit: 10_000,
+                commit_interval: Duration::from_secs(3_000),
+            },
+        },
+        reader_side: ReadSideConfig {
+            input: InputSideChannelType::InMemory { capacity: 100 },
+            config: IndexesConfig {
+                data_dir: generate_new_path(),
+                // Lot of tests commit to test it.
+                // So, we put an high value to avoid problems.
+                insert_batch_commit_size: 10_000,
+                commit_interval: Duration::from_secs(3_000),
+                notifier: None,
+            },
+        },
     }
 }
 
 static CELL: OnceLock<Result<(Arc<TextEmbedding>, Arc<TextEmbedding>)>> = OnceLock::new();
-
 pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
 
@@ -206,7 +157,6 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         )
         .unwrap();
 
-        info!("Initializing the Fastembed: {model}");
         let text_embedding = TextEmbedding::try_new(init_option)
             .with_context(|| format!("Failed to initialize the Fastembed: {model}"))?;
         Ok((Arc::new(text_embedding), Arc::new(context_evaluator)))
@@ -218,23 +168,21 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         context_evaluator,
     };
 
-    info!("Checking which port is available on system");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let add = listener.local_addr().unwrap();
+    let addr = listener.local_addr().unwrap();
     drop(listener);
-    info!("Starting the server on: {}", add);
 
     tokio::spawn(async move {
         Server::builder()
             .add_service(grpc_def::llm_service_server::LlmServiceServer::new(server))
-            .serve(add)
+            .serve(addr)
             .await
             .expect("Nooope");
     });
 
     // Waiting for the server to start
     loop {
-        let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", add))
+        let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", addr))
             .await;
         if c.is_ok() {
             break;
@@ -242,56 +190,52 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
         sleep(Duration::from_millis(100)).await;
     }
 
-    Ok(add)
+    Ok(addr)
 }
 
-pub fn create_oramacore_config() -> OramacoreConfig {
-    OramacoreConfig {
-        log: Default::default(),
-        http: HttpConfig {
-            host: "127.0.0.1".parse().unwrap(),
-            port: 2222,
-            allow_cors: false,
-            with_prometheus: false,
-        },
-        ai_server: AIServiceConfig {
-            host: "0.0.0.0".parse().unwrap(),
-            port: 0,
-            api_key: None,
-            max_connections: 1,
-            scheme: Scheme::HTTP,
-            llm: crate::ai::AIServiceLLMConfig {
-                host: "localhost".to_string(),
-                port: 8000,
-                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-            },
-            remote_llms: None,
-        },
-        writer_side: WriteSideConfig {
-            master_api_key: ApiKey::try_from("my-master-api-key").unwrap(),
-            output: OutputSideChannelType::InMemory { capacity: 100 },
-            hooks: hooks_runtime_config(),
-            config: CollectionsWriterConfig {
-                data_dir: generate_new_path(),
-                embedding_queue_limit: 50,
-                default_embedding_model: OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
-                // Lot of tests commit to test it.
-                // So, we put an high value to avoid problems.
-                insert_batch_commit_size: 10_000,
-                javascript_queue_limit: 10_000,
-                commit_interval: Duration::from_secs(3_000),
-            },
-        },
-        reader_side: ReadSideConfig {
-            input: InputSideChannelType::InMemory { capacity: 100 },
-            config: IndexesConfig {
-                data_dir: generate_new_path(),
-                // Lot of tests commit to test it.
-                // So, we put an high value to avoid problems.
-                insert_batch_commit_size: 10_000,
-                commit_interval: Duration::from_secs(3_000),
-                notifier: None,
-            },
-        },
+pub mod grpc_def {
+    tonic::include_proto!("orama_ai_service");
+}
+
+pub struct GRPCServer {
+    fastembed_model: Arc<TextEmbedding>,
+    context_evaluator: Arc<TextEmbedding>,
+}
+
+#[tonic::async_trait]
+impl grpc_def::llm_service_server::LlmService for GRPCServer {
+    async fn check_health(
+        &self,
+        _req: tonic::Request<grpc_def::HealthCheckRequest>,
+    ) -> Result<tonic::Response<grpc_def::HealthCheckResponse>, Status> {
+        Ok(tonic::Response::new(grpc_def::HealthCheckResponse {
+            status: "ok".to_string(),
+        }))
+    }
+
+    async fn get_embedding(
+        &self,
+        req: tonic::Request<grpc_def::EmbeddingRequest>,
+    ) -> Result<tonic::Response<grpc_def::EmbeddingResponse>, Status> {
+        let req = req.into_inner();
+        // `0` means `BgeSmall`
+        // `6` means `SentenceTransformersParaphraseMultilingualMiniLML12v2`
+        let model = match req.model {
+            0 => self.fastembed_model.clone(),
+            6 => self.context_evaluator.clone(),
+            _ => return Err(Status::invalid_argument("Invalid model")),
+        };
+
+        let embed = model
+            .embed(req.input, None)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(grpc_def::EmbeddingResponse {
+            embeddings_result: embed
+                .into_iter()
+                .map(|v| Embedding { embeddings: v })
+                .collect(),
+            dimensions: 384,
+        }))
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
-        sides::read::collection::uncommitted::{Positions, TotalDocumentsWithTermInField},
+        sides::read::index::uncommitted_field::{Positions, TotalDocumentsWithTermInField},
     },
     file_utils::create_if_not_exists,
     indexes::{fst::FSTIndex, map::Map},
@@ -21,15 +21,17 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct StringField {
+pub struct CommittedStringField {
+    field_path: Box<[String]>,
     index: FSTIndex,
 
     posting_storage: PostingIdStorage,
     document_lengths_per_document: DocumentLengthsPerDocument,
 }
 
-impl StringField {
+impl CommittedStringField {
     pub fn from_iter(
+        field_path: Box<[String]>,
         uncommitted_iter: impl Iterator<
             Item = (
                 Vec<u8>,
@@ -83,6 +85,7 @@ impl StringField {
                 .context("Cannot commit posting id storage")?,
         );
         Ok(Self {
+            field_path,
             index,
             posting_storage,
             document_lengths_per_document,
@@ -90,6 +93,7 @@ impl StringField {
     }
 
     pub fn from_iter_and_committed(
+        field_path: Box<[String]>,
         uncommitted_iter: impl Iterator<
             Item = (
                 Vec<u8>,
@@ -188,6 +192,7 @@ impl StringField {
         document_lengths_per_document.commit()?;
 
         Ok(Self {
+            field_path,
             index,
             posting_storage,
             document_lengths_per_document,
@@ -255,6 +260,7 @@ impl StringField {
         document_lengths_per_document.commit()?;
 
         Ok(Self {
+            field_path: committed.field_path.clone(),
             index,
             posting_storage,
             document_lengths_per_document,
@@ -267,14 +273,20 @@ impl StringField {
         let document_lengths_per_document =
             DocumentLengthsPerDocument::load(info.document_lengths_per_document_file_path)?;
         Ok(Self {
+            field_path: info.field_path,
             index,
             posting_storage,
             document_lengths_per_document,
         })
     }
 
+    pub fn field_path(&self) -> &[String] {
+        &self.field_path
+    }
+
     pub fn get_field_info(&self) -> StringFieldInfo {
         StringFieldInfo {
+            field_path: self.field_path.clone(),
             document_lengths_per_document_file_path: self
                 .document_lengths_per_document
                 .get_backed_file(),
@@ -500,9 +512,9 @@ impl StringField {
         Ok(())
     }
 
-    pub fn get_stats(&self) -> Result<StringCommittedFieldStats> {
+    pub fn stats(&self) -> Result<CommittedStringFieldStats> {
         let key_count = self.index.len();
-        Ok(StringCommittedFieldStats {
+        Ok(CommittedStringFieldStats {
             key_count,
             global_info: self.global_info(),
         })
@@ -612,13 +624,14 @@ impl DocumentLengthsPerDocument {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFieldInfo {
+    field_path: Box<[String]>,
     pub posting_id_storage_file_path: PathBuf,
     pub document_lengths_per_document_file_path: PathBuf,
     pub fst_file_path: PathBuf,
 }
 
 #[derive(Serialize, Debug)]
-pub struct StringCommittedFieldStats {
+pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
 }
