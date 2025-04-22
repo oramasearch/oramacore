@@ -68,16 +68,6 @@ pub struct ToolsRuntime {
 
 impl ToolsRuntime {
     pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
-        // @todo: check if we want to move this inside of the orama-js-pool crate.
-        // This is needed to use the crypto provider for the JSExecutor, or else
-        // TLS handshake will fail with "no crypto provider found".
-        use rustls::crypto::{ring::default_provider, CryptoProvider};
-
-        if CryptoProvider::get_default().is_none() {
-            let provider = default_provider();
-            let _ = provider.install_default();
-        }
-
         ToolsRuntime { kv, llm_service }
     }
 
