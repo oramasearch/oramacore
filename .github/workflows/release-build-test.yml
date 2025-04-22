@@ -1,0 +1,65 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - test/release
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: Build and Upload Release Asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Protocol Buffers Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Build Writer
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --features writer
+      - name: Copy OramaCore Writer
+        run: |
+          cp ./target/release/oramacore ./oramacore-writer
+
+      - name: Build Reader
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --features reader
+      - name: Copy OramaCore Reader
+        run: |
+          cp ./target/release/oramacore ./oramacore-reader
+
+      - name: Build Standalone
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+      - name: Copy OramaCore Standalone
+        run: |
+          cp ./target/release/oramacore ./oramacore-standalone
+
+      - name: Upload Binary to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./oramacore-writer
+            ./oramacore-reader
+            ./oramacore-standalone
+          token: ${{ secrets.GITHUB_TOKEN }}
