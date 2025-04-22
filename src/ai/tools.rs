@@ -1,9 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use async_openai::types::{
-    ChatCompletionRequestMessage, FunctionCall, FunctionObject, FunctionObjectArgs,
-};
+use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
 use orama_js_pool::{JSExecutorConfig, JSExecutorPoolConfig, OramaJSPool, OramaJSPoolConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

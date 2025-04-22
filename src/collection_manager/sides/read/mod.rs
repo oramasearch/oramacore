@@ -3,7 +3,6 @@ mod collections;
 mod document_storage;
 pub mod notify;
 
-use async_openai::types::FunctionCall;
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
