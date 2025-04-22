@@ -246,7 +246,13 @@ impl Index {
         doc_id_storage.get_document_ids().collect()
     }
 
-    pub async fn process_new_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
+    pub async fn process_new_document(
+        &self,
+        doc_id: DocumentId,
+        doc: Document,
+    ) -> Result<Option<DocumentId>> {
+        let mut old_document_id = None;
+
         // Those `?` is never triggered, but it's here to make the compiler happy:
         // The "id" property is always present in the document.
         // TODO: do this better
@@ -256,15 +262,35 @@ impl Index {
             .context("Document does not have an id")?
             .as_str()
             .context("Document id is not a string")?;
-        // doc id is always a string. Anyway with Index, it is not unique in a collection.
-        // Think about a SQL table with an auto-incremented id: different tables can have the same id.
-        // So we need to add the index id (in this case could be the table name) to the document id to make it unique
-        // let doc_id_str_with_index_id = format!("{}:{}", self.index_id, doc_id_str);
 
+        // Check if the document is already indexed. If so, we will replace it
         let mut doc_id_storage = self.doc_id_storage.write().await;
-        if !doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id) {
+        if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id)
+        {
+            info!("Document already indexed, replacing it.");
+            old_document_id = Some(old_doc_id);
+
             // Remove the old document
-            panic!("Implement me: doc_id_storage.insert_document_id");
+            self.op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments {
+                        doc_ids: vec![old_doc_id],
+                    },
+                ))
+                .await
+                .context("Cannot send operation")?;
+            self.op_sender
+                .send(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::DeleteDocuments {
+                            doc_ids: vec![old_doc_id],
+                        },
+                    ),
+                ))
+                .await
+                .context("Cannot send operation")?;
         }
         drop(doc_id_storage);
 
@@ -317,7 +343,7 @@ impl Index {
 
         trace!("Document processed");
 
-        Ok(())
+        Ok(old_document_id)
     }
 
     #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]

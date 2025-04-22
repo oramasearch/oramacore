@@ -32,13 +32,12 @@ impl DocIdStorage {
     }
 
     #[must_use]
-    pub fn insert_document_id(&mut self, doc_id: String, document_id: DocumentId) -> bool {
-        if let std::collections::hash_map::Entry::Vacant(e) = self.document_ids.entry(doc_id) {
-            e.insert(document_id);
-            true
-        } else {
-            false
-        }
+    pub fn insert_document_id(
+        &mut self,
+        doc_id: String,
+        document_id: DocumentId,
+    ) -> Option<DocumentId> {
+        self.document_ids.insert(doc_id, document_id)
     }
 
     pub fn contains(&self, doc_id: &str) -> bool {

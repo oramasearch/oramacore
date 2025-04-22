@@ -353,7 +353,11 @@ impl WriteSide {
                 .await
                 .context("Cannot process document")
             {
-                Ok(_) => {
+                Ok(Some(old_doc_id)) => {
+                    self.document_storage.remove(vec![old_doc_id]).await;
+                    result.inserted += 1;
+                }
+                Ok(None) => {
                     result.inserted += 1;
                 }
                 Err(e) => {

@@ -18,7 +18,8 @@ use crate::{
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
-        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, IndexId, SearchParams,
+        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, IndexId,
+        SearchParams,
     },
 };
 

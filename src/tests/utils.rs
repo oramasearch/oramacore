@@ -249,7 +249,10 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
     }
 }
 
-async fn wait_for<'i, 'b, I, R>(i: &'i I, f: impl Fn(&I) -> BoxFuture<'b, Result<R>>) -> Result<R>
+pub async fn wait_for<'i, 'b, I, R>(
+    i: &'i I,
+    f: impl Fn(&I) -> BoxFuture<'b, Result<R>>,
+) -> Result<R>
 where
     'b: 'i,
 {
@@ -481,6 +484,20 @@ pub struct TestIndexClient {
     writer: Arc<WriteSide>,
 }
 impl TestIndexClient {
+    pub async fn unchecked_insert_documents(
+        &self,
+        documents: DocumentList,
+    ) -> Result<InsertDocumentsResult> {
+        self.writer
+            .insert_documents(
+                self.write_api_key,
+                self.collection_id,
+                self.index_id,
+                documents,
+            )
+            .await
+    }
+
     pub async fn insert_documents(&self, documents: DocumentList) -> Result<InsertDocumentsResult> {
         let stats = self
             .reader
