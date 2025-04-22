@@ -4,29 +4,91 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
-/// ToolValidator is used to validate the code of a given tool.
-/// Every tool must:
-/// 1. Use `export default`.
-/// 2. Export an object.
-/// 3. The object must have a single function.
-/// 4. The function must have a valid name.
+#[derive(Debug)]
+pub struct ValidationResult {
+    pub is_valid: bool,
+    pub function_name: Option<String>,
+    pub error_reason: Option<String>,
+}
+
+/// Validates JavaScript code to ensure it follows the expected tool format.
+///
+/// A valid tool must:
+/// 1. Use `export default` to export a value
+/// 2. The exported value must be an object literal
+/// 3. The object must contain exactly one property
+/// 4. That property's value must be a function (regular or arrow)
 pub struct ToolValidator {
-    pub has_export_default: bool,
-    pub exports_object: bool,
-    pub exports_single_function: bool,
-    pub exported_function_name: Option<String>,
-    pub reason: Option<String>,
+    has_export_default: bool,
+    exports_object: bool,
+    exports_single_function: bool,
+    exported_function_name: Option<String>,
+    error_reason: Option<String>,
 }
 
 impl ToolValidator {
     pub fn new() -> Self {
-        ToolValidator {
+        Self {
             has_export_default: false,
             exports_object: false,
             exports_single_function: false,
             exported_function_name: None,
-            reason: None,
+            error_reason: None,
         }
+    }
+
+    fn set_error_if_none(&mut self, reason: &str) {
+        if self.error_reason.is_none() {
+            self.error_reason = Some(reason.to_string());
+        }
+    }
+
+    pub fn result(self) -> ValidationResult {
+        let is_valid =
+            self.has_export_default && self.exports_object && self.exports_single_function;
+
+        let error_reason = if !is_valid && self.error_reason.is_none() {
+            if !self.has_export_default {
+                Some("Missing `export default`".to_string())
+            } else if !self.exports_object {
+                Some("Exported default is not an object".to_string())
+            } else if !self.exports_single_function {
+                Some("Exported object must contain exactly one function".to_string())
+            } else {
+                Some("Unknown validation error".to_string())
+            }
+        } else {
+            self.error_reason
+        };
+
+        ValidationResult {
+            is_valid,
+            function_name: self.exported_function_name,
+            error_reason,
+        }
+    }
+
+    /// Validates if the export is a valid function property
+    fn validate_property(&mut self, property: &ObjectPropertyKind) -> bool {
+        if let ObjectPropertyKind::ObjectProperty(prop) = property {
+            // Check that key is a static identifier
+            if let PropertyKey::StaticIdentifier(ident) = &prop.key {
+                // Check that value is a function
+                match &prop.value {
+                    Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_) => {
+                        self.exports_single_function = true;
+                        self.exported_function_name = Some(ident.name.to_string());
+                        return true;
+                    }
+                    _ => self.set_error_if_none("Exported property's value is not a function"),
+                }
+            } else {
+                self.set_error_if_none("Exported property's key is not an identifier");
+            }
+        } else {
+            self.set_error_if_none("Exported object property has incorrect format");
+        }
+        false
     }
 }
 
@@ -34,85 +96,42 @@ impl<'a> Visit<'a> for ToolValidator {
     fn visit_export_default_declaration(&mut self, export: &ExportDefaultDeclaration<'a>) {
         self.has_export_default = true;
 
-        if let Some(expr) = export.declaration.as_expression() {
-            if let Expression::ObjectExpression(obj_expr) = expr {
+        // Extract the expression from the export declaration
+        match export.declaration.as_expression() {
+            Some(Expression::ObjectExpression(obj_expr)) => {
                 self.exports_object = true;
 
-                if obj_expr.properties.len() == 1 {
-                    if let Some(ObjectPropertyKind::ObjectProperty(property)) =
-                        obj_expr.properties.first()
-                    {
-                        match &property.key {
-                            PropertyKey::StaticIdentifier(ident) => match &property.value {
-                                Expression::FunctionExpression(_)
-                                | Expression::ArrowFunctionExpression(_) => {
-                                    self.exports_single_function = true;
-                                    self.exported_function_name = Some(ident.name.to_string());
-                                }
-                                _ => {
-                                    self.reason = Some(
-                                        "Exported property's value is not a function.".to_string(),
-                                    );
-                                }
-                            },
-                            _ => {
-                                self.reason = Some(
-                                    "Exported property's key is not an identifier.".to_string(),
-                                );
-                            }
-                        }
-                    } else {
-                        self.reason = Some("Exported object must contain a property.".to_string());
-                    }
-                } else {
-                    self.reason =
-                        Some("Exported object must have exactly one property.".to_string());
+                // Check object has exactly one property
+                if obj_expr.properties.len() != 1 {
+                    self.set_error_if_none("Exported object must have exactly one property");
+                    return;
                 }
-            } else {
-                self.reason = Some("Export default must be an object expression.".to_string());
+
+                // Validate the single property
+                if let Some(property) = obj_expr.properties.first() {
+                    self.validate_property(property);
+                } else {
+                    self.set_error_if_none("Exported object has no properties");
+                }
             }
-        } else {
-            self.reason = Some("Export default is not an expression.".to_string());
+            Some(_) => self.set_error_if_none("Export default must be an object expression"),
+            None => self.set_error_if_none("Export default is not an expression"),
         }
     }
 }
 
-pub fn validate_js_exports(
-    source_code: &str,
-) -> Result<(bool, Option<String>, Option<String>), String> {
+pub fn validate_js_exports(source_code: &str) -> Result<ValidationResult, String> {
+    // Configure the parser for ECMAScript modules
     let source_type = SourceType::default().with_module(true);
-
     let allocator = Allocator::default();
     let parser = Parser::new(&allocator, source_code, source_type);
-
     let parse_result = parser.parse();
 
     if parse_result.errors.is_empty() {
-        let program = parse_result.program;
         let mut validator = ToolValidator::new();
-        validator.visit_program(&program);
+        validator.visit_program(&parse_result.program);
 
-        let is_valid = validator.has_export_default
-            && validator.exports_object
-            && validator.exports_single_function;
-
-        if is_valid {
-            Ok((true, validator.exported_function_name, None))
-        } else {
-            let reason = validator.reason.or_else(|| {
-                if !validator.has_export_default {
-                    Some("Missing `export default`.".to_string())
-                } else if !validator.exports_object {
-                    Some("Exported default is not an object.".to_string())
-                } else if !validator.exports_single_function {
-                    Some("Exported object must contain a single function.".to_string())
-                } else {
-                    Some("Unknown reason.".to_string())
-                }
-            });
-
-            Ok((false, None, reason))
-        }
+        Ok(validator.result())
     } else {
         Err("Failed to parse JavaScript source code".to_string())
     }
@@ -134,10 +153,11 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, name, reason) = result.unwrap();
-        assert!(is_valid);
-        assert_eq!(name, Some("myFunction".to_string()));
-        assert!(reason.is_none());
+
+        let validation = result.unwrap();
+        assert!(validation.is_valid);
+        assert_eq!(validation.function_name, Some("myFunction".to_string()));
+        assert_eq!(validation.error_reason, None);
     }
 
     #[test]
@@ -150,10 +170,14 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, name, reason) = result.unwrap();
-        assert!(!is_valid);
-        assert_eq!(name, None);
-        assert_eq!(reason, Some("Missing `export default`.".to_string()));
+
+        let validation = result.unwrap();
+        assert!(!validation.is_valid);
+        assert_eq!(validation.function_name, None);
+        assert_eq!(
+            validation.error_reason,
+            Some("Missing `export default`".to_string())
+        );
     }
 
     #[test]
@@ -164,11 +188,12 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, _, reason) = result.unwrap();
-        assert!(!is_valid);
+
+        let validation = result.unwrap();
+        assert!(!validation.is_valid);
         assert_eq!(
-            reason,
-            Some("Export default must be an object expression.".to_string())
+            validation.error_reason,
+            Some("Export default must be an object expression".to_string())
         );
     }
 
@@ -183,11 +208,12 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, _, reason) = result.unwrap();
-        assert!(!is_valid);
+
+        let validation = result.unwrap();
+        assert!(!validation.is_valid);
         assert_eq!(
-            reason,
-            Some("Exported object must have exactly one property.".to_string())
+            validation.error_reason,
+            Some("Exported object must have exactly one property".to_string())
         );
     }
 
@@ -201,11 +227,12 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, _, reason) = result.unwrap();
-        assert!(!is_valid);
+
+        let validation = result.unwrap();
+        assert!(!validation.is_valid);
         assert_eq!(
-            reason,
-            Some("Exported property's value is not a function.".to_string())
+            validation.error_reason,
+            Some("Exported property's value is not a function".to_string())
         );
     }
 
@@ -219,11 +246,12 @@ mod tests {
 
         let result = validate_js_exports(js);
         assert!(result.is_ok());
-        let (is_valid, _, reason) = result.unwrap();
-        assert!(!is_valid);
+
+        let validation = result.unwrap();
+        assert!(!validation.is_valid);
         assert_eq!(
-            reason,
-            Some("Exported property's key is not an identifier.".to_string())
+            validation.error_reason,
+            Some("Exported property's key is not an identifier".to_string())
         );
     }
 
