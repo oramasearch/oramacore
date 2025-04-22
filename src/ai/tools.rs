@@ -2,10 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{
-    JSExecutor, JSExecutorConfig, JSExecutorError, JSExecutorPoolConfig, OramaJSPool,
-    OramaJSPoolConfig,
-};
+use orama_js_pool::{JSExecutor, JSExecutorConfig, JSExecutorError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{runtime::Builder, task::LocalSet};
@@ -25,7 +22,9 @@ pub struct ToolExecutionResult {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ToolExecutionReturnType {
+    #[serde(rename = "functionParameters")]
     FunctionParameters(ToolExecutionResult),
+    #[serde(rename = "functionResult")]
     FunctionResult(ToolExecutionResult),
 }
 
@@ -69,6 +68,16 @@ pub struct ToolsRuntime {
 
 impl ToolsRuntime {
     pub fn new(kv: Arc<KV>, llm_service: Arc<LLMService>) -> Self {
+        // @todo: check if we want to move this inside of the orama-js-pool crate.
+        // This is needed to use the crypto provider for the JSExecutor, or else
+        // TLS handshake will fail with "no crypto provider found".
+        use rustls::crypto::{ring::default_provider, CryptoProvider};
+
+        if CryptoProvider::get_default().is_none() {
+            let provider = default_provider();
+            let _ = provider.install_default();
+        }
+
         ToolsRuntime { kv, llm_service }
     }
 
@@ -200,18 +209,21 @@ impl ToolsRuntime {
                                 &tool.name
                             ))?;
 
+                        // Deno is not thread-safe, so we need to spawn a new thread for each tool execution.
+                        // We need to use a oneshot channel to send the result back to the main thread.
                         let (sx, rx) = tokio::sync::oneshot::channel();
                         let function_name = full_tool.id.clone();
 
                         std::thread::spawn(|| {
+                            // LocalSet is used to run the async code in a thread.
                             let local = LocalSet::new();
 
                             local.spawn_local(async move {
                                 match JSExecutor::try_new(
                                     JSExecutorConfig {
-                                        allowed_hosts: vec![],
-                                        max_startup_time: Duration::from_millis(500),
-                                        max_execution_time: Duration::from_secs(3),
+                                        allowed_hosts: vec!["api.duckduckgo.com".to_string()],
+                                        max_startup_time: Duration::from_millis(500), // @todo: make this configurable
+                                        max_execution_time: Duration::from_secs(3), // @todo: make this configurable
                                         function_name: function_name.clone(),
                                         is_async: true,
                                     },
@@ -219,6 +231,8 @@ impl ToolsRuntime {
                                 )
                                 .await
                                 {
+                                    // The JSExecutor call can easily fail under different circumstances.
+                                    // We need to handle this error and send it back to the main thread.
                                     Ok(mut tools_js_runtime) => {
                                         // Let's call the function with the deserialized arguments.
                                         // We should assume that it'll always return a JSON object or a valid JSON string.
@@ -235,6 +249,7 @@ impl ToolsRuntime {
                                 }
                             });
 
+                            // Let's tell the local set to run the async code and wait for it to finish.
                             Builder::new_current_thread()
                                 .enable_all()
                                 .build()
@@ -242,6 +257,7 @@ impl ToolsRuntime {
                                 .block_on(local)
                         });
 
+                        // We need to wait for the function call to finish and get the result.
                         let function_call = rx.await.context(format!(
                             "Failed to execute tool {}. Timeout.",
                             &full_tool.id
