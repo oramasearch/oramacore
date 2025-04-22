@@ -1,9 +1,8 @@
 name: Build and Release
 
 on:
-  push:
-    branches:
-      - test/release
+  release:
+    types: [created]
 
 permissions:
   contents: write
