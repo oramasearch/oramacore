@@ -117,10 +117,10 @@ async fn insert_tool_v1(
     Json(params): Json<InsertToolsParams>,
 ) -> impl IntoResponse {
     let tool = Tool {
-        id: params.id.unwrap_or(cuid2::create_id()),
-        name: params.name.clone(),
-        description: params.description.clone(),
-        parameters: params.parameters.clone(),
+        id: params.id,
+        description: params.description,
+        parameters: params.parameters,
+        code: params.code,
     };
 
     match write_side
@@ -180,9 +180,9 @@ async fn update_tool_v1(
 ) -> impl IntoResponse {
     let tool = Tool {
         id: params.id.clone(),
-        name: params.name.clone(),
         description: params.description.clone(),
         parameters: params.parameters.clone(),
+        code: params.code.clone(),
     };
 
     match write_side
