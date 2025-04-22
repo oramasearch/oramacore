@@ -10,7 +10,7 @@ use crate::{
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
-    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels, Empty},
+    metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     nlp::{locales::Locale, NLPService},
     types::{ApiKey, CollectionId, SearchOffset},
 };
@@ -293,7 +293,7 @@ impl CollectionsReader {
         );
 
         let mut guard = self.collections.write().await;
-        let mut source = guard
+        let source = guard
             .remove(&source_collection_id)
             .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
         // source.id = target_collection_id;

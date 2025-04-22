@@ -233,7 +233,7 @@ impl CommittedCollection {
             None => return Ok(None),
         };
 
-        Ok(Some(field.get_string_value()))
+        Ok(Some(field.get_string_values()))
     }
 }
 

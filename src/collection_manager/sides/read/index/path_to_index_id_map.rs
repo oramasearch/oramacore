@@ -16,7 +16,9 @@ impl PathToIndexId {
     }
 
     pub fn from(map: Vec<(Box<[String]>, (FieldId, FieldType))>) -> Self {
-        Self { map: map.into_iter().collect() }
+        Self {
+            map: map.into_iter().collect(),
+        }
     }
 
     pub fn serialize(&self) -> Vec<(Box<[String]>, (FieldId, FieldType))> {

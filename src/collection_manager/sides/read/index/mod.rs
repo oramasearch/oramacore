@@ -11,7 +11,7 @@ use merge::{
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{debug, trace, warn, error};
+use tracing::{debug, error, info, trace};
 use uncommitted_field::*;
 
 use crate::{
@@ -27,8 +27,9 @@ use crate::{
     },
     nlp::{locales::Locale, TextParser},
     types::{
-        DocumentId, Filter, FulltextMode, HybridMode, IndexId, Limit, Properties, SearchMode,
-        SearchModeResult, SearchParams, Similarity, VectorMode,
+        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
+        NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
+        VectorMode,
     },
 };
 
@@ -143,17 +144,26 @@ impl Index {
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
         for (field_id, info) in dump.bool_field_ids {
-            uncommitted_fields.bool_fields.insert(field_id, UncommittedBoolField::empty(info.field_path.clone()));
+            uncommitted_fields.bool_fields.insert(
+                field_id,
+                UncommittedBoolField::empty(info.field_path.clone()),
+            );
             let field = CommittedBoolField::try_load(info).context("Cannot load bool field")?;
             committed_fields.bool_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.number_field_ids {
-            uncommitted_fields.number_fields.insert(field_id, UncommittedNumberField::empty(info.field_path.clone()));
+            uncommitted_fields.number_fields.insert(
+                field_id,
+                UncommittedNumberField::empty(info.field_path.clone()),
+            );
             let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.string_filter_field_ids {
-            uncommitted_fields.string_filter_fields.insert(field_id, UncommittedStringFilterField::empty(info.field_path.clone()));
+            uncommitted_fields.string_filter_fields.insert(
+                field_id,
+                UncommittedStringFilterField::empty(info.field_path.clone()),
+            );
             let field = CommittedStringFilterField::try_load(info)
                 .context("Cannot load string filter field")?;
             committed_fields
@@ -161,12 +171,18 @@ impl Index {
                 .insert(field_id, field);
         }
         for (field_id, info) in dump.string_field_ids {
-            uncommitted_fields.string_fields.insert(field_id, UncommittedStringField::empty(info.field_path.clone()));
+            uncommitted_fields.string_fields.insert(
+                field_id,
+                UncommittedStringField::empty(info.field_path.clone()),
+            );
             let field = CommittedStringField::try_load(info).context("Cannot load string field")?;
             committed_fields.string_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.vector_field_ids {
-            uncommitted_fields.vector_fields.insert(field_id, UncommittedVectorField::empty(info.field_path.clone(), info.model.0));
+            uncommitted_fields.vector_fields.insert(
+                field_id,
+                UncommittedVectorField::empty(info.field_path.clone(), info.model.0),
+            );
             let field = CommittedVectorField::try_load(info).context("Cannot load vector field")?;
             committed_fields.vector_fields.insert(field_id, field);
         }
@@ -489,7 +505,9 @@ impl Index {
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
+        tracing::info!("------- self.uncommitted_fields.write() -------");
         let uncommitted_fields = self.uncommitted_fields.get_mut();
+        tracing::info!("------- self.uncommitted_fields.write() done -------");
         match op {
             IndexWriteOperation::CreateField2 {
                 field_id,
@@ -545,10 +563,7 @@ impl Index {
                             if let Some(field) = uncommitted_fields.bool_fields.get_mut(&field_id) {
                                 field.insert(doc_id, bool_value);
                             } else {
-                                error!(
-                                    "Cannot find field {:?} in uncommitted fields",
-                                    field_id
-                                );
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
                         }
                         IndexedValue::FilterNumber(field_id, number) => {
@@ -556,10 +571,7 @@ impl Index {
                             {
                                 field.insert(doc_id, number.0);
                             } else {
-                                error!(
-                                    "Cannot find field {:?} in uncommitted fields",
-                                    field_id
-                                );
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
                         }
                         IndexedValue::FilterString(field_id, string_value) => {
@@ -568,10 +580,7 @@ impl Index {
                             {
                                 field.insert(doc_id, string_value);
                             } else {
-                                error!(
-                                    "Cannot find field {:?} in uncommitted fields",
-                                    field_id
-                                );
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
                         }
                         IndexedValue::ScoreString(field_id, len, values) => {
@@ -579,10 +588,7 @@ impl Index {
                             {
                                 field.insert(doc_id, len, values);
                             } else {
-                                error!(
-                                    "Cannot find field {:?} in uncommitted fields",
-                                    field_id
-                                );
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
                         }
                     }
@@ -759,54 +765,6 @@ impl Index {
         Ok(())
     }
 
-    async fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
-        let uncommitted_fields = self.uncommitted_fields.read().await;
-        let committed_fields = self.committed_fields.read().await;
-
-        let properties: Vec<_> = uncommitted_fields
-            .vector_fields
-            .keys()
-            .chain(committed_fields.vector_fields.keys())
-            .copied()
-            .collect();
-
-        Ok(properties)
-    }
-
-    async fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
-        let properties: HashSet<_> = match properties {
-            Properties::Specified(properties) => {
-                let mut field_ids = HashSet::new();
-                for field in properties {
-                    let (field_id, field_type) = match self.path_to_index_id_map.get(field) {
-                        None => {
-                            bail!("Cannot filter by \"{}\": unknown field", &field);
-                        }
-                        Some((field_id, field_type)) => (field_id, field_type),
-                    };
-                    if !matches!(field_type, FieldType::String) {
-                        bail!("Cannot filter by \"{}\": wrong type", &field);
-                    }
-                    field_ids.insert(field_id);
-                }
-                field_ids
-            }
-            Properties::None | Properties::Star => {
-                let uncommitted_fields = self.uncommitted_fields.read().await;
-                let committed_fields = self.committed_fields.read().await;
-
-                uncommitted_fields
-                    .string_fields
-                    .keys()
-                    .chain(committed_fields.string_fields.keys())
-                    .copied()
-                    .collect()
-            }
-        };
-
-        Ok(properties.into_iter().collect())
-    }
-
     pub async fn stats(&self) -> Result<IndexStats> {
         let mut fields_stats = Vec::new();
 
@@ -915,6 +873,186 @@ impl Index {
         })
     }
 
+    pub async fn calculate_facets(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        facets: &HashMap<String, FacetDefinition>,
+        res_facets: &mut HashMap<String, FacetResult>,
+    ) -> Result<()> {
+        if facets.is_empty() {
+            return Ok(());
+        }
+
+        info!("Computing facets on {:?}", facets.keys());
+
+        let uncommitted_fields = self.uncommitted_fields.read().await;
+        let committed_fields = self.committed_fields.read().await;
+
+        for (field_name, facet) in facets {
+            let Some((field_id, field_type)) = self.path_to_index_id_map.get(field_name) else {
+                bail!("Unknown field name {}", field_name);
+            };
+            let facet_definition =
+                res_facets
+                    .entry(field_name.clone())
+                    .or_insert_with(|| FacetResult {
+                        count: 0,
+                        values: HashMap::new(),
+                    });
+
+            // This calculation is not efficient
+            // we have the doc_ids that matches:
+            // - filters
+            // - search
+            // We should use them to calculate the facets
+            // Instead here we are building an hashset and
+            // iter again on it to filter the doc_ids.
+            // We could create a dedicated method in the indexes that
+            // accepts the matching doc_ids + facet definition and returns the count
+            // TODO: do it
+            match (facet, field_type) {
+                (FacetDefinition::Number(facet), FieldType::Number) => {
+                    let uncommitted = uncommitted_fields.number_fields.get(&field_id);
+                    let committed = committed_fields.number_fields.get(&field_id);
+
+                    for range in &facet.ranges {
+                        let filter = NumberFilter::Between((range.from, range.to));
+
+                        let uncommitted_output = uncommitted.map(|f| f.filter(&filter));
+                        let committed_output = committed.map(|f| f.filter(&filter));
+
+                        let facet = match (committed_output, uncommitted_output) {
+                            (Some(Ok(committed_output)), Some(uncommitted_output)) => {
+                                committed_output
+                                    .chain(uncommitted_output)
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect()
+                            }
+                            (Some(Ok(committed_output)), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), Some(uncommitted_output))
+                            | (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), None) | (None, None) => HashSet::new(),
+                        };
+
+                        let c = facet_definition
+                            .values
+                            .entry(format!("{}-{}", range.from, range.to))
+                            .or_default();
+                        *c += facet.len();
+                    }
+                }
+                (FacetDefinition::Bool(facets), FieldType::Bool) => {
+                    let uncommitted = uncommitted_fields.bool_fields.get(&field_id);
+                    let committed = committed_fields.bool_fields.get(&field_id);
+
+                    if facets.r#true {
+                        let committed_output = committed.map(|f| f.filter(true));
+                        let uncommitted_output = uncommitted.map(|f| f.filter(true));
+                        let true_facet = match (committed_output, uncommitted_output) {
+                            (Some(Ok(committed_output)), Some(uncommitted_output)) => {
+                                committed_output
+                                    .chain(uncommitted_output)
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect()
+                            }
+                            (Some(Ok(committed_output)), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), Some(uncommitted_output))
+                            | (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), None) | (None, None) => HashSet::new(),
+                        };
+
+                        let c = facet_definition
+                            .values
+                            .entry("true".to_string())
+                            .or_default();
+                        *c += true_facet.len();
+                    }
+                    if facets.r#false {
+                        let committed_output = committed.map(|f| f.filter(false));
+                        let uncommitted_output = uncommitted.map(|f| f.filter(false));
+                        let false_facet = match (committed_output, uncommitted_output) {
+                            (Some(Ok(committed_output)), Some(uncommitted_output)) => {
+                                committed_output
+                                    .chain(uncommitted_output)
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect()
+                            }
+                            (Some(Ok(committed_output)), None) => committed_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), Some(uncommitted_output))
+                            | (None, Some(uncommitted_output)) => uncommitted_output
+                                .filter(|doc_id| token_scores.contains_key(doc_id))
+                                .collect(),
+                            (Some(Err(_)), None) | (None, None) => HashSet::new(),
+                        };
+
+                        let c = facet_definition
+                            .values
+                            .entry("false".to_string())
+                            .or_default();
+                        *c += false_facet.len();
+                    }
+                }
+                (FacetDefinition::String(_), FieldType::StringFilter) => {
+                    let uncommitted = uncommitted_fields.string_filter_fields.get(&field_id);
+                    let committed = committed_fields.string_filter_fields.get(&field_id);
+
+                    let mut all_values = HashSet::new();
+                    if let Some(values) = committed.map(|f| f.get_string_values()) {
+                        all_values.extend(values);
+                    }
+                    if let Some(values) = uncommitted.map(|f| f.get_string_values()) {
+                        all_values.extend(values);
+                    }
+
+                    for filter in all_values {
+                        let committed_output = committed.map(|f| f.filter(filter));
+                        let uncommitted_output = uncommitted.map(|f| f.filter(filter));
+
+                        let mut facets = HashSet::new();
+                        if let Some(committed_output) = committed_output {
+                            facets.extend(
+                                committed_output
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect::<HashSet<_>>(),
+                            );
+                        }
+                        if let Some(uncommitted_output) = uncommitted_output {
+                            facets.extend(
+                                uncommitted_output
+                                    .filter(|doc_id| token_scores.contains_key(doc_id))
+                                    .collect::<HashSet<_>>(),
+                            );
+                        }
+                        let c = facet_definition
+                            .values
+                            .entry(filter.to_string())
+                            .or_default();
+                        *c += facets.len();
+                    }
+                }
+                (_, t) => {
+                    bail!(
+                        "Cannot calculate facet on field {:?}: wrong type. Expected {:?} filter",
+                        field_name,
+                        t
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn calculate_filtered_doc_ids(
         &self,
         where_filter: &HashMap<String, Filter>,
@@ -980,6 +1118,54 @@ impl Index {
                 Some((field_id, *boost))
             })
             .collect()
+    }
+
+    async fn calculate_vector_properties(&self) -> Result<Vec<FieldId>> {
+        let uncommitted_fields = self.uncommitted_fields.read().await;
+        let committed_fields = self.committed_fields.read().await;
+
+        let properties: Vec<_> = uncommitted_fields
+            .vector_fields
+            .keys()
+            .chain(committed_fields.vector_fields.keys())
+            .copied()
+            .collect();
+
+        Ok(properties)
+    }
+
+    async fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {
+        let properties: HashSet<_> = match properties {
+            Properties::Specified(properties) => {
+                let mut field_ids = HashSet::new();
+                for field in properties {
+                    let (field_id, field_type) = match self.path_to_index_id_map.get(field) {
+                        None => {
+                            bail!("Cannot filter by \"{}\": unknown field", &field);
+                        }
+                        Some((field_id, field_type)) => (field_id, field_type),
+                    };
+                    if !matches!(field_type, FieldType::String) {
+                        bail!("Cannot filter by \"{}\": wrong type", &field);
+                    }
+                    field_ids.insert(field_id);
+                }
+                field_ids
+            }
+            Properties::None | Properties::Star => {
+                let uncommitted_fields = self.uncommitted_fields.read().await;
+                let committed_fields = self.committed_fields.read().await;
+
+                uncommitted_fields
+                    .string_fields
+                    .keys()
+                    .chain(committed_fields.string_fields.keys())
+                    .copied()
+                    .collect()
+            }
+        };
+
+        Ok(properties.into_iter().collect())
     }
 
     async fn search_full_text(

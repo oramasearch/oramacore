@@ -167,15 +167,9 @@ mod tests {
         v2[1] = 0.0001;
         let mut v3 = vec![0.0; 384];
         v3[2] = 1.0;
-        index
-            .insert(DocumentId(0), vec![v1])
-            .unwrap();
-        index
-            .insert(DocumentId(1), vec![v2])
-            .unwrap();
-        index
-            .insert(DocumentId(2), vec![v3])
-            .unwrap();
+        index.insert(DocumentId(0), vec![v1]).unwrap();
+        index.insert(DocumentId(1), vec![v2]).unwrap();
+        index.insert(DocumentId(2), vec![v3]).unwrap();
 
         let mut target = vec![0.0; 384];
         target[0] = 1.0;
@@ -183,13 +177,7 @@ mod tests {
         // With similarity
         let mut output = HashMap::new();
         index
-            .search(
-                &target,
-                0.6,
-                None,
-                &mut output,
-                &Default::default(),
-            )
+            .search(&target, 0.6, None, &mut output, &Default::default())
             .unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1)]),
@@ -199,13 +187,7 @@ mod tests {
         // With similarity to 0
         let mut output = HashMap::new();
         index
-            .search(
-                &target,
-                0.0,
-                None,
-                &mut output,
-                &Default::default(),
-            )
+            .search(&target, 0.0, None, &mut output, &Default::default())
             .unwrap();
         assert_eq!(
             HashSet::from([DocumentId(0), DocumentId(1), DocumentId(2)]),

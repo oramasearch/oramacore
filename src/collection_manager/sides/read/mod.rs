@@ -15,6 +15,7 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
+pub use collection::IndexFieldStatsType;
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
@@ -200,7 +201,7 @@ impl ReadSide {
         let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
         let live_offset = self.live_offset.write().await;
-        let offset = live_offset.clone();
+        let offset = *live_offset;
 
         self.collections.commit(offset).await?;
         self.document_storage
@@ -243,7 +244,9 @@ impl ReadSide {
 
         // We stop commit operations while we are updating
         // The lock is released at the end of this function
+        info!("------- commit_insert_mutex.lock() -------");
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+        tracing::info!("------- commit_insert_mutex.lock() done -------");
 
         // Already applied. We can skip this operation.
         if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
@@ -251,7 +254,9 @@ impl ReadSide {
             return Ok(());
         }
 
+        tracing::info!("------- self.live_offset.write() -------");
         let mut live_offset = self.live_offset.write().await;
+        tracing::info!("------- self.live_offset.write() done -------");
         *live_offset = offset;
         drop(live_offset);
 
@@ -288,6 +293,25 @@ impl ReadSide {
 
         drop(m);
 
+        let mut lock = self.operation_counter.write().await;
+        *lock += 1;
+        let should_commit = if *lock >= self.insert_batch_commit_size {
+            *lock = 0;
+            true
+        } else {
+            false
+        };
+        drop(lock);
+
+        drop(commit_insert_mutex_lock);
+
+        if should_commit {
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
+            self.commit().await?;
+        }
+
+        trace!(offset=?offset, "Updated");
+
         Ok(())
     }
 
@@ -321,10 +345,11 @@ impl ReadSide {
 
         let token_scores = collection.search(search_params).await?;
 
-        if !facets.is_empty() {
-            panic!("Facets are not supported yet");
-        }
-        let facets = None; // collection.calculate_facets(&token_scores, facets).await?;
+        let facets = if !facets.is_empty() {
+            Some(collection.calculate_facets(&token_scores, facets).await?)
+        } else {
+            None
+        };
 
         let count = token_scores.len();
 
@@ -800,6 +825,8 @@ fn start_receive_operations(
                         .skip(1)
                         .for_each(|cause| eprintln!("because: {}", cause));
                 }
+
+                trace!("Operation applied");
             }
 
             warn!("Operation receiver is closed.");

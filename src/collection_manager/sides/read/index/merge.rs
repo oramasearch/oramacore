@@ -52,7 +52,7 @@ pub fn merge_number_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
-            if uncommitted.len() == 0 {
+            if uncommitted.is_empty() {
                 return Ok(None);
             }
 
@@ -128,7 +128,7 @@ pub fn merge_string_filter_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
-            if uncommitted.len() == 0 {
+            if uncommitted.is_empty() {
                 return Ok(None);
             }
 
@@ -217,7 +217,7 @@ pub fn merge_bool_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
-            if uncommitted.len() == 0 {
+            if uncommitted.is_empty() {
                 return Ok(None);
             }
 
@@ -281,7 +281,7 @@ pub fn merge_string_field(
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
-            if uncommitted.len() == 0 {
+            if uncommitted.is_empty() {
                 return Ok(None);
             }
 
@@ -348,13 +348,13 @@ pub fn merge_vector_field(
                 uncommitted
                     .iter()
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
-                    uncommitted.get_model(),
+                uncommitted.get_model(),
                 data_dir,
             )?;
             Ok(Some(new_field))
         }
         (Some(uncommitted), Some(committed)) => {
-            if uncommitted.len() == 0 {
+            if uncommitted.is_empty() {
                 return Ok(None);
             }
 

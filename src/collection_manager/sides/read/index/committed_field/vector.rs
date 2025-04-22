@@ -8,7 +8,11 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ai::OramaModel, collection_manager::sides::OramaModelSerializable, file_utils::{create_if_not_exists, BufferedFile}, indexes::hnsw2::HNSW2Index, types::DocumentId
+    ai::OramaModel,
+    collection_manager::sides::OramaModelSerializable,
+    file_utils::{create_if_not_exists, BufferedFile},
+    indexes::hnsw2::HNSW2Index,
+    types::DocumentId,
 };
 
 pub struct CommittedVectorField {
@@ -116,7 +120,7 @@ impl CommittedVectorField {
             field_path: info.field_path,
             inner,
             data_dir: info.data_dir,
-            model: info.model.0
+            model: info.model.0,
         })
     }
 
@@ -128,7 +132,7 @@ impl CommittedVectorField {
         VectorFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
-            model: OramaModelSerializable(self.model.clone()),
+            model: OramaModelSerializable(self.model),
         }
     }
 

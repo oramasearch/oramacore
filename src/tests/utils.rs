@@ -14,7 +14,7 @@ use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
-use futures::{future::BoxFuture, join, FutureExt};
+use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
 use http::uri::Scheme;
 use tokio::time::sleep;
@@ -278,12 +278,12 @@ pub struct TestContext {
 }
 impl TestContext {
     pub async fn new() -> Self {
-        let mut config: OramacoreConfig = create_oramacore_config();
-        config.writer_side.master_api_key = Self::generate_api_key();
+        let config: OramacoreConfig = create_oramacore_config();
         Self::new_with_config(config).await
     }
 
-    async fn new_with_config(mut config: OramacoreConfig) -> Self {
+    pub async fn new_with_config(mut config: OramacoreConfig) -> Self {
+        config.writer_side.master_api_key = Self::generate_api_key();
         if config.ai_server.port == 0 {
             let address = create_grpc_server().await.unwrap();
             config.ai_server.host = address.ip().to_string();

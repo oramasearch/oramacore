@@ -372,6 +372,8 @@ impl WriteSide {
 
         info!("All documents are inserted");
 
+        drop(index);
+        drop(collection);
         drop(metric);
 
         let mut lock = self.operation_counter.write().await;
@@ -387,8 +389,6 @@ impl WriteSide {
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
-        } else {
-            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
 
         Ok(result)

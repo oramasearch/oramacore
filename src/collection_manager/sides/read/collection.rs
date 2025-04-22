@@ -16,9 +16,10 @@ use crate::{
     ai::{llms::LLMService, AIService, OramaModel},
     collection_manager::sides::{CollectionWriteOperation, Offset},
     file_utils::BufferedFile,
-    nlp::{locales::Locale, NLPService, TextParser},
-    offset_storage::OffsetStorage,
-    types::{ApiKey, CollectionId, DocumentId, FieldId, IndexId, SearchOffset, SearchParams},
+    nlp::{locales::Locale, NLPService},
+    types::{
+        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, IndexId, SearchParams,
+    },
 };
 
 use super::{
@@ -117,8 +118,7 @@ impl CollectionReader {
 
         let indexes_dir = data_dir.join("indexes");
         for (id, index) in indexes_lock.iter() {
-            let dir = indexes_dir
-                .join(id.as_str());
+            let dir = indexes_dir.join(id.as_str());
             index.commit(dir, offset).await?;
         }
 
@@ -173,6 +173,22 @@ impl CollectionReader {
         let indexes_lock = self.indexes.read().await;
         for (_, index) in indexes_lock.iter() {
             index.search(&search_params, &mut result).await?;
+        }
+
+        Ok(result)
+    }
+
+    pub async fn calculate_facets(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        facets: HashMap<String, FacetDefinition>,
+    ) -> Result<HashMap<String, FacetResult>> {
+        let mut result: HashMap<String, FacetResult> = HashMap::new();
+        let indexes_lock = self.indexes.read().await;
+        for (_, index) in indexes_lock.iter() {
+            index
+                .calculate_facets(token_scores, &facets, &mut result)
+                .await?;
         }
 
         Ok(result)
@@ -787,7 +803,9 @@ impl CollectionReader {
                 drop(indexes_lock);
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
+                tracing::info!("------- self.indexes.write() -------");
                 let mut indexes_lock = self.indexes.write().await;
+                tracing::info!("------- self.indexes.write() done -------");
                 let Some(index) = indexes_lock.get_mut(&index_id) else {
                     bail!("Index {} not found", index_id)
                 };

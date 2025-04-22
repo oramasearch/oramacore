@@ -95,7 +95,7 @@ impl CommittedStringFilterField {
             .unwrap_or_default()
     }
 
-    pub fn get_string_value<'s, 'iter>(&'s self) -> impl Iterator<Item = &'s str> + 'iter
+    pub fn get_string_values<'s, 'iter>(&'s self) -> impl Iterator<Item = &'s str> + 'iter
     where
         's: 'iter,
     {
