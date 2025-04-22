@@ -18,7 +18,7 @@ jobs:
       run: sudo apt-get update
     - name: apt-get install
       run: |
-        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates
+        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates protobuf-compiler
     - name: Set up cargo cache
       uses: actions/cache@v3
       continue-on-error: false
