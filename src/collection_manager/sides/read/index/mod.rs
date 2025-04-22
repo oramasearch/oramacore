@@ -5,8 +5,7 @@ use committed_field::{
 use futures::join;
 use path_to_index_id_map::PathToIndexId;
 use serde::Serialize;
-use tokio::sync::RwLock;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace};
 use uncommitted_field::{
     bool::UncommittedBoolField, number::UncommittedNumberField, string::UncommittedStringField,
     string_filter::UncommittedStringFilterField, vector::UncommittedVectorField,
@@ -39,7 +38,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::{
     collection_manager::sides::{
@@ -60,6 +59,8 @@ pub use uncommitted_field::{
 pub struct Index {
     id: IndexId,
     locale: Locale,
+
+    deleted: bool,
 
     llm_service: Arc<llms::LLMService>,
     ai_service: Arc<AIService>,
@@ -95,6 +96,7 @@ impl Index {
         Self {
             id,
             locale,
+            deleted: false,
 
             llm_service,
             ai_service,
@@ -119,6 +121,14 @@ impl Index {
 
             path_to_index_id_map: PathToIndexId::new(),
         }
+    }
+
+    pub fn mark_as_deleted(&mut self) {
+        self.deleted = true;
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
@@ -200,7 +210,10 @@ impl Index {
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
 
-                println!("self.uncommitted_deleted_documents: {:?}", self.uncommitted_deleted_documents);
+                println!(
+                    "self.uncommitted_deleted_documents: {:?}",
+                    self.uncommitted_deleted_documents
+                );
                 println!("doc count: {}", self.document_count)
             }
         };
@@ -273,26 +286,30 @@ impl Index {
         match search_mode {
             SearchMode::Default(search_mode) | SearchMode::FullText(search_mode) => {
                 let properties = self.calculate_string_properties(&search_params.properties)?;
-                results.extend(self.search_full_text(
-                    &search_mode.term,
-                    properties,
-                    boost,
-                    filtered_doc_ids.as_ref(),
-                    uncommitted_deleted_documents,
+                results.extend(
+                    self.search_full_text(
+                        &search_mode.term,
+                        properties,
+                        boost,
+                        filtered_doc_ids.as_ref(),
+                        uncommitted_deleted_documents,
+                    )
+                    .await?,
                 )
-                .await?)
             }
             SearchMode::Vector(search_mode) => {
                 let vector_properties = self.calculate_vector_properties()?;
-                results.extend(self.search_vector(
-                    &search_mode.term,
-                    vector_properties,
-                    search_mode.similarity,
-                    filtered_doc_ids.as_ref(),
-                    search_params.limit,
-                    uncommitted_deleted_documents,
+                results.extend(
+                    self.search_vector(
+                        &search_mode.term,
+                        vector_properties,
+                        search_mode.similarity,
+                        filtered_doc_ids.as_ref(),
+                        search_params.limit,
+                        uncommitted_deleted_documents,
+                    )
+                    .await?,
                 )
-                .await?)
             }
             SearchMode::Hybrid(search_mode) => {
                 let vector_properties = self.calculate_vector_properties()?;
@@ -572,7 +589,7 @@ impl Index {
     ) -> Result<HashMap<DocumentId, f32>> {
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
 
-        let parser = TextParser::from_locale(self.locale.clone());
+        let parser = TextParser::from_locale(self.locale);
         let tokens = parser.tokenize_and_stem(term);
         let tokens: Vec<_> = tokens
             .into_iter()

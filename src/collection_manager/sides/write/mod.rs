@@ -249,6 +249,24 @@ impl WriteSide {
         Ok(())
     }
 
+    pub async fn delete_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection.delete_index(index_id).await?;
+
+        Ok(())
+    }
+
     pub async fn insert_documents(
         &self,
         write_api_key: ApiKey,
@@ -320,7 +338,9 @@ impl WriteSide {
                     DocumentStorageWriteOperation::InsertDocument {
                         doc_id,
                         doc: DocumentToInsert(
-                            doc.clone().into_raw(format!("{}:{}", index_id, doc_id_str)).expect("Cannot get raw document"),
+                            doc.clone()
+                                .into_raw(format!("{}:{}", index_id, doc_id_str))
+                                .expect("Cannot get raw document"),
                         ),
                     },
                 ))

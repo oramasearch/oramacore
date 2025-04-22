@@ -139,6 +139,30 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn delete_index(&self, index_id: IndexId) -> Result<()> {
+        let mut indexes = self.indexes.write().await;
+        let index = match indexes.remove(&index_id) {
+            Some(index) => index,
+            None => {
+                warn!(collection_id= ?self.id, "Index not found. Ignored");
+                return Ok(());
+            }
+        };
+        drop(indexes);
+
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::DeleteIndex2 { index_id },
+            ))
+            .await
+            .context("Cannot send delete index operation")?;
+
+        // index.remove_from_fs().await;
+
+        Ok(())
+    }
+
     pub async fn create_temporary_index_from(
         &self,
         index_id: IndexId,

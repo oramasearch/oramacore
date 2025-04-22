@@ -25,9 +25,8 @@ impl PathToIndexId {
             .map(|s| s.to_string())
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        match self.map.get(&path) {
-            None => None,
-            Some((field_id, field_type)) => Some((*field_id, *field_type)),
-        }
+        self.map
+            .get(&path)
+            .map(|(field_id, field_type)| (*field_id, *field_type))
     }
 }

@@ -22,7 +22,6 @@ impl DocIdStorage {
     }
 
     pub fn remove_document_ids(&mut self, doc_ids: Vec<String>) -> Vec<DocumentId> {
-
         println!("Removing document ids: {:?}", doc_ids);
         println!("Current document ids: {:?}", self.document_ids);
 
@@ -80,6 +79,8 @@ impl DocIdStorage {
             .read_bincode_data()
             .context("Cannot read doc_id_storage from file")?;
 
-        Ok(Self { document_ids: document_id })
+        Ok(Self {
+            document_ids: document_id,
+        })
     }
 }

@@ -1,5 +1,5 @@
-mod fields;
 mod doc_id_storage;
+mod fields;
 
 use std::{
     path::PathBuf,
@@ -20,7 +20,8 @@ use tracing::{info, instrument, trace};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation
+        hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation,
+        IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
@@ -30,10 +31,7 @@ use crate::{
     },
 };
 
-use super::{
-    embedding::MultiEmbeddingCalculationRequest,
-    OramaModelSerializable,
-};
+use super::{embedding::MultiEmbeddingCalculationRequest, OramaModelSerializable};
 pub use fields::{FieldType, IndexedValue};
 
 #[derive(Clone)]
@@ -329,9 +327,12 @@ impl Index {
         self.op_sender
             .send(WriteOperation::Collection(
                 self.collection_id,
-                CollectionWriteOperation::IndexWriteOperation(self.index_id, IndexWriteOperation::DeleteDocuments {
-                    doc_ids: doc_ids.clone(),
-                }),
+                CollectionWriteOperation::IndexWriteOperation(
+                    self.index_id,
+                    IndexWriteOperation::DeleteDocuments {
+                        doc_ids: doc_ids.clone(),
+                    },
+                ),
             ))
             .await
             .context("Cannot send operation")?;

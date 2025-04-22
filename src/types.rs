@@ -122,7 +122,10 @@ impl Document {
     pub fn into_raw(&self, doc_id_str: String) -> Result<RawJSONDocument> {
         let inner =
             serde_json::value::to_raw_value(&self.inner).context("Cannot serialize document")?;
-        Ok(RawJSONDocument { inner, id: Some(doc_id_str) })
+        Ok(RawJSONDocument {
+            inner,
+            id: Some(doc_id_str),
+        })
     }
 
     pub fn get(&self, key: &str) -> Option<&Value> {
@@ -265,7 +268,7 @@ impl FlattenDocument {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct DocumentList(Vec<Document>);
+pub struct DocumentList(pub Vec<Document>);
 impl DocumentList {
     #[inline]
     pub fn len(&self) -> usize {

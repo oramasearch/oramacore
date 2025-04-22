@@ -6,7 +6,7 @@ pub mod notify;
 
 pub use index::*;
 
-use collection::CollectionStats;
+pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
@@ -259,6 +259,9 @@ impl ReadSide {
                 self.collections
                     .create_collection(offset, id, description, default_locale, read_api_key)
                     .await?;
+            }
+            WriteOperation::DeleteCollection(collection_id) => {
+                self.collections.delete_collection(collection_id).await?;
             }
             WriteOperation::Collection(collection_id, collection_operation) => {
                 let collection = self

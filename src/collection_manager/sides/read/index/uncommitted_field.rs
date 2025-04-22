@@ -1,23 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
-pub use bool::{UncommittedBoolField, UncommittedBoolFieldStats};
-use debug_panic::debug_panic;
-pub use number::{UncommittedNumberField, UncommittedNumberFieldStats};
+pub use bool::UncommittedBoolFieldStats;
+pub use number::UncommittedNumberFieldStats;
 use serde::Serialize;
-pub use string::{UncommittedStringField, UncommittedStringFieldStats};
-pub use string_filter::{UncommittedStringFilterField, UncommittedStringFilterFieldStats};
-use tracing::{trace, warn};
-pub use vector::{UncommittedVectorField, UncommittedVectorFieldStats};
+pub use string::UncommittedStringFieldStats;
+pub use string_filter::UncommittedStringFilterFieldStats;
+pub use vector::UncommittedVectorFieldStats;
 
 use crate::{
-    collection_manager::{
-        bm25::BM25Scorer,
-        global_info::GlobalInfo,
-        sides::{index::Index, DocumentFieldIndexOperation},
-    },
-    nlp::locales::Locale,
-    types::{DocumentId, FieldId, IndexId, NumberFilter},
+    collection_manager::sides::index::Index,
+    types::{FieldId, IndexId},
 };
 
 pub mod bool;

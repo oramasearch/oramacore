@@ -2,10 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::Arc,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -14,37 +11,15 @@ use dashmap::DashMap;
 
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    join,
-    sync::{RwLock, RwLockReadGuard},
-};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::{instrument, warn};
 
 use crate::{
-    ai::{
-        llms::{self, LLMService},
-        AIService, OramaModel,
-    },
-    collection_manager::{
-        bm25::BM25Scorer,
-        sides::{CollectionWriteOperation, Offset, OramaModelSerializable, TypedFieldWrapper},
-    },
-    file_utils::BufferedFile,
-    metrics::{
-        commit::FIELD_COMMIT_CALCULATION_TIME,
-        search::{
-            FILTER_CALCULATION_TIME, FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
-            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
-        },
-        CollectionFieldCommitLabels, CollectionLabels,
-    },
+    ai::{llms::LLMService, AIService, OramaModel},
+    collection_manager::sides::CollectionWriteOperation,
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
-    types::{
-        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, Filter,
-        FulltextMode, HybridMode, IndexId, Limit, NumberFilter, Properties, SearchMode,
-        SearchModeResult, SearchParams, Similarity, VectorMode,
-    },
+    types::{ApiKey, CollectionId, DocumentId, FieldId, IndexId, SearchParams},
 };
 
 use super::{
@@ -888,6 +863,15 @@ impl CollectionReader {
                 }
                 drop(indexes_lock);
             }
+            CollectionWriteOperation::DeleteIndex2 { index_id } => {
+                let mut indexes_lock = self.indexes.write().await;
+                if let Some(index) = indexes_lock.get_mut(&index_id) {
+                    index.mark_as_deleted();
+                } else {
+                    warn!("Cannot mark index {} as deleted. Ignored.", index_id);
+                }
+                drop(indexes_lock);
+            }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
                 let mut indexes_lock = self.indexes.write().await;
                 let Some(index) = indexes_lock.get_mut(&index_id) else {
@@ -1620,6 +1604,9 @@ impl CollectionReader {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         for (_, i) in indexes_lock.iter() {
+            if i.is_deleted() {
+                continue;
+            }
             indexes_stats.push(i.stats().await?);
         }
         drop(indexes_lock);

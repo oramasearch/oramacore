@@ -374,6 +374,18 @@ impl CollectionsReader {
 
         Ok(())
     }
+
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
+        info!(collection_id=?collection_id, "ReadSide: Deleting collection {:?}", collection_id);
+
+        let mut guard = self.collections.write().await;
+        if let Some(collection) = guard.get_mut(&collection_id) {
+            collection.mark_as_deleted();
+            info!(collection_id=?collection_id, "Collection marked as deleted {:?}", collection_id);
+        }
+
+        Ok(())
+    }
 }
 
 pub struct CollectionReadLock<'guard> {

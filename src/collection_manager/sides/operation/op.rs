@@ -136,7 +136,7 @@ pub enum IndexWriteOperation {
     },
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,10 +154,12 @@ pub enum CollectionWriteOperation {
         field: TypedFieldWrapper,
     },
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
-
     CreateIndex2 {
         index_id: IndexId,
         locale: Locale,
+    },
+    DeleteIndex2 {
+        index_id: IndexId,
     },
     IndexWriteOperation(IndexId, IndexWriteOperation),
     InsertDocument2 {
@@ -306,13 +308,19 @@ impl WriteOperation {
             ) => "index_document_2",
             WriteOperation::Collection(
                 _,
-                CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::DeleteDocuments { .. }),
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::DeleteDocuments { .. },
+                ),
             ) => "delete_document_2",
             WriteOperation::Collection(_, CollectionWriteOperation::InsertDocument2 { .. }) => {
                 "insert_document_2"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
                 "create_index"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {
+                "delete_index"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::IndexDocument2 { .. }) => {
                 "index_document"
@@ -323,9 +331,9 @@ impl WriteOperation {
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",
-            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments { .. }) => {
-                "document_storage_delete_documents"
-            }
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
+                ..
+            }) => "document_storage_delete_documents",
         }
     }
 }
