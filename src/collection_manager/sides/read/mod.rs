@@ -3,7 +3,6 @@ mod collections;
 mod document_storage;
 pub mod notify;
 
-use async_openai::types::FunctionCall;
 use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
@@ -22,7 +21,7 @@ use tracing::{error, info, instrument, trace, warn};
 
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
-use crate::ai::tools::{Tool, ToolsInterface};
+use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::SegmentInterface;
@@ -80,7 +79,7 @@ pub struct ReadSide {
     triggers: TriggerInterface,
     segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
-    tools: ToolsInterface,
+    tools: ToolsRuntime,
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
@@ -142,7 +141,7 @@ impl ReadSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
-        let tools = ToolsInterface::new(kv.clone(), llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, stop_receiver) = tokio::sync::mpsc::channel(1);
@@ -657,7 +656,7 @@ impl ReadSide {
         messages: Vec<InteractionMessage>,
         tool_ids: Option<Vec<String>>,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<Vec<FunctionCall>>> {
+    ) -> Result<Option<Vec<ToolExecutionReturnType>>> {
         self.check_read_api_key(collection_id, read_api_key).await?;
         self.tools
             .execute_tools(collection_id, messages, tool_ids, llm_config)

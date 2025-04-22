@@ -45,7 +45,7 @@ use crate::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
         gpu::LocalGPUManager,
         llms::LLMService,
-        tools::{Tool, ToolsInterface},
+        tools::{Tool, ToolsRuntime},
         AIService, RemoteLLMProvider,
     },
     collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
@@ -95,7 +95,7 @@ pub struct WriteSide {
     segments: SegmentInterface,
     triggers: TriggerInterface,
     system_prompts: SystemPromptInterface,
-    tools: ToolsInterface,
+    tools: ToolsRuntime,
     kv: Arc<KV>,
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
@@ -155,7 +155,7 @@ impl WriteSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
-        let tools = ToolsInterface::new(kv.clone(), llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 

@@ -116,6 +116,14 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
 pub async fn build_orama(
     config: OramacoreConfig,
 ) -> Result<(Option<Arc<WriteSide>>, Option<Arc<ReadSide>>)> {
+    info!("Installing CryptoProvider");
+    use rustls::crypto::{ring::default_provider, CryptoProvider};
+
+    if CryptoProvider::get_default().is_none() {
+        let provider = default_provider();
+        let _ = provider.install_default();
+    }
+
     info!("Building ai_service");
     let ai_service = AIService::new(config.ai_server.clone());
 

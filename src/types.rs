@@ -1298,10 +1298,10 @@ pub struct InsertDocumentsResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertToolsParams {
-    pub id: Option<String>,
-    pub name: String,
+    pub id: String,
     pub description: String,
     pub parameters: String,
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1315,6 +1315,7 @@ pub struct UpdateToolParams {
     pub name: String,
     pub description: String,
     pub parameters: String,
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
