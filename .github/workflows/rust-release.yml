@@ -42,15 +42,18 @@ jobs:
     - name: Build
       run: |
         cargo build --release --target x86_64-unknown-linux-gnu -p oramacore
-        ls -lha target/
-        ls -lha target/x86_64-unknown-linux-gnu
-        ls -lha target/x86_64-unknown-linux-gnu/release
+        cp ./target/x86_64-unknown-linux-gnu/release/oramacore ./oramacore-standalone
 
-    - name: Upload Linux x86_64-unknown-linux-gnu
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        cargo build --release --target x86_64-unknown-linux-gnu -p oramacore --features writer
+        cp ./target/x86_64-unknown-linux-gnu/release/oramacore ./oramacore-writer
+
+        cargo build --release --target x86_64-unknown-linux-gnu -p oramacore --features reader
+        cp ./target/x86_64-unknown-linux-gnu/release/oramacore ./oramacore-reader
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./target/x86_64-unknown-linux-gnu/release/oramacore
-        asset_name: oramacore-linux-x86_64-unknown-linux-gnu
+        files: |
+          oramacore-standalone
+          oramacore-writer
+          oramacore-reader
