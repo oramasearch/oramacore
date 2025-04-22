@@ -212,6 +212,8 @@ impl Index {
     }
 
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
+        std::fs::create_dir_all(&data_dir).context("Cannot create data directory")?;
+
         let filter_fields = self.filter_fields.read().await;
         let score_fields = self.score_fields.read().await;
         let dump = IndexDump::V1(IndexDumpV1 {

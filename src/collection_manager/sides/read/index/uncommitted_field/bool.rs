@@ -26,6 +26,15 @@ impl UncommittedBoolField {
         self.inner.0.len() + self.inner.1.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.0 = HashSet::new();
+        self.inner.1 = HashSet::new();
+    }
+
     pub fn insert(&mut self, id: DocumentId, value: bool) {
         if value {
             self.inner.0.insert(id);

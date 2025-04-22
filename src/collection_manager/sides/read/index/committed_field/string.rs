@@ -267,7 +267,7 @@ impl CommittedStringField {
         })
     }
 
-    pub fn load(info: StringFieldInfo) -> Result<Self> {
+    pub fn try_load(info: StringFieldInfo) -> Result<Self> {
         let index = FSTIndex::load(info.fst_file_path)?;
         let posting_storage = PostingIdStorage::load(info.posting_id_storage_file_path)?;
         let document_lengths_per_document =
@@ -624,7 +624,7 @@ impl DocumentLengthsPerDocument {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFieldInfo {
-    field_path: Box<[String]>,
+    pub field_path: Box<[String]>,
     pub posting_id_storage_file_path: PathBuf,
     pub document_lengths_per_document_file_path: PathBuf,
     pub fst_file_path: PathBuf,

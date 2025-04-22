@@ -101,12 +101,12 @@ pub mod document_insertion {
 }
 
 pub mod commit {
-    use super::{CollectionCommitLabels, CollectionFieldCommitLabels, Empty};
+    use super::{CollectionFieldCommitLabels, Empty};
     use crate::create_time_histogram;
     create_time_histogram!(
         COMMIT_CALCULATION_TIME,
         "commit_calculation_time_sec",
-        CollectionCommitLabels
+        Empty
     );
     create_time_histogram!(
         FIELD_COMMIT_CALCULATION_TIME,

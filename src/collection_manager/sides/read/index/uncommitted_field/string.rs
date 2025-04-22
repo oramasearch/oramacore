@@ -89,6 +89,17 @@ impl UncommittedStringField {
         self.document_ids.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.inner = RadixIndex::new();
+        self.document_ids = HashSet::new();
+        self.field_length_per_doc = HashMap::new();
+        self.total_field_length = 0;
+    }
+
     pub fn insert(&mut self, document_id: DocumentId, field_length: u16, terms: InsertStringTerms) {
         self.document_ids.insert(document_id);
 
@@ -103,12 +114,11 @@ impl UncommittedStringField {
         self.field_length_per_doc
             .insert(document_id, document_length);
 
+        self.total_field_length += usize::from(field_length);
         for (term, term_string_field) in terms {
             let k = term.0;
 
             let TermStringField { positions } = term_string_field;
-
-            self.total_field_length += usize::from(field_length);
 
             match self.inner.get_mut(k.bytes()) {
                 Some(v) => {

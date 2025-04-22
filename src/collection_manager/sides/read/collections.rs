@@ -10,9 +10,9 @@ use crate::{
     file_utils::{
         create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
     },
-    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
+    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels, Empty},
     nlp::{locales::Locale, NLPService},
-    types::{ApiKey, CollectionId},
+    types::{ApiKey, CollectionId, SearchOffset},
 };
 
 use anyhow::{Context, Result};
@@ -154,22 +154,20 @@ impl CollectionsReader {
         CollectionReadLock::try_new(collections_lock, last_reindexed_collections_lock, id)
     }
 
-    #[instrument(skip(self))]
-    pub async fn commit(&self) -> Result<()> {
+    #[instrument(skip(self, offset))]
+    pub async fn commit(&self, offset: Offset) -> Result<()> {
         info!("Committing collections");
 
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
         let col = self.collections.read().await;
-        let col = &*col;
         let collection_ids: Vec<_> = col.keys().cloned().collect();
-        let mut deleted_collection_ids = HashSet::new();
-        for (id, collection) in col {
+        for (id, collection) in col.iter() {
             let collection_dir = collections_dir.join(id.as_str());
 
             if collection.is_deleted() {
-                deleted_collection_ids.insert(*id);
+                // TODO: should we delete the collection from the disk?
                 continue;
             }
 
@@ -179,27 +177,21 @@ impl CollectionsReader {
                     format!("Cannot create directory for collection '{}'", id.as_str())
                 })?;
 
-            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: id.to_string(),
-                side: "read",
-            });
-            /*
-            match collection.commit(collection_dir, false).await {
+            let m = COMMIT_CALCULATION_TIME.create(Empty);
+
+            match collection.commit(collection_dir, offset).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
                 }
             }
-            */
+
             drop(m);
         }
 
         let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
-            collection_ids: collection_ids
-                .into_iter()
-                .filter(|id| !deleted_collection_ids.contains(id))
-                .collect(),
+            collection_ids: collection_ids.into_iter().collect(),
             deleted_collection_ids: Default::default(),
             last_reindexed_collections: guard.iter().cloned().collect(),
         });
@@ -216,7 +208,6 @@ impl CollectionsReader {
 
     pub async fn create_collection(
         &self,
-        _offset: Offset,
         id: CollectionId,
         description: Option<String>,
         default_locale: Locale,
@@ -266,19 +257,19 @@ impl CollectionsReader {
     }
 
     pub async fn clean_fs_for_collection(&self, collection: &CollectionReader) -> Result<()> {
-        info!(collection_id=?collection.id, "Cleaning FS collection");
+        info!(collection_id=?collection.id(), "Cleaning FS collection");
 
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(collection.id.as_str());
+        let collection_dir = collections_dir.join(collection.id().as_str());
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
                 .with_context(|| {
                     format!(
                         "Cannot remove directory for collection '{}'",
-                        collection.id.as_str()
+                        collection.id().as_str()
                     )
                 })?;
         }
@@ -290,7 +281,7 @@ impl CollectionsReader {
 
     pub async fn substitute_collection(
         &self,
-        _offset: Offset,
+        _offset: SearchOffset,
         target_collection_id: CollectionId,
         source_collection_id: CollectionId,
         reference: Option<String>,
@@ -305,7 +296,7 @@ impl CollectionsReader {
         let mut source = guard
             .remove(&source_collection_id)
             .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
-        source.id = target_collection_id;
+        // source.id = target_collection_id;
         // Ignore return value: we don't care if the target collection was there or not.
         let _ = guard.remove(&target_collection_id);
         guard.insert(target_collection_id, source);
@@ -331,10 +322,7 @@ impl CollectionsReader {
                 )
             })?;
 
-        let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-            collection: target_collection_id.to_string(),
-            side: "read",
-        });
+        let m = COMMIT_CALCULATION_TIME.create(Empty);
         let collection = self
             .get_collection(target_collection_id)
             .await

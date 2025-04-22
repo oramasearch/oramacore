@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
-pub use bool::{BoolFieldInfo, CommittedBoolField, CommittedBoolFieldStats};
+pub use bool::{BoolFieldInfo, BoolWrapper, CommittedBoolField, CommittedBoolFieldStats};
 pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
 pub use string::{CommittedStringField, CommittedStringFieldStats, StringFieldInfo};
 pub use string_filter::{
@@ -55,27 +55,27 @@ impl CommittedCollection {
         let mut vector_index: HashMap<FieldId, CommittedVectorField> = Default::default();
 
         for (field_id, info) in number_field_infos {
-            let number_field = CommittedNumberField::load(info)
+            let number_field = CommittedNumberField::try_load(info)
                 .with_context(|| format!("Cannot load number {:?} field", field_id))?;
             number_index.insert(field_id, number_field);
         }
         for (field_id, info) in bool_field_infos {
-            let bool_field = CommittedBoolField::load(info)
+            let bool_field = CommittedBoolField::try_load(info)
                 .with_context(|| format!("Cannot load bool {:?} field", field_id))?;
             bool_index.insert(field_id, bool_field);
         }
         for (field_id, info) in string_field_infos {
-            let string_field = CommittedStringField::load(info)
+            let string_field = CommittedStringField::try_load(info)
                 .with_context(|| format!("Cannot load string {:?} field", field_id))?;
             string_index.insert(field_id, string_field);
         }
         for (field_id, info) in vector_field_infos {
-            let vector_field = CommittedVectorField::load(info)
+            let vector_field = CommittedVectorField::try_load(info)
                 .with_context(|| format!("Cannot load vector {:?} field", field_id))?;
             vector_index.insert(field_id, vector_field);
         }
         for (field_id, info) in string_filter_field_infos {
-            let vector_field = CommittedStringFilterField::load(info)
+            let vector_field = CommittedStringFilterField::try_load(info)
                 .with_context(|| format!("Cannot load string filter  {:?} field", field_id))?;
             string_filter_index.insert(field_id, vector_field);
         }

@@ -50,7 +50,7 @@ impl CommittedBoolField {
         })
     }
 
-    pub fn load(info: BoolFieldInfo) -> Result<Self> {
+    pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let inner = OrderedKeyIndex::load(data_dir.clone())?;
         Ok(Self {

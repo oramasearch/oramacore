@@ -650,7 +650,7 @@ impl Default for Limit {
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
-pub struct Offset(pub usize);
+pub struct SearchOffset(pub usize);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
@@ -941,7 +941,7 @@ pub struct SearchParams {
     #[serde(default)]
     pub limit: Limit,
     #[serde(default)]
-    pub offset: Offset,
+    pub offset: SearchOffset,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
     #[serde(default, deserialize_with = "deserialize_properties")]

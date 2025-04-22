@@ -15,6 +15,14 @@ impl PathToIndexId {
         }
     }
 
+    pub fn from(map: Vec<(Box<[String]>, (FieldId, FieldType))>) -> Self {
+        Self { map: map.into_iter().collect() }
+    }
+
+    pub fn serialize(&self) -> Vec<(Box<[String]>, (FieldId, FieldType))> {
+        self.map.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    }
+
     pub fn insert(&mut self, path: Box<[String]>, field_id: FieldId, field_type: FieldType) {
         self.map.insert(path, (field_id, field_type));
     }

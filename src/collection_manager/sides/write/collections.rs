@@ -11,7 +11,7 @@ use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
-use crate::metrics::CollectionCommitLabels;
+use crate::metrics::{CollectionCommitLabels, Empty};
 use crate::nlp::locales::Locale;
 use crate::nlp::NLPService;
 use crate::types::CollectionId;
@@ -126,37 +126,11 @@ impl CollectionsWriter {
             id,
             description.clone(),
             write_api_key,
+            read_api_key,
             default_locale,
             self.embedding_sender.clone(),
             self.op_sender.clone(),
         );
-
-        /*
-        let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
-            let model = embeddings
-                .as_ref()
-                .and_then(|embeddings| embeddings.model.as_ref())
-                .unwrap_or(&self.config.default_embedding_model);
-            let model = model.0;
-            let document_fields = embeddings
-                .map(|embeddings| {
-                    // Empty array means all string properties
-                    if embeddings.document_fields.is_empty() {
-                        DocumentFields::AllStringProperties
-                    } else {
-                        DocumentFields::Properties(embeddings.document_fields)
-                    }
-                })
-                .unwrap_or(DocumentFields::AllStringProperties);
-            let typed_field = TypedField::Embedding(EmbeddingTypedField {
-                model: OramaModelSerializable(model),
-                document_fields,
-            });
-            HashMap::from_iter([(DEFAULT_EMBEDDING_FIELD_NAME.to_string(), typed_field)])
-        } else {
-            HashMap::new()
-        };
-        */
 
         let mut collections = self.collections.write().await;
 
@@ -212,21 +186,20 @@ impl CollectionsWriter {
     }
 
     pub async fn commit(&self) -> Result<()> {
+        info!("Committing collections");
+
         // During the commit, we don't accept any new write operation
-        let collections = self.collections.write().await;
+        // This `write` lock is held until the commit is done
+        let mut collections = self.collections.write().await;
 
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        for (collection_id, collection) in collections.iter() {
+        let m = COMMIT_CALCULATION_TIME.create(Empty);
+        for (collection_id, collection) in collections.iter_mut() {
             let collection_dir = data_dir.join(collection_id.as_str());
 
-            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: collection_id.to_string(),
-                side: "write",
-            });
             collection.commit(collection_dir).await?;
-            drop(m);
         }
 
         let info_path = data_dir.join("info.json");
@@ -238,10 +211,12 @@ impl CollectionsWriter {
             }))
             .context("Cannot write info.json")?;
 
+        drop(m);
+
         // Now it is safe to drop the lock
-        // because we safe everything to disk
+        // because we save everything to disk
         drop(collections);
-        info!("Commit done");
+        info!("Collections committed");
 
         Ok(())
     }

@@ -30,6 +30,14 @@ impl UncommittedNumberField {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.inner = Default::default();
+    }
+
     pub fn insert(&mut self, doc_id: DocumentId, value: Number) {
         self.inner.entry(value).or_default().insert(doc_id);
     }

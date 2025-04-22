@@ -8,7 +8,7 @@ use crate::types::{
     ApiKey, AutoMode, Interaction, InteractionLLMConfig, InteractionMessage, Limit, Properties,
     Role, SearchMode, SearchParams,
 };
-use crate::types::{CollectionId, Offset};
+use crate::types::{CollectionId, SearchOffset};
 use crate::web_server::api::util::print_error;
 use anyhow::Context;
 use axum::extract::Query;
@@ -460,7 +460,7 @@ async fn answer_v1(
                         term: optimized_query,
                     }),
                     limit: Limit(5),
-                    offset: Offset(0),
+                    offset: SearchOffset(0),
                     where_filter: HashMap::new(),
                     boost: HashMap::new(),
                     facets: HashMap::new(),

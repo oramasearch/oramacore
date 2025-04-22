@@ -14,7 +14,7 @@ use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, join, FutureExt};
 use grpc_def::Embedding;
 use http::uri::Scheme;
 use tokio::time::sleep;
@@ -271,6 +271,7 @@ where
 }
 
 pub struct TestContext {
+    config: OramacoreConfig,
     reader: Arc<ReadSide>,
     writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
@@ -290,14 +291,29 @@ impl TestContext {
         }
 
         let master_api_key = config.writer_side.master_api_key;
-        let (writer, reader) = build_orama(config).await.unwrap();
+        let (writer, reader) = build_orama(config.clone()).await.unwrap();
         let writer = writer.unwrap();
         let reader = reader.unwrap();
 
         TestContext {
+            config,
             reader,
             writer,
             master_api_key,
+        }
+    }
+
+    pub async fn reload(self) -> Self {
+        let config = self.config.clone();
+        let (writer, reader) = build_orama(config.clone()).await.unwrap();
+        let writer = writer.unwrap();
+        let reader = reader.unwrap();
+
+        TestContext {
+            config,
+            reader,
+            writer,
+            master_api_key: self.master_api_key,
         }
     }
 
@@ -326,14 +342,29 @@ impl TestContext {
         })
         .await?;
 
+        self.get_test_collection_client(id, write_api_key, read_api_key)
+    }
+
+    pub fn get_test_collection_client(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+        read_api_key: ApiKey,
+    ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
-            collection_id: id,
+            collection_id,
             write_api_key,
             read_api_key,
             master_api_key: self.master_api_key,
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
+    }
+
+    pub async fn commit_all(&self) -> Result<()> {
+        self.writer.commit().await?;
+        self.reader.commit().await?;
+        Ok(())
     }
 
     fn generate_collection_id() -> CollectionId {
@@ -407,16 +438,18 @@ impl TestCollectionClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                if reader.collection_stats(read_api_key, collection_id).await.is_err() {
+                if reader
+                    .collection_stats(read_api_key, collection_id)
+                    .await
+                    .is_err()
+                {
                     return Ok(());
                 }
-                bail!(
-                    "Collection still exists: {}",
-                    collection_id
-                );
+                bail!("Collection still exists: {}", collection_id);
             }
             .boxed()
-        }).await?;
+        })
+        .await?;
 
         Ok(())
     }

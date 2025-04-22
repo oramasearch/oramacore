@@ -7,8 +7,6 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use dashmap::DashMap;
-
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -16,10 +14,11 @@ use tracing::{instrument, warn};
 
 use crate::{
     ai::{llms::LLMService, AIService, OramaModel},
-    collection_manager::sides::CollectionWriteOperation,
+    collection_manager::sides::{CollectionWriteOperation, Offset},
+    file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
     offset_storage::OffsetStorage,
-    types::{ApiKey, CollectionId, DocumentId, FieldId, IndexId, SearchParams},
+    types::{ApiKey, CollectionId, DocumentId, FieldId, IndexId, SearchOffset, SearchParams},
 };
 
 use super::{
@@ -31,7 +30,7 @@ use super::{
 };
 
 pub struct CollectionReader {
-    pub(super) id: CollectionId,
+    id: CollectionId,
     description: Option<String>,
     default_locale: Locale,
     deleted: bool,
@@ -41,20 +40,8 @@ pub struct CollectionReader {
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
 
-    // document_count: AtomicU64,
-    score_fields: DashMap<String, (FieldId, TypedField)>,
-    filter_fields: DashMap<String, (FieldId, TypedField)>,
-
-    // uncommitted_collection: RwLock<UncommittedCollection>,
-    // committed_collection: RwLock<CommittedCollection>,
     uncommitted_deleted_documents: RwLock<HashSet<DocumentId>>,
     indexes: RwLock<HashMap<IndexId, Index>>,
-
-    fields_per_model: DashMap<OramaModel, Vec<FieldId>>,
-
-    text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)>,
-
-    offset_storage: OffsetStorage,
 }
 
 impl CollectionReader {
@@ -77,20 +64,9 @@ impl CollectionReader {
             ai_service,
             nlp_service,
             llm_service,
-            // document_count: AtomicU64::new(0),
-            filter_fields: Default::default(),
-            score_fields: Default::default(),
 
-            // uncommitted_collection: RwLock::new(UncommittedCollection::new()),
-            // committed_collection: RwLock::new(CommittedCollection::empty()),
             uncommitted_deleted_documents: Default::default(),
             indexes: Default::default(),
-
-            fields_per_model: Default::default(),
-
-            text_parser_per_field: Default::default(),
-
-            offset_storage: OffsetStorage::new(),
         }
     }
 
@@ -100,134 +76,72 @@ impl CollectionReader {
         llm_service: Arc<LLMService>,
         data_dir: PathBuf,
     ) -> Result<Self> {
-        /*
-        info!("Loading collection from {:?}", data_dir);
-
-        let collection_info_path = data_dir.join("info.info");
-        let current_offset: Offset = BufferedFile::open(collection_info_path.clone())
-            .context("Cannot open previous collection info")?
+        let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
+            .context("Cannot open collection.json")?
             .read_json_data()
-            .context("Cannot read previous info")?;
+            .context("Cannot read collection.json")?;
+        let Dump::V1(dump) = dump;
 
-        info!("Current offset: {:?}", current_offset);
-
-        let collection_info_path = data_dir.join(format!("info-offset-{}.info", current_offset.0));
-        let collection_info: CollectionInfo = BufferedFile::open(collection_info_path)
-            .context("Cannot open previous collection info")?
-            .read_json_data()
-            .context("Cannot read previous collection info")?;
-
-        let collection_info: dump::CollectionInfoV2 = match collection_info {
-            dump::CollectionInfo::V1(info) => dump::migrate_v1_to_v2(info),
-            dump::CollectionInfo::V2(info) => info,
-        };
-        let read_api_key =
-            ApiKey::try_new(collection_info.read_api_key).context("Cannot create read api key")?;
-
-        let score_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
-        for (field_name, (field_id, field_type)) in collection_info.score_fields {
-            let typed_field: TypedField = match field_type {
-                dump::TypedField::Text(locale) => TypedField::Text(locale),
-                dump::TypedField::Embedding(embedding) => TypedField::Embedding(embedding.model.0),
-                dump::TypedField::Number => continue,
-                dump::TypedField::Bool => continue,
-                dump::TypedField::String => continue,
-            };
-            score_fields.insert(field_name, (field_id, typed_field));
+        let mut indexes: HashMap<IndexId, Index> = HashMap::new();
+        for index_id in dump.index_ids {
+            let index = Index::try_load(
+                index_id,
+                data_dir.join("indexes").join(index_id.as_str()),
+                llm_service.clone(),
+                ai_service.clone(),
+            )?;
+            indexes.insert(index_id, index);
         }
 
-        let filter_fields: DashMap<String, (FieldId, TypedField)> = Default::default();
-        for (field_name, (field_id, field_type)) in collection_info.filter_fields {
-            let typed_field: TypedField = match field_type {
-                dump::TypedField::Text(_) => continue,
-                dump::TypedField::Embedding(_) => continue,
-                dump::TypedField::Number => TypedField::Number,
-                dump::TypedField::Bool => TypedField::Bool,
-                dump::TypedField::String => TypedField::String,
-            };
-            filter_fields.insert(field_name, (field_id, typed_field));
-        }
-
-        let fields_per_model: DashMap<OramaModel, Vec<FieldId>> = Default::default();
-        for (orama_model, fields) in collection_info.used_models {
-            fields_per_model.insert(orama_model.0, fields);
-        }
-
-        let text_parser_per_field: DashMap<FieldId, (Locale, Arc<TextParser>)> = score_fields
-            .iter()
-            .filter_map(|e| {
-                if let TypedField::Text(l) = e.1 {
-                    let locale = l;
-                    Some((e.0, (locale, nlp_service.get(locale))))
-                } else if let TypedField::ArrayText(l) = e.1 {
-                    let locale = l;
-                    Some((e.0, (locale, nlp_service.get(locale))))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let committed_collection = CommittedCollection::try_load(
-            collection_info.number_field_infos,
-            collection_info.bool_field_infos,
-            collection_info.string_filter_field_infos,
-            collection_info.string_field_infos,
-            collection_info.vector_field_infos,
-        )
-        .context("Cannot load committed collection")?;
-        let committed_collection = RwLock::new(committed_collection);
-
-        let offset_storage = OffsetStorage::new();
-        offset_storage.set_offset(current_offset);
-
-        Ok(Self {
-            id: collection_info.id,
-            description: collection_info.description,
-            default_locale: collection_info.default_locale,
+        let s = Self {
+            id: dump.id,
+            description: dump.description,
+            default_locale: dump.default_locale,
             deleted: false,
-            read_api_key,
+
+            read_api_key: dump.read_api_key,
             ai_service,
             nlp_service,
             llm_service,
-            // document_count: AtomicU64::new(collection_info.document_count),
-            fields_per_model,
-            text_parser_per_field,
-            filter_fields,
-            score_fields,
 
-            uncommitted_collection: RwLock::new(UncommittedCollection::new()),
-            committed_collection,
-            uncommitted_deleted_documents: RwLock::new(HashSet::new()),
+            uncommitted_deleted_documents: Default::default(),
+            indexes: RwLock::new(indexes),
+        };
 
-            offset_storage,
-        })
-        */
-        panic!()
+        Ok(s)
     }
 
-    /*
-    pub async fn create_index(&self, index_id: IndexId, locale: Locale) {
-        let mut indexes_lock = self.indexes.write().await;
-        let index = Index::new(index_id, locale, self.llm_service.clone());
-        if indexes_lock.insert(index_id, index).is_some() {
-            warn!("Index {} already exists", index_id);
-            debug_panic!("Index {} already exists", index_id);
-        }
-    }
-
-
-    pub async fn get_index_mut(&mut self, index_id: IndexId) -> Option<IndexReadLock> {
+    pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
         let indexes_lock = self.indexes.read().await;
-        if !indexes_lock.contains_key(&index_id) {
-            return None;
+        let index_ids = indexes_lock.keys().cloned().collect();
+
+        let indexes_dir = data_dir.join("indexes");
+        for (id, index) in indexes_lock.iter() {
+            let dir = indexes_dir
+                .join(id.as_str());
+            index.commit(dir, offset).await?;
         }
-        Some(IndexReadLock {
-            lock: indexes_lock,
-            id: index_id,
-        })
+
+        let dump = Dump::V1(DumpV1 {
+            id: self.id,
+            description: self.description.clone(),
+            default_locale: self.default_locale,
+            read_api_key: self.read_api_key,
+            index_ids,
+        });
+
+        BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
+            .context("Cannot create collection.json")?
+            .write_json_data(&dump)
+            .context("Cannot write collection.json")?;
+
+        Ok(())
     }
-    */
+
+    #[inline]
+    pub fn id(&self) -> CollectionId {
+        self.id
+    }
 
     pub fn is_deleted(&self) -> bool {
         self.deleted
@@ -1974,4 +1888,17 @@ impl Deref for IndexReadLock<'_> {
             "The index map always contains id because we checked it before and we hold a read lock",
         )
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DumpV1 {
+    id: CollectionId,
+    description: Option<String>,
+    default_locale: Locale,
+    read_api_key: ApiKey,
+    index_ids: HashSet<IndexId>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+enum Dump {
+    V1(DumpV1),
 }

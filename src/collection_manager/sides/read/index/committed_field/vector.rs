@@ -8,15 +8,14 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    indexes::hnsw2::HNSW2Index,
-    types::DocumentId,
+    ai::OramaModel, collection_manager::sides::OramaModelSerializable, file_utils::{create_if_not_exists, BufferedFile}, indexes::hnsw2::HNSW2Index, types::DocumentId
 };
 
 pub struct CommittedVectorField {
     field_path: Box<[String]>,
     inner: HNSW2Index,
     data_dir: PathBuf,
+    model: OramaModel,
 }
 
 impl Debug for CommittedVectorField {
@@ -33,13 +32,13 @@ impl CommittedVectorField {
     pub fn from_iter<I>(
         field_path: Box<[String]>,
         iter: I,
-        dim: usize,
+        model: OramaModel,
         data_dir: PathBuf,
     ) -> Result<Self>
     where
         I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
     {
-        let mut inner = HNSW2Index::new(dim);
+        let mut inner = HNSW2Index::new(model.dimensions());
         for (doc_id, vectors) in iter {
             for vector in vectors {
                 inner.add(&vector, doc_id).context("Cannot add vector")?;
@@ -57,6 +56,7 @@ impl CommittedVectorField {
             inner,
             data_dir,
             field_path,
+            model,
         })
     }
 
@@ -65,6 +65,7 @@ impl CommittedVectorField {
         data_dir: PathBuf,
         iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
+        model: OramaModel,
         new_data_dir: PathBuf,
     ) -> Result<Self> {
         let dump_file_path = data_dir.join("index.hnsw");
@@ -98,11 +99,12 @@ impl CommittedVectorField {
         Ok(Self {
             field_path,
             inner: new_inner,
+            model,
             data_dir: new_data_dir,
         })
     }
 
-    pub fn load(info: VectorFieldInfo) -> Result<Self> {
+    pub fn try_load(info: VectorFieldInfo) -> Result<Self> {
         let dump_file_path = info.data_dir.join("index.hnsw");
 
         let inner: HNSW2Index = BufferedFile::open(dump_file_path)
@@ -114,6 +116,7 @@ impl CommittedVectorField {
             field_path: info.field_path,
             inner,
             data_dir: info.data_dir,
+            model: info.model.0
         })
     }
 
@@ -125,6 +128,7 @@ impl CommittedVectorField {
         VectorFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
+            model: OramaModelSerializable(self.model.clone()),
         }
     }
 
@@ -181,8 +185,9 @@ impl CommittedVectorField {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VectorFieldInfo {
-    field_path: Box<[String]>,
-    data_dir: PathBuf,
+    pub field_path: Box<[String]>,
+    pub data_dir: PathBuf,
+    pub model: OramaModelSerializable,
 }
 
 #[derive(Serialize, Debug)]

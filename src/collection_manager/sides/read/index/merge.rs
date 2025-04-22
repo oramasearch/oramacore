@@ -7,15 +7,15 @@ use crate::file_utils::create_if_not_exists;
 use crate::merger::MergedIterator;
 use crate::types::{DocumentId, SerializableNumber};
 
-use super::committed::fields as committed_fields;
-use super::uncommitted::fields as uncommitted_fields;
+use super::committed_field::*;
+use super::uncommitted_field::*;
 
 pub fn merge_number_field(
-    uncommitted: Option<&uncommitted_fields::UncommittedNumberField>,
-    committed: Option<&committed_fields::CommittedNumberField>,
+    uncommitted: Option<&UncommittedNumberField>,
+    committed: Option<&CommittedNumberField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::CommittedNumberField>> {
+) -> Result<Option<CommittedNumberField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
@@ -31,7 +31,8 @@ pub fn merge_number_field(
                 (k, d)
             });
 
-            Ok(Some(committed_fields::CommittedNumberField::from_iter(
+            Ok(Some(CommittedNumberField::from_iter(
+                committed.field_path().to_vec().into_boxed_slice(),
                 committed_iter,
                 data_dir,
             )?))
@@ -44,8 +45,10 @@ pub fn merge_number_field(
                     d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                     (k, d)
                 });
-            Ok(Some(committed_fields::CommittedNumberField::from_iter(
-                iter, data_dir,
+            Ok(Some(CommittedNumberField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
@@ -69,19 +72,29 @@ pub fn merge_number_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::CommittedNumberField::from_iter(
-                iter, data_dir,
+
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            Ok(Some(CommittedNumberField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
     }
 }
 
 pub fn merge_string_filter_field(
-    uncommitted: Option<&uncommitted_fields::UncommittedStringFilterField>,
-    committed: Option<&committed_fields::CommittedStringFilterField>,
+    uncommitted: Option<&UncommittedStringFilterField>,
+    committed: Option<&CommittedStringFilterField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::CommittedStringFilterField>> {
+) -> Result<Option<CommittedStringFilterField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
@@ -97,7 +110,8 @@ pub fn merge_string_filter_field(
                 (k, d)
             });
 
-            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
+            Ok(Some(CommittedStringFilterField::from_iter(
+                committed.field_path().to_vec().into_boxed_slice(),
                 committed_iter,
                 data_dir,
             )?))
@@ -107,8 +121,10 @@ pub fn merge_string_filter_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
-                iter, data_dir,
+            Ok(Some(CommittedStringFilterField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
@@ -132,19 +148,29 @@ pub fn merge_string_filter_field(
                 d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
                 (k, d)
             });
-            Ok(Some(committed_fields::CommittedStringFilterField::from_iter(
-                iter, data_dir,
+
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            Ok(Some(CommittedStringFilterField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
     }
 }
 
 pub fn merge_bool_field(
-    uncommitted: Option<&uncommitted_fields::UncommittedBoolField>,
-    committed: Option<&committed_fields::CommittedBoolField>,
+    uncommitted: Option<&UncommittedBoolField>,
+    committed: Option<&CommittedBoolField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::CommittedBoolField>> {
+) -> Result<Option<CommittedBoolField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
@@ -157,8 +183,8 @@ pub fn merge_bool_field(
 
             let (true_docs, false_docs) = committed.clone_inner()?;
             let iter = vec![
-                (committed_fields::BoolWrapper::False, false_docs),
-                (committed_fields::BoolWrapper::True, true_docs),
+                (BoolWrapper::False, false_docs),
+                (BoolWrapper::True, true_docs),
             ]
             .into_iter()
             .map(|(k, mut v)| {
@@ -166,15 +192,17 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::CommittedBoolField::from_iter(
-                iter, data_dir,
+            Ok(Some(CommittedBoolField::from_iter(
+                committed.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
         (Some(uncommitted), None) => {
             let (true_docs, false_docs) = uncommitted.clone_inner();
             let iter = vec![
-                (committed_fields::BoolWrapper::False, false_docs),
-                (committed_fields::BoolWrapper::True, true_docs),
+                (BoolWrapper::False, false_docs),
+                (BoolWrapper::True, true_docs),
             ]
             .into_iter()
             .map(|(k, mut v)| {
@@ -182,8 +210,10 @@ pub fn merge_bool_field(
                 (k, v)
             });
 
-            Ok(Some(committed_fields::CommittedBoolField::from_iter(
-                iter, data_dir,
+            Ok(Some(CommittedBoolField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
@@ -197,7 +227,15 @@ pub fn merge_bool_field(
             committed_true_docs.extend(uncommitted_true_docs);
             committed_false_docs.extend(uncommitted_false_docs);
 
-            Ok(Some(committed_fields::CommittedBoolField::from_data(
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            Ok(Some(CommittedBoolField::from_data(
+                committed.field_path().to_vec().into_boxed_slice(),
                 committed_true_docs,
                 committed_false_docs,
                 data_dir,
@@ -207,11 +245,11 @@ pub fn merge_bool_field(
 }
 
 pub fn merge_string_field(
-    uncommitted: Option<&uncommitted_fields::UncommittedStringField>,
-    committed: Option<&committed_fields::CommittedStringField>,
+    uncommitted: Option<&UncommittedStringField>,
+    committed: Option<&CommittedStringField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::CommittedStringField>> {
+) -> Result<Option<CommittedStringField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");
@@ -222,7 +260,7 @@ pub fn merge_string_field(
                 return Ok(None);
             }
 
-            Ok(Some(committed_fields::CommittedStringField::from_committed(
+            Ok(Some(CommittedStringField::from_committed(
                 committed,
                 data_dir,
                 uncommitted_document_deletions,
@@ -234,7 +272,8 @@ pub fn merge_string_field(
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            Ok(Some(committed_fields::CommittedStringField::from_iter(
+            Ok(Some(CommittedStringField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
                 entries.into_iter(),
                 length_per_documents,
                 data_dir,
@@ -252,8 +291,16 @@ pub fn merge_string_field(
             let mut entries: Vec<_> = iter.collect();
             entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
             Ok(Some(
-                committed_fields::CommittedStringField::from_iter_and_committed(
+                CommittedStringField::from_iter_and_committed(
+                    uncommitted.field_path().to_vec().into_boxed_slice(),
                     entries.into_iter(),
                     committed,
                     length_per_documents,
@@ -267,11 +314,11 @@ pub fn merge_string_field(
 }
 
 pub fn merge_vector_field(
-    uncommitted: Option<&uncommitted_fields::UncommittedEmbeddingField>,
-    committed: Option<&committed_fields::CommittedEmbeddingField>,
+    uncommitted: Option<&UncommittedVectorField>,
+    committed: Option<&CommittedVectorField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
-) -> Result<Option<committed_fields::CommittedEmbeddingField>> {
+) -> Result<Option<CommittedVectorField>> {
     create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
     match (uncommitted, committed) {
@@ -284,21 +331,24 @@ pub fn merge_vector_field(
                 Ok(None)
             } else {
                 let info = committed.get_field_info();
-                let new_field = committed_fields::CommittedEmbeddingField::from_dump_and_iter(
+                let new_field = CommittedVectorField::from_dump_and_iter(
+                    committed.field_path().to_vec().into_boxed_slice(),
                     info.data_dir,
                     std::iter::empty(),
                     uncommitted_document_deletions,
+                    info.model.0,
                     data_dir,
                 )?;
                 Ok(Some(new_field))
             }
         }
         (Some(uncommitted), None) => {
-            let new_field = committed_fields::CommittedEmbeddingField::from_iter(
+            let new_field = CommittedVectorField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
                 uncommitted
                     .iter()
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
-                uncommitted.dimension(),
+                    uncommitted.get_model(),
                 data_dir,
             )?;
             Ok(Some(new_field))
@@ -308,11 +358,28 @@ pub fn merge_vector_field(
                 return Ok(None);
             }
 
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
             let info = committed.get_field_info();
-            let new_field = committed_fields::CommittedEmbeddingField::from_dump_and_iter(
+
+            // uncommitted and committed model has to be the same
+            debug_assert_eq!(
+                uncommitted.get_model(),
+                info.model.0,
+                "Uncommitted and committed models should be the same",
+            );
+
+            let new_field = CommittedVectorField::from_dump_and_iter(
+                info.field_path,
                 info.data_dir,
                 uncommitted.iter(),
                 uncommitted_document_deletions,
+                uncommitted.get_model(),
                 data_dir,
             )?;
             Ok(Some(new_field))

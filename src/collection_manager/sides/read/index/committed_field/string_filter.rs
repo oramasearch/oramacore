@@ -48,7 +48,7 @@ impl CommittedStringFilterField {
         })
     }
 
-    pub fn load(info: StringFilterFieldInfo) -> Result<Self> {
+    pub fn try_load(info: StringFilterFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let dump_file_path = data_dir.join("data.bin");
 
@@ -111,7 +111,7 @@ impl CommittedStringFilterField {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFilterFieldInfo {
-    field_path: Box<[String]>,
+    pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
 }
 

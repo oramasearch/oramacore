@@ -195,20 +195,26 @@ impl ReadSide {
 
     pub async fn commit(&self) -> Result<()> {
         // We stop insertion operations while we are committing
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+        // This lock is needed to prevent any collection from being created, deleted or changed
+        // ie, we stop to process any new events
+        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
-        self.collections.commit().await?;
+        let live_offset = self.live_offset.write().await;
+        let offset = live_offset.clone();
+
+        self.collections.commit(offset).await?;
         self.document_storage
             .commit()
             .await
             .context("Cannot commit document storage")?;
         self.kv.commit().await.context("Cannot commit KV")?;
 
-        let offset: Offset = *(self.live_offset.read().await);
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
             .context("Cannot create read.info file")?
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
             .context("Cannot write read.info file")?;
+
+        *commit_insert_mutex_lock = offset;
 
         drop(commit_insert_mutex_lock);
 
@@ -257,7 +263,7 @@ impl ReadSide {
                 description,
             } => {
                 self.collections
-                    .create_collection(offset, id, description, default_locale, read_api_key)
+                    .create_collection(id, description, default_locale, read_api_key)
                     .await?;
             }
             WriteOperation::DeleteCollection(collection_id) => {

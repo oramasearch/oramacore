@@ -1,4 +1,3 @@
-use hurl::report::json;
 use serde_json::json;
 
 use crate::tests::utils::init_log;
@@ -28,8 +27,14 @@ async fn test_entity_lifecycle() {
 
     collection_client.delete().await.unwrap();
 
-    let err = collection_client.search(json!({
-        "term": "Lorem ipsum",
-    }).try_into().unwrap()).await;
+    let err = collection_client
+        .search(
+            json!({
+                "term": "",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await;
     assert!(err.is_err());
 }

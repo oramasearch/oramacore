@@ -1,22 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
-pub use bool::UncommittedBoolFieldStats;
-pub use number::UncommittedNumberFieldStats;
+pub use bool::{UncommittedBoolField, UncommittedBoolFieldStats};
+pub use number::{UncommittedNumberField, UncommittedNumberFieldStats};
 use serde::Serialize;
-pub use string::UncommittedStringFieldStats;
-pub use string_filter::UncommittedStringFilterFieldStats;
-pub use vector::UncommittedVectorFieldStats;
+pub use string::{UncommittedStringField, UncommittedStringFieldStats};
+pub use string_filter::{UncommittedStringFilterField, UncommittedStringFilterFieldStats};
+pub use vector::{UncommittedVectorField, UncommittedVectorFieldStats};
 
 use crate::{
     collection_manager::sides::index::Index,
     types::{FieldId, IndexId},
 };
 
-pub mod bool;
-pub mod number;
-pub mod string;
-pub mod string_filter;
-pub mod vector;
+mod bool;
+mod number;
+mod string;
+mod string_filter;
+mod vector;
 
 pub use string::{Positions, TotalDocumentsWithTermInField};
 

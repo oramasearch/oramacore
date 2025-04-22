@@ -34,6 +34,14 @@ impl UncommittedVectorField {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.data = Default::default();
+    }
+
     pub fn get_model(&self) -> OramaModel {
         self.model
     }
@@ -150,23 +158,33 @@ mod tests {
     fn test_uncommitted_vector() {
         let mut index = UncommittedVectorField::empty(
             vec!["".to_string()].into_boxed_slice(),
-            OramaModel::BgeBase,
+            OramaModel::BgeSmall,
         );
+        let mut v1 = vec![0.0; 384];
+        v1[0] = 1.0;
+        let mut v2 = vec![0.0; 384];
+        v2[0] = 1.0;
+        v2[1] = 0.0001;
+        let mut v3 = vec![0.0; 384];
+        v3[2] = 1.0;
         index
-            .insert(DocumentId(0), vec![vec![1.0, 0.0, 0.0]])
+            .insert(DocumentId(0), vec![v1])
             .unwrap();
         index
-            .insert(DocumentId(1), vec![vec![1.0, 0.0001, 0.0]])
+            .insert(DocumentId(1), vec![v2])
             .unwrap();
         index
-            .insert(DocumentId(2), vec![vec![0.0, 0.0, 1.0]])
+            .insert(DocumentId(2), vec![v3])
             .unwrap();
+
+        let mut target = vec![0.0; 384];
+        target[0] = 1.0;
 
         // With similarity
         let mut output = HashMap::new();
         index
             .search(
-                &[1.0, 0.0, 0.0],
+                &target,
                 0.6,
                 None,
                 &mut output,
@@ -182,7 +200,7 @@ mod tests {
         let mut output = HashMap::new();
         index
             .search(
-                &[1.0, 0.0, 0.0],
+                &target,
                 0.0,
                 None,
                 &mut output,
