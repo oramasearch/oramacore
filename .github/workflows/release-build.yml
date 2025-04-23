@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build-and-upload:
-    name: Build and Upload Release Asset
+    name: Build and Upload Release Assets
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -27,14 +27,38 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Build Binary
+      - name: Build Default Binary
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release
 
-      - name: Upload Binary to Release
+      - name: Save Default Binary
+        run: cp ./target/release/oramacore ./target/release/oramacore-default
+
+      - name: Build Reader Binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --features reader
+
+      - name: Save Reader Binary
+        run: cp ./target/release/oramacore ./target/release/oramacore-reader
+
+      - name: Build Writer Binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --features writer
+
+      - name: Save Writer Binary
+        run: cp ./target/release/oramacore ./target/release/oramacore-writer
+
+      - name: Upload Binaries to Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ./target/release/oramacore
+          files: |
+            ./target/release/oramacore
+            ./target/release/oramacore-reader
+            ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
