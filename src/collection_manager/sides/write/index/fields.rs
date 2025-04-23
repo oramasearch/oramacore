@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
@@ -13,8 +14,7 @@ use crate::{
     ai::OramaModel,
     collection_manager::sides::{
         hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
-        write::embedding::MultiEmbeddingCalculationRequest,
-        OperationSender, OramaModelSerializable, Term, TermStringField,
+        write::embedding::MultiEmbeddingCalculationRequest, Term, TermStringField,
     },
     nlp::{
         chunker::{Chunker, ChunkerConfig},
@@ -70,6 +70,7 @@ enum SerializedEmbeddingStringCalculation {
     AllProperties,
     Properties(Box<[Box<[String]>]>),
     Hook,
+    Automatic,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -424,7 +425,6 @@ impl IndexScoreField {
         model: OramaModel,
         calculation: EmbeddingStringCalculation,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        op_sender: OperationSender,
     ) -> Self {
         IndexScoreField::Embedding(EmbeddingField::new(
             collection_id,
@@ -434,7 +434,6 @@ impl IndexScoreField {
             model,
             calculation,
             embedding_sender,
-            op_sender,
         ))
     }
 
@@ -452,7 +451,7 @@ impl IndexScoreField {
             IndexScoreField::Embedding(field) => {
                 let r = CreateIndexEmbeddingFieldDefintionRequest {
                     field_path: field.field_path.clone(),
-                    model: field.model,
+                    // model: field.model,
                     string_calculation: field.calculation.clone(),
                 };
 
@@ -490,6 +489,9 @@ impl IndexScoreField {
                     EmbeddingStringCalculation::Hook(_) => {
                         SerializedEmbeddingStringCalculation::Hook
                     }
+                    EmbeddingStringCalculation::Automatic => {
+                        SerializedEmbeddingStringCalculation::Automatic
+                    }
                 },
             ),
         }
@@ -501,7 +503,6 @@ impl IndexScoreField {
         index_id: IndexId,
         hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        op_sender: OperationSender,
     ) -> Self {
         match dump {
             SerializedScoreFieldType::String(field, locale) => {
@@ -538,9 +539,11 @@ impl IndexScoreField {
                     SerializedEmbeddingStringCalculation::Hook => {
                         EmbeddingStringCalculation::Hook(hooks_runtime)
                     }
+                    SerializedEmbeddingStringCalculation::Automatic => {
+                        EmbeddingStringCalculation::Automatic
+                    }
                 },
                 embedding_sender,
-                op_sender,
             ),
         }
     }
@@ -651,7 +654,6 @@ pub struct EmbeddingField {
     chunker: Chunker,
     calculation: EmbeddingStringCalculation,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-    op_sender: OperationSender,
 }
 impl EmbeddingField {
     pub fn new(
@@ -662,7 +664,6 @@ impl EmbeddingField {
         model: OramaModel,
         calculation: EmbeddingStringCalculation,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        op_sender: OperationSender,
     ) -> Self {
         let max_tokens = model.senquence_length();
         let overlap = model.overlap();
@@ -682,7 +683,6 @@ impl EmbeddingField {
             chunker,
             calculation,
             embedding_sender,
-            op_sender,
         }
     }
 
@@ -700,6 +700,9 @@ impl EmbeddingField {
         doc: &Map<String, Value>,
     ) -> Result<Vec<IndexedValue>> {
         let input: String = match &self.calculation {
+            EmbeddingStringCalculation::Automatic => {
+                panic!("Automatic calculation is not implemented yet");
+            }
             EmbeddingStringCalculation::AllProperties => {
                 fn recursive_object_inspection<'doc>(
                     obj: &'doc Map<String, Value>,
@@ -816,7 +819,6 @@ impl EmbeddingField {
                 coll_id: self.collection_id,
                 field_id: self.field_id,
                 index_id: self.index_id,
-                op_sender: self.op_sender.clone(),
                 doc_id,
                 text: texts,
             })
@@ -846,4 +848,47 @@ fn join_vec_strings(v: &[&String]) -> String {
         final_str.push_str(s);
     }
     final_str
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OramaModelSerializable(pub OramaModel);
+
+impl Serialize for OramaModelSerializable {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        self.0.as_str_name().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OramaModelSerializable {
+    fn deserialize<D>(deserializer: D) -> Result<OramaModelSerializable, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let model_name = String::deserialize(deserializer)?;
+        let model = OramaModel::from_str_name(&model_name)
+            .ok_or_else(|| serde::de::Error::custom("Invalid model name"))?;
+        Ok(OramaModelSerializable(model))
+    }
+}
+
+impl OramaModel {
+    pub fn senquence_length(&self) -> usize {
+        match self {
+            OramaModel::MultilingualE5Small => 512,
+            OramaModel::MultilingualE5Base => 512,
+            OramaModel::MultilingualE5Large => 512,
+            OramaModel::BgeSmall => 512,
+            OramaModel::BgeBase => 512,
+            OramaModel::BgeLarge => 512,
+            OramaModel::MultilingualMiniLml12v2 => 128,
+            OramaModel::JinaEmbeddingsV2BaseCode => 512,
+        }
+    }
+
+    pub fn overlap(&self) -> usize {
+        self.senquence_length() * 2 / 100
+    }
 }

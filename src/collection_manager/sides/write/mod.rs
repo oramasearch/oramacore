@@ -2,8 +2,8 @@ pub mod collection;
 mod collections;
 pub mod document_storage;
 mod embedding;
-mod fields;
 pub mod index;
+pub use index::OramaModelSerializable;
 
 use std::{
     collections::HashMap,
@@ -27,7 +27,9 @@ use super::{
 use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
-use index::CreateIndexRequest;
+use index::{
+    CreateIndexEmbeddingFieldDefintionRequest, CreateIndexRequest, EmbeddingStringCalculation,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -40,12 +42,10 @@ use tracing::{debug, error, info, instrument, trace};
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
-pub use fields::*;
-
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
     collection_manager::sides::{
-        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert, WriteOperation,
+        DocumentStorageWriteOperation, DocumentToInsert, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -53,7 +53,6 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, DeleteDocuments, DescribeCollectionResponse,
         Document, DocumentId, DocumentList, IndexId, InsertDocumentsResult, InteractionLLMConfig,
-        ReindexConfig,
     },
 };
 
@@ -174,7 +173,7 @@ impl WriteSide {
             insert_batch_commit_size,
             master_api_key,
             operation_counter: Default::default(),
-            op_sender,
+            op_sender: op_sender.clone(),
             segments,
             triggers,
             system_prompts,
@@ -186,7 +185,7 @@ impl WriteSide {
         let write_side = Arc::new(write_side);
 
         start_commit_loop(write_side.clone(), commit_interval);
-        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
+        start_calculate_embedding_loop(ai_service, rx, op_sender, embedding_queue_limit);
 
         Ok(write_side)
     }
@@ -225,7 +224,7 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(option, self.op_sender.clone(), self.hook_runtime.clone())
+            .create_collection(option, self.op_sender.clone())
             .await?;
 
         Ok(())
@@ -244,7 +243,15 @@ impl WriteSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
 
-        collection.create_index(req).await?;
+        collection
+            .create_index(CreateIndexRequest {
+                id: req.id,
+                embedding_field_definition: vec![CreateIndexEmbeddingFieldDefintionRequest {
+                    field_path: vec!["aa".to_string()].into_boxed_slice(),
+                    string_calculation: EmbeddingStringCalculation::AllProperties,
+                }],
+            })
+            .await?;
 
         Ok(())
     }
@@ -625,6 +632,7 @@ impl WriteSide {
     }
     */
 
+    /*
     pub async fn reindex(
         &self,
         write_api_key: ApiKey,
@@ -702,6 +710,7 @@ impl WriteSide {
 
         Ok(())
     }
+    */
 
     pub async fn get_javascript_hook(
         &self,

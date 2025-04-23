@@ -587,8 +587,7 @@ pub struct CreateCollection {
     pub write_api_key: ApiKey,
 
     pub language: Option<LanguageDTO>,
-    #[serde(default)]
-    pub embeddings: Option<CreateCollectionEmbeddings>,
+    pub embeddings_model: OramaModelSerializable,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1243,13 +1242,7 @@ mod test {
     fn test_create_collection_option_dto_serialization() {
         let _: CreateCollection = json!({
             "id": "foo",
-            "typed_fields": {
-                "vector": {
-                    "mode": "embedding",
-                    "model_name": "gte-small",
-                    "document_fields": ["text"],
-                }
-            },
+            "embeddings_model": "BGESmall",
             "read_api_key": "foo",
             "write_api_key": "bar",
         })

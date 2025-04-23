@@ -505,9 +505,7 @@ impl Index {
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
-        tracing::info!("------- self.uncommitted_fields.write() -------");
         let uncommitted_fields = self.uncommitted_fields.get_mut();
-        tracing::info!("------- self.uncommitted_fields.write() done -------");
         match op {
             IndexWriteOperation::CreateField2 {
                 field_id,
@@ -591,6 +589,19 @@ impl Index {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
                         }
+                    }
+                }
+            }
+            IndexWriteOperation::IndexEmbedding { data } => {
+                for (field_id, data) in data {
+                    if let Some(field) = uncommitted_fields.vector_fields.get_mut(&field_id) {
+                        for (doc_id, vectors) in data {
+                            if let Err(e) = field.insert(doc_id, vectors) {
+                                error!(error = ?e, "Cannot insert vector. Skip it.");
+                            }
+                        }
+                    } else {
+                        error!("Cannot find field {:?} in uncommitted fields", field_id);
                     }
                 }
             }
@@ -1124,14 +1135,14 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
-        let properties: Vec<_> = uncommitted_fields
+        let properties: HashSet<_> = uncommitted_fields
             .vector_fields
             .keys()
             .chain(committed_fields.vector_fields.keys())
             .copied()
             .collect();
 
-        Ok(properties)
+        Ok(properties.into_iter().collect())
     }
 
     async fn calculate_string_properties(&self, properties: &Properties) -> Result<Vec<FieldId>> {

@@ -6,13 +6,14 @@ use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
 use crate::{
+    ai::OramaModel,
     collection_manager::sides::{
         hooks::HooksRuntime, index::CreateIndexRequest, CollectionWriteOperation, OperationSender,
-        WriteOperation,
+        OramaModelSerializable, WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexId, ReindexConfig},
+    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexId},
 };
 
 use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
@@ -25,6 +26,7 @@ pub struct CollectionWriter {
     default_locale: Locale,
     write_api_key: ApiKey,
     read_api_key: ApiKey,
+    embeddings_model: OramaModel,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
@@ -38,6 +40,7 @@ impl CollectionWriter {
         write_api_key: ApiKey,
         read_api_key: ApiKey,
         default_locale: Locale,
+        embeddings_model: OramaModel,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         op_sender: OperationSender,
     ) -> Self {
@@ -48,6 +51,7 @@ impl CollectionWriter {
             read_api_key,
             default_locale,
             embedding_sender,
+            embeddings_model,
             indexes: Default::default(),
             temp_indexes: Default::default(),
             op_sender,
@@ -97,6 +101,7 @@ impl CollectionWriter {
             read_api_key,
             default_locale,
             embedding_sender,
+            embeddings_model: dump.embeddings_model.0,
             indexes: RwLock::new(HashMap::new()),
             temp_indexes: RwLock::new(HashMap::new()),
             op_sender,
@@ -129,6 +134,7 @@ impl CollectionWriter {
             write_api_key: self.write_api_key.expose().to_string(),
             read_api_key: self.read_api_key.expose().to_string(),
             default_locale: self.default_locale,
+            embeddings_model: OramaModelSerializable(self.embeddings_model),
             indexes,
             temporary_indexes,
         });
@@ -144,19 +150,10 @@ impl CollectionWriter {
     pub async fn create_index(&self, request: CreateIndexRequest) -> Result<()> {
         let index_id = request.id;
 
-        let index = Index::empty(
-            self.id,
-            request,
-            self.embedding_sender.clone(),
-            self.get_text_parser(self.default_locale),
-            self.op_sender.clone(),
-        )
-        .await
-        .context("Cannot create index")?;
-
         let mut indexes = self.indexes.write().await;
-        indexes.insert(index_id, index);
-        drop(indexes);
+        if indexes.contains_key(&index_id) {
+            bail!("Index with id {} already exists", index_id);
+        }
 
         self.op_sender
             .send(WriteOperation::Collection(
@@ -168,6 +165,20 @@ impl CollectionWriter {
             ))
             .await
             .context("Cannot send create index operation")?;
+
+        let index = Index::empty(
+            self.id,
+            request,
+            self.embedding_sender.clone(),
+            self.get_text_parser(self.default_locale),
+            self.embeddings_model,
+            self.op_sender.clone(),
+        )
+        .await
+        .context("Cannot create index")?;
+
+        indexes.insert(index_id, index);
+        drop(indexes);
 
         Ok(())
     }
@@ -195,47 +206,47 @@ impl CollectionWriter {
 
         Ok(())
     }
+    /*
+        pub async fn create_temporary_index_from(
+            &self,
+            index_id: IndexId,
+            temporary_index_id: IndexId,
+            reindex_config: ReindexConfig,
+        ) -> Result<()> {
+            let index = self.get_index(index_id).await.context("Cannot get index")?;
 
-    pub async fn create_temporary_index_from(
-        &self,
-        index_id: IndexId,
-        temporary_index_id: IndexId,
-        reindex_config: ReindexConfig,
-    ) -> Result<()> {
-        let index = self.get_index(index_id).await.context("Cannot get index")?;
+            let locale: Locale = reindex_config
+                .language
+                .map(|l| l.into())
+                .unwrap_or(index.get_locale());
 
-        let locale: Locale = reindex_config
-            .language
-            .map(|l| l.into())
-            .unwrap_or(index.get_locale());
+            let embedding_field_definition = index
+                .get_embedding_field_definition()
+                .await
+                .context("Cannot get embedding field definition")?;
 
-        let embedding_field_definition = index
-            .get_embedding_field_definition()
+            let req = CreateIndexRequest {
+                id: temporary_index_id,
+                embedding_field_definition,
+            };
+
+            let temp_index = Index::empty(
+                self.id,
+                req,
+                self.embedding_sender.clone(),
+                self.get_text_parser(locale),
+                self.op_sender.clone(),
+            )
             .await
-            .context("Cannot get embedding field definition")?;
+            .context("Cannot create index")?;
 
-        let req = CreateIndexRequest {
-            id: temporary_index_id,
-            embedding_field_definition,
-        };
+            let mut temp_indexes = self.temp_indexes.write().await;
+            temp_indexes.insert(temporary_index_id, temp_index);
+            drop(temp_indexes);
 
-        let temp_index = Index::empty(
-            self.id,
-            req,
-            self.embedding_sender.clone(),
-            self.get_text_parser(locale),
-            self.op_sender.clone(),
-        )
-        .await
-        .context("Cannot create index")?;
-
-        let mut temp_indexes = self.temp_indexes.write().await;
-        temp_indexes.insert(temporary_index_id, temp_index);
-        drop(temp_indexes);
-
-        Ok(())
-    }
-
+            Ok(())
+        }
+    */
     pub async fn get_temporary_index<'s, 'index>(
         &'s self,
         id: IndexId,
@@ -346,6 +357,7 @@ struct CollectionDumpV1 {
     write_api_key: String,
     read_api_key: String,
     default_locale: Locale,
+    embeddings_model: OramaModelSerializable,
     indexes: Vec<IndexId>,
     temporary_indexes: Vec<IndexId>,
 }

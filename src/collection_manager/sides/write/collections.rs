@@ -106,16 +106,15 @@ impl CollectionsWriter {
         &self,
         collection_option: CreateCollection,
         sender: OperationSender,
-        hooks_runtime: Arc<HooksRuntime>,
     ) -> Result<()> {
         let CreateCollection {
             id,
             description,
             language,
-            embeddings,
+            embeddings_model,
             write_api_key,
             read_api_key,
-        } = collection_option.clone();
+        } = collection_option;
 
         info!("Creating collection {:?}", id);
 
@@ -128,6 +127,7 @@ impl CollectionsWriter {
             write_api_key,
             read_api_key,
             default_locale,
+            embeddings_model.0,
             self.embedding_sender.clone(),
             self.op_sender.clone(),
         );
@@ -143,7 +143,9 @@ impl CollectionsWriter {
             )));
         }
 
-        // Send event & Register field should be inside the lock transaction
+        collections.insert(id, collection);
+        drop(collections);
+
         sender
             .send(WriteOperation::CreateCollection {
                 id,
@@ -153,9 +155,6 @@ impl CollectionsWriter {
             })
             .await
             .context("Cannot send create collection")?;
-
-        collections.insert(id, collection);
-        drop(collections);
 
         Ok(())
     }

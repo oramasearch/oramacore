@@ -5,7 +5,7 @@ use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_fulltext_search() {
+async fn test_vector_search() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -14,21 +14,33 @@ async fn test_fulltext_search() {
 
     let index_client = collection_client.create_index().await.unwrap();
 
-    index_client.insert_documents(json!([
-        {
-            "id": "1",
-            "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-        },
-        {
-            "id": "2",
-            "text": "Curabitur sem tortor, interdum in rutrum in, dignissim vestibulum metus.",
-        }
-    ]).try_into().unwrap()).await.unwrap();
+    index_client
+        .insert_documents(
+            json!([
+                json!({
+                    "id": "1",
+                    "text": "The cat is sleeping on the table.",
+                }),
+                json!({
+                    "id": "2",
+                    "text": "A cat rests peacefully on the sofa.",
+                }),
+                json!({
+                    "id": "3",
+                    "text": "The dog is barking loudly in the yard.",
+                }),
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
     let output = collection_client
         .search(
             json!({
-                "term": "Lorem ipsum",
+                "term": "A cat sleeps",
+                "mode": "vector"
             })
             .try_into()
             .unwrap(),
@@ -44,33 +56,77 @@ async fn test_fulltext_search() {
     );
     assert!(output.hits[0].score > 0.);
 
+    let output = collection_client
+        .search(
+            json!({
+                "term": "A cat sleeps",
+                "mode": "vector",
+                "similarity": 0.0001
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.count, 3);
+    assert_eq!(output.hits.len(), 3);
+    assert_eq!(
+        output.hits[0].id,
+        format!("{}:{}", index_client.index_id, "1")
+    );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:{}", index_client.index_id, "2")
+    );
+    assert_eq!(
+        output.hits[2].id,
+        format!("{}:{}", index_client.index_id, "3")
+    );
+    assert!(output.hits[0].score > 0.);
+    assert!(output.hits[1].score > 0.);
+    assert!(output.hits[2].score > 0.);
+
     drop(test_context);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_fulltext_search_should_work_after_commit() {
+async fn test_vector_search_should_work_after_commit() {
     init_log();
+
     let test_context = TestContext::new().await;
 
     let collection_client = test_context.create_collection().await.unwrap();
 
     let index_client = collection_client.create_index().await.unwrap();
 
-    index_client.insert_documents(json!([
-        {
-            "id": "1",
-            "text": "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-        },
-        {
-            "id": "2",
-            "text": "Curabitur sem tortor, interdum in rutrum in, dignissim vestibulum metus.",
-        }
-    ]).try_into().unwrap()).await.unwrap();
+    index_client
+        .insert_documents(
+            json!([
+                json!({
+                    "id": "1",
+                    "text": "The cat is sleeping on the table.",
+                }),
+                json!({
+                    "id": "2",
+                    "text": "A cat rests peacefully on the sofa.",
+                }),
+                json!({
+                    "id": "3",
+                    "text": "The dog is barking loudly in the yard.",
+                }),
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
 
     let output1 = collection_client
         .search(
             json!({
-                "term": "Lorem ipsum",
+                "term": "A cat sleeps",
+                "mode": "vector"
             })
             .try_into()
             .unwrap(),
@@ -90,7 +146,8 @@ async fn test_fulltext_search_should_work_after_commit() {
     let output2 = collection_client
         .search(
             json!({
-                "term": "Lorem ipsum",
+                "term": "A cat sleeps",
+                "mode": "vector",
             })
             .try_into()
             .unwrap(),
@@ -118,7 +175,8 @@ async fn test_fulltext_search_should_work_after_commit() {
     let output3 = collection_client
         .search(
             json!({
-                "term": "Lorem ipsum",
+                "term": "A cat sleeps",
+                "mode": "vector",
             })
             .try_into()
             .unwrap(),
@@ -133,8 +191,7 @@ async fn test_fulltext_search_should_work_after_commit() {
     );
     assert!(output3.hits[0].score > 0.);
 
-    // Committed before and after the reload should be the same
-    // NB: the uncommitted could be different because it doens't implement phase matching
+    assert_approx_eq!(output1.hits[0].score, output2.hits[0].score);
     assert_approx_eq!(output2.hits[0].score, output3.hits[0].score);
 
     drop(test_context);

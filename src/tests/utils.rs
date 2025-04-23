@@ -334,7 +334,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
-                    embeddings: None,
+                    embeddings_model: OramaModelSerializable(OramaModel::BgeSmall),
                 },
             )
             .await?;
@@ -377,6 +377,20 @@ impl TestContext {
     fn generate_api_key() -> ApiKey {
         let id: String = Faker.fake();
         ApiKey::try_new(id).unwrap()
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        let output = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                // Some tests may close the connection intentionally
+                // so we ignore the error here
+                self.reader.stop().await
+            })
+        });
+
+        output.expect("Cannot stop reader");
     }
 }
 

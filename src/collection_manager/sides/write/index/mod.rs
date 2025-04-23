@@ -31,20 +31,20 @@ use crate::{
     },
 };
 
-use super::{embedding::MultiEmbeddingCalculationRequest, OramaModelSerializable};
-pub use fields::{FieldType, IndexedValue};
+use super::embedding::MultiEmbeddingCalculationRequest;
+pub use fields::{FieldType, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
     AllProperties,
     Properties(Box<[Box<[String]>]>),
     Hook(Arc<HooksRuntime>),
+    Automatic,
 }
 
 pub struct CreateIndexEmbeddingFieldDefintionRequest {
-    field_path: Box<[String]>,
-    model: OramaModel,
-    string_calculation: EmbeddingStringCalculation,
+    pub field_path: Box<[String]>,
+    pub string_calculation: EmbeddingStringCalculation,
 }
 
 pub struct CreateIndexRequest {
@@ -74,6 +74,7 @@ impl Index {
         req: CreateIndexRequest,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         text_parser: Arc<TextParser>,
+        model: OramaModel,
         op_sender: OperationSender,
     ) -> Result<Self> {
         let index_id = req.id;
@@ -86,10 +87,9 @@ impl Index {
                 index_id,
                 FieldId(field_id),
                 d.field_path.clone(),
-                d.model,
+                model,
                 d.string_calculation,
                 embedding_sender.clone(),
-                op_sender.clone(),
             );
 
             op_sender
@@ -168,7 +168,6 @@ impl Index {
                     index_id,
                     hooks_runtime.clone(),
                     embedding_sender.clone(),
-                    op_sender.clone(),
                 )
             })
             .collect();

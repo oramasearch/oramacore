@@ -56,25 +56,6 @@ pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_or_overwrite<T: serde::Serialize>(path: PathBuf, data: &T) -> Result<()> {
-    let mut file = tokio::fs::File::create(&path)
-        .await
-        .with_context(|| format!("Cannot create file at {:?}", path))?;
-    let v = serde_json::to_vec(data)
-        .with_context(|| format!("Cannot write json data to {:?}", path))?;
-    file.write_all(&v)
-        .await
-        .with_context(|| format!("Cannot write json data to {:?}", path))?;
-    file.flush()
-        .await
-        .with_context(|| format!("Cannot flush file {:?}", path))?;
-    file.sync_all()
-        .await
-        .with_context(|| format!("Cannot sync_all file {:?}", path))?;
-
-    Ok(())
-}
-
 pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T> {
     let vec = tokio::fs::read(&path)
         .await

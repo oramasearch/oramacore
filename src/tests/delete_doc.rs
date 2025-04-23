@@ -102,4 +102,6 @@ async fn test_delete_search_unexisting_id() {
         format!("{}:{}", index_client.index_id, "1")
     );
     assert!(output.hits[0].score > 0.);
+
+    drop(test_context);
 }

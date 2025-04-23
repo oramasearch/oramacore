@@ -244,9 +244,7 @@ impl ReadSide {
 
         // We stop commit operations while we are updating
         // The lock is released at the end of this function
-        info!("------- commit_insert_mutex.lock() -------");
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-        tracing::info!("------- commit_insert_mutex.lock() done -------");
 
         // Already applied. We can skip this operation.
         if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
@@ -254,9 +252,7 @@ impl ReadSide {
             return Ok(());
         }
 
-        tracing::info!("------- self.live_offset.write() -------");
         let mut live_offset = self.live_offset.write().await;
-        tracing::info!("------- self.live_offset.write() done -------");
         *live_offset = offset;
         drop(live_offset);
 

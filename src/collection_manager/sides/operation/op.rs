@@ -134,6 +134,9 @@ pub enum IndexWriteOperation {
         doc_id: DocumentId,
         indexed_values: Vec<IndexedValue>,
     },
+    IndexEmbedding {
+        data: Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>,
+    },
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
@@ -325,6 +328,13 @@ impl WriteOperation {
             WriteOperation::Collection(_, CollectionWriteOperation::IndexDocument2 { .. }) => {
                 "index_document"
             }
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::IndexEmbedding { .. },
+                ),
+            ) => "index_embedding",
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteDocuments2 { .. }) => {
                 "delete_documents_2"
             }

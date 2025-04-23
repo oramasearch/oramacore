@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use tracing::error;
 
 use crate::{
-    file_utils::{create_if_not_exists, create_or_overwrite, read_file},
+    file_utils::{create_if_not_exists, read_file, BufferedFile},
     types::{Document, DocumentId, RawJSONDocument},
 };
 
@@ -32,8 +32,9 @@ impl DocumentStorage {
         let document: RawJSONDocument = document.into_raw(doc_id_str)?;
         let doc_path = self.data_dir.join(id.0.to_string());
         let data = RawJSONDocumentWrapper(document);
-        create_or_overwrite(doc_path, &data)
-            .await
+        BufferedFile::create_or_overwrite(doc_path)
+            .context("Cannot create document data")?
+            .write_json_data(&data)
             .context("Cannot write document data")?;
         Ok(())
     }
@@ -76,6 +77,7 @@ impl DocumentStorage {
     }
 }
 
+#[derive(Debug)]
 struct RawJSONDocumentWrapper(RawJSONDocument);
 
 impl Serialize for RawJSONDocumentWrapper {

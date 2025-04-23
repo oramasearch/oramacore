@@ -37,4 +37,6 @@ async fn test_entity_lifecycle() {
         )
         .await;
     assert!(err.is_err());
+
+    drop(test_context);
 }

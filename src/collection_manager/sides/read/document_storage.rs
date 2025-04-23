@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::{
     collection_manager::sides::DocumentStorageWriteOperation,
-    file_utils::{create_or_overwrite, read_file},
+    file_utils::{read_file, BufferedFile},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
@@ -104,8 +104,9 @@ impl CommittedDiskDocumentStorage {
             let doc_path = self.path.join(format!("{}", doc_id.0));
 
             let doc = RawJSONDocumentWrapper(doc);
-            create_or_overwrite(doc_path, &doc)
-                .await
+            BufferedFile::create_or_overwrite(doc_path)
+                .context("Cannot write document data")?
+                .write_json_data(&doc)
                 .context("Cannot write document data")?;
         }
 
@@ -263,7 +264,6 @@ impl PartialEq for RawJSONDocumentWrapper {
         self.0.id == other.0.id && self.0.inner.get() == other.0.inner.get()
     }
 }
-#[cfg(test)]
 impl Debug for RawJSONDocumentWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RawJSONDocumentWrapper")

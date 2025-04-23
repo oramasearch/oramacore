@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::{instrument, warn};
+use tracing::warn;
 
 use crate::{
     ai::{llms::LLMService, AIService, OramaModel},
@@ -165,7 +165,6 @@ impl CollectionReader {
         self.id
     }
 
-    #[instrument(skip(self, search_params), level="debug", fields(coll_id = ?self.id))]
     pub async fn search(
         &self,
         search_params: SearchParams,
@@ -804,9 +803,7 @@ impl CollectionReader {
                 drop(indexes_lock);
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
-                tracing::info!("------- self.indexes.write() -------");
                 let mut indexes_lock = self.indexes.write().await;
-                tracing::info!("------- self.indexes.write() done -------");
                 let Some(index) = indexes_lock.get_mut(&index_id) else {
                     bail!("Index {} not found", index_id)
                 };

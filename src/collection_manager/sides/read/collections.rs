@@ -7,9 +7,7 @@ use std::{
 use crate::{
     ai::{llms::LLMService, AIService},
     collection_manager::sides::{read::notify::Notifier, Offset},
-    file_utils::{
-        create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
-    },
+    file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     nlp::{locales::Locale, NLPService},
     types::{ApiKey, CollectionId, SearchOffset},
@@ -197,9 +195,10 @@ impl CollectionsReader {
         });
         drop(guard);
 
-        create_or_overwrite(data_dir.join("info.json"), &collections_info)
-            .await
-            .context("Cannot create info.json file")?;
+        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&collections_info)
+            .context("Cannot write info.json file")?;
 
         info!("Collections committed");
 
@@ -432,13 +431,13 @@ impl Deref for CollectionReadLock<'_> {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
 enum CollectionsInfo {
     #[serde(rename = "1")]
     V1(CollectionsInfoV1),
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct CollectionsInfoV1 {
     collection_ids: HashSet<CollectionId>,
     #[serde(default)]
