@@ -32,8 +32,7 @@ use crate::{
         WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, DocumentList, IndexId, InsertDocumentsResult,
-        SearchParams, SearchResult,
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequestDTO, DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -409,9 +408,9 @@ impl TestCollectionClient {
             .create_index(
                 self.write_api_key,
                 self.collection_id,
-                CreateIndexRequest {
-                    id: index_id,
-                    embedding_field_definition: vec![],
+                CreateIndexRequestDTO {
+                    index_id,
+                    embedding: None,
                 },
             )
             .await?;
@@ -481,6 +480,18 @@ impl TestCollectionClient {
         self.reader
             .search(self.read_api_key, self.collection_id, search_params)
             .await
+    }
+
+    pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<()> {
+        let new_index_id = Self::generate_index_id();
+        self.writer.create_temp_index(
+            self.write_api_key,
+            self.collection_id,
+            copy_from,
+            new_index_id
+        ).await?;
+
+        Ok(())
     }
 
     fn generate_index_id() -> IndexId {

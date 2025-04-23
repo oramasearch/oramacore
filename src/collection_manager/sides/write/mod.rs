@@ -16,12 +16,7 @@ use std::{
 };
 
 use super::{
-    generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
-    segments::{Segment, SegmentInterface},
-    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
-    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
-    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
+    field_names_to_paths, generic_kv::{KVConfig, KV}, hooks::{HookName, HooksRuntime, HooksRuntimeConfig}, segments::{Segment, SegmentInterface}, system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse}, triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface}, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType
 };
 
 use anyhow::{bail, Context, Result};
@@ -51,10 +46,11 @@ use crate::{
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, DeleteDocuments, DescribeCollectionResponse,
-        Document, DocumentId, DocumentList, IndexId, InsertDocumentsResult, InteractionLLMConfig,
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequestDTO, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, InteractionLLMConfig
     },
 };
+
+pub const DEFAULT_EMBEDDING_FIELD_NAME: &'static str = "___orama_auto_embedding";
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
@@ -190,7 +186,6 @@ impl WriteSide {
         Ok(write_side)
     }
 
-    #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
@@ -234,7 +229,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        req: CreateIndexRequest,
+        req: CreateIndexRequestDTO,
     ) -> Result<()> {
         let collection = self
             .collections
@@ -243,14 +238,73 @@ impl WriteSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
 
+        let default_string_calculation = if cfg!(test) {
+            EmbeddingStringCalculation::AllProperties
+        } else {
+            EmbeddingStringCalculation::Automatic
+        };
+        let string_calculation = req.embedding.map(|e| {
+            match e {
+                IndexEmbeddingsCalculation::AllProperties => EmbeddingStringCalculation::AllProperties,
+                IndexEmbeddingsCalculation::Automatic => EmbeddingStringCalculation::Automatic,
+                IndexEmbeddingsCalculation::Properties(v) => EmbeddingStringCalculation::Properties(field_names_to_paths(v)),
+                IndexEmbeddingsCalculation::Hook => EmbeddingStringCalculation::Hook(self.hook_runtime.clone()),
+            }
+        })
+        .unwrap_or(default_string_calculation);
+
         collection
             .create_index(CreateIndexRequest {
-                id: req.id,
+                id: req.index_id,
                 embedding_field_definition: vec![CreateIndexEmbeddingFieldDefintionRequest {
-                    field_path: vec!["aa".to_string()].into_boxed_slice(),
-                    string_calculation: EmbeddingStringCalculation::AllProperties,
+                    field_path: vec![DEFAULT_EMBEDDING_FIELD_NAME.to_string()].into_boxed_slice(),
+                    string_calculation: string_calculation,
                 }],
             })
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_temp_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        copy_from: IndexId,
+        temp_index_id: IndexId,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+
+        let default_string_calculation = if cfg!(test) {
+            EmbeddingStringCalculation::AllProperties
+        } else {
+            EmbeddingStringCalculation::Automatic
+        };
+        let string_calculation = req.embedding.map(|e| {
+            match e {
+                IndexEmbeddingsCalculation::AllProperties => EmbeddingStringCalculation::AllProperties,
+                IndexEmbeddingsCalculation::Automatic => EmbeddingStringCalculation::Automatic,
+                IndexEmbeddingsCalculation::Properties(v) => EmbeddingStringCalculation::Properties(field_names_to_paths(v)),
+                IndexEmbeddingsCalculation::Hook => EmbeddingStringCalculation::Hook(self.hook_runtime.clone()),
+            }
+        })
+        .unwrap_or(default_string_calculation);
+
+        collection
+            .create_temp_index(
+                copy_from,
+                temp_index_id,
+                vec![CreateIndexEmbeddingFieldDefintionRequest {
+                    field_path: vec![DEFAULT_EMBEDDING_FIELD_NAME.to_string()].into_boxed_slice(),
+                    string_calculation: string_calculation,
+                }],
+            )
             .await?;
 
         Ok(())

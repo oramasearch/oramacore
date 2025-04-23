@@ -16,9 +16,7 @@ use crate::{
     types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexId},
 };
 
-use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
-
-pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
+use super::{embedding::MultiEmbeddingCalculationRequest, index::{CreateIndexEmbeddingFieldDefintionRequest, EmbeddingStringCalculation, Index}};
 
 pub struct CollectionWriter {
     pub(super) id: CollectionId,
@@ -179,6 +177,34 @@ impl CollectionWriter {
 
         indexes.insert(index_id, index);
         drop(indexes);
+
+        Ok(())
+    }
+
+    pub async fn create_temp_index(
+        &self,
+        copy_from: IndexId,
+        new_index_id: IndexId,
+        index_embeddings: Vec<CreateIndexEmbeddingFieldDefintionRequest>,
+    ) -> Result<()> {
+        let lock = self.indexes.write().await;
+        let Some(copy_from) = lock.get(&copy_from) else {
+            bail!("Index with id {} not found", copy_from);
+        };
+
+        let index = Index::empty(
+            self.id,
+            CreateIndexRequest {
+                id: new_index_id,
+                embedding_field_definition: index_embeddings,
+            },
+            self.embedding_sender.clone(),
+            self.get_text_parser(self.default_locale),
+            self.embeddings_model,
+            self.op_sender.clone(),
+        )
+        .await
+        .context("Cannot create index")?;
 
         Ok(())
     }

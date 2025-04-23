@@ -1181,6 +1181,25 @@ pub struct InsertDocumentsResult {
     pub failed: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum IndexEmbeddingsCalculation {
+    #[serde(rename = "automatic")]
+    Automatic,
+    #[serde(rename = "all_properties")]
+    AllProperties,
+    #[serde(rename = "properties")]
+    Properties(Vec<String>),
+    #[serde(rename = "hook")]
+    Hook,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateIndexRequestDTO {
+    pub index_id: IndexId,
+    pub embedding: Option<IndexEmbeddingsCalculation>
+}
+
 #[cfg(test)]
 mod test {
     use serde_json::json;
