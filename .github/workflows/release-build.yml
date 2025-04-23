@@ -34,7 +34,7 @@ jobs:
           args: --release
 
       - name: Save Default Binary
-        run: cp ./target/release/oramacore ./target/release/oramacore-default
+        run: cp ./target/release/oramacore ./target/release/oramacore-compact
 
       - name: Build Reader Binary
         uses: actions-rs/cargo@v1
@@ -58,7 +58,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ./target/release/oramacore
+            ./target/release/oramacore-compact
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
