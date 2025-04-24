@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
-use crate::collection_manager::sides::hooks::HooksRuntime;
+use crate::collection_manager::sides::hooks::{self, HooksRuntime};
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
@@ -26,6 +26,7 @@ pub struct CollectionsWriter {
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
+    hooks_runtime: Arc<HooksRuntime>,
 }
 
 impl CollectionsWriter {
@@ -58,6 +59,7 @@ impl CollectionsWriter {
                     config,
                     embedding_sender,
                     op_sender,
+                    hooks_runtime,
                 });
             }
         };
@@ -74,6 +76,7 @@ impl CollectionsWriter {
                 hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
+                hooks_runtime.clone(),
                 op_sender.clone(),
             )
             .await?;
@@ -86,6 +89,7 @@ impl CollectionsWriter {
             embedding_sender,
             // collection_options: collection_info.collection_options.into_iter().collect(),
             op_sender,
+            hooks_runtime,
         };
 
         Ok(writer)
@@ -129,6 +133,7 @@ impl CollectionsWriter {
             default_locale,
             embeddings_model.0,
             self.embedding_sender.clone(),
+            self.hooks_runtime.clone(),
             self.op_sender.clone(),
         );
 

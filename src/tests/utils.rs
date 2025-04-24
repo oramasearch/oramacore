@@ -26,13 +26,12 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
-        index::CreateIndexRequest,
         CollectionStats, CollectionsWriterConfig, IndexesConfig, InputSideChannelType,
         OramaModelSerializable, OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide,
         WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequestDTO, DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -48,7 +47,6 @@ pub fn init_log() {
 
 pub fn generate_new_path() -> PathBuf {
     let tmp_dir = tempfile::tempdir().expect("Cannot create temp dir");
-    info!("Temp dir: {:?}", tmp_dir.path());
     let dir = tmp_dir.path().to_path_buf();
     std::fs::create_dir_all(dir.clone()).expect("Cannot create dir");
     dir
@@ -255,7 +253,7 @@ pub async fn wait_for<'i, 'b, I, R>(
 where
     'b: 'i,
 {
-    // 10msec * 1000 attempts = 10 sec
+    // 20msec * 1000 attempts = 20 sec
     const MAX_ATTEMPTS: usize = 1_000;
     let mut attempts = 0;
     loop {
@@ -266,7 +264,7 @@ where
                 if attempts > MAX_ATTEMPTS {
                     break Err(e);
                 }
-                sleep(Duration::from_millis(10)).await
+                sleep(Duration::from_millis(20)).await
             }
         }
     }
@@ -408,7 +406,7 @@ impl TestCollectionClient {
             .create_index(
                 self.write_api_key,
                 self.collection_id,
-                CreateIndexRequestDTO {
+                CreateIndexRequest {
                     index_id,
                     embedding: None,
                 },
@@ -488,7 +486,10 @@ impl TestCollectionClient {
             self.write_api_key,
             self.collection_id,
             copy_from,
-            new_index_id
+        CreateIndexRequest {
+                index_id: new_index_id,
+                embedding: None,
+            },
         ).await?;
 
         Ok(())

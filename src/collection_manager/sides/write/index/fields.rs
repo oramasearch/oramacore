@@ -24,7 +24,7 @@ use crate::{
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, SerializableNumber},
 };
 
-use super::{get_value, CreateIndexEmbeddingFieldDefintionRequest, EmbeddingStringCalculation};
+use super::{get_value, EmbeddingStringCalculation};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldType {
@@ -440,23 +440,6 @@ impl IndexScoreField {
     pub fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {
         if let IndexScoreField::Embedding(field) = self {
             field.switch_to_embedding_hook(hooks_runtime);
-        }
-    }
-
-    pub fn get_embedding_field_definition(
-        &self,
-    ) -> Option<CreateIndexEmbeddingFieldDefintionRequest> {
-        match self {
-            IndexScoreField::String(_) => None,
-            IndexScoreField::Embedding(field) => {
-                let r = CreateIndexEmbeddingFieldDefintionRequest {
-                    field_path: field.field_path.clone(),
-                    // model: field.model,
-                    string_calculation: field.calculation.clone(),
-                };
-
-                Some(r)
-            }
         }
     }
 

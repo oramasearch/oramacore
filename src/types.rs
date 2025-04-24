@@ -1195,7 +1195,7 @@ pub enum IndexEmbeddingsCalculation {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateIndexRequestDTO {
+pub struct CreateIndexRequest {
     pub index_id: IndexId,
     pub embedding: Option<IndexEmbeddingsCalculation>
 }
@@ -1644,11 +1644,6 @@ impl Display for IndexId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateIndexRequest {
-    id: IndexId,
 }
 
 #[derive(Debug, Serialize)]

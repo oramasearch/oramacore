@@ -8,15 +8,16 @@ use tracing::{info, warn};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        hooks::HooksRuntime, index::CreateIndexRequest, CollectionWriteOperation, OperationSender,
-        OramaModelSerializable, WriteOperation,
+        field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation, OperationSender, OramaModelSerializable, WriteOperation
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexId},
+    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation, IndexId},
 };
 
-use super::{embedding::MultiEmbeddingCalculationRequest, index::{CreateIndexEmbeddingFieldDefintionRequest, EmbeddingStringCalculation, Index}};
+use super::{embedding::MultiEmbeddingCalculationRequest, index::{Index}};
+
+pub const DEFAULT_EMBEDDING_FIELD_NAME: &'static str = "___orama_auto_embedding";
 
 pub struct CollectionWriter {
     pub(super) id: CollectionId,
@@ -29,6 +30,7 @@ pub struct CollectionWriter {
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
     op_sender: OperationSender,
+    hook_runtime: Arc<HooksRuntime>,
 }
 
 impl CollectionWriter {
@@ -40,6 +42,7 @@ impl CollectionWriter {
         default_locale: Locale,
         embeddings_model: OramaModel,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
     ) -> Self {
         Self {
@@ -53,6 +56,7 @@ impl CollectionWriter {
             indexes: Default::default(),
             temp_indexes: Default::default(),
             op_sender,
+            hook_runtime,
         }
     }
 
@@ -61,6 +65,7 @@ impl CollectionWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
     ) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
@@ -87,6 +92,7 @@ impl CollectionWriter {
                 op_sender.clone(),
                 hooks_runtime.clone(),
                 embedding_sender.clone(),
+                hooks_runtime.clone(),
             )
             .context("Cannot load index")?;
             indexes.insert(index_id, index);
@@ -100,9 +106,10 @@ impl CollectionWriter {
             default_locale,
             embedding_sender,
             embeddings_model: dump.embeddings_model.0,
-            indexes: RwLock::new(HashMap::new()),
+            indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(HashMap::new()),
             op_sender,
+            hook_runtime,
         })
     }
 
@@ -145,9 +152,11 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn create_index(&self, request: CreateIndexRequest) -> Result<()> {
-        let index_id = request.id;
-
+    pub async fn create_index(
+        &self,
+        index_id: IndexId,
+        embedding: IndexEmbeddingsCalculation
+    ) -> Result<()> {
         let mut indexes = self.indexes.write().await;
         if indexes.contains_key(&index_id) {
             bail!("Index with id {} already exists", index_id);
@@ -165,15 +174,21 @@ impl CollectionWriter {
             .context("Cannot send create index operation")?;
 
         let index = Index::empty(
+            index_id,
             self.id,
-            request,
             self.embedding_sender.clone(),
             self.get_text_parser(self.default_locale),
-            self.embeddings_model,
             self.op_sender.clone(),
+            self.hook_runtime.clone(),
         )
         .await
         .context("Cannot create index")?;
+
+        index.add_embedding_field(
+            field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
+            self.embeddings_model,
+            embedding,
+        ).await?;
 
         indexes.insert(index_id, index);
         drop(indexes);
@@ -185,7 +200,7 @@ impl CollectionWriter {
         &self,
         copy_from: IndexId,
         new_index_id: IndexId,
-        index_embeddings: Vec<CreateIndexEmbeddingFieldDefintionRequest>,
+        embedding: IndexEmbeddingsCalculation,
     ) -> Result<()> {
         let lock = self.indexes.write().await;
         let Some(copy_from) = lock.get(&copy_from) else {
@@ -193,18 +208,23 @@ impl CollectionWriter {
         };
 
         let index = Index::empty(
+            new_index_id,
             self.id,
-            CreateIndexRequest {
-                id: new_index_id,
-                embedding_field_definition: index_embeddings,
-            },
             self.embedding_sender.clone(),
             self.get_text_parser(self.default_locale),
-            self.embeddings_model,
             self.op_sender.clone(),
+            self.hook_runtime.clone(),
         )
         .await
         .context("Cannot create index")?;
+
+        index.add_embedding_field(
+            field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
+            self.embeddings_model,
+            embedding,
+        ).await?;
+
+
 
         Ok(())
     }

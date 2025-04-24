@@ -20,14 +20,12 @@ use tracing::{info, instrument, trace};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation,
-        IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation,
+        field_names_to_paths, hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{
-        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, FieldId,
-        IndexFieldType, IndexId,
+        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, FieldId, IndexEmbeddingsCalculation, IndexFieldType, IndexId
     },
 };
 
@@ -40,16 +38,6 @@ pub enum EmbeddingStringCalculation {
     Properties(Box<[Box<[String]>]>),
     Hook(Arc<HooksRuntime>),
     Automatic,
-}
-
-pub struct CreateIndexEmbeddingFieldDefintionRequest {
-    pub field_path: Box<[String]>,
-    pub string_calculation: EmbeddingStringCalculation,
-}
-
-pub struct CreateIndexRequest {
-    pub id: IndexId,
-    pub embedding_field_definition: Vec<CreateIndexEmbeddingFieldDefintionRequest>,
 }
 
 pub struct Index {
@@ -66,59 +54,21 @@ pub struct Index {
     field_id_generator: AtomicU16,
 
     op_sender: OperationSender,
+    embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+    hook_runtime: Arc<HooksRuntime>,
 }
 
 impl Index {
     pub async fn empty(
+        index_id: IndexId,
         collection_id: CollectionId,
-        req: CreateIndexRequest,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         text_parser: Arc<TextParser>,
-        model: OramaModel,
         op_sender: OperationSender,
+        hook_runtime: Arc<HooksRuntime>,
     ) -> Result<Self> {
-        let index_id = req.id;
-
-        let mut field_id = 0;
-        let mut score_fields = vec![];
-        for d in req.embedding_field_definition {
-            let field = IndexScoreField::new_embedding(
-                collection_id,
-                index_id,
-                FieldId(field_id),
-                d.field_path.clone(),
-                model,
-                d.string_calculation,
-                embedding_sender.clone(),
-            );
-
-            op_sender
-                .send(WriteOperation::Collection(
-                    collection_id,
-                    CollectionWriteOperation::IndexWriteOperation(
-                        index_id,
-                        IndexWriteOperation::CreateField2 {
-                            field_id: field.field_id(),
-                            field_path: field.field_path().to_vec().into_boxed_slice(),
-                            is_array: field.is_array(),
-                            field_type: match &field {
-                                IndexScoreField::String(_) => IndexWriteOperationFieldType::String,
-                                IndexScoreField::Embedding(field) => {
-                                    IndexWriteOperationFieldType::Embedding(OramaModelSerializable(
-                                        field.get_model(),
-                                    ))
-                                }
-                            },
-                        },
-                    ),
-                ))
-                .await
-                .context("Cannot send operation")?;
-
-            score_fields.push(field);
-
-            field_id += 1;
-        }
+        let field_id = 0;
+        let score_fields = vec![];
 
         let locale = text_parser.locale();
 
@@ -136,6 +86,8 @@ impl Index {
             field_id_generator: AtomicU16::new(field_id),
 
             op_sender,
+            hook_runtime,
+            embedding_sender,
         })
     }
 
@@ -146,6 +98,7 @@ impl Index {
         op_sender: OperationSender,
         hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        hook_runtime: Arc<HooksRuntime>,
     ) -> Result<Self> {
         let dump: IndexDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -188,6 +141,8 @@ impl Index {
             field_id_generator: AtomicU16::new(0),
 
             op_sender,
+            hook_runtime,
+            embedding_sender,
         })
     }
 
@@ -195,19 +150,55 @@ impl Index {
         self.locale
     }
 
-    pub async fn get_embedding_field_definition(
+    pub async fn add_embedding_field(
         &self,
-    ) -> Result<Vec<CreateIndexEmbeddingFieldDefintionRequest>> {
-        let score_fields = self.score_fields.read().await;
+        field_path: Box<[String]>,
+        model: OramaModel,
+        embedding_calculation: IndexEmbeddingsCalculation,
+    ) -> Result<()> {
+        let field_id = self.field_id_generator.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let field_id = FieldId(field_id);
 
-        let mut a: Vec<CreateIndexEmbeddingFieldDefintionRequest> = vec![];
-        for f in score_fields.iter() {
-            if let Some(f) = f.get_embedding_field_definition() {
-                a.push(f);
+        let string_calculation = match embedding_calculation {
+            IndexEmbeddingsCalculation::AllProperties => EmbeddingStringCalculation::AllProperties,
+            IndexEmbeddingsCalculation::Automatic => EmbeddingStringCalculation::Automatic,
+            IndexEmbeddingsCalculation::Properties(v) => {
+                EmbeddingStringCalculation::Properties(field_names_to_paths(v))
             }
-        }
+            IndexEmbeddingsCalculation::Hook => EmbeddingStringCalculation::Hook(self.hook_runtime.clone()),
+        };
 
-        Ok(a)
+        let field = IndexScoreField::new_embedding(
+            self.collection_id,
+            self.index_id,
+            field_id,
+            field_path.clone(),
+            model,
+            string_calculation,
+            self.embedding_sender.clone(),
+        );
+
+        let mut field_lock = self.score_fields.write().await;
+        field_lock.push(field);
+        drop(field_lock);
+
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    self.index_id,
+                    IndexWriteOperation::CreateField2 {
+                        field_id,
+                        field_path,
+                        is_array: false,
+                        field_type: IndexWriteOperationFieldType::Embedding(OramaModelSerializable(model)),
+                    },
+                ),
+            ))
+            .await
+            .context("Cannot send operation")?;
+
+        Ok(())
     }
 
     pub async fn commit(&self, data_dir: PathBuf) -> Result<()> {
