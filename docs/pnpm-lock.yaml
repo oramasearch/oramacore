@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@orama/core':
+        specifier: ^0.1.4
+        version: 0.1.4
       '@orama/react-components':
         specifier: ^0.7.0
         version: 0.7.0(@stencil/core@4.27.0)(@types/react@19.1.2)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
