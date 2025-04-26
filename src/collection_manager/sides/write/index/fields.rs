@@ -677,6 +677,10 @@ impl EmbeddingField {
         self.calculation = EmbeddingStringCalculation::Hook(hooks_runtime);
     }
 
+    pub fn get_embedding_calculation(&self) -> &EmbeddingStringCalculation {
+        &self.calculation
+    }
+
     async fn index_value(
         &self,
         doc_id: DocumentId,

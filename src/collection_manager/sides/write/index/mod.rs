@@ -150,6 +150,37 @@ impl Index {
         self.locale
     }
 
+    pub async fn get_embedding_field(
+        &self,
+        field_path: Box<[String]>,
+    ) -> Result<IndexEmbeddingsCalculation> {
+        let score_fields = self.score_fields.read().await;
+        let field = match get_field_by_path(&field_path, &*score_fields) {
+            Some(field) => field,
+            None => {
+                return Err(anyhow::anyhow!("Field not found"));
+            }
+        };
+        let field = match field {
+            IndexScoreField::Embedding(field) => field,
+            _ => {
+                return Err(anyhow::anyhow!("Field is not an embedding field"));
+            }
+        };
+        match field.get_embedding_calculation() {
+            EmbeddingStringCalculation::AllProperties => Ok(IndexEmbeddingsCalculation::AllProperties),
+            EmbeddingStringCalculation::Automatic => Ok(IndexEmbeddingsCalculation::Automatic),
+            EmbeddingStringCalculation::Properties(v) => {
+                let mut results = Vec::new();
+                for path in v.iter() {
+                    results.push(path.join("."));
+                }
+                Ok(IndexEmbeddingsCalculation::Properties(results))
+            }
+            EmbeddingStringCalculation::Hook(_) => Ok(IndexEmbeddingsCalculation::Hook),
+        }
+    }
+
     pub async fn add_embedding_field(
         &self,
         field_path: Box<[String]>,
@@ -236,6 +267,28 @@ impl Index {
         doc_id_storage.get_document_ids().collect()
     }
 
+    pub async fn reindex_document(
+        &self,
+        doc_id: DocumentId,
+        doc: Document,
+    ) -> Result<()> {
+        // The document is already:
+        // - indexed (but in another index)
+        // - added to the document storage (and shared among all indexes)
+        // So, we just need to reindex it and stop.
+
+        // Inspect the doc and create the fields if needed
+        self.add_fields_if_needed(&doc)
+            .await
+            .context("Cannot add fields")?;
+
+        self.process_document(doc_id, doc).await
+            .context("Cannot process document")?;
+
+        Ok(())
+
+    }
+
     pub async fn process_new_document(
         &self,
         doc_id: DocumentId,
@@ -289,6 +342,19 @@ impl Index {
             .await
             .context("Cannot add fields")?;
 
+        self.process_document(doc_id, doc).await
+            .context("Cannot process document")?;
+
+        trace!("Document processed");
+
+        Ok(old_document_id)
+    }
+
+    async fn process_document(
+        &self,
+        doc_id: DocumentId,
+        doc: Document,
+    ) -> Result<()> {
         let mut doc_indexed_values: Vec<IndexedValue> = vec![];
 
         let filter_fields = self.filter_fields.read().await;
@@ -331,10 +397,9 @@ impl Index {
                 .context("Cannot send operation")?;
         }
 
-        trace!("Document processed");
-
-        Ok(old_document_id)
+        Ok(())
     }
+
 
     #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]
     pub async fn delete_documents(&self, doc_ids: Vec<String>) -> Result<Vec<DocumentId>> {

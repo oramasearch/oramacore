@@ -84,6 +84,11 @@ pub struct Index {
     id: IndexId,
     locale: Locale,
 
+    // This will contains all the temp index ids
+    // This is needed because embedding calculation can arrive later,
+    // after the index substitution.
+    aliases: Vec<IndexId>,
+
     deleted: bool,
 
     llm_service: Arc<llms::LLMService>,
@@ -108,6 +113,7 @@ impl Index {
         Self {
             id,
             locale,
+            aliases: vec![],
             deleted: false,
 
             llm_service,
@@ -191,6 +197,7 @@ impl Index {
             id: dump.id,
             locale: dump.locale,
             deleted: false,
+            aliases: dump.aliases,
 
             llm_service,
             ai_service,
@@ -455,6 +462,7 @@ impl Index {
             id: self.id,
             document_count: self.document_count,
             locale: self.locale,
+            aliases: self.aliases.clone(),
             bool_field_ids: committed_fields
                 .bool_fields
                 .iter()
@@ -494,6 +502,25 @@ impl Index {
         debug!("Index committed: {:?}", self.id);
 
         Ok(())
+    }
+
+    #[inline]
+    pub fn id(&self) -> IndexId {
+        self.id
+    }
+
+    #[inline]
+    pub fn aliases(&self) -> &[IndexId] {
+        self.aliases.as_slice()
+    }
+
+    pub fn promote_to_runtime_index(
+        &mut self,
+        runtime_index_id: IndexId,
+    ) {
+        let previous_id = self.id;
+        self.id = runtime_index_id;
+        self.aliases.push(previous_id);
     }
 
     pub fn mark_as_deleted(&mut self) {
@@ -1319,6 +1346,7 @@ struct DumpV1 {
     id: IndexId,
     document_count: u64,
     locale: Locale,
+    aliases: Vec<IndexId>,
     bool_field_ids: Vec<(FieldId, BoolFieldInfo)>,
     number_field_ids: Vec<(FieldId, NumberFieldInfo)>,
     string_filter_field_ids: Vec<(FieldId, StringFilterFieldInfo)>,

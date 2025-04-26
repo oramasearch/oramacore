@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    ops::Deref,
+    ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
 };
@@ -9,8 +9,8 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::warn;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tracing::{info, warn, error};
 
 use crate::{
     ai::{llms::LLMService, AIService, OramaModel},
@@ -24,11 +24,7 @@ use crate::{
 };
 
 use super::{
-    index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, UncommittedBoolFieldStats,
-    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
-    UncommittedVectorFieldStats,
+    index::{Index, IndexStats}, notify::Notifier, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats
 };
 
 pub struct CollectionReader {
@@ -43,7 +39,11 @@ pub struct CollectionReader {
     llm_service: Arc<LLMService>,
 
     uncommitted_deleted_documents: RwLock<HashSet<DocumentId>>,
-    indexes: RwLock<HashMap<IndexId, Index>>,
+    indexes: RwLock<Vec<Index>>,
+
+    temp_indexes: RwLock<Vec<Index>>,
+
+    notifier: Option<Arc<Notifier>>,
 }
 
 impl CollectionReader {
@@ -55,6 +55,7 @@ impl CollectionReader {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
+        notifier: Option<Arc<Notifier>>,
     ) -> Self {
         Self {
             id,
@@ -69,6 +70,8 @@ impl CollectionReader {
 
             uncommitted_deleted_documents: Default::default(),
             indexes: Default::default(),
+            temp_indexes: Default::default(),
+            notifier,
         }
     }
 
@@ -76,6 +79,7 @@ impl CollectionReader {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
+        notifier: Option<Arc<Notifier>>,
         data_dir: PathBuf,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -84,7 +88,7 @@ impl CollectionReader {
             .context("Cannot read collection.json")?;
         let Dump::V1(dump) = dump;
 
-        let mut indexes: HashMap<IndexId, Index> = HashMap::new();
+        let mut indexes: Vec<Index> = Vec::with_capacity(dump.index_ids.len());
         for index_id in dump.index_ids {
             let index = Index::try_load(
                 index_id,
@@ -92,7 +96,18 @@ impl CollectionReader {
                 llm_service.clone(),
                 ai_service.clone(),
             )?;
-            indexes.insert(index_id, index);
+            indexes.push(index);
+        }
+
+        let mut temp_indexes: Vec<Index> = Vec::with_capacity(dump.temp_index_ids.len());
+        for index_id in dump.temp_index_ids {
+            let index = Index::try_load(
+                index_id,
+                data_dir.join("temp_indexes").join(index_id.as_str()),
+                llm_service.clone(),
+                ai_service.clone(),
+            )?;
+            temp_indexes.push(index);
         }
 
         let s = Self {
@@ -108,6 +123,8 @@ impl CollectionReader {
 
             uncommitted_deleted_documents: Default::default(),
             indexes: RwLock::new(indexes),
+            temp_indexes: RwLock::new(temp_indexes),
+            notifier,
         };
 
         Ok(s)
@@ -115,13 +132,25 @@ impl CollectionReader {
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
         let indexes_lock = self.indexes.read().await;
-        let index_ids = indexes_lock.keys().cloned().collect();
+        let mut index_ids = Vec::with_capacity(indexes_lock.len());
 
         let indexes_dir = data_dir.join("indexes");
-        for (id, index) in indexes_lock.iter() {
-            let dir = indexes_dir.join(id.as_str());
+        for index in indexes_lock.iter() {
+            index_ids.push(index.id());
+            let dir = indexes_dir.join(index.id().as_str());
             index.commit(dir, offset).await?;
         }
+        drop(indexes_lock);
+
+        let temp_indexes_lock = self.temp_indexes.read().await;
+        let mut temp_index_ids = Vec::with_capacity(temp_indexes_lock.len());
+        let temp_indexes_dir = data_dir.join("temp_indexes");
+        for index in temp_indexes_lock.iter() {
+            temp_index_ids.push(index.id());
+            let dir = temp_indexes_dir.join(index.id().as_str());
+            index.commit(dir, offset).await?;
+        }
+        drop(temp_indexes_lock);
 
         let dump = Dump::V1(DumpV1 {
             id: self.id,
@@ -129,6 +158,7 @@ impl CollectionReader {
             default_locale: self.default_locale,
             read_api_key: self.read_api_key,
             index_ids,
+            temp_index_ids,
         });
 
         BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
@@ -171,7 +201,10 @@ impl CollectionReader {
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
         let mut result: HashMap<DocumentId, f32> = HashMap::new();
         let indexes_lock = self.indexes.read().await;
-        for (_, index) in indexes_lock.iter() {
+        for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
             index.search(&search_params, &mut result).await?;
         }
 
@@ -185,7 +218,7 @@ impl CollectionReader {
     ) -> Result<HashMap<String, FacetResult>> {
         let mut result: HashMap<String, FacetResult> = HashMap::new();
         let indexes_lock = self.indexes.read().await;
-        for (_, index) in indexes_lock.iter() {
+        for index in indexes_lock.iter() {
             index
                 .calculate_facets(token_scores, &facets, &mut result)
                 .await?;
@@ -777,6 +810,21 @@ impl CollectionReader {
     }
     */
 
+    pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {
+        let indexes_lock = self.indexes.read().await;
+        IndexReadLock::try_new(indexes_lock, index_id)
+    }
+
+    async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
+        let indexes_lock = self.indexes.write().await;
+        IndexWriteLock::try_new(indexes_lock, index_id)
+    }
+
+    async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
+        let indexes_lock = self.temp_indexes.write().await;
+        IndexWriteLock::try_new(indexes_lock, index_id)
+    }
+
     pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
         match collection_operation {
             CollectionWriteOperation::CreateIndex2 { index_id, locale } => {
@@ -787,30 +835,101 @@ impl CollectionReader {
                     self.llm_service.clone(),
                     self.ai_service.clone(),
                 );
-                if indexes_lock.insert(index_id, index).is_some() {
+                let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
+                if contains {
                     warn!("Index {} already exists", index_id);
                     debug_panic!("Index {} already exists", index_id);
                 }
+                indexes_lock.push(index);
                 drop(indexes_lock);
             }
+            CollectionWriteOperation::CreateTemporaryIndex2 { index_id, locale } => {
+                let mut temp_indexes_lock = self.temp_indexes.write().await;
+                let index = Index::new(
+                    index_id,
+                    locale,
+                    self.llm_service.clone(),
+                    self.ai_service.clone(),
+                );
+                let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
+                if contains {
+                    warn!("Temp index {} already exists", index_id);
+                    debug_panic!("Temp index {} already exists", index_id);
+                }
+                temp_indexes_lock.push(index);
+                drop(temp_indexes_lock);
+            }
             CollectionWriteOperation::DeleteIndex2 { index_id } => {
-                let mut indexes_lock = self.indexes.write().await;
-                if let Some(index) = indexes_lock.get_mut(&index_id) {
+                let index = self.get_index_mut(index_id).await;
+                if let Some(mut index) = index {
                     index.mark_as_deleted();
                 } else {
                     warn!("Cannot mark index {} as deleted. Ignored.", index_id);
                 }
-                drop(indexes_lock);
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
-                let mut indexes_lock = self.indexes.write().await;
-                let Some(index) = indexes_lock.get_mut(&index_id) else {
-                    bail!("Index {} not found", index_id)
+                let temp_index = self.get_temp_index_mut(index_id).await;
+                if let Some(mut temp_index) = temp_index {
+                    temp_index
+                        .update(index_op)
+                        .with_context(|| format!("Cannot update index {:?}", index_id))?;
+                } else {
+                    let index = self.get_index_mut(index_id).await;
+                    let Some(mut index) = index else {
+                        bail!("Index {} not found", index_id)
+                    };
+                    index
+                        .update(index_op)
+                        .with_context(|| format!("Cannot update index {:?}", index_id))?;
+                }
+            }
+            CollectionWriteOperation::SubstituteCollection { runtime_index_id, temp_index_id, reference } => {
+                let mut temp_index_lock = self.temp_indexes.write().await;
+                let mut runtime_index_lock = self.indexes.write().await;
+
+                let runtime_i = get_index_in_vector(&runtime_index_lock, runtime_index_id);
+                let temp_i = get_index_in_vector(&temp_index_lock, temp_index_id);
+
+                let Some(runtime_i) = runtime_i else {
+                    bail!("Runtime index {} not found", runtime_index_id);
                 };
-                index
-                    .update(index_op)
-                    .with_context(|| format!("Cannot update index {:?}", index_id))?;
-                drop(indexes_lock);
+                let Some(temp_i) = temp_i else{
+                    bail!("Temp index {} not found", temp_index_id);
+                };
+
+                let old_index = runtime_index_lock
+                    .get_mut(runtime_i)
+                    // This should not happen, since we already checked that the index exists
+                    .unwrap();
+                old_index.mark_as_deleted();
+
+                let mut new_index = temp_index_lock
+                    // This should not happen, since we already checked that the index exists
+                    .remove(temp_i);
+
+                // Replace the temp index id with the new one
+                new_index.promote_to_runtime_index(runtime_index_id);
+                runtime_index_lock.push(new_index);
+
+                drop(temp_index_lock);
+                drop(runtime_index_lock);
+
+                if let Some(notifier) = self.notifier.as_ref() {
+                    match notifier.notify_collection_substitution(
+                        self.id,
+                        runtime_index_id,
+                        temp_index_id,
+                        reference
+                    ).await {
+                        Ok(_) => {
+                            info!("Collection {} notified", self.id);
+                        }
+                        Err(e) => {
+                            error!("Error notifying collection {}: {:?}", self.id, e);
+                        }
+                    }
+                }
+
             }
             _ => panic!(
                 "Unimplemented read side operation: {:?}",
@@ -1533,7 +1652,7 @@ impl CollectionReader {
     pub async fn stats(&self) -> Result<CollectionStats> {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
-        for (_, i) in indexes_lock.iter() {
+        for i in indexes_lock.iter() {
             if i.is_deleted() {
                 continue;
             }
@@ -1871,25 +1990,21 @@ pub struct CollectionStats {
 }
 
 pub struct IndexReadLock<'guard> {
-    lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
-    id: IndexId,
+    lock: RwLockReadGuard<'guard, Vec<Index>>,
+    index: usize,
 }
 
 impl<'guard> IndexReadLock<'guard> {
     pub fn try_new(
-        indexes_lock: RwLockReadGuard<'guard, HashMap<IndexId, Index>>,
+        indexes_lock: RwLockReadGuard<'guard, Vec<Index>>,
         id: IndexId,
     ) -> Option<Self> {
-        let guard = indexes_lock.get(&id);
-        match &guard {
-            Some(_) => {
-                let _ = guard;
-                Some(Self {
-                    lock: indexes_lock,
-                    id,
-                })
-            }
-            None => None,
+        match get_index_in_vector(&indexes_lock, id) {
+            Some(index) => Some(Self {
+                lock: indexes_lock,
+                index,
+            }),
+            None => None
         }
     }
 }
@@ -1900,10 +2015,68 @@ impl Deref for IndexReadLock<'_> {
     fn deref(&self) -> &Self::Target {
         // Safety: the index map contains the id because we checked it before
         // no one can remove the collection from the map because we hold a read lock
-        self.lock.get(&self.id).expect(
-            "The index map always contains id because we checked it before and we hold a read lock",
-        )
+        &self.lock[self.index]
     }
+}
+
+pub struct IndexWriteLock<'guard> {
+    lock: RwLockWriteGuard<'guard, Vec<Index>>,
+    index: usize,
+}
+
+impl<'guard> IndexWriteLock<'guard> {
+    pub fn try_new(
+        indexes_lock: RwLockWriteGuard<'guard, Vec<Index>>,
+        id: IndexId,
+    ) -> Option<Self> {
+        match get_index_in_vector(&indexes_lock, id) {
+            Some(index) => Some(Self {
+                lock: indexes_lock,
+                index,
+            }),
+            None => None
+        }
+    }
+}
+impl Deref for IndexWriteLock<'_> {
+    type Target = Index;
+
+    fn deref(&self) -> &Self::Target {
+        // Safety: the index map contains the id because we checked it before
+        // no one can remove the collection from the map because we hold a read lock
+        &self.lock[self.index]
+    }
+}
+impl DerefMut for IndexWriteLock<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // Safety: the index map contains the id because we checked it before
+        // no one can remove the collection from the map because we hold a read lock
+        &mut self.lock[self.index]
+    }
+}
+
+fn get_index_in_vector(vec: &Vec<Index>, wanted: IndexId) -> Option<usize> {
+    // fast path
+    for (i, index) in vec.iter().enumerate() {
+        if index.is_deleted() {
+            continue;
+        }
+        if index.id() == wanted {
+            return Some(i);
+        }
+    }
+
+    // check in alias too
+    for (i, index) in vec.iter().enumerate() {
+        if index.is_deleted() {
+            continue;
+        }
+        if index.aliases().contains(&wanted) {
+            return Some(i);
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1912,7 +2085,8 @@ struct DumpV1 {
     description: Option<String>,
     default_locale: Locale,
     read_api_key: ApiKey,
-    index_ids: HashSet<IndexId>,
+    index_ids: Vec<IndexId>,
+    temp_index_ids: Vec<IndexId>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {

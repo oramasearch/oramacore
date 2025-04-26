@@ -27,6 +27,7 @@ pub struct CollectionsWriter {
     embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
     hooks_runtime: Arc<HooksRuntime>,
+    nlp_service: Arc<NLPService>,
 }
 
 impl CollectionsWriter {
@@ -60,6 +61,7 @@ impl CollectionsWriter {
                     embedding_sender,
                     op_sender,
                     hooks_runtime,
+                    nlp_service,
                 });
             }
         };
@@ -90,6 +92,7 @@ impl CollectionsWriter {
             // collection_options: collection_info.collection_options.into_iter().collect(),
             op_sender,
             hooks_runtime,
+            nlp_service,
         };
 
         Ok(writer)
@@ -135,7 +138,9 @@ impl CollectionsWriter {
             self.embedding_sender.clone(),
             self.hooks_runtime.clone(),
             self.op_sender.clone(),
+            self.nlp_service.clone(),
         );
+        
 
         let mut collections = self.collections.write().await;
 

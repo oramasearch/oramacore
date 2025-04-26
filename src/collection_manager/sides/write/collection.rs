@@ -1,6 +1,9 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Context, Result};
+use axum_extra::handler::Or;
+use bincode::de;
+use mobc::runtime;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -12,25 +15,30 @@ use crate::{
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation, IndexId},
+    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation, IndexId, LanguageDTO},
 };
 
-use super::{embedding::MultiEmbeddingCalculationRequest, index::{Index}};
+use super::{embedding::{self, MultiEmbeddingCalculationRequest}, index::Index};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &'static str = "___orama_auto_embedding";
+
+struct CollectionRuntimeConfig {
+    default_locale: Locale,
+    embeddings_model: OramaModel,
+}
 
 pub struct CollectionWriter {
     pub(super) id: CollectionId,
     description: Option<String>,
-    default_locale: Locale,
+    runtime_config: RwLock<CollectionRuntimeConfig>,
     write_api_key: ApiKey,
     read_api_key: ApiKey,
-    embeddings_model: OramaModel,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
     op_sender: OperationSender,
     hook_runtime: Arc<HooksRuntime>,
+    nlp_service: Arc<NLPService>,
 }
 
 impl CollectionWriter {
@@ -44,19 +52,23 @@ impl CollectionWriter {
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
+        nlp_service: Arc<NLPService>,
     ) -> Self {
         Self {
             id,
             description,
             write_api_key,
             read_api_key,
-            default_locale,
+            runtime_config: RwLock::new(CollectionRuntimeConfig {
+                default_locale,
+                embeddings_model,
+            }),
             embedding_sender,
-            embeddings_model,
             indexes: Default::default(),
             temp_indexes: Default::default(),
             op_sender,
             hook_runtime,
+            nlp_service,
         }
     }
 
@@ -103,13 +115,16 @@ impl CollectionWriter {
             description,
             write_api_key,
             read_api_key,
-            default_locale,
+            runtime_config: RwLock::new(CollectionRuntimeConfig {
+                default_locale,
+                embeddings_model: dump.embeddings_model.0,
+            }),
             embedding_sender,
-            embeddings_model: dump.embeddings_model.0,
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(HashMap::new()),
             op_sender,
             hook_runtime,
+            nlp_service,
         })
     }
 
@@ -133,13 +148,18 @@ impl CollectionWriter {
             index.commit(indexes_path.join(id.as_str())).await?;
         }
 
+        let runtime_config = self.runtime_config.read().await;
+        let default_locale = runtime_config.default_locale;
+        let embeddings_model = runtime_config.embeddings_model;
+        drop(runtime_config);
+
         let dump = CollectionDump::V1(CollectionDumpV1 {
             id: self.id,
             description: self.description.clone(),
             write_api_key: self.write_api_key.expose().to_string(),
             read_api_key: self.read_api_key.expose().to_string(),
-            default_locale: self.default_locale,
-            embeddings_model: OramaModelSerializable(self.embeddings_model),
+            default_locale: default_locale,
+            embeddings_model: OramaModelSerializable(embeddings_model),
             indexes,
             temporary_indexes,
         });
@@ -152,6 +172,11 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn get_index_ids(&self) -> Vec<IndexId> {
+        let indexes = self.indexes.read().await;
+        indexes.keys().copied().collect()
+    }
+
     pub async fn create_index(
         &self,
         index_id: IndexId,
@@ -162,31 +187,36 @@ impl CollectionWriter {
             bail!("Index with id {} already exists", index_id);
         }
 
-        self.op_sender
-            .send(WriteOperation::Collection(
-                self.id,
-                CollectionWriteOperation::CreateIndex2 {
-                    index_id,
-                    locale: self.default_locale,
-                },
-            ))
-            .await
-            .context("Cannot send create index operation")?;
+        let runtime_config = self.runtime_config.read().await;
+        let default_locale = runtime_config.default_locale;
+        let embeddings_model = runtime_config.embeddings_model;
+        drop(runtime_config);
 
         let index = Index::empty(
             index_id,
             self.id,
             self.embedding_sender.clone(),
-            self.get_text_parser(self.default_locale),
+            self.get_text_parser(default_locale),
             self.op_sender.clone(),
             self.hook_runtime.clone(),
         )
         .await
         .context("Cannot create index")?;
 
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::CreateIndex2 {
+                    index_id,
+                    locale: default_locale,
+                },
+            ))
+            .await
+            .context("Cannot send create index operation")?;
+
         index.add_embedding_field(
             field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
-            self.embeddings_model,
+            embeddings_model,
             embedding,
         ).await?;
 
@@ -196,35 +226,66 @@ impl CollectionWriter {
         Ok(())
     }
 
+    pub async fn change_runtime_config(
+        &self,
+        new_default_locale: Locale,
+        new_embeddings_model: OramaModel,
+    ) {
+        let mut runtime_config = self.runtime_config.write().await;
+        runtime_config.default_locale = new_default_locale;
+        runtime_config.embeddings_model = new_embeddings_model;
+    }
+
     pub async fn create_temp_index(
         &self,
         copy_from: IndexId,
         new_index_id: IndexId,
         embedding: IndexEmbeddingsCalculation,
     ) -> Result<()> {
-        let lock = self.indexes.write().await;
-        let Some(copy_from) = lock.get(&copy_from) else {
+        let indexes_lock = self.indexes.write().await;
+        if !indexes_lock.contains_key(&copy_from) {
             bail!("Index with id {} not found", copy_from);
-        };
+        }
+        if indexes_lock.contains_key(&new_index_id) {
+            bail!("Index with id {} already exists", new_index_id);
+        }
+
+        let mut temp_indexes_lock = self.temp_indexes.write().await;
+
+        let runtime_config = self.runtime_config.read().await;
+        let default_locale = runtime_config.default_locale;
+        let embeddings_model = runtime_config.embeddings_model;
+        drop(runtime_config);
 
         let index = Index::empty(
             new_index_id,
             self.id,
             self.embedding_sender.clone(),
-            self.get_text_parser(self.default_locale),
+            self.get_text_parser(default_locale),
             self.op_sender.clone(),
             self.hook_runtime.clone(),
         )
         .await
         .context("Cannot create index")?;
 
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::CreateTemporaryIndex2 {
+                    index_id: new_index_id,
+                    locale: default_locale,
+                },
+            ))
+            .await
+            .context("Cannot send create index operation")?;
+
         index.add_embedding_field(
             field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
-            self.embeddings_model,
+            embeddings_model,
             embedding,
         ).await?;
 
-
+        temp_indexes_lock.insert(new_index_id, index);
 
         Ok(())
     }
@@ -373,10 +434,7 @@ impl CollectionWriter {
     }
 
     fn get_text_parser(&self, locale: Locale) -> Arc<TextParser> {
-        // TextParser is expensive to create, so we cache it
-        // TODO: add a cache
-        let parser = TextParser::from_locale(locale);
-        Arc::new(parser)
+        self.nlp_service.get(locale)
     }
 
     pub async fn remove_from_fs(self, path: PathBuf) {

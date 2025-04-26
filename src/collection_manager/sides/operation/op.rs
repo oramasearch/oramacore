@@ -161,6 +161,15 @@ pub enum CollectionWriteOperation {
         index_id: IndexId,
         locale: Locale,
     },
+    CreateTemporaryIndex2 {
+        index_id: IndexId,
+        locale: Locale,
+    },
+    SubstituteCollection {
+        runtime_index_id: IndexId,
+        temp_index_id: IndexId,
+        reference: Option<String>,
+    },
     DeleteIndex2 {
         index_id: IndexId,
     },
@@ -321,6 +330,12 @@ impl WriteOperation {
             }
             WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
                 "create_index"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateTemporaryIndex2 { .. }) => {
+                "create_temp_index"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::SubstituteCollection { .. }) => {
+                "substitute_collection"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {
                 "delete_index"

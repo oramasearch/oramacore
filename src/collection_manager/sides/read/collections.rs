@@ -41,7 +41,7 @@ pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
-    notifier: Option<Notifier>,
+    notifier: Option<Arc<Notifier>>,
 
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
@@ -103,6 +103,7 @@ impl CollectionsReader {
                 ai_service.clone(),
                 nlp_service.clone(),
                 llm_service.clone(),
+                notifier.clone(),
                 collection_dir,
             )
             .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
@@ -222,6 +223,7 @@ impl CollectionsReader {
             self.ai_service.clone(),
             self.nlp_service.clone(),
             self.llm_service.clone(),
+            self.notifier.clone(),
         );
 
         let mut guard = self.collections.write().await;
@@ -278,6 +280,7 @@ impl CollectionsReader {
         Ok(())
     }
 
+    /*
     pub async fn substitute_collection(
         &self,
         _offset: SearchOffset,
@@ -361,7 +364,7 @@ impl CollectionsReader {
 
         Ok(())
     }
-
+    */
     pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
         info!(collection_id=?collection_id, "ReadSide: Deleting collection {:?}", collection_id);
 

@@ -31,7 +31,7 @@ use crate::{
         WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId, InsertDocumentsResult, SearchParams, SearchResult
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -480,17 +480,15 @@ impl TestCollectionClient {
             .await
     }
 
-    pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<()> {
-        let new_index_id = Self::generate_index_id();
-        self.writer.create_temp_index(
-            self.write_api_key,
-            self.collection_id,
-            copy_from,
-        CreateIndexRequest {
-                index_id: new_index_id,
-                embedding: None,
-            },
-        ).await?;
+    pub async fn rebuild_index(&self, language: LanguageDTO) -> Result<()> {
+        self.writer
+            .reindex(
+                self.write_api_key,
+                self.collection_id,
+                language,
+                OramaModel::BgeSmall,
+            )
+            .await?;
 
         Ok(())
     }

@@ -3,6 +3,8 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
+use axum_openapi3::utoipa::openapi::info;
+use collection::DEFAULT_EMBEDDING_FIELD_NAME;
 pub use index::OramaModelSerializable;
 
 use std::{
@@ -16,7 +18,7 @@ use std::{
 };
 
 use super::{
-    field_names_to_paths, generic_kv::{KVConfig, KV}, hooks::{HookName, HooksRuntime, HooksRuntimeConfig}, segments::{Segment, SegmentInterface}, system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse}, triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface}, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType
+    field_name_to_path, field_names_to_paths, generic_kv::{KVConfig, KV}, hooks::{HookName, HooksRuntime, HooksRuntimeConfig}, segments::{Segment, SegmentInterface}, system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse}, triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface}, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType
 };
 
 use anyhow::{bail, Context, Result};
@@ -38,15 +40,15 @@ use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, RemoteLLMProvider},
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, OramaModel, RemoteLLMProvider},
     collection_manager::sides::{
-        DocumentStorageWriteOperation, DocumentToInsert, WriteOperation,
+        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert, WriteOperation
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, InteractionLLMConfig
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO
     },
 };
 
@@ -251,6 +253,104 @@ impl WriteSide {
         collection
             .create_index(index_id, embedding)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn reindex(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        language: LanguageDTO,
+        model: OramaModel,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection.change_runtime_config(
+            language.into(),
+            model,
+        ).await;
+
+
+        // We should lock the collection during the reindex.
+        // Adding documents during the reindex could create problems
+        // TODO: check if we should lock the collection
+
+        info!("Reindexing collection {}", collection_id);
+
+        let index_ids = collection.get_index_ids().await;
+        for copy_from in index_ids {
+            info!("Reindexing index {}", copy_from);
+            let copy_from_index = collection
+                .get_index(copy_from)
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+
+            let new_index_id = cuid2::create_id();
+            let new_index_id = IndexId::try_new(new_index_id)
+                // This is safe because cuid2 is less than 64 bytes
+                .expect("Cannot create new index id");
+
+            // Copy the embedding calculation mechanism from the old index
+            let embedding = copy_from_index.get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME)).await?;
+            let document_ids = copy_from_index.get_document_ids().await;
+
+            // Free the read lock, so we can add new index
+            drop(copy_from_index);
+
+            println!("Crearing temp index");
+            collection.create_temp_index(copy_from, new_index_id, embedding)
+                .await
+                .context("Cannot create temporary index")?;
+            println!("Get temp index");
+            let new_index = collection.get_temporary_index(new_index_id)
+                .await
+                .expect("Temporary index not found but it should be there because already created");
+
+
+            println!("document ids {:?}", document_ids);
+            let mut stream = self.document_storage.stream_documents(document_ids).await;
+            while let Some((doc_id, doc)) = stream.next().await {
+                println!("Reindexing document {:?}", doc_id);
+                let inner = doc.inner;
+                let inner: Map<String, Value> =
+                    serde_json::from_str(inner.get())
+                    // This is safe because the document is a valid JSON
+                    .context("Cannot deserialize document")?;
+                let doc = Document { inner };
+                match new_index
+                    .reindex_document(doc_id, doc)
+                    .await
+                    .context("Cannot process document")
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Ignore the error and continue to process the rest of the documents
+                        error!(error = ?e, "Cannot process document during the reindexing. Ignore the error and continue");
+                    }
+                };
+            }
+
+            // swap
+            self.op_sender
+                .send(WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::SubstituteCollection {
+                        reference: None,
+                        runtime_index_id: copy_from,
+                        temp_index_id: new_index_id,
+                    },
+                ))
+                .await
+                .context("Cannot send operation")?;
+
+            info!("Index reindexed {}", copy_from);
+        }
 
         Ok(())
     }
