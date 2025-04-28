@@ -20,8 +20,6 @@ use tracing::{error, info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
 
-const LIMIT: usize = 100;
-
 /// Lifecicle of a collection
 ///
 /// # Collection creation
@@ -31,10 +29,6 @@ const LIMIT: usize = 100;
 /// When a collection is deleted, it is marked as deleted.
 /// The collection still exists in the `collections` map.
 /// NB: `get_collection` will return `None`.
-///
-/// # Collection substitution
-/// When a collection is substituted, the old collection is removed from the `collections` map.
-/// The old collection id is added to the `last_reindexed_collections`
 ///
 
 pub struct CollectionsReader {
@@ -280,91 +274,6 @@ impl CollectionsReader {
         Ok(())
     }
 
-    /*
-    pub async fn substitute_collection(
-        &self,
-        _offset: SearchOffset,
-        target_collection_id: CollectionId,
-        source_collection_id: CollectionId,
-        reference: Option<String>,
-    ) -> Result<()> {
-        info!(
-            target_collection_id=?target_collection_id,
-            source_collection_id=?source_collection_id,
-            "ReadSide: Substitute collection {:?} with {:?}", target_collection_id, source_collection_id
-        );
-
-        let mut guard = self.collections.write().await;
-        let source = guard
-            .remove(&source_collection_id)
-            .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
-        // source.id = target_collection_id;
-        // Ignore return value: we don't care if the target collection was there or not.
-        let _ = guard.remove(&target_collection_id);
-        guard.insert(target_collection_id, source);
-        drop(guard);
-
-        let mut guard = self.last_reindexed_collections.write().await;
-        guard.push((source_collection_id, target_collection_id));
-        if guard.len() > LIMIT {
-            guard.remove(0);
-        }
-        drop(guard);
-
-        let data_dir = &self.indexes_config.data_dir;
-        let collections_dir = data_dir.join("collections");
-
-        let collection_dir = collections_dir.join(target_collection_id.as_str());
-        create_if_not_exists_async(&collection_dir)
-            .await
-            .with_context(|| {
-                format!(
-                    "Cannot create directory for collection '{}'",
-                    target_collection_id.as_str()
-                )
-            })?;
-
-        let m = COMMIT_CALCULATION_TIME.create(Empty);
-        let collection = self
-            .get_collection(target_collection_id)
-            .await
-            .context("Cannot get collection")?;
-        /*
-        collection
-            .commit(collection_dir, true)
-            .await
-            .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
-        */
-        drop(m);
-
-        if let Some(notifier) = &self.notifier {
-            if let Err(error) = notifier
-                .notify_collection_substitution(
-                    target_collection_id,
-                    source_collection_id,
-                    reference,
-                )
-                .await
-                .context("Cannot notify collection substitution")
-            {
-                error!(
-                    error = ?error,
-                    target_collection_id=?target_collection_id,
-                    source_collection_id=?source_collection_id,
-                    "Cannot notify collection substitution. Skip it"
-                );
-            };
-        }
-
-        info!(
-            target_collection_id=?target_collection_id,
-            source_collection_id=?source_collection_id,
-            "Collection substituted {:?} with {:?}", target_collection_id, source_collection_id
-        );
-
-        Ok(())
-    }
-    */
     pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
         info!(collection_id=?collection_id, "ReadSide: Deleting collection {:?}", collection_id);
 

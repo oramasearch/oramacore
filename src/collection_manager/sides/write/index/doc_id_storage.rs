@@ -37,10 +37,6 @@ impl DocIdStorage {
         self.document_ids.insert(doc_id, document_id)
     }
 
-    pub fn contains(&self, doc_id: &str) -> bool {
-        self.document_ids.contains_key(doc_id)
-    }
-
     pub fn get_document_ids(&self) -> impl Iterator<Item = DocumentId> + '_ {
         self.document_ids.values().copied()
     }
@@ -48,11 +44,6 @@ impl DocIdStorage {
     #[inline]
     pub fn len(&self) -> usize {
         self.document_ids.len()
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub fn commit(&self, data_dir: PathBuf) -> Result<()> {

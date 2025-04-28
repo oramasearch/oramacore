@@ -99,10 +99,6 @@ impl UncommittedVectorField {
         Ok(())
     }
 
-    pub fn dimension(&self) -> usize {
-        self.dimension
-    }
-
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)> + '_ {
         self.data
             .iter()

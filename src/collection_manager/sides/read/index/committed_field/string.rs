@@ -203,75 +203,6 @@ impl CommittedStringField {
         })
     }
 
-    pub fn from_committed(
-        committed: &Self,
-        data_dir: PathBuf,
-        uncommitted_document_deletions: &HashSet<DocumentId>,
-    ) -> Result<Self> {
-        create_if_not_exists(&data_dir)
-            .context("Cannot create data directory for committed string field")?;
-
-        let new_posting_storage_file = data_dir.join("posting_id_storage.map");
-        let old_posting_storage_file = committed.posting_storage.get_backed_file();
-
-        let new_document_lengths_per_document_file = data_dir.join("length_per_documents.map");
-        let old_document_lengths_per_document_file =
-            committed.document_lengths_per_document.get_backed_file();
-
-        // We need to perform this check because `std::fs::copy` truncate the file if the source and
-        // destination are the same.
-        // When it happens? I donno, but it happens.
-        // In that case we have the same data in the committed files but with a document deletion.
-        // That document deletion fires this method.
-        // We need to prevent the truncation of the file.
-        // Anyway, this is a workaround because in the below code, we will overwrite the file
-        // And this is bad: we should never overwrite a file.
-        // TODO: deep dive into this and understand why this happens
-
-        if old_posting_storage_file != new_posting_storage_file {
-            std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(
-                || {
-                    format!(
-                        "Cannot copy posting storage file: old {:?} -> new {:?}",
-                        old_posting_storage_file, new_posting_storage_file
-                    )
-                },
-            )?;
-        }
-        let mut posting_storage = PostingIdStorage::load(new_posting_storage_file)
-            .context("Cannot load posting storage")?;
-
-        let committed_iter = committed.index.iter();
-        let fst_file_path = data_dir.join("fst.map");
-        let index =
-            FSTIndex::from_iter(committed_iter, fst_file_path).context("Cannot commit fst")?;
-
-        if old_document_lengths_per_document_file != new_document_lengths_per_document_file {
-            std::fs::copy(
-                &old_document_lengths_per_document_file,
-                &new_document_lengths_per_document_file,
-            )
-            .context("Cannot copy posting storage file")?;
-        }
-        let mut document_lengths_per_document =
-            DocumentLengthsPerDocument::load(new_document_lengths_per_document_file)
-                .context("Cannot load document lengths per document")?;
-
-        document_lengths_per_document.remove_doc_ids(uncommitted_document_deletions);
-        posting_storage.remove_doc_ids(uncommitted_document_deletions);
-
-        posting_storage.commit()?;
-        document_lengths_per_document.commit()?;
-
-        Ok(Self {
-            field_path: committed.field_path.clone(),
-            index,
-            posting_storage,
-            document_lengths_per_document,
-            data_dir,
-        })
-    }
-
     pub fn try_load(info: StringFieldInfo) -> Result<Self> {
         let index = FSTIndex::load(info.data_dir.join("fst.map"))?;
         let posting_storage = PostingIdStorage::load(info.data_dir.join("posting_id_storage.map"))?;
@@ -295,11 +226,6 @@ impl CommittedStringField {
         StringFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
-            // document_lengths_per_document_file_path: self
-            //     .document_lengths_per_document
-            //     .get_backed_file(),
-            // posting_id_storage_file_path: self.posting_storage.get_backed_file(),
-            // fst_file_path: self.index.file_path(),
         }
     }
 

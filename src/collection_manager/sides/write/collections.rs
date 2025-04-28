@@ -168,21 +168,6 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    pub async fn replace(
-        &self,
-        collection_id_tmp: CollectionId,
-        collection_id: CollectionId,
-    ) -> Result<()> {
-        let mut collections = self.collections.write().await;
-        let mut collection_tmp = collections
-            .remove(&collection_id_tmp)
-            .ok_or_else(|| anyhow!("Collection not found"))?;
-        collection_tmp.id = collection_id;
-        collections.insert(collection_id, collection_tmp);
-        drop(collections);
-        Ok(())
-    }
-
     pub async fn list(&self) -> Vec<DescribeCollectionResponse> {
         let collections = self.collections.read().await;
 

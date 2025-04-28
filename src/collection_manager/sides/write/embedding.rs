@@ -15,12 +15,6 @@ pub struct EmbeddingCalculationRequestInput {
     pub text: String,
     pub doc_id: DocumentId,
     pub field_id: FieldId,
-    pub op_sender: OperationSender,
-}
-
-pub struct EmbeddingCalculationRequest {
-    pub model: OramaModel,
-    pub input: EmbeddingCalculationRequestInput,
 }
 
 #[derive(Debug)]
@@ -148,7 +142,6 @@ pub fn start_calculate_embedding_loop(
                         text: t,
                         doc_id,
                         field_id,
-                        op_sender: op_sender.clone(),
                     };
                     inputs.push(input);
                 }

@@ -146,7 +146,6 @@ impl DocumentStorage {
                 self.delete_documents(doc_ids).await?;
                 Ok(())
             }
-            _ => panic!("Not implemented: {:?}", op),
         }
     }
 
