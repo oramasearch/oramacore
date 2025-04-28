@@ -1,7 +1,9 @@
 use assert_approx_eq::assert_approx_eq;
 use serde_json::json;
+use tokio::time::sleep;
 
 use crate::collection_manager::sides::hooks::HookName;
+use crate::collection_manager::sides::IndexFieldStatsType;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
@@ -375,6 +377,62 @@ export default {
         .await
         .unwrap();
     assert_eq!(output.count, 0);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_document_chunk_long_text_for_embedding_calculation() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([json!({
+            "id": "1",
+            "text": "foo ".repeat(1_000),
+            })])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    sleep(std::time::Duration::from_millis(1_000)).await;
+
+    let result = collection_client.reader_stats().await.unwrap();
+
+    let mut result = result
+        .indexes_stats
+        .into_iter()
+        .find(|i| i.id == index_client.index_id)
+        .unwrap();
+    let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats else {
+        panic!("Expected vector field stats")
+    };
+
+    // Even if we insert only one document, we have two vectors because the text is chunked
+    assert_eq!(stats.vector_count, 2);
+
+    let result = collection_client
+        .search(
+            json!({
+                "term": "foo ".repeat(256),
+                "mode": "vector",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    // In search result, the document is returned only once
+    // because the id is the same
+    // even it the document matches twice
+    assert_eq!(result.count, 1);
+    assert_eq!(result.hits[0].id, format!("{}:1", index_client.index_id));
 
     drop(test_context);
 }

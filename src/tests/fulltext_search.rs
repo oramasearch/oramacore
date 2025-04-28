@@ -191,9 +191,7 @@ async fn test_search_documents_limit() {
     init_log();
 
     let test_context = TestContext::new().await;
-
     let collection_client = test_context.create_collection().await.unwrap();
-
     let index_client = collection_client.create_index().await.unwrap();
 
     let docs = (0..100)
@@ -248,4 +246,88 @@ async fn test_search_documents_limit() {
     assert!(output.hits[1].score > output.hits[2].score);
     assert!(output.hits[2].score > output.hits[3].score);
     assert!(output.hits[3].score > output.hits[4].score);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_search_offset() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = vec![
+        json!({
+            "id": "1",
+            "text": "cat",
+        }),
+        json!({
+            "id": "2",
+            "text": "cat cat",
+        }),
+        json!({
+            "id": "3",
+            "text": "cat cat cat",
+        }),
+    ];
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "A cat sleeps",
+                "limit": 1,
+                "offset": 0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(
+        output.hits[0].document.as_ref().unwrap().id,
+        Some(format!("{}:3", index_client.index_id.as_str()))
+    );
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "A cat sleeps",
+                "limit": 1,
+                "offset": 1,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(
+        output.hits[0].document.as_ref().unwrap().id,
+        Some(format!("{}:2", index_client.index_id.as_str()))
+    );
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "A cat sleeps",
+                "limit": 1,
+                "offset": 2,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(
+        output.hits[0].document.as_ref().unwrap().id,
+        Some(format!("{}:1", index_client.index_id.as_str()))
+    );
+
+    drop(test_context);
 }

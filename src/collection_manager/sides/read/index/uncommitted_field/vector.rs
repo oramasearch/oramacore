@@ -107,7 +107,8 @@ impl UncommittedVectorField {
 
     pub fn stats(&self) -> UncommittedVectorFieldStats {
         UncommittedVectorFieldStats {
-            len: self.data.len(),
+            document_count: self.data.len(),
+            vector_count: self.data.iter().map(|(_, v)| v.len()).sum(),
         }
     }
 }
@@ -143,7 +144,8 @@ fn score_vector(vector: &[f32], target: &[f32]) -> Result<f32> {
 
 #[derive(Serialize, Debug)]
 pub struct UncommittedVectorFieldStats {
-    pub len: usize,
+    pub document_count: usize,
+    pub vector_count: usize,
 }
 
 #[cfg(test)]
