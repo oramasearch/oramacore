@@ -1197,7 +1197,7 @@ pub enum IndexEmbeddingsCalculation {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateIndexRequest {
     pub index_id: IndexId,
-    pub embedding: Option<IndexEmbeddingsCalculation>
+    pub embedding: Option<IndexEmbeddingsCalculation>,
 }
 
 #[cfg(test)]

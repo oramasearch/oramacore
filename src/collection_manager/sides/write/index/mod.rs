@@ -20,12 +20,15 @@ use tracing::{info, instrument, trace};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        field_names_to_paths, hooks::HooksRuntime, CollectionWriteOperation, DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation
+        field_names_to_paths, hooks::HooksRuntime, CollectionWriteOperation,
+        DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
+        OperationSender, WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{
-        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, FieldId, IndexEmbeddingsCalculation, IndexFieldType, IndexId
+        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, FieldId,
+        IndexEmbeddingsCalculation, IndexFieldType, IndexId,
     },
 };
 
@@ -168,7 +171,9 @@ impl Index {
             }
         };
         match field.get_embedding_calculation() {
-            EmbeddingStringCalculation::AllProperties => Ok(IndexEmbeddingsCalculation::AllProperties),
+            EmbeddingStringCalculation::AllProperties => {
+                Ok(IndexEmbeddingsCalculation::AllProperties)
+            }
             EmbeddingStringCalculation::Automatic => Ok(IndexEmbeddingsCalculation::Automatic),
             EmbeddingStringCalculation::Properties(v) => {
                 let mut results = Vec::new();
@@ -187,7 +192,9 @@ impl Index {
         model: OramaModel,
         embedding_calculation: IndexEmbeddingsCalculation,
     ) -> Result<()> {
-        let field_id = self.field_id_generator.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let field_id = self
+            .field_id_generator
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let field_id = FieldId(field_id);
 
         let string_calculation = match embedding_calculation {
@@ -196,7 +203,9 @@ impl Index {
             IndexEmbeddingsCalculation::Properties(v) => {
                 EmbeddingStringCalculation::Properties(field_names_to_paths(v))
             }
-            IndexEmbeddingsCalculation::Hook => EmbeddingStringCalculation::Hook(self.hook_runtime.clone()),
+            IndexEmbeddingsCalculation::Hook => {
+                EmbeddingStringCalculation::Hook(self.hook_runtime.clone())
+            }
         };
 
         let field = IndexScoreField::new_embedding(
@@ -222,7 +231,9 @@ impl Index {
                         field_id,
                         field_path,
                         is_array: false,
-                        field_type: IndexWriteOperationFieldType::Embedding(OramaModelSerializable(model)),
+                        field_type: IndexWriteOperationFieldType::Embedding(
+                            OramaModelSerializable(model),
+                        ),
                     },
                 ),
             ))
@@ -267,11 +278,7 @@ impl Index {
         doc_id_storage.get_document_ids().collect()
     }
 
-    pub async fn reindex_document(
-        &self,
-        doc_id: DocumentId,
-        doc: Document,
-    ) -> Result<()> {
+    pub async fn reindex_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
         // The document is already:
         // - indexed (but in another index)
         // - added to the document storage (and shared among all indexes)
@@ -282,11 +289,11 @@ impl Index {
             .await
             .context("Cannot add fields")?;
 
-        self.process_document(doc_id, doc).await
+        self.process_document(doc_id, doc)
+            .await
             .context("Cannot process document")?;
 
         Ok(())
-
     }
 
     pub async fn process_new_document(
@@ -342,7 +349,8 @@ impl Index {
             .await
             .context("Cannot add fields")?;
 
-        self.process_document(doc_id, doc).await
+        self.process_document(doc_id, doc)
+            .await
             .context("Cannot process document")?;
 
         trace!("Document processed");
@@ -350,11 +358,7 @@ impl Index {
         Ok(old_document_id)
     }
 
-    async fn process_document(
-        &self,
-        doc_id: DocumentId,
-        doc: Document,
-    ) -> Result<()> {
+    async fn process_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
         let mut doc_indexed_values: Vec<IndexedValue> = vec![];
 
         let filter_fields = self.filter_fields.read().await;
@@ -399,7 +403,6 @@ impl Index {
 
         Ok(())
     }
-
 
     #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]
     pub async fn delete_documents(&self, doc_ids: Vec<String>) -> Result<Vec<DocumentId>> {

@@ -22,9 +22,6 @@ impl DocIdStorage {
     }
 
     pub fn remove_document_ids(&mut self, doc_ids: Vec<String>) -> Vec<DocumentId> {
-        println!("Removing document ids: {:?}", doc_ids);
-        println!("Current document ids: {:?}", self.document_ids);
-
         doc_ids
             .into_iter()
             .filter_map(|doc_id| self.document_ids.remove(&doc_id))

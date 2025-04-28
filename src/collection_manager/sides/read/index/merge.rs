@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use fs_extra::copy_items;
+use fs_extra::dir::CopyOptions;
 
 use crate::file_utils::create_if_not_exists;
 use crate::merger::MergedIterator;
@@ -15,27 +17,14 @@ pub fn merge_number_field(
     committed: Option<&CommittedNumberField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
 ) -> Result<Option<CommittedNumberField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
         }
-        (None, Some(committed)) => {
-            if uncommitted_document_deletions.is_empty() {
-                // No changes
-                return Ok(None);
-            }
-
-            let committed_iter = committed.iter().map(|(k, mut d)| {
-                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
-                (k, d)
-            });
-
-            Ok(Some(CommittedNumberField::from_iter(
-                committed.field_path().to_vec().into_boxed_slice(),
-                committed_iter,
-                data_dir,
-            )?))
+        (None, Some(_)) => {
+            bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
             let iter = uncommitted
@@ -53,6 +42,41 @@ pub fn merge_number_field(
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedNumberField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
+
                 return Ok(None);
             }
 
@@ -94,27 +118,14 @@ pub fn merge_string_filter_field(
     committed: Option<&CommittedStringFilterField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
 ) -> Result<Option<CommittedStringFilterField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
         }
-        (None, Some(committed)) => {
-            if uncommitted_document_deletions.is_empty() {
-                // No changes
-                return Ok(None);
-            }
-
-            let committed_iter = committed.iter().map(|(k, mut d)| {
-                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
-                (k, d)
-            });
-
-            Ok(Some(CommittedStringFilterField::from_iter(
-                committed.field_path().to_vec().into_boxed_slice(),
-                committed_iter,
-                data_dir,
-            )?))
+        (None, Some(_)) => {
+            bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
             let iter = uncommitted.iter().map(|(k, mut d)| {
@@ -129,6 +140,41 @@ pub fn merge_string_filter_field(
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedStringFilterField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
+
                 return Ok(None);
             }
 
@@ -170,33 +216,14 @@ pub fn merge_bool_field(
     committed: Option<&CommittedBoolField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
 ) -> Result<Option<CommittedBoolField>> {
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed bool fields are None. Never should happen");
         }
-        (None, Some(committed)) => {
-            if uncommitted_document_deletions.is_empty() {
-                // No changes
-                return Ok(None);
-            }
-
-            let (true_docs, false_docs) = committed.clone_inner()?;
-            let iter = vec![
-                (BoolWrapper::False, false_docs),
-                (BoolWrapper::True, true_docs),
-            ]
-            .into_iter()
-            .map(|(k, mut v)| {
-                v.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
-                (k, v)
-            });
-
-            Ok(Some(CommittedBoolField::from_iter(
-                committed.field_path().to_vec().into_boxed_slice(),
-                iter,
-                data_dir,
-            )?))
+        (None, Some(_)) => {
+            bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
             let (true_docs, false_docs) = uncommitted.clone_inner();
@@ -218,6 +245,41 @@ pub fn merge_bool_field(
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedBoolField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
+
                 return Ok(None);
             }
 
@@ -249,22 +311,21 @@ pub fn merge_string_field(
     committed: Option<&CommittedStringField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
 ) -> Result<Option<CommittedStringField>> {
+    println!(
+        "Merge string field: uncommitted {:?}, committed {:?} dest: {:?}",
+        uncommitted.is_some(),
+        committed.is_some(),
+        data_dir
+    );
+
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");
         }
-        (None, Some(committed)) => {
-            if uncommitted_document_deletions.is_empty() {
-                // No changes
-                return Ok(None);
-            }
-
-            Ok(Some(CommittedStringField::from_committed(
-                committed,
-                data_dir,
-                uncommitted_document_deletions,
-            )?))
+        (None, Some(_)) => {
+            bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
             let length_per_documents = uncommitted.field_length_per_doc();
@@ -282,6 +343,40 @@ pub fn merge_string_field(
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedStringField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
                 return Ok(None);
             }
 
@@ -318,6 +413,7 @@ pub fn merge_vector_field(
     committed: Option<&CommittedVectorField>,
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
 ) -> Result<Option<CommittedVectorField>> {
     create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
@@ -325,22 +421,9 @@ pub fn merge_vector_field(
         (None, None) => {
             bail!("Both uncommitted and committed vector fields are None. Never should happen");
         }
-        (None, Some(committed)) => {
-            if uncommitted_document_deletions.is_empty() {
-                // No changes
-                Ok(None)
-            } else {
-                let info = committed.get_field_info();
-                let new_field = CommittedVectorField::from_dump_and_iter(
-                    committed.field_path().to_vec().into_boxed_slice(),
-                    info.data_dir,
-                    std::iter::empty(),
-                    uncommitted_document_deletions,
-                    info.model.0,
-                    data_dir,
-                )?;
-                Ok(Some(new_field))
-            }
+        (None, Some(_)) => {
+            // Uncommitted field is alway present in the index if there's a committed one
+            bail!("Both uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
             let new_field = CommittedVectorField::from_iter(
@@ -354,7 +437,42 @@ pub fn merge_vector_field(
             Ok(Some(new_field))
         }
         (Some(uncommitted), Some(committed)) => {
+            let mut info = committed.get_field_info();
             if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedVectorField::try_load(info)
+                            .context("Failed to load committed vector field")?,
+                    ));
+                }
+
                 return Ok(None);
             }
 
@@ -364,8 +482,6 @@ pub fn merge_vector_field(
                 committed.field_path(),
                 "Uncommitted and committed field paths should be the same",
             );
-
-            let info = committed.get_field_info();
 
             // uncommitted and committed model has to be the same
             debug_assert_eq!(

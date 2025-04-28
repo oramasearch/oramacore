@@ -10,7 +10,7 @@ use crate::{
     file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     nlp::{locales::Locale, NLPService},
-    types::{ApiKey, CollectionId, SearchOffset},
+    types::{ApiKey, CollectionId, DocumentId, SearchOffset},
 };
 
 use anyhow::{Context, Result};
@@ -155,13 +155,13 @@ impl CollectionsReader {
 
     #[instrument(skip(self, offset))]
     pub async fn commit(&self, offset: Offset) -> Result<()> {
-        info!("Committing collections");
-
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
         let col = self.collections.read().await;
+
         let collection_ids: Vec<_> = col.keys().cloned().collect();
+        info!("Committing collections: {:?}", collection_ids);
         for (id, collection) in col.iter() {
             let collection_dir = collections_dir.join(id.as_str());
 

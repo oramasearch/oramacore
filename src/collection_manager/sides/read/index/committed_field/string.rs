@@ -27,6 +27,8 @@ pub struct CommittedStringField {
 
     posting_storage: PostingIdStorage,
     document_lengths_per_document: DocumentLengthsPerDocument,
+
+    data_dir: PathBuf,
 }
 
 impl CommittedStringField {
@@ -89,6 +91,7 @@ impl CommittedStringField {
             index,
             posting_storage,
             document_lengths_per_document,
+            data_dir,
         })
     }
 
@@ -196,6 +199,7 @@ impl CommittedStringField {
             index,
             posting_storage,
             document_lengths_per_document,
+            data_dir,
         })
     }
 
@@ -264,19 +268,22 @@ impl CommittedStringField {
             index,
             posting_storage,
             document_lengths_per_document,
+            data_dir,
         })
     }
 
     pub fn try_load(info: StringFieldInfo) -> Result<Self> {
-        let index = FSTIndex::load(info.fst_file_path)?;
-        let posting_storage = PostingIdStorage::load(info.posting_id_storage_file_path)?;
+        let index = FSTIndex::load(info.data_dir.join("fst.map"))?;
+        let posting_storage = PostingIdStorage::load(info.data_dir.join("posting_id_storage.map"))?;
         let document_lengths_per_document =
-            DocumentLengthsPerDocument::load(info.document_lengths_per_document_file_path)?;
+            DocumentLengthsPerDocument::load(info.data_dir.join("length_per_documents.map"))?;
+
         Ok(Self {
             field_path: info.field_path,
             index,
             posting_storage,
             document_lengths_per_document,
+            data_dir: info.data_dir,
         })
     }
 
@@ -287,11 +294,12 @@ impl CommittedStringField {
     pub fn get_field_info(&self) -> StringFieldInfo {
         StringFieldInfo {
             field_path: self.field_path.clone(),
-            document_lengths_per_document_file_path: self
-                .document_lengths_per_document
-                .get_backed_file(),
-            posting_id_storage_file_path: self.posting_storage.get_backed_file(),
-            fst_file_path: self.index.file_path(),
+            data_dir: self.data_dir.clone(),
+            // document_lengths_per_document_file_path: self
+            //     .document_lengths_per_document
+            //     .get_backed_file(),
+            // posting_id_storage_file_path: self.posting_storage.get_backed_file(),
+            // fst_file_path: self.index.file_path(),
         }
     }
 
@@ -625,9 +633,10 @@ impl DocumentLengthsPerDocument {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StringFieldInfo {
     pub field_path: Box<[String]>,
-    pub posting_id_storage_file_path: PathBuf,
-    pub document_lengths_per_document_file_path: PathBuf,
-    pub fst_file_path: PathBuf,
+    pub data_dir: PathBuf,
+    // pub posting_id_storage_file_path: PathBuf,
+    // pub document_lengths_per_document_file_path: PathBuf,
+    // pub fst_file_path: PathBuf,
 }
 
 #[derive(Serialize, Debug)]

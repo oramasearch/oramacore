@@ -50,7 +50,9 @@ impl<Value: Clone> RadixIndex<Value> {
 
 impl<Value: Clone + Debug> Debug for RadixIndex<Value> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let all: Vec<_> = self.inner.iter()
+        let all: Vec<_> = self
+            .inner
+            .iter()
             .map(|(key, value)| {
                 let key = String::from_utf8(key).unwrap();
                 (key, value)

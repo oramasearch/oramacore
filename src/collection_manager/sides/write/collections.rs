@@ -140,7 +140,6 @@ impl CollectionsWriter {
             self.op_sender.clone(),
             self.nlp_service.clone(),
         );
-        
 
         let mut collections = self.collections.write().await;
 

@@ -11,14 +11,22 @@ use tracing::{info, warn};
 use crate::{
     ai::OramaModel,
     collection_manager::sides::{
-        field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation, OperationSender, OramaModelSerializable, WriteOperation
+        field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
+        DocumentStorageWriteOperation, OperationSender, OramaModelSerializable,
+        SubstituteIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
-    types::{ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation, IndexId, LanguageDTO},
+    types::{
+        ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
+        IndexId, LanguageDTO,
+    },
 };
 
-use super::{embedding::{self, MultiEmbeddingCalculationRequest}, index::Index};
+use super::{
+    embedding::{self, MultiEmbeddingCalculationRequest},
+    index::Index,
+};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &'static str = "___orama_auto_embedding";
 
@@ -109,6 +117,20 @@ impl CollectionWriter {
             .context("Cannot load index")?;
             indexes.insert(index_id, index);
         }
+        let mut temp_indexes = HashMap::new();
+        for temp_index_id in dump.temporary_indexes {
+            let index = Index::try_load(
+                id,
+                temp_index_id,
+                path.join("temp_indexes").join(temp_index_id.as_str()),
+                op_sender.clone(),
+                hooks_runtime.clone(),
+                embedding_sender.clone(),
+                hooks_runtime.clone(),
+            )
+            .context("Cannot load index")?;
+            temp_indexes.insert(temp_index_id, index);
+        }
 
         Ok(Self {
             id,
@@ -121,7 +143,7 @@ impl CollectionWriter {
             }),
             embedding_sender,
             indexes: RwLock::new(indexes),
-            temp_indexes: RwLock::new(HashMap::new()),
+            temp_indexes: RwLock::new(temp_indexes),
             op_sender,
             hook_runtime,
             nlp_service,
@@ -180,7 +202,7 @@ impl CollectionWriter {
     pub async fn create_index(
         &self,
         index_id: IndexId,
-        embedding: IndexEmbeddingsCalculation
+        embedding: IndexEmbeddingsCalculation,
     ) -> Result<()> {
         let mut indexes = self.indexes.write().await;
         if indexes.contains_key(&index_id) {
@@ -214,11 +236,13 @@ impl CollectionWriter {
             .await
             .context("Cannot send create index operation")?;
 
-        index.add_embedding_field(
-            field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
-            embeddings_model,
-            embedding,
-        ).await?;
+        index
+            .add_embedding_field(
+                field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
+                embeddings_model,
+                embedding,
+            )
+            .await?;
 
         indexes.insert(index_id, index);
         drop(indexes);
@@ -279,11 +303,13 @@ impl CollectionWriter {
             .await
             .context("Cannot send create index operation")?;
 
-        index.add_embedding_field(
-            field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
-            embeddings_model,
-            embedding,
-        ).await?;
+        index
+            .add_embedding_field(
+                field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME),
+                embeddings_model,
+                embedding,
+            )
+            .await?;
 
         temp_indexes_lock.insert(new_index_id, index);
 
@@ -308,6 +334,14 @@ impl CollectionWriter {
             ))
             .await
             .context("Cannot send delete index operation")?;
+
+        let doc_ids = index.get_document_ids().await;
+        self.op_sender
+            .send(WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::DeleteDocuments { doc_ids },
+            ))
+            .await
+            .context("Cannot send delete documents operation")?;
 
         // index.remove_from_fs().await;
 
@@ -430,7 +464,17 @@ impl CollectionWriter {
         's: 'index,
     {
         let lock = self.indexes.read().await;
-        IndexReadLock::try_new(lock, id)
+        if lock.contains_key(&id) {
+            return IndexReadLock::try_new(lock, id);
+        }
+        drop(lock);
+        let lock = self.temp_indexes.read().await;
+        if lock.contains_key(&id) {
+            return IndexReadLock::try_new(lock, id);
+        }
+        drop(lock);
+
+        None
     }
 
     fn get_text_parser(&self, locale: Locale) -> Arc<TextParser> {
@@ -444,6 +488,28 @@ impl CollectionWriter {
                 warn!(coll_id= ?self.id, "Cannot remove collection directory. Ignored: {:?}", e);
             }
         };
+    }
+
+    pub async fn substiture_index(
+        &self,
+        runtime_index_id: IndexId,
+        temp_index_id: IndexId,
+        reason: SubstituteIndexReason,
+    ) -> Result<()> {
+        self.op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::SubstituteIndex {
+                    reference: None,
+                    runtime_index_id,
+                    temp_index_id,
+                    reason,
+                },
+            ))
+            .await
+            .context("Cannot send operation")?;
+
+        Ok(())
     }
 }
 

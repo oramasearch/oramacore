@@ -19,7 +19,7 @@ use grpc_def::Embedding;
 use http::uri::Scheme;
 use tokio::time::sleep;
 use tonic::{transport::Server, Status};
-use tracing::info;
+use tracing::warn;
 
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
@@ -27,11 +27,12 @@ use crate::{
     collection_manager::sides::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         CollectionStats, CollectionsWriterConfig, IndexesConfig, InputSideChannelType,
-        OramaModelSerializable, OutputSideChannelType, ReadSide, ReadSideConfig, WriteSide,
-        WriteSideConfig,
+        OramaModelSerializable, OutputSideChannelType, ReadSide, ReadSideConfig,
+        SubstituteIndexReason, WriteSide, WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId,
+        InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -271,7 +272,7 @@ where
 }
 
 pub struct TestContext {
-    config: OramacoreConfig,
+    pub config: OramacoreConfig,
     reader: Arc<ReadSide>,
     writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
@@ -304,6 +305,8 @@ impl TestContext {
     }
 
     pub async fn reload(self) -> Self {
+        self.reader.stop().await.unwrap();
+
         let config = self.config.clone();
         let (writer, reader) = build_orama(config.clone()).await.unwrap();
         let writer = writer.unwrap();
@@ -387,7 +390,9 @@ impl Drop for TestContext {
             })
         });
 
-        output.expect("Cannot stop reader");
+        if let Err(err) = output {
+            warn!("Error stopping reader: {}", err);
+        }
     }
 }
 
@@ -440,6 +445,71 @@ impl TestCollectionClient {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
+    }
+
+    pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<TestIndexClient> {
+        let index_id = Self::generate_index_id();
+        self.writer
+            .create_temp_index(
+                self.write_api_key,
+                self.collection_id,
+                copy_from,
+                CreateIndexRequest {
+                    index_id: index_id.clone(),
+                    embedding: None,
+                },
+            )
+            .await?;
+
+        sleep(Duration::from_millis(50)).await;
+
+        Ok(TestIndexClient {
+            collection_id: self.collection_id,
+            index_id,
+            write_api_key: self.write_api_key,
+            read_api_key: self.read_api_key,
+            reader: self.reader.clone(),
+            writer: self.writer.clone(),
+        })
+    }
+
+    pub async fn substitute_index(
+        &self,
+        runtime_index_id: IndexId,
+        temp_index_id: IndexId,
+    ) -> Result<()> {
+        self.writer
+            .substitute_index(
+                self.write_api_key,
+                self.collection_id,
+                runtime_index_id,
+                temp_index_id,
+                SubstituteIndexReason::IndexResynced,
+            )
+            .await?;
+
+        wait_for(self, |s| {
+            let reader = s.reader.clone();
+            let read_api_key = s.read_api_key;
+            let collection_id = s.collection_id;
+            async move {
+                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let old_index = stats
+                    .indexes_stats
+                    .iter()
+                    .find(|index| index.id == temp_index_id);
+
+                if old_index.is_some() {
+                    bail!("Old index still exists");
+                }
+
+                Ok(())
+            }
+            .boxed()
+        })
+        .await?;
+
+        Ok(())
     }
 
     pub async fn delete(&self) -> Result<()> {

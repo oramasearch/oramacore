@@ -18,15 +18,19 @@ use std::{
 };
 
 use super::{
-    field_name_to_path, field_names_to_paths, generic_kv::{KVConfig, KV}, hooks::{HookName, HooksRuntime, HooksRuntimeConfig}, segments::{Segment, SegmentInterface}, system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse}, triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface}, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType
+    field_name_to_path, field_names_to_paths,
+    generic_kv::{KVConfig, KV},
+    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
+    segments::{Segment, SegmentInterface},
+    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
+    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
+    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
 use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
-use index::{
-    EmbeddingStringCalculation,
-};
+use index::EmbeddingStringCalculation;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -42,13 +46,16 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, OramaModel, RemoteLLMProvider},
     collection_manager::sides::{
-        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert, WriteOperation
+        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert,
+        SubstituteIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
+        DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
+        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO,
     },
 };
 
@@ -250,9 +257,7 @@ impl WriteSide {
         };
         let embedding: IndexEmbeddingsCalculation = embedding.unwrap_or(default_string_calculation);
 
-        collection
-            .create_index(index_id, embedding)
-            .await?;
+        collection.create_index(index_id, embedding).await?;
 
         Ok(())
     }
@@ -271,11 +276,9 @@ impl WriteSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
 
-        collection.change_runtime_config(
-            language.into(),
-            model,
-        ).await;
-
+        collection
+            .change_runtime_config(language.into(), model)
+            .await;
 
         // We should lock the collection during the reindex.
         // Adding documents during the reindex could create problems
@@ -297,29 +300,27 @@ impl WriteSide {
                 .expect("Cannot create new index id");
 
             // Copy the embedding calculation mechanism from the old index
-            let embedding = copy_from_index.get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME)).await?;
+            let embedding = copy_from_index
+                .get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME))
+                .await?;
             let document_ids = copy_from_index.get_document_ids().await;
 
             // Free the read lock, so we can add new index
             drop(copy_from_index);
 
-            println!("Crearing temp index");
-            collection.create_temp_index(copy_from, new_index_id, embedding)
+            collection
+                .create_temp_index(copy_from, new_index_id, embedding)
                 .await
                 .context("Cannot create temporary index")?;
-            println!("Get temp index");
-            let new_index = collection.get_temporary_index(new_index_id)
+            let new_index = collection
+                .get_temporary_index(new_index_id)
                 .await
                 .expect("Temporary index not found but it should be there because already created");
 
-
-            println!("document ids {:?}", document_ids);
             let mut stream = self.document_storage.stream_documents(document_ids).await;
             while let Some((doc_id, doc)) = stream.next().await {
-                println!("Reindexing document {:?}", doc_id);
                 let inner = doc.inner;
-                let inner: Map<String, Value> =
-                    serde_json::from_str(inner.get())
+                let inner: Map<String, Value> = serde_json::from_str(inner.get())
                     // This is safe because the document is a valid JSON
                     .context("Cannot deserialize document")?;
                 let doc = Document { inner };
@@ -336,21 +337,40 @@ impl WriteSide {
                 };
             }
 
-            // swap
-            self.op_sender
-                .send(WriteOperation::Collection(
-                    collection_id,
-                    CollectionWriteOperation::SubstituteCollection {
-                        reference: None,
-                        runtime_index_id: copy_from,
-                        temp_index_id: new_index_id,
-                    },
-                ))
-                .await
-                .context("Cannot send operation")?;
+            self.substitute_index(
+                write_api_key,
+                collection_id,
+                copy_from,
+                new_index_id,
+                SubstituteIndexReason::CollectionReindexed,
+            )
+            .await
+            .context("Cannot substitute index")?;
 
             info!("Index reindexed {}", copy_from);
         }
+
+        Ok(())
+    }
+
+    pub async fn substitute_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        runtime_index_id: IndexId,
+        temp_index_id: IndexId,
+        reason: SubstituteIndexReason,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection
+            .substiture_index(runtime_index_id, temp_index_id, reason)
+            .await?;
 
         Ok(())
     }

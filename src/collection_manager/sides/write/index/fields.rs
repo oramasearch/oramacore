@@ -14,7 +14,8 @@ use crate::{
     ai::OramaModel,
     collection_manager::sides::{
         hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
-        write::embedding::MultiEmbeddingCalculationRequest, Term, TermStringField,
+        write::embedding::MultiEmbeddingCalculationRequest,
+        Term, TermStringField,
     },
     nlp::{
         chunker::{Chunker, ChunkerConfig},

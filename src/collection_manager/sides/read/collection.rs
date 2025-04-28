@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
@@ -10,11 +11,11 @@ use anyhow::{anyhow, bail, Context, Result};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::{
     ai::{llms::LLMService, AIService, OramaModel},
-    collection_manager::sides::{CollectionWriteOperation, Offset},
+    collection_manager::sides::{CollectionWriteOperation, Offset, SubstituteIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
@@ -24,7 +25,12 @@ use crate::{
 };
 
 use super::{
-    index::{Index, IndexStats}, notify::Notifier, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats
+    index::{Index, IndexStats},
+    notify::Notifier,
+    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason,
+    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
 pub struct CollectionReader {
@@ -131,11 +137,43 @@ impl CollectionReader {
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+        // During the commit we have:
+        // 1. indexes till alive
+        // 2. indexes deleted by the user
+        // 3. temp indexes promoted to runtime indexes due to resync
+        // 4. temp indexes promoted to runtime indexes due to reindexing
+        //
+        // So:
+        // 1. We have to keep it and commit it
+        // 2. We have to remove it from the in memory indexes and remove it from the disk
+        // 3-4. We have to commit it and remove the temp indexes from the disk
+        //
+        // NB: the document from the document_storage are removed
+        //     because the writer sends an appropriate command for that
+
         let indexes_lock = self.indexes.read().await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
 
+        let mut index_id_to_remove = vec![];
+        let mut temp_index_id_to_remove = vec![];
+
         let indexes_dir = data_dir.join("indexes");
-        for index in indexes_lock.iter() {
+        for (i, index) in indexes_lock.iter().enumerate() {
+            match index.get_deletion_reason() {
+                Some(DeletionReason::UserWanted) => {
+                    index_id_to_remove.push((i, index.id()));
+                    continue;
+                }
+                Some(DeletionReason::IndexResynced { temp_index_id })
+                | Some(DeletionReason::CollectionReindexed { temp_index_id }) => {
+                    // This is the old version of the index.
+                    // In the vec, there'll be the new version of this index
+                    // So, we should remove the old temp index.
+                    temp_index_id_to_remove.push(temp_index_id);
+                    continue;
+                }
+                None => {}
+            }
             index_ids.push(index.id());
             let dir = indexes_dir.join(index.id().as_str());
             index.commit(dir, offset).await?;
@@ -146,6 +184,10 @@ impl CollectionReader {
         let mut temp_index_ids = Vec::with_capacity(temp_indexes_lock.len());
         let temp_indexes_dir = data_dir.join("temp_indexes");
         for index in temp_indexes_lock.iter() {
+            if index.is_deleted() {
+                debug_panic!("It is not possible to delete a temp index (yet)");
+                continue;
+            }
             temp_index_ids.push(index.id());
             let dir = temp_indexes_dir.join(index.id().as_str());
             index.commit(dir, offset).await?;
@@ -165,6 +207,38 @@ impl CollectionReader {
             .context("Cannot create collection.json")?
             .write_json_data(&dump)
             .context("Cannot write collection.json")?;
+
+        // Remove deleted indexes from in memory
+        let mut indexes_lock = self.indexes.write().await;
+        let (kept, deleted): (Vec<_>, Vec<_>) = std::mem::take(&mut *indexes_lock)
+            .into_iter()
+            .enumerate()
+            .partition(|(i, _)| !index_id_to_remove.iter().any(|(ind, _)| ind == i));
+        *indexes_lock = kept.into_iter().map(|(_, index)| index).collect();
+        drop(indexes_lock);
+
+        // Remove deleted indexes from disk: here it is safe because we already save the collection dump to fs
+        for (_, index) in deleted {
+            let dir = indexes_dir.join(index.id().as_str());
+            if let Err(err) = std::fs::remove_dir_all(dir) {
+                // This happen when the index is never committed
+                if err.kind() != ErrorKind::NotFound {
+                    error!(error = ?err, "Cannot remove index dir {:?}", index.id());
+                }
+            }
+        }
+
+        // Remove temp deleted indexes from disk because they are promoted to runtime indexes.
+        // Here it is safe because we already save the collection dump to fs
+        for index_id in temp_index_id_to_remove {
+            let dir = temp_indexes_dir.join(index_id.as_str());
+            if let Err(err) = std::fs::remove_dir_all(dir) {
+                // This happen when the index is never committed
+                if err.kind() != ErrorKind::NotFound {
+                    error!(error = ?err, "Cannot remove index dir {:?}", index_id);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -862,7 +936,7 @@ impl CollectionReader {
             CollectionWriteOperation::DeleteIndex2 { index_id } => {
                 let index = self.get_index_mut(index_id).await;
                 if let Some(mut index) = index {
-                    index.mark_as_deleted();
+                    index.mark_as_deleted(DeletionReason::UserWanted);
                 } else {
                     warn!("Cannot mark index {} as deleted. Ignored.", index_id);
                 }
@@ -883,7 +957,17 @@ impl CollectionReader {
                         .with_context(|| format!("Cannot update index {:?}", index_id))?;
                 }
             }
-            CollectionWriteOperation::SubstituteCollection { runtime_index_id, temp_index_id, reference } => {
+            CollectionWriteOperation::SubstituteIndex {
+                runtime_index_id,
+                temp_index_id,
+                reference,
+                reason,
+            } => {
+                println!(
+                    "Substituting index {} with temp index {}",
+                    runtime_index_id, temp_index_id
+                );
+
                 let mut temp_index_lock = self.temp_indexes.write().await;
                 let mut runtime_index_lock = self.indexes.write().await;
 
@@ -893,7 +977,7 @@ impl CollectionReader {
                 let Some(runtime_i) = runtime_i else {
                     bail!("Runtime index {} not found", runtime_index_id);
                 };
-                let Some(temp_i) = temp_i else{
+                let Some(temp_i) = temp_i else {
                     bail!("Temp index {} not found", temp_index_id);
                 };
 
@@ -901,7 +985,15 @@ impl CollectionReader {
                     .get_mut(runtime_i)
                     // This should not happen, since we already checked that the index exists
                     .unwrap();
-                old_index.mark_as_deleted();
+                match reason {
+                    SubstituteIndexReason::CollectionReindexed => {
+                        old_index
+                            .mark_as_deleted(DeletionReason::CollectionReindexed { temp_index_id });
+                    }
+                    SubstituteIndexReason::IndexResynced => {
+                        old_index.mark_as_deleted(DeletionReason::IndexResynced { temp_index_id });
+                    }
+                };
 
                 let mut new_index = temp_index_lock
                     // This should not happen, since we already checked that the index exists
@@ -915,12 +1007,15 @@ impl CollectionReader {
                 drop(runtime_index_lock);
 
                 if let Some(notifier) = self.notifier.as_ref() {
-                    match notifier.notify_collection_substitution(
-                        self.id,
-                        runtime_index_id,
-                        temp_index_id,
-                        reference
-                    ).await {
+                    match notifier
+                        .notify_collection_substitution(
+                            self.id,
+                            runtime_index_id,
+                            temp_index_id,
+                            reference,
+                        )
+                        .await
+                    {
                         Ok(_) => {
                             info!("Collection {} notified", self.id);
                         }
@@ -929,7 +1024,6 @@ impl CollectionReader {
                         }
                     }
                 }
-
             }
             _ => panic!(
                 "Unimplemented read side operation: {:?}",
@@ -1656,9 +1750,17 @@ impl CollectionReader {
             if i.is_deleted() {
                 continue;
             }
-            indexes_stats.push(i.stats().await?);
+            indexes_stats.push(i.stats(false).await?);
         }
         drop(indexes_lock);
+
+        let temp_indexes_lock = self.temp_indexes.read().await;
+        for i in temp_indexes_lock.iter() {
+            if i.is_deleted() {
+                continue;
+            }
+            indexes_stats.push(i.stats(true).await?);
+        }
 
         Ok(CollectionStats {
             id: self.get_id(),
@@ -1995,16 +2097,13 @@ pub struct IndexReadLock<'guard> {
 }
 
 impl<'guard> IndexReadLock<'guard> {
-    pub fn try_new(
-        indexes_lock: RwLockReadGuard<'guard, Vec<Index>>,
-        id: IndexId,
-    ) -> Option<Self> {
+    pub fn try_new(indexes_lock: RwLockReadGuard<'guard, Vec<Index>>, id: IndexId) -> Option<Self> {
         match get_index_in_vector(&indexes_lock, id) {
             Some(index) => Some(Self {
                 lock: indexes_lock,
                 index,
             }),
-            None => None
+            None => None,
         }
     }
 }
@@ -2034,7 +2133,7 @@ impl<'guard> IndexWriteLock<'guard> {
                 lock: indexes_lock,
                 index,
             }),
-            None => None
+            None => None,
         }
     }
 }

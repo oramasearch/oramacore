@@ -143,6 +143,12 @@ pub enum IndexWriteOperation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SubstituteIndexReason {
+    IndexResynced,
+    CollectionReindexed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectionWriteOperation {
     InsertDocument {
         doc_id: DocumentId,
@@ -165,7 +171,8 @@ pub enum CollectionWriteOperation {
         index_id: IndexId,
         locale: Locale,
     },
-    SubstituteCollection {
+    SubstituteIndex {
+        reason: SubstituteIndexReason,
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
         reference: Option<String>,
@@ -331,10 +338,11 @@ impl WriteOperation {
             WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
                 "create_index"
             }
-            WriteOperation::Collection(_, CollectionWriteOperation::CreateTemporaryIndex2 { .. }) => {
-                "create_temp_index"
-            }
-            WriteOperation::Collection(_, CollectionWriteOperation::SubstituteCollection { .. }) => {
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::CreateTemporaryIndex2 { .. },
+            ) => "create_temp_index",
+            WriteOperation::Collection(_, CollectionWriteOperation::SubstituteIndex { .. }) => {
                 "substitute_collection"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {

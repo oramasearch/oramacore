@@ -42,7 +42,10 @@ mod uncommitted_field;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use anyhow::{bail, Context, Result};
@@ -63,6 +66,13 @@ pub use uncommitted_field::{
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub enum DeletionReason {
+    UserWanted,
+    CollectionReindexed { temp_index_id: IndexId },
+    IndexResynced { temp_index_id: IndexId },
+}
+
 #[derive(Default)]
 struct UncommittedFields {
     bool_fields: HashMap<FieldId, UncommittedBoolField>,
@@ -71,6 +81,7 @@ struct UncommittedFields {
     string_fields: HashMap<FieldId, UncommittedStringField>,
     vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
+
 #[derive(Default)]
 struct CommittedFields {
     bool_fields: HashMap<FieldId, CommittedBoolField>,
@@ -89,7 +100,8 @@ pub struct Index {
     // after the index substitution.
     aliases: Vec<IndexId>,
 
-    deleted: bool,
+    deleted: Option<DeletionReason>,
+    pub promoted_to_runtime_index: AtomicBool,
 
     llm_service: Arc<llms::LLMService>,
     ai_service: Arc<AIService>,
@@ -114,7 +126,8 @@ impl Index {
             id,
             locale,
             aliases: vec![],
-            deleted: false,
+            deleted: None,
+            promoted_to_runtime_index: AtomicBool::new(false),
 
             llm_service,
             ai_service,
@@ -196,7 +209,8 @@ impl Index {
         Ok(Self {
             id: dump.id,
             locale: dump.locale,
-            deleted: false,
+            deleted: None,
+            promoted_to_runtime_index: AtomicBool::new(false),
             aliases: dump.aliases,
 
             llm_service,
@@ -218,6 +232,16 @@ impl Index {
         create_if_not_exists(&data_dir_with_offset).context("Cannot create data directory")?;
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
+
+        // This index was a temp index and from the last commit, it was promoted to a runtime index
+        // That means all committed fields are inside "temp_indexes" folder and
+        // the metadata info points to the wrong folder.
+        // If it is "true", we need to move the committed field to "indexes" folder.
+        // To not income to a bug, if the uncommitted fields are empty, we need to copy the committed fields
+        // to the new folder.
+        let is_promoted = self.promoted_to_runtime_index.load(Ordering::Relaxed);
+
+        println!("Committing index {:?} {:?}", self.id, is_promoted);
 
         // check if there's something to commit
         let something_to_commit = uncommitted_fields
@@ -241,9 +265,14 @@ impl Index {
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || !self.uncommitted_deleted_documents.is_empty();
-        if !something_to_commit {
+        if !something_to_commit && !is_promoted {
             // Nothing to commit
-            debug!("Nothing to commit");
+            debug!("Nothing to commit {:?}", self.id);
+            println!(
+                "Nothing to commit {:?} {:?}",
+                self.id,
+                self.path_to_index_id_map.serialize()
+            );
             return Ok(());
         }
 
@@ -275,6 +304,7 @@ impl Index {
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
+                is_promoted,
             )
             .context("Cannot merge bool field")?
             {
@@ -300,6 +330,7 @@ impl Index {
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
+                is_promoted,
             )
             .context("Cannot merge number field")?
             {
@@ -325,6 +356,7 @@ impl Index {
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
+                is_promoted,
             )
             .context("Cannot merge string filter field")?
             {
@@ -350,6 +382,7 @@ impl Index {
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
+                is_promoted,
             )
             .context("Cannot merge string field")?
             {
@@ -375,6 +408,7 @@ impl Index {
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
+                is_promoted,
             )
             .context("Cannot merge vector field")?
             {
@@ -384,7 +418,7 @@ impl Index {
             }
         }
 
-        // Once collect all changed in merged_* maps,
+        // Once all changed in merged_* maps are collected,
         // we can proceed to replace the committed fields with the merged ones
         // and clear the uncommitted fields
         // NB: the following drop + write lock lines are not safe:
@@ -499,6 +533,9 @@ impl Index {
             .write_json_data(&dump)
             .context("Cannot write index.json")?;
 
+        self.promoted_to_runtime_index
+            .store(false, Ordering::Relaxed);
+
         debug!("Index committed: {:?}", self.id);
 
         Ok(())
@@ -514,21 +551,24 @@ impl Index {
         self.aliases.as_slice()
     }
 
-    pub fn promote_to_runtime_index(
-        &mut self,
-        runtime_index_id: IndexId,
-    ) {
+    pub fn promote_to_runtime_index(&mut self, runtime_index_id: IndexId) {
         let previous_id = self.id;
         self.id = runtime_index_id;
         self.aliases.push(previous_id);
+        self.promoted_to_runtime_index
+            .store(true, Ordering::Relaxed);
     }
 
-    pub fn mark_as_deleted(&mut self) {
-        self.deleted = true;
+    pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
+        self.deleted = Some(reason);
+    }
+
+    pub fn get_deletion_reason(&self) -> Option<DeletionReason> {
+        self.deleted
     }
 
     pub fn is_deleted(&self) -> bool {
-        self.deleted
+        self.deleted.is_some()
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
@@ -803,7 +843,7 @@ impl Index {
         Ok(())
     }
 
-    pub async fn stats(&self) -> Result<IndexStats> {
+    pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
         let mut fields_stats = Vec::new();
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -907,6 +947,7 @@ impl Index {
             id: self.id,
             default_locale: self.locale,
             document_count: self.document_count,
+            is_temp,
             fields_stats,
         })
     }
@@ -1329,6 +1370,7 @@ pub struct IndexStats {
     pub id: IndexId,
     pub default_locale: Locale,
     pub document_count: u64,
+    pub is_temp: bool,
     pub fields_stats: Vec<IndexFieldStats>,
 }
 

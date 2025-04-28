@@ -4351,6 +4351,7 @@ dependencies = [
  "duration-string",
  "fake",
  "fastembed",
+ "fs_extra",
  "fst",
  "futures",
  "hnsw2",
