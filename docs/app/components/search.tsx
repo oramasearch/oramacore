@@ -4,9 +4,9 @@ import type { SharedProps } from 'fumadocs-ui/components/dialog/search';
 
 export default function Search(props: SharedProps) {
   const clientInstance = new CollectionManager({
-    url: 'https://oramacore.orama.foo',
-    collectionID: 'cxlenmho72jp3qpbdphbmfdn',
-    readAPIKey: 'caTS1G81uC8uBoWICSQYzmGjGVBCqxrf',
+    url: 'https://staging.collections.orama.com',
+    collectionID: 'a6qpvbj0nrfnabjt8rrbztsx',
+    readAPIKey: '9lZ5AZViyRSVv3rTf8i25lPlJY2HH2wK',
   })
   return <OramaSearchBox {...props} oramaCoreClientInstance={clientInstance} />;
 
