@@ -686,6 +686,10 @@ impl Index {
         Ok(())
     }
 
+    pub fn has_field(&self, field_name: &str) -> bool {
+        self.path_to_index_id_map.get(field_name).is_some()
+    }
+
     pub async fn search(
         &self,
         search_params: &SearchParams,
@@ -1131,6 +1135,8 @@ impl Index {
                     );
                 }
             }
+
+            facet_definition.count += facet_definition.values.len();
         }
 
         Ok(())
@@ -1154,7 +1160,9 @@ impl Index {
         for (k, filter) in where_filter {
             let (field_id, field_type) = match self.path_to_index_id_map.get(k) {
                 None => {
-                    bail!("Cannot filter by \"{}\": unknown field", &k);
+                    // If the user specified a field that is not in the index,
+                    // we should return an empty set.
+                    return Ok(Some(HashSet::new()));
                 }
                 Some((field_id, field_type)) => (field_id, field_type),
             };
@@ -1177,10 +1185,45 @@ impl Index {
                         filtered.extend(a);
                     }
                 }
-                _ => panic!(
-                    "Unsupported filter type: type {:?}. filter: {:?}",
-                    field_type, filter
-                ),
+                (FieldType::Number, Filter::Number(filter_number)) => {
+                    let uncommitted_field = uncommitted_fields
+                        .number_fields
+                        .get(&field_id)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                        })?;
+
+                    filtered.extend(uncommitted_field.filter(filter_number));
+
+                    let committed_field = committed_fields.number_fields.get(&field_id);
+                    if let Some(committed_field) = committed_field {
+                        let a = committed_field.filter(filter_number).with_context(|| {
+                            format!("Cannot filter by \"{}\": unknown field", &k)
+                        })?;
+                        filtered.extend(a);
+                    }
+                }
+                (FieldType::StringFilter, Filter::String(filter_string)) => {
+                    let uncommitted_field = uncommitted_fields
+                        .string_filter_fields
+                        .get(&field_id)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                        })?;
+
+                    filtered.extend(uncommitted_field.filter(filter_string));
+
+                    let committed_field = committed_fields.string_filter_fields.get(&field_id);
+                    if let Some(committed_field) = committed_field {
+                        let a = committed_field.filter(filter_string);
+                        filtered.extend(a);
+                    }
+                }
+                _ => {
+                    // If the user specified a field that is not in the index,
+                    // we should return an empty set.
+                    return Ok(Some(HashSet::new()));
+                }
             }
         }
 

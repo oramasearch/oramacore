@@ -3,9 +3,44 @@ use std::time::Duration;
 
 use serde_json::json;
 
+use crate::ai::OramaModel;
+use crate::collection_manager::sides::OramaModelSerializable;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
+use crate::types::CreateCollection;
 use crate::types::DocumentList;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_collection_id_already_exists() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let output = test_context
+        .writer
+        .create_collection(
+            test_context.master_api_key,
+            CreateCollection {
+                id: collection_client.collection_id,
+                read_api_key: collection_client.read_api_key,
+                write_api_key: collection_client.write_api_key,
+                description: None,
+                embeddings_model: OramaModelSerializable(OramaModel::BgeSmall),
+                language: None,
+            },
+        )
+        .await;
+
+    assert_eq!(
+        format!("{}", output.err().unwrap()),
+        format!(
+            "Collection \"{}\" already exists",
+            collection_client.collection_id
+        ),
+    );
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_delete_collection() {

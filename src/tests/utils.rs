@@ -274,7 +274,7 @@ where
 pub struct TestContext {
     pub config: OramacoreConfig,
     reader: Arc<ReadSide>,
-    writer: Arc<WriteSide>,
+    pub writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
 }
 impl TestContext {
@@ -437,14 +437,7 @@ impl TestCollectionClient {
         })
         .await?;
 
-        Ok(TestIndexClient {
-            collection_id: self.collection_id,
-            index_id,
-            write_api_key: self.write_api_key,
-            read_api_key: self.read_api_key,
-            reader: self.reader.clone(),
-            writer: self.writer.clone(),
-        })
+        self.get_test_index_client(index_id)
     }
 
     pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<TestIndexClient> {
@@ -463,6 +456,10 @@ impl TestCollectionClient {
 
         sleep(Duration::from_millis(50)).await;
 
+        self.get_test_index_client(index_id)
+    }
+
+    pub fn get_test_index_client(&self, index_id: IndexId) -> Result<TestIndexClient> {
         Ok(TestIndexClient {
             collection_id: self.collection_id,
             index_id,

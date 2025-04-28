@@ -139,3 +139,113 @@ async fn test_fulltext_search_should_work_after_commit() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_search_documents_order() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                json!({
+                    "id": "1",
+                    "text": "This is a long text with a lot of words",
+                }),
+                json!({
+                    "id": "2",
+                    "text": "This is a smaller text",
+                }),
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.count, 2);
+    assert_eq!(output.hits.len(), 2);
+    assert_eq!(output.hits[0].id, format!("{}:2", index_client.index_id));
+    assert_eq!(output.hits[1].id, format!("{}:1", index_client.index_id));
+    assert!(output.hits[0].score > output.hits[1].score);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_search_documents_limit() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "limit": 10,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.count, 100);
+    assert_eq!(output.hits.len(), 10);
+    assert_eq!(
+        output.hits[0].id,
+        format!("{}:99", index_client.index_id.as_str())
+    );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:98", index_client.index_id.as_str())
+    );
+    assert_eq!(
+        output.hits[2].id,
+        format!("{}:97", index_client.index_id.as_str())
+    );
+    assert_eq!(
+        output.hits[3].id,
+        format!("{}:96", index_client.index_id.as_str())
+    );
+    assert_eq!(
+        output.hits[4].id,
+        format!("{}:95", index_client.index_id.as_str())
+    );
+
+    assert!(output.hits[0].score > output.hits[1].score);
+    assert!(output.hits[1].score > output.hits[2].score);
+    assert!(output.hits[2].score > output.hits[3].score);
+    assert!(output.hits[3].score > output.hits[4].score);
+}

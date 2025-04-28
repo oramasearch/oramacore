@@ -284,7 +284,12 @@ impl ReadSide {
                     .await
                     .context("Cannot update document storage")?;
             }
-            _ => panic!("Unsupported operation: {:?}", op),
+            WriteOperation::KV(op) => {
+                self.kv
+                    .update(offset, op)
+                    .await
+                    .context("Cannot insert into KV")?;
+            }
         }
 
         drop(m);
@@ -389,126 +394,6 @@ impl ReadSide {
         })
     }
 
-    /*
-
-    #[instrument(skip(self, op), fields(offset=?op.0))]
-    pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
-        trace!(offset=?op.0, "Updating read side");
-
-        let (offset, op) = op;
-
-        let m = OPERATION_COUNT.create(Empty);
-
-        // We stop commit operations while we are updating
-        // The lock is released at the end of this function
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
-        let mut live_offset = self.live_offset.write().await;
-        *live_offset = offset;
-        drop(live_offset);
-
-        // Already applied. We can skip this operation.
-        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
-            warn!(offset=?offset, "Operation already applied. Skipping");
-            return Ok(());
-        }
-
-        match op {
-            WriteOperation::CreateCollection {
-                id,
-                read_api_key,
-                default_locale,
-                description,
-            } => {
-                self.collections
-                    .create_collection(offset, id, description, default_locale, read_api_key)
-                    .await?;
-            }
-            WriteOperation::DeleteCollection(coll_id) => {
-                // The order of those operations are important:
-                // 1. Remove collection from the hashmap
-                // 2. Commit
-                // 3. Clean the fs
-                // otherwise, if something crashed, we loose the collection.
-                info!(collection=?coll_id, "Deleting collection");
-                self.collections.remove_collection(coll_id).await?;
-
-                info!("Collection deleted");
-            }
-            WriteOperation::Collection(collection_id, collection_operation) => {
-                let collection = self
-                    .collections
-                    .get_collection(collection_id)
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-                if let CollectionWriteOperation::DeleteDocuments { doc_ids } = &collection_operation
-                {
-                    for doc_id in doc_ids {
-                        self.document_storage.delete_document(doc_id).await?;
-                    }
-                }
-
-                if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
-                    collection_operation
-                {
-                    trace!(?doc_id, "Inserting document");
-                    collection.increment_document_count();
-                    self.document_storage.add_document(doc_id, doc.0).await?;
-                    trace!(?doc_id, "Document inserted");
-                } else {
-                    collection.update(offset, collection_operation).await?;
-                }
-            }
-            WriteOperation::KV(op) => {
-                self.kv
-                    .update(offset, op)
-                    .await
-                    .context("Cannot insert into KV")?;
-            }
-            WriteOperation::SubstituteCollection {
-                subject_collection_id,
-                target_collection_id,
-                reference,
-            } => {
-                self.collections
-                    .substitute_collection(
-                        offset,
-                        target_collection_id,
-                        subject_collection_id,
-                        reference,
-                    )
-                    .await?;
-            }
-        }
-        drop(m);
-
-        let mut lock = self.operation_counter.write().await;
-        *lock += 1;
-        let should_commit = if *lock >= self.insert_batch_commit_size {
-            *lock = 0;
-            true
-        } else {
-            false
-        };
-        drop(lock);
-
-        drop(commit_insert_mutex_lock);
-
-        if should_commit {
-            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
-            self.commit().await?;
-        } else {
-            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
-        }
-
-        trace!("Updating done");
-
-        Ok(())
-    }
-
-    */
-
     // This is wrong. We should not expose the ai service to the read side.
     // TODO: Remove this method.
     pub fn get_ai_service(&self) -> Arc<AIService> {
@@ -520,13 +405,6 @@ impl ReadSide {
     pub fn get_llm_service(&self) -> Arc<LLMService> {
         self.llm_service.clone()
     }
-
-    /*
-    pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
-        let collection = self.collections.get_collection(collection_id).await?;
-        Some(collection.count_documents())
-    }
-    */
 
     pub async fn get_system_prompt(
         &self,

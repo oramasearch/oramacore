@@ -281,6 +281,34 @@ impl CollectionReader {
             index.search(&search_params, &mut result).await?;
         }
 
+        if result.is_empty() && !search_params.where_filter.is_empty() {
+            // We want to return an error if there's some filter on unknown field
+            // It is checked in this way because:
+            // - we don't want to affect the performance of the search
+            // - we want to return a meaningful error message
+            let fields_in_filter = search_params
+                .where_filter
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>();
+
+            // We don't handle the case when the field type is different in different indexes
+            // We should dedicate a message error for that
+            // TODO: do it
+
+            for field_in_filter in fields_in_filter {
+                if indexes_lock
+                    .iter()
+                    .all(|index| !index.has_field(field_in_filter))
+                {
+                    return Err(anyhow!(
+                        "Cannot filter by \"{}\": unknown field",
+                        field_in_filter
+                    ));
+                }
+            }
+        }
+
         Ok(result)
     }
 
@@ -441,10 +469,6 @@ impl CollectionReader {
                     }
                 }
             }
-            _ => panic!(
-                "Unimplemented read side operation: {:?}",
-                collection_operation
-            ),
         }
 
         Ok(())
@@ -536,9 +560,9 @@ pub struct IndexReadLock<'guard> {
 impl<'guard> IndexReadLock<'guard> {
     pub fn try_new(indexes_lock: RwLockReadGuard<'guard, Vec<Index>>, id: IndexId) -> Option<Self> {
         get_index_in_vector(&indexes_lock, id).map(|index| Self {
-                lock: indexes_lock,
-                index,
-            })
+            lock: indexes_lock,
+            index,
+        })
     }
 }
 
@@ -563,9 +587,9 @@ impl<'guard> IndexWriteLock<'guard> {
         id: IndexId,
     ) -> Option<Self> {
         get_index_in_vector(&indexes_lock, id).map(|index| Self {
-                lock: indexes_lock,
-                index,
-            })
+            lock: indexes_lock,
+            index,
+        })
     }
 }
 impl Deref for IndexWriteLock<'_> {

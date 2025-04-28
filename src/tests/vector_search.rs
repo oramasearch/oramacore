@@ -1,6 +1,7 @@
 use assert_approx_eq::assert_approx_eq;
 use serde_json::json;
 
+use crate::collection_manager::sides::hooks::HookName;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
@@ -95,9 +96,7 @@ async fn test_vector_search_should_work_after_commit() {
     init_log();
 
     let test_context = TestContext::new().await;
-
     let collection_client = test_context.create_collection().await.unwrap();
-
     let index_client = collection_client.create_index().await.unwrap();
 
     index_client
@@ -193,6 +192,189 @@ async fn test_vector_search_should_work_after_commit() {
 
     assert_approx_eq!(output1.hits[0].score, output2.hits[0].score);
     assert_approx_eq!(output2.hits[0].score, output3.hits[0].score);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_commit_hooks() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let code = r#"
+function selectEmbeddingsProperties() {
+    return "The pen is on the table.";
+}
+export default {
+    selectEmbeddingsProperties
+}
+"#;
+
+    test_context
+        .writer
+        .insert_javascript_hook(
+            collection_client.write_api_key,
+            collection_client.collection_id,
+            index_client.index_id,
+            HookName::SelectEmbeddingsProperties,
+            code.to_string(),
+        )
+        .await
+        .unwrap();
+
+    index_client
+        .insert_documents(
+            json!([json!({
+                "title": "Today I want to listen only Max Pezzali.",
+            })])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 1);
+
+    // Hook change the meaning of the text, so the exact match should not work
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "Today I want to listen only Max Pezzali.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 0);
+
+    test_context.commit_all().await.unwrap();
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+    let index_client = collection_client
+        .get_test_index_client(index_client.index_id)
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 0);
+
+    index_client
+        .insert_documents(
+            json!([json!({
+                "title": "My dog is barking.",
+            })])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 0);
+
+    test_context.commit_all().await.unwrap();
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "The pen is on the table.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "mode": "vector",
+                "term": "My dog is barking.",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 0);
 
     drop(test_context);
 }

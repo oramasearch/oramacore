@@ -94,10 +94,6 @@ impl RabbitOperationSender {
             WriteOperation::Collection(coll_id, _) => Some(*coll_id),
             WriteOperation::DeleteCollection(id) => Some(*id),
             WriteOperation::CreateCollection { id, .. } => Some(*id),
-            WriteOperation::SubstituteCollection {
-                target_collection_id,
-                ..
-            } => Some(*target_collection_id),
             WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
         };
 
