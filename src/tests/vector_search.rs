@@ -401,7 +401,7 @@ async fn test_document_chunk_long_text_for_embedding_calculation() {
         .await
         .unwrap();
 
-    sleep(std::time::Duration::from_millis(1_000)).await;
+    sleep(std::time::Duration::from_millis(1_500)).await;
 
     let result = collection_client.reader_stats().await.unwrap();
 

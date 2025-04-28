@@ -10,7 +10,10 @@ use serde_json::{Map, Value};
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    ai::{automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties}, OramaModel},
+    ai::{
+        automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties},
+        OramaModel,
+    },
     collection_manager::sides::{
         hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
         write::embedding::MultiEmbeddingCalculationRequest,
@@ -439,12 +442,6 @@ impl IndexScoreField {
         ))
     }
 
-    pub fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {
-        if let IndexScoreField::Embedding(field) = self {
-            field.switch_to_embedding_hook(hooks_runtime);
-        }
-    }
-
     pub fn serialize(&self) -> SerializedScoreFieldType {
         match self {
             IndexScoreField::String(f) => SerializedScoreFieldType::String(
@@ -682,12 +679,17 @@ impl EmbeddingField {
         self.model
     }
 
-    fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {
+    pub fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {
         self.calculation = EmbeddingStringCalculation::Hook(hooks_runtime);
     }
 
     pub fn get_embedding_calculation(&self) -> &EmbeddingStringCalculation {
         &self.calculation
+    }
+
+    pub async fn get_automatic_embeddings_selector(&self) -> HashMap<String, ChosenProperties> {
+        let cache_read = self.embeddings_selector_cache.read().await;
+        cache_read.clone()
     }
 
     async fn index_value(

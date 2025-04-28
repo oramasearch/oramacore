@@ -42,13 +42,24 @@ use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
-    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager, llms::LLMService, tools::{Tool, ToolsRuntime}, AIService, OramaModel, RemoteLLMProvider}, collection_manager::sides::{
+    ai::{
+        automatic_embeddings_selector::AutomaticEmbeddingsSelector,
+        gpu::LocalGPUManager,
+        llms::LLMService,
+        tools::{Tool, ToolsRuntime},
+        AIService, OramaModel, RemoteLLMProvider,
+    },
+    collection_manager::sides::{
         DocumentStorageWriteOperation, DocumentToInsert, SubstituteIndexReason, WriteOperation,
-    }, file_utils::BufferedFile, metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty}, nlp::NLPService, types::{
+    },
+    file_utils::BufferedFile,
+    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
+    nlp::NLPService,
+    types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
         IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO,
-    }
+    },
 };
 
 #[derive(Debug, Deserialize, Clone)]

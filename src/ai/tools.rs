@@ -103,11 +103,11 @@ impl ToolsRuntime {
             None
         };
 
-        let key = self.format_key(collection_id.clone(), &tool.id);
+        let key = self.format_key(collection_id, &tool.id);
 
         // Since we use function names as keys, it may be easier to unintentionally overwrite a tool.
         // Users should delete the tool first and then insert it again (or update an existing one).
-        if let Some(_existing_tool) = self.get(collection_id.clone(), tool.id.clone()).await? {
+        if let Some(_existing_tool) = self.get(collection_id, tool.id.clone()).await? {
             anyhow::bail!("Tool with id {} already exists", tool.id);
         }
 
@@ -162,7 +162,7 @@ impl ToolsRuntime {
             Some(tool_ids) => {
                 let mut tools = Vec::new();
                 for tool_id in tool_ids {
-                    match self.get(collection_id.clone(), tool_id.clone()).await? {
+                    match self.get(collection_id, tool_id.clone()).await? {
                         Some(tool) => tools.push(tool),
                         None => anyhow::bail!("Tool with id {} not found", tool_id),
                     }

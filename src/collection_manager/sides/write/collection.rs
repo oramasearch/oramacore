@@ -6,8 +6,8 @@ use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
 use crate::{
-    ai::OramaModel,
     ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector,
+    ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
         DocumentStorageWriteOperation, OperationSender, OramaModelSerializable,

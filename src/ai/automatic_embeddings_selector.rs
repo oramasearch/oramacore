@@ -94,7 +94,7 @@ impl ChosenProperties {
         }
 
         // First, handle snake_case and kebab-case by replacing separators with spaces
-        let with_spaces = key.replace('_', " ").replace('-', " ");
+        let with_spaces = key.replace(['_', '-'], " ");
 
         // Buffer to build our humanized string
         let mut result = String::with_capacity(with_spaces.len());
@@ -123,7 +123,7 @@ impl ChosenProperties {
                         && with_spaces
                             .chars()
                             .nth(i + 1)
-                            .map_or(false, |next| next.is_lowercase()))
+                            .is_some_and(|next| next.is_lowercase()))
                 {
                     result.push(' ');
                 }

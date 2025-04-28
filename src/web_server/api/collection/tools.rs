@@ -15,7 +15,8 @@ use crate::{
     collection_manager::sides::{ReadSide, WriteSide},
     types::{
         ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams,
-    }, web_server::api::util::print_error,
+    },
+    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]

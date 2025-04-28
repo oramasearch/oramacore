@@ -466,13 +466,13 @@ impl Index {
         let document_count = self.doc_id_storage.read().await.len();
 
         // FieldId(0) is the default embedding field by construction
-        let automatically_chosen_properties = None;
-        
-        /*match score_fields.get(&FieldId(0)) {
-            Some(field) => field.get_automatic_embeddings_selector().await,
-            None => None,
+        let automatically_chosen_properties = if let Some(IndexScoreField::Embedding(field)) =
+            score_fields.iter().find(|f| f.field_id() == FieldId(0))
+        {
+            Some(field.get_automatic_embeddings_selector().await)
+        } else {
+            None
         };
-        */
 
         DescribeCollectionIndexResponse {
             id: self.index_id,
@@ -614,8 +614,11 @@ impl Index {
 
     pub async fn switch_to_embedding_hook(&self, hooks_runtime: Arc<HooksRuntime>) -> Result<()> {
         let mut score_fields = self.score_fields.write().await;
+
         for field in score_fields.iter_mut() {
-            field.switch_to_embedding_hook(hooks_runtime.clone());
+            if let IndexScoreField::Embedding(field) = field {
+                field.switch_to_embedding_hook(hooks_runtime.clone());
+            }
         }
 
         Ok(())
