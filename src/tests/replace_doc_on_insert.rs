@@ -11,9 +11,7 @@ async fn test_replace_doc_on_insert() {
     init_log();
 
     let test_context = TestContext::new().await;
-
     let collection_client = test_context.create_collection().await.unwrap();
-
     let index_client = collection_client.create_index().await.unwrap();
 
     index_client

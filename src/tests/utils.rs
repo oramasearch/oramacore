@@ -26,6 +26,7 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
+        triggers::Trigger,
         CollectionStats, CollectionsWriterConfig, IndexesConfig, InputSideChannelType,
         OramaModelSerializable, OutputSideChannelType, ReadSide, ReadSideConfig,
         SubstituteIndexReason, WriteSide, WriteSideConfig,
@@ -468,6 +469,50 @@ impl TestCollectionClient {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        trigger: Trigger,
+        trigger_id: Option<String>,
+    ) -> Result<Trigger> {
+        let trigger = self
+            .writer
+            .insert_trigger(
+                self.write_api_key,
+                self.collection_id,
+                trigger,
+                trigger_id.clone(),
+            )
+            .await?;
+
+        wait_for(self, |coll| {
+            let reader = coll.reader.clone();
+            let read_api_key = coll.read_api_key;
+            let collection_id = coll.collection_id;
+            let trigger_id = trigger_id.clone();
+            async move {
+                let trigger = reader
+                    .get_trigger(read_api_key, collection_id, trigger_id.unwrap())
+                    .await?;
+
+                if trigger.is_none() {
+                    bail!("Trigger not found");
+                }
+
+                Ok(())
+            }
+            .boxed()
+        })
+        .await?;
+
+        Ok(trigger)
+    }
+
+    pub async fn get_trigger(&self, trigger_id: String) -> Result<Option<Trigger>> {
+        self.reader
+            .get_trigger(self.read_api_key, self.collection_id, trigger_id)
+            .await
     }
 
     pub async fn substitute_index(
