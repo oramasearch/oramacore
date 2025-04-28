@@ -34,7 +34,7 @@ pub enum FieldType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum FilterFieldType {
+pub enum FilterFieldType {
     #[serde(rename = "number")]
     Number,
     #[serde(rename = "bool")]
@@ -44,7 +44,7 @@ enum FilterFieldType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum ScoreFieldType {
+pub enum ScoreFieldType {
     #[serde(rename = "string")]
     String,
     #[serde(rename = "embedding")]
@@ -52,7 +52,7 @@ enum ScoreFieldType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SerializedFilterFieldIndexer {
+pub struct SerializedFilterFieldIndexer {
     field_id: FieldId,
     field_path: Box<[String]>,
     is_array: bool,
@@ -67,7 +67,7 @@ pub enum SerializedFilterFieldType {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum SerializedEmbeddingStringCalculation {
+pub enum SerializedEmbeddingStringCalculation {
     AllProperties,
     Properties(Box<[Box<[String]>]>),
     Hook,

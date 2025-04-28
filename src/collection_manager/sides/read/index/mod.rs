@@ -25,7 +25,7 @@ use crate::{
         },
         CollectionLabels,
     },
-    nlp::{locales::Locale, TextParser},
+    nlp::{locales::Locale, NLPService, TextParser},
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
@@ -94,6 +94,7 @@ struct CommittedFields {
 pub struct Index {
     id: IndexId,
     locale: Locale,
+    text_parser: Arc<TextParser>,
 
     // This will contains all the temp index ids
     // This is needed because embedding calculation can arrive later,
@@ -118,13 +119,14 @@ pub struct Index {
 impl Index {
     pub fn new(
         id: IndexId,
-        locale: Locale,
+        text_parser: Arc<TextParser>,
         llm_service: Arc<llms::LLMService>,
         ai_service: Arc<AIService>,
     ) -> Self {
         Self {
             id,
-            locale,
+            locale: text_parser.locale(),
+            text_parser,
             aliases: vec![],
             deleted: None,
             promoted_to_runtime_index: AtomicBool::new(false),
@@ -145,6 +147,7 @@ impl Index {
     pub fn try_load(
         index_id: IndexId,
         data_dir: PathBuf,
+        nlp_service: Arc<NLPService>,
         llm_service: Arc<llms::LLMService>,
         ai_service: Arc<AIService>,
     ) -> Result<Self> {
@@ -209,6 +212,7 @@ impl Index {
         Ok(Self {
             id: dump.id,
             locale: dump.locale,
+            text_parser: nlp_service.get(dump.locale),
             deleted: None,
             promoted_to_runtime_index: AtomicBool::new(false),
             aliases: dump.aliases,
@@ -1260,8 +1264,7 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
-        let parser = TextParser::from_locale(self.locale);
-        let tokens = parser.tokenize_and_stem(term);
+        let tokens = self.text_parser.tokenize_and_stem(term);
         let tokens: Vec<_> = tokens
             .into_iter()
             .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))

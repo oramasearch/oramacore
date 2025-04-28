@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
-use crate::collection_manager::sides::hooks::{self, HooksRuntime};
+use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;

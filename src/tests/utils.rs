@@ -455,7 +455,7 @@ impl TestCollectionClient {
                 self.collection_id,
                 copy_from,
                 CreateIndexRequest {
-                    index_id: index_id.clone(),
+                    index_id,
                     embedding: None,
                 },
             )

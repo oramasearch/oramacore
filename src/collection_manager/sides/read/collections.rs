@@ -10,7 +10,7 @@ use crate::{
     file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     nlp::{locales::Locale, NLPService},
-    types::{ApiKey, CollectionId, DocumentId, SearchOffset},
+    types::{ApiKey, CollectionId},
 };
 
 use anyhow::{Context, Result};

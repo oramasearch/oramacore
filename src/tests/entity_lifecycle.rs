@@ -322,7 +322,7 @@ async fn test_index_substitution() {
     let test_context = test_context.reload().await;
     let collection_client = test_context
         .get_test_collection_client(
-            collection_client.collection_id.clone(),
+            collection_client.collection_id,
             collection_client.write_api_key,
             collection_client.read_api_key,
         )

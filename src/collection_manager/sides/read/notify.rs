@@ -10,8 +10,6 @@ use tracing::{info, warn};
 
 use crate::types::{CollectionId, IndexId};
 
-use super::collection;
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct NotifierConfig {
     pub url: Url,

@@ -6,7 +6,6 @@ use std::{
 
 use anyhow::{Context, Result};
 use atomic_write_file::AtomicWriteFile;
-use tokio::io::AsyncWriteExt;
 use tracing::{error, trace};
 
 pub async fn create_if_not_exists_async<P: AsRef<Path>>(p: P) -> Result<()> {

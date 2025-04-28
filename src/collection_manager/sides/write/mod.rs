@@ -3,7 +3,6 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use axum_openapi3::utoipa::openapi::info;
 use collection::DEFAULT_EMBEDDING_FIELD_NAME;
 pub use index::OramaModelSerializable;
 
@@ -18,7 +17,7 @@ use std::{
 };
 
 use super::{
-    field_name_to_path, field_names_to_paths,
+    field_name_to_path,
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
@@ -30,7 +29,6 @@ use super::{
 use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
-use index::EmbeddingStringCalculation;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -38,7 +36,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, error, info, trace};
 
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
@@ -46,8 +44,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 use crate::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService, OramaModel, RemoteLLMProvider},
     collection_manager::sides::{
-        CollectionWriteOperation, DocumentStorageWriteOperation, DocumentToInsert,
-        SubstituteIndexReason, WriteOperation,
+        DocumentStorageWriteOperation, DocumentToInsert, SubstituteIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},

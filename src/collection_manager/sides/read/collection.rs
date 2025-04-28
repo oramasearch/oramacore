@@ -99,6 +99,7 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
+                nlp_service.clone(),
                 llm_service.clone(),
                 ai_service.clone(),
             )?;
@@ -110,6 +111,7 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
+                nlp_service.clone(),
                 llm_service.clone(),
                 ai_service.clone(),
             )?;
@@ -905,7 +907,7 @@ impl CollectionReader {
                 let mut indexes_lock = self.indexes.write().await;
                 let index = Index::new(
                     index_id,
-                    locale,
+                    self.nlp_service.get(locale),
                     self.llm_service.clone(),
                     self.ai_service.clone(),
                 );
@@ -921,7 +923,7 @@ impl CollectionReader {
                 let mut temp_indexes_lock = self.temp_indexes.write().await;
                 let index = Index::new(
                     index_id,
-                    locale,
+                    self.nlp_service.get(locale),
                     self.llm_service.clone(),
                     self.ai_service.clone(),
                 );
@@ -2098,13 +2100,10 @@ pub struct IndexReadLock<'guard> {
 
 impl<'guard> IndexReadLock<'guard> {
     pub fn try_new(indexes_lock: RwLockReadGuard<'guard, Vec<Index>>, id: IndexId) -> Option<Self> {
-        match get_index_in_vector(&indexes_lock, id) {
-            Some(index) => Some(Self {
+        get_index_in_vector(&indexes_lock, id).map(|index| Self {
                 lock: indexes_lock,
                 index,
-            }),
-            None => None,
-        }
+            })
     }
 }
 
@@ -2128,13 +2127,10 @@ impl<'guard> IndexWriteLock<'guard> {
         indexes_lock: RwLockWriteGuard<'guard, Vec<Index>>,
         id: IndexId,
     ) -> Option<Self> {
-        match get_index_in_vector(&indexes_lock, id) {
-            Some(index) => Some(Self {
+        get_index_in_vector(&indexes_lock, id).map(|index| Self {
                 lock: indexes_lock,
                 index,
-            }),
-            None => None,
-        }
+            })
     }
 }
 impl Deref for IndexWriteLock<'_> {

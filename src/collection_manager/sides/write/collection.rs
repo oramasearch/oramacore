@@ -1,9 +1,6 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Context, Result};
-use axum_extra::handler::Or;
-use bincode::de;
-use mobc::runtime;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -19,16 +16,13 @@ use crate::{
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
-        IndexId, LanguageDTO,
+        IndexId,
     },
 };
 
-use super::{
-    embedding::{self, MultiEmbeddingCalculationRequest},
-    index::Index,
-};
+use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
 
-pub const DEFAULT_EMBEDDING_FIELD_NAME: &'static str = "___orama_auto_embedding";
+pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
 struct CollectionRuntimeConfig {
     default_locale: Locale,
@@ -180,7 +174,7 @@ impl CollectionWriter {
             description: self.description.clone(),
             write_api_key: self.write_api_key.expose().to_string(),
             read_api_key: self.read_api_key.expose().to_string(),
-            default_locale: default_locale,
+            default_locale,
             embeddings_model: OramaModelSerializable(embeddings_model),
             indexes,
             temporary_indexes,

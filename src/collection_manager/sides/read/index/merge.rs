@@ -67,7 +67,7 @@ pub fn merge_number_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
                     info.data_dir = data_dir;
 
@@ -165,7 +165,7 @@ pub fn merge_string_filter_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
                     info.data_dir = data_dir;
 
@@ -270,7 +270,7 @@ pub fn merge_bool_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
                     info.data_dir = data_dir;
 
@@ -368,7 +368,7 @@ pub fn merge_string_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
                     info.data_dir = data_dir;
 
@@ -463,7 +463,7 @@ pub fn merge_vector_field(
                         // Instead we should... ???? WHAT?
                         // TODO: check if this is the right way to do it
                         .overwrite(true);
-                    copy_items(&[old_dir], &data_dir.parent().unwrap(), &options)?;
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
                     // And move the field to the new directory
                     info.data_dir = data_dir;
 
