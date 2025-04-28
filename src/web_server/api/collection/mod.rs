@@ -11,6 +11,7 @@ mod hooks;
 mod search;
 mod segments;
 mod system_prompts;
+mod tools;
 mod triggers;
 
 pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>) -> Router {
@@ -22,6 +23,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(admin::apis(write_side.clone()))
             .merge(segments::write_apis(write_side.clone()))
             .merge(triggers::write_apis(write_side.clone()))
+            .merge(tools::write_apis(write_side.clone()))
             .merge(system_prompts::write_apis(write_side))
     } else {
         collection_router
@@ -34,6 +36,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(answer::apis(read_side.clone()))
             .merge(segments::read_apis(read_side.clone()))
             .merge(triggers::read_apis(read_side.clone()))
+            .merge(tools::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side))
     } else {
         collection_router

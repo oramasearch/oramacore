@@ -13,6 +13,7 @@ class EmbeddingsConfig:
     dynamically_load_models: Optional[bool] = False
     execution_providers: List[str] = field(default_factory=lambda: ["CUDAExecutionProvider"])
     total_threads: Optional[int] = 8
+    automatic_embeddings_selector: None = None
 
     def __post_init__(self):
         available_providers = [
@@ -47,7 +48,7 @@ class OramaAIConfig:
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     total_threads: Optional[int] = 12
-
+    
     rust_server_host: Optional[str] = "0.0.0.0"
     rust_server_port: Optional[int] = 8080
 

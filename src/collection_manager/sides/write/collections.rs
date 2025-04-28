@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::info;
 
+use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
@@ -28,6 +29,7 @@ pub struct CollectionsWriter {
     op_sender: OperationSender,
     hooks_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl CollectionsWriter {
@@ -37,6 +39,7 @@ impl CollectionsWriter {
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         op_sender: OperationSender,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
 
@@ -62,6 +65,7 @@ impl CollectionsWriter {
                     op_sender,
                     hooks_runtime,
                     nlp_service,
+                    automatic_embeddings_selector,
                 });
             }
         };
@@ -80,6 +84,7 @@ impl CollectionsWriter {
                 embedding_sender.clone(),
                 hooks_runtime.clone(),
                 op_sender.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .await?;
             collections.insert(collection_id, collection);
@@ -89,10 +94,10 @@ impl CollectionsWriter {
             collections: RwLock::new(collections),
             config,
             embedding_sender,
-            // collection_options: collection_info.collection_options.into_iter().collect(),
             op_sender,
             hooks_runtime,
             nlp_service,
+            automatic_embeddings_selector,
         };
 
         Ok(writer)
@@ -139,6 +144,7 @@ impl CollectionsWriter {
             self.hooks_runtime.clone(),
             self.op_sender.clone(),
             self.nlp_service.clone(),
+            self.automatic_embeddings_selector.clone(),
         );
 
         let mut collections = self.collections.write().await;

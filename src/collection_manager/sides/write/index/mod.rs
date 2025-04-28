@@ -18,7 +18,7 @@ use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{info, instrument, trace};
 
 use crate::{
-    ai::OramaModel,
+    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
         field_names_to_paths, hooks::HooksRuntime, CollectionWriteOperation,
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
@@ -59,6 +59,7 @@ pub struct Index {
     op_sender: OperationSender,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     hook_runtime: Arc<HooksRuntime>,
+    automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl Index {
@@ -69,6 +70,7 @@ impl Index {
         text_parser: Arc<TextParser>,
         op_sender: OperationSender,
         hook_runtime: Arc<HooksRuntime>,
+        automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let field_id = 0;
         let score_fields = vec![];
@@ -91,6 +93,7 @@ impl Index {
             op_sender,
             hook_runtime,
             embedding_sender,
+            automatically_chosen_properties,
         })
     }
 
@@ -102,6 +105,7 @@ impl Index {
         hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         hook_runtime: Arc<HooksRuntime>,
+        automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let dump: IndexDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -124,6 +128,7 @@ impl Index {
                     index_id,
                     hooks_runtime.clone(),
                     embedding_sender.clone(),
+                    automatically_chosen_properties.clone(),
                 )
             })
             .collect();
@@ -146,6 +151,7 @@ impl Index {
             op_sender,
             hook_runtime,
             embedding_sender,
+            automatically_chosen_properties,
         })
     }
 
@@ -216,6 +222,7 @@ impl Index {
             model,
             string_calculation,
             self.embedding_sender.clone(),
+            self.automatically_chosen_properties.clone(),
         );
 
         let mut field_lock = self.score_fields.write().await;
@@ -458,10 +465,20 @@ impl Index {
 
         let document_count = self.doc_id_storage.read().await.len();
 
+        // FieldId(0) is the default embedding field by construction
+        let automatically_chosen_properties = None;
+        
+        /*match score_fields.get(&FieldId(0)) {
+            Some(field) => field.get_automatic_embeddings_selector().await,
+            None => None,
+        };
+        */
+
         DescribeCollectionIndexResponse {
             id: self.index_id,
             document_count,
             fields,
+            automatically_chosen_properties,
         }
     }
 

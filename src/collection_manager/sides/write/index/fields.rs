@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
@@ -8,10 +7,10 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    ai::OramaModel,
+    ai::{automatic_embeddings_selector::{AutomaticEmbeddingsSelector, ChosenProperties}, OramaModel},
     collection_manager::sides::{
         hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
         write::embedding::MultiEmbeddingCalculationRequest,
@@ -426,6 +425,7 @@ impl IndexScoreField {
         model: OramaModel,
         calculation: EmbeddingStringCalculation,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         IndexScoreField::Embedding(EmbeddingField::new(
             collection_id,
@@ -435,6 +435,7 @@ impl IndexScoreField {
             model,
             calculation,
             embedding_sender,
+            automatic_embeddings_selector,
         ))
     }
 
@@ -487,6 +488,7 @@ impl IndexScoreField {
         index_id: IndexId,
         hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         match dump {
             SerializedScoreFieldType::String(field, locale) => {
@@ -528,6 +530,7 @@ impl IndexScoreField {
                     }
                 },
                 embedding_sender,
+                automatic_embeddings_selector,
             ),
         }
     }
@@ -638,6 +641,8 @@ pub struct EmbeddingField {
     chunker: Chunker,
     calculation: EmbeddingStringCalculation,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+    embeddings_selector_cache: RwLock<HashMap<String, ChosenProperties>>,
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 impl EmbeddingField {
     pub fn new(
@@ -648,6 +653,7 @@ impl EmbeddingField {
         model: OramaModel,
         calculation: EmbeddingStringCalculation,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         let max_tokens = model.senquence_length();
         let overlap = model.overlap();
@@ -667,6 +673,8 @@ impl EmbeddingField {
             chunker,
             calculation,
             embedding_sender,
+            embeddings_selector_cache: RwLock::new(HashMap::new()),
+            automatic_embeddings_selector,
         }
     }
 
@@ -689,7 +697,34 @@ impl EmbeddingField {
     ) -> Result<Vec<IndexedValue>> {
         let input: String = match &self.calculation {
             EmbeddingStringCalculation::Automatic => {
-                panic!("Automatic calculation is not implemented yet");
+                let cache_read = self.embeddings_selector_cache.read().await;
+                let mut cache_key: Vec<String> = Vec::new();
+
+                for (key, _value) in doc.iter() {
+                    cache_key.push(key.to_string());
+                }
+
+                cache_key.sort();
+
+                if let Some(cached_value) = cache_read.get(&cache_key.join(":")) {
+                    cached_value.format(doc)
+                } else {
+                    drop(cache_read);
+                    let mut cache_write = self.embeddings_selector_cache.write().await;
+                    let cache_key = cache_key.join(":");
+
+                    let chosen_properties = self
+                        .automatic_embeddings_selector
+                        .choose_properties(doc)
+                        .await
+                        .context("Unable to choose embedding properties")?;
+
+                    let embeddable_value = chosen_properties.format(doc);
+
+                    cache_write.insert(cache_key.clone(), chosen_properties.clone());
+
+                    embeddable_value
+                }
             }
             EmbeddingStringCalculation::AllProperties => {
                 fn recursive_object_inspection<'doc>(

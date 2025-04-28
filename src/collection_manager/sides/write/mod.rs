@@ -42,18 +42,13 @@ use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
-    ai::{gpu::LocalGPUManager, llms::LLMService, AIService, OramaModel, RemoteLLMProvider},
-    collection_manager::sides::{
+    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, gpu::LocalGPUManager, llms::LLMService, tools::{Tool, ToolsRuntime}, AIService, OramaModel, RemoteLLMProvider}, collection_manager::sides::{
         DocumentStorageWriteOperation, DocumentToInsert, SubstituteIndexReason, WriteOperation,
-    },
-    file_utils::BufferedFile,
-    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
-    nlp::NLPService,
-    types::{
+    }, file_utils::BufferedFile, metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty}, nlp::NLPService, types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
         IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO,
-    },
+    }
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -92,10 +87,13 @@ pub struct WriteSide {
     segments: SegmentInterface,
     triggers: TriggerInterface,
     system_prompts: SystemPromptInterface,
+    tools: ToolsRuntime,
     kv: Arc<KV>,
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl WriteSide {
@@ -106,6 +104,7 @@ impl WriteSide {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         local_gpu_manager: Arc<LocalGPUManager>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
         let collections_writer_config = config.config;
@@ -148,6 +147,7 @@ impl WriteSide {
         let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
         let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
         let hook_runtime = Arc::new(hook);
 
@@ -157,6 +157,7 @@ impl WriteSide {
             hook_runtime.clone(),
             nlp_service.clone(),
             op_sender.clone(),
+            automatic_embeddings_selector.clone(),
         )
         .await
         .context("Cannot load collections")?;
@@ -177,9 +178,11 @@ impl WriteSide {
             segments,
             triggers,
             system_prompts,
+            tools,
             kv,
             local_gpu_manager,
             llm_service,
+            automatic_embeddings_selector,
         };
 
         let write_side = Arc::new(write_side);
@@ -720,7 +723,12 @@ impl WriteSide {
         option.id = collection_id_tmp;
 
         self.collections
-            .create_collection(option, self.sender.clone(), self.hook_runtime.clone())
+            .create_collection(
+                option,
+                self.sender.clone(),
+                self.hook_runtime.clone(),
+                self.automatic_embeddings_selector.clone(),
+            )
             .await?;
 
         let hook = self
@@ -1185,6 +1193,53 @@ impl WriteSide {
                 bail!("Cannot parse trigger id")
             }
         }
+    }
+
+    pub async fn insert_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool: Tool,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.tools
+            .insert(collection_id, tool.clone())
+            .await
+            .context("Cannot insert tool")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool_id: String,
+    ) -> Result<()> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        self.tools
+            .delete(collection_id, tool_id.clone())
+            .await
+            .context("Cannot delete tool")?;
+
+        Ok(())
+    }
+
+    pub async fn update_tool(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        tool: Tool,
+    ) -> Result<()> {
+        self.delete_tool(write_api_key, collection_id, tool.id.clone())
+            .await?;
+        self.insert_tool(write_api_key, collection_id, tool).await?;
+
+        Ok(())
     }
 
     pub fn is_gpu_overloaded(&self) -> bool {

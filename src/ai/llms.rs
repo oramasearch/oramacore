@@ -4,7 +4,8 @@ use async_openai::{
     types::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs,
+        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall,
+        FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -25,6 +26,7 @@ use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLL
 pub enum KnownPrompts {
     Answer,
     Autoquery,
+    AutomaticEmbeddingsSelector,
     OptimizeQuery,
     PartyPlanner,
     Segmenter,
@@ -116,6 +118,12 @@ impl KnownPrompts {
             KnownPrompts::GenerateRelatedQueries => KnownPrompt {
                 system: include_str!("../prompts/v1/related_queries/system.md").to_string(),
                 user: include_str!("../prompts/v1/related_queries/user.md").to_string(),
+            },
+            KnownPrompts::AutomaticEmbeddingsSelector => KnownPrompt {
+                system: include_str!("../prompts/v1/automatic_embeddings_selector/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/automatic_embeddings_selector/user.md")
+                    .to_string(),
             },
         }
     }
@@ -383,6 +391,49 @@ impl LLMService {
             remote_clients,
             model: local_vllm_config.model,
         })
+    }
+
+    pub async fn execute_tools(
+        &self,
+        messages: Vec<ChatCompletionRequestMessage>,
+        tools: Vec<FunctionObject>,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Option<Vec<FunctionCall>>> {
+        let chosen_model = self.get_chosen_model(llm_config.clone());
+        let llm_client = self.get_chosen_llm_client(llm_config);
+
+        let all_tools: Vec<ChatCompletionTool> = tools
+            .iter()
+            .map(|tool| ChatCompletionTool {
+                r#type: ChatCompletionToolType::Function,
+                function: tool.clone(),
+            })
+            .collect();
+
+        let request = CreateChatCompletionRequestArgs::default()
+            .max_tokens(1024u32)
+            .temperature(0.0)
+            .model(chosen_model)
+            .messages(messages)
+            .tools(all_tools)
+            .build()?;
+
+        let response_message = llm_client
+            .chat()
+            .create(request)
+            .await?
+            .choices
+            .first()
+            .unwrap()
+            .message
+            .clone();
+
+        match response_message.tool_calls {
+            Some(calls) => Ok(Some(
+                calls.iter().map(|call| call.function.clone()).collect(),
+            )),
+            None => Ok(None),
+        }
     }
 
     pub async fn run_known_prompt(

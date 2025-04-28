@@ -7,6 +7,7 @@ use tracing::{info, warn};
 
 use crate::{
     ai::OramaModel,
+    ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector,
     collection_manager::sides::{
         field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
         DocumentStorageWriteOperation, OperationSender, OramaModelSerializable,
@@ -41,6 +42,7 @@ pub struct CollectionWriter {
     op_sender: OperationSender,
     hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl CollectionWriter {
@@ -55,6 +57,7 @@ impl CollectionWriter {
         hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
         nlp_service: Arc<NLPService>,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         Self {
             id,
@@ -71,6 +74,7 @@ impl CollectionWriter {
             op_sender,
             hook_runtime,
             nlp_service,
+            automatic_embeddings_selector,
         }
     }
 
@@ -81,6 +85,7 @@ impl CollectionWriter {
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
+        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
             .context("Cannot open info.json file")?
@@ -107,6 +112,7 @@ impl CollectionWriter {
                 hooks_runtime.clone(),
                 embedding_sender.clone(),
                 hooks_runtime.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
             indexes.insert(index_id, index);
@@ -121,6 +127,7 @@ impl CollectionWriter {
                 hooks_runtime.clone(),
                 embedding_sender.clone(),
                 hooks_runtime.clone(),
+                automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
             temp_indexes.insert(temp_index_id, index);
@@ -141,6 +148,7 @@ impl CollectionWriter {
             op_sender,
             hook_runtime,
             nlp_service,
+            automatic_embeddings_selector,
         })
     }
 
@@ -215,6 +223,7 @@ impl CollectionWriter {
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
             self.hook_runtime.clone(),
+            self.automatic_embeddings_selector.clone(),
         )
         .await
         .context("Cannot create index")?;
@@ -282,6 +291,7 @@ impl CollectionWriter {
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
             self.hook_runtime.clone(),
+            self.automatic_embeddings_selector.clone(),
         )
         .await
         .context("Cannot create index")?;
@@ -341,47 +351,7 @@ impl CollectionWriter {
 
         Ok(())
     }
-    /*
-        pub async fn create_temporary_index_from(
-            &self,
-            index_id: IndexId,
-            temporary_index_id: IndexId,
-            reindex_config: ReindexConfig,
-        ) -> Result<()> {
-            let index = self.get_index(index_id).await.context("Cannot get index")?;
 
-            let locale: Locale = reindex_config
-                .language
-                .map(|l| l.into())
-                .unwrap_or(index.get_locale());
-
-            let embedding_field_definition = index
-                .get_embedding_field_definition()
-                .await
-                .context("Cannot get embedding field definition")?;
-
-            let req = CreateIndexRequest {
-                id: temporary_index_id,
-                embedding_field_definition,
-            };
-
-            let temp_index = Index::empty(
-                self.id,
-                req,
-                self.embedding_sender.clone(),
-                self.get_text_parser(locale),
-                self.op_sender.clone(),
-            )
-            .await
-            .context("Cannot create index")?;
-
-            let mut temp_indexes = self.temp_indexes.write().await;
-            temp_indexes.insert(temporary_index_id, temp_index);
-            drop(temp_indexes);
-
-            Ok(())
-        }
-    */
     pub async fn get_temporary_index<'s, 'index>(
         &'s self,
         id: IndexId,

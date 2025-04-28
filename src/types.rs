@@ -1,4 +1,7 @@
 use crate::ai::{OramaModel, RemoteLLMProvider};
+
+use crate::ai::automatic_embeddings_selector::ChosenProperties;
+
 use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::index::FieldType;
 use crate::collection_manager::sides::{
@@ -9,6 +12,12 @@ use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
 use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
+
+use async_openai::types::{
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+};
+
 use redact::Secret;
 use serde::de::{Error, Unexpected, Visitor};
 use serde::{de, Deserialize, Serialize};
@@ -262,6 +271,10 @@ impl FlattenDocument {
         self.0
     }
 
+    pub fn get_inner(&self) -> &Map<String, Value> {
+        &self.0
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.0.iter()
     }
@@ -497,6 +510,7 @@ pub enum DocumentFields {
     Properties(Vec<String>),
     Hook(HookName),
     AllStringProperties,
+    Automatic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1047,17 +1061,42 @@ pub struct RelatedRequest {
     pub format: Option<RelatedQueriesFormat>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy, ToSchema)]
 pub enum Role {
+    #[serde(rename = "system")]
     System,
+    #[serde(rename = "assistant")]
     Assistant,
+    #[serde(rename = "user")]
     User,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InteractionMessage {
     pub role: Role,
     pub content: String,
+}
+
+impl InteractionMessage {
+    pub fn to_async_openai_message(&self) -> ChatCompletionRequestMessage {
+        match &self.role {
+            Role::System => ChatCompletionRequestSystemMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+            Role::Assistant => ChatCompletionRequestAssistantMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+            Role::User => ChatCompletionRequestUserMessageArgs::default()
+                .content(self.content.clone())
+                .build()
+                .unwrap()
+                .into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1198,6 +1237,35 @@ pub enum IndexEmbeddingsCalculation {
 pub struct CreateIndexRequest {
     pub index_id: IndexId,
     pub embedding: Option<IndexEmbeddingsCalculation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertToolsParams {
+    pub id: String,
+    pub description: String,
+    pub parameters: String,
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeleteToolParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateToolParams {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub parameters: String,
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RunToolsParams {
+    pub tool_ids: Option<Vec<String>>,
+    pub messages: Vec<InteractionMessage>,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[cfg(test)]
@@ -1659,6 +1727,7 @@ pub struct DescribeCollectionIndexResponse {
     pub id: IndexId,
     pub document_count: usize,
     pub fields: Vec<IndexFieldType>,
+    pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]

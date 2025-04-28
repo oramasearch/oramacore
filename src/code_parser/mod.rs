@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 use tree_sitter_typescript::{LANGUAGE_TSX, LANGUAGE_TYPESCRIPT};
 
+pub mod tool_parser;
+
 #[derive(Debug, Eq, Hash, PartialEq, Copy, Clone, Serialize, Deserialize, ToSchema)]
 pub enum CodeLanguage {
     JavaScript,
