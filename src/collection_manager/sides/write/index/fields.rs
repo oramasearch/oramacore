@@ -31,7 +31,9 @@ use super::{get_value, EmbeddingStringCalculation};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldType {
+    #[serde(rename = "filter")]
     Filter(FilterFieldType),
+    #[serde(rename = "score")]
     Score(ScoreFieldType),
 }
 

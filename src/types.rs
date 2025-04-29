@@ -585,6 +585,11 @@ pub struct DeleteCollection {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct DeleteIndex {
+    pub id: IndexId,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
@@ -604,15 +609,10 @@ pub struct CreateCollection {
     pub embeddings_model: OramaModelSerializable,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, ToSchema)]
 pub struct ReindexConfig {
-    #[serde(default)]
-    pub description: Option<String>,
-
-    #[serde(default)]
-    pub language: Option<LanguageDTO>,
-    #[serde(default)]
-    pub embeddings: Option<CreateCollectionEmbeddings>,
+    pub language: LanguageDTO,
+    pub embedding_model: OramaModelSerializable,
 
     pub reference: Option<String>,
 }
@@ -1220,8 +1220,7 @@ pub struct InsertDocumentsResult {
     pub failed: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub enum IndexEmbeddingsCalculation {
     #[serde(rename = "automatic")]
     Automatic,
@@ -1233,10 +1232,18 @@ pub enum IndexEmbeddingsCalculation {
     Hook,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateIndexRequest {
     pub index_id: IndexId,
     pub embedding: Option<IndexEmbeddingsCalculation>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SubstituteIndexRequest {
+    pub runtime_index_id: IndexId,
+    pub temp_index_id: IndexId,
+    #[serde(default)]
+    pub reference: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1694,7 +1701,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
 pub struct IndexId(StackString<64>);
 
 impl IndexId {

@@ -320,13 +320,13 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn delete_index(&self, index_id: IndexId) -> Result<()> {
+    pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>> {
         let mut indexes = self.indexes.write().await;
         let index = match indexes.remove(&index_id) {
             Some(index) => index,
             None => {
                 warn!(collection_id= ?self.id, "Index not found. Ignored");
-                return Ok(());
+                return Ok(vec![]);
             }
         };
         drop(indexes);
@@ -342,14 +342,14 @@ impl CollectionWriter {
         let doc_ids = index.get_document_ids().await;
         self.op_sender
             .send(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::DeleteDocuments { doc_ids },
+                DocumentStorageWriteOperation::DeleteDocuments {
+                    doc_ids: doc_ids.clone(),
+                },
             ))
             .await
             .context("Cannot send delete documents operation")?;
 
-        // index.remove_from_fs().await;
-
-        Ok(())
+        Ok(doc_ids)
     }
 
     pub async fn get_temporary_index<'s, 'index>(
@@ -459,12 +459,13 @@ impl CollectionWriter {
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
         reason: SubstituteIndexReason,
+        reference: Option<String>,
     ) -> Result<()> {
         self.op_sender
             .send(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::SubstituteIndex {
-                    reference: None,
+                    reference,
                     runtime_index_id,
                     temp_index_id,
                     reason,

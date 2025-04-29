@@ -96,7 +96,7 @@ impl CommittedBoolField {
         let w = value.into();
         Ok(self
             .inner
-            .get_items(w, w)
+            .get_items((true, w), (true, w))
             .context("Cannot get items for bool field")?
             .flat_map(|item| item.values))
     }
@@ -104,12 +104,12 @@ impl CommittedBoolField {
     pub fn clone_inner(&self) -> Result<(HashSet<DocumentId>, HashSet<DocumentId>)> {
         let false_docs: HashSet<_> = self
             .inner
-            .get_items(BoolWrapper::False, BoolWrapper::False)?
+            .get_items((true, BoolWrapper::False), (true, BoolWrapper::False))?
             .flat_map(|item| item.values)
             .collect();
         let true_docs: HashSet<_> = self
             .inner
-            .get_items(BoolWrapper::True, BoolWrapper::True)?
+            .get_items((true, BoolWrapper::True), (true, BoolWrapper::True))?
             .flat_map(|item| item.values)
             .collect();
 

@@ -25,7 +25,7 @@ use crate::web_server::{HttpConfig, WebServer};
 use super::utils::{create_grpc_server, generate_new_path, hooks_runtime_config};
 
 const HOST: &str = "127.0.0.1";
-const PORT: u16 = 8081;
+const PORT: u16 = 8080;
 
 async fn wait_for_server() {
     loop {
@@ -68,16 +68,16 @@ async fn start_server() {
             port: address.port(),
             api_key: None,
             max_connections: 1,
+            embeddings: None,
             llm: crate::ai::AIServiceLLMConfig {
                 port: 8000,
                 host: "localhost".to_string(),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
             },
-            embeddings: None,
             remote_llms: None,
         },
         writer_side: WriteSideConfig {
-            master_api_key: ApiKey::try_from("my-master-api-key").unwrap(),
+            master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
             hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {
@@ -142,9 +142,15 @@ async fn run_hurl_test(content: &'static str) -> Result<HurlResult> {
     Ok(r.unwrap().unwrap())
 }
 
-async fn run_segments_tests() {
-    let content = include_str!("./hurl/kv-actions-test.hurl");
+async fn run_fulltext_search_test() {
+    let content = include_str!("./hurl/api-test.hurl");
 
+    let result = run_hurl_test(content).await.unwrap();
+    assert!(result.success);
+}
+
+async fn run_embedding_search_test() {
+    let content = include_str!("./hurl/embedding-api-test.hurl");
     let result = run_hurl_test(content).await.unwrap();
     assert!(result.success);
 }
@@ -152,7 +158,8 @@ async fn run_segments_tests() {
 async fn run_tests() {
     wait_for_server().await;
 
-    run_segments_tests().await;
+    run_fulltext_search_test().await;
+    run_embedding_search_test().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]

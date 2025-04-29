@@ -58,7 +58,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO,
+        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, SubstituteIndexRequest,
     },
 };
 
@@ -103,8 +103,6 @@ pub struct WriteSide {
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
-
-    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl WriteSide {
@@ -193,7 +191,6 @@ impl WriteSide {
             kv,
             local_gpu_manager,
             llm_service,
-            automatic_embeddings_selector,
         };
 
         let write_side = Arc::new(write_side);
@@ -279,6 +276,7 @@ impl WriteSide {
         collection_id: CollectionId,
         language: LanguageDTO,
         model: OramaModel,
+        reference: Option<String>,
     ) -> Result<()> {
         let collection = self
             .collections
@@ -348,11 +346,15 @@ impl WriteSide {
                 };
             }
 
+            let req = SubstituteIndexRequest {
+                runtime_index_id: copy_from,
+                temp_index_id: new_index_id,
+                reference: reference.clone(),
+            };
             self.substitute_index(
                 write_api_key,
                 collection_id,
-                copy_from,
-                new_index_id,
+                req,
                 SubstituteIndexReason::CollectionReindexed,
             )
             .await
@@ -368,8 +370,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        runtime_index_id: IndexId,
-        temp_index_id: IndexId,
+        req: SubstituteIndexRequest,
         reason: SubstituteIndexReason,
     ) -> Result<()> {
         let collection = self
@@ -380,7 +381,12 @@ impl WriteSide {
         collection.check_write_api_key(write_api_key)?;
 
         collection
-            .substiture_index(runtime_index_id, temp_index_id, reason)
+            .substiture_index(
+                req.runtime_index_id,
+                req.temp_index_id,
+                reason,
+                req.reference,
+            )
             .await?;
 
         Ok(())
@@ -432,7 +438,9 @@ impl WriteSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_write_api_key(write_api_key)?;
 
-        collection.delete_index(index_id).await?;
+        let document_to_remove = collection.delete_index(index_id).await?;
+
+        self.document_storage.remove(document_to_remove).await;
 
         Ok(())
     }
@@ -597,10 +605,10 @@ impl WriteSide {
         master_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<()> {
-        self.check_master_api_key(master_api_key).unwrap();
+        self.check_master_api_key(master_api_key)?;
 
-        let deleted = self.collections.delete_collection(collection_id).await;
-        if deleted {
+        let document_ids = self.collections.delete_collection(collection_id).await;
+        if let Some(document_ids) = document_ids {
             self.commit()
                 .await
                 .context("Cannot commit collections after collection deletion")?;
@@ -614,6 +622,8 @@ impl WriteSide {
                 .delete_with_prefix(collection_id.as_str())
                 .await
                 .context("Cannot delete collection from KV")?;
+
+            self.document_storage.remove(document_ids).await;
         }
 
         Ok(())
@@ -708,177 +718,6 @@ impl WriteSide {
         };
         Ok(Some(collection.as_dto().await))
     }
-
-    /*
-    pub async fn create_collection_from(
-        &self,
-        write_api_key: ApiKey,
-        request: CreateCollectionFrom,
-    ) -> Result<CollectionId> {
-        info!("create temporary collection");
-        self.check_write_api_key(request.from, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-
-        let collection_id_tmp = cuid2::create_id();
-        let collection_id_tmp = CollectionId::from(collection_id_tmp);
-
-        let mut option = self
-            .collections
-            .collection_options
-            .get(&request.from)
-            .ok_or_else(|| anyhow!("Collection options not found"))?
-            .clone();
-        option.language = request.language.or(option.language);
-        option.embeddings = request.embeddings.or(option.embeddings);
-        option.id = collection_id_tmp;
-
-        self.collections
-            .create_collection(
-                option,
-                self.sender.clone(),
-                self.hook_runtime.clone(),
-                self.automatic_embeddings_selector.clone(),
-            )
-            .await?;
-
-        let hook = self
-            .get_javascript_hook(
-                write_api_key,
-                request.from,
-                HookName::SelectEmbeddingsProperties,
-            )
-            .await
-            .context("Cannot get embedding hook")?;
-        if let Some(hook) = hook {
-            self.insert_javascript_hook(
-                write_api_key,
-                collection_id_tmp,
-                HookName::SelectEmbeddingsProperties,
-                hook,
-            )
-            .await
-            .context("Cannot insert embedding hook to new collection")?;
-        }
-
-        Ok(collection_id_tmp)
-    }
-
-    pub async fn swap_collections(
-        &self,
-        write_api_key: ApiKey,
-        request: SwapCollections,
-    ) -> Result<()> {
-        info!("Replacing collection");
-        self.check_write_api_key(request.from, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-        self.check_write_api_key(request.to, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-
-        self.collections
-            .replace(request.from, request.to)
-            .await
-            .context("Cannot replace collection")?;
-        info!("Replaced");
-
-        info!("Substitute collection");
-        self.sender
-            .send(WriteOperation::SubstituteCollection {
-                subject_collection_id: request.from,
-                target_collection_id: request.to,
-                reference: request.reference,
-            })
-            .await?;
-
-        self.commit()
-            .await
-            .context("Cannot commit collection after replace")?;
-
-        Ok(())
-    }
-    */
-
-    /*
-    pub async fn reindex(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        temp_index_id: IndexId,
-        reindex_config: ReindexConfig,
-    ) -> Result<()> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
-
-        collection
-            .create_temporary_index_from(index_id, temp_index_id, reindex_config)
-            .await
-            .context("Cannot create temporary index")?;
-        let temp_index = collection
-            .get_temporary_index(temp_index_id)
-            .await
-            // This should never happen because we just created it above
-            .expect("Temporary index not found but it should be there because already created");
-
-        let index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
-        let document_ids = index.get_document_ids().await;
-        drop(index);
-
-        let mut stream = self.document_storage.stream_documents(document_ids).await;
-        while let Some((doc_id, doc)) = stream.next().await {
-            debug!(?doc_id, "Reindexing document");
-
-            let inner = doc.inner;
-            let inner: Map<String, Value> =
-                serde_json::from_str(inner.get()).context("Cannot deserialize document")?;
-            let doc = Document { inner };
-            match temp_index
-                .process_new_document(doc_id, doc)
-                .await
-                .context("Cannot process document")
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    // If the document cannot be processed, we should remove it from the document storage
-                    // and from the read side
-                    // NB: check if the error handling is correct
-
-                    self.op_sender
-                        .send(WriteOperation::Collection(
-                            collection_id,
-                            CollectionWriteOperation::DeleteDocuments {
-                                doc_ids: vec![doc_id],
-                            },
-                        ))
-                        .await
-                        .context("Cannot send delete document operation")?;
-
-                    return Err(e);
-                }
-            };
-            info!("Document reindexed");
-        }
-        drop(temp_index);
-
-        collection
-            .promote_temp_index(index_id, temp_index_id)
-            .await
-            .context("Cannot replace index")?;
-
-        drop(collection);
-
-        Ok(())
-    }
-    */
 
     pub async fn get_javascript_hook(
         &self,

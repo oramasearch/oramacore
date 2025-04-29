@@ -313,13 +313,6 @@ pub fn merge_string_field(
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
 ) -> Result<Option<CommittedStringField>> {
-    println!(
-        "Merge string field: uncommitted {:?}, committed {:?} dest: {:?}",
-        uncommitted.is_some(),
-        committed.is_some(),
-        data_dir
-    );
-
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed string fields are None. Never should happen");

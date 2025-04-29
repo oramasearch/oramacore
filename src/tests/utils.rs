@@ -33,7 +33,7 @@ use crate::{
     },
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId,
-        InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult,
+        InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult, SubstituteIndexRequest,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -521,12 +521,16 @@ impl TestCollectionClient {
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
     ) -> Result<()> {
+        let req = SubstituteIndexRequest {
+            runtime_index_id,
+            temp_index_id,
+            reference: None,
+        };
         self.writer
             .substitute_index(
                 self.write_api_key,
                 self.collection_id,
-                runtime_index_id,
-                temp_index_id,
+                req,
                 SubstituteIndexReason::IndexResynced,
             )
             .await?;
@@ -600,6 +604,7 @@ impl TestCollectionClient {
                 self.collection_id,
                 language,
                 OramaModel::BgeSmall,
+                None,
             )
             .await?;
 

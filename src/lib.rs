@@ -40,7 +40,7 @@ pub mod build_info;
 pub mod ai;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct LogConfig {

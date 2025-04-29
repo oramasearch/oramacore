@@ -84,7 +84,7 @@ ai_server:
         default_model_group: all
         dynamically_load_models: false
         execution_providers:
-            - CUDAExecutionProvider
+            #- CUDAExecutionProvider
             - CPUExecutionProvider
         total_threads: 8
         # automatic_embeddings_selector:

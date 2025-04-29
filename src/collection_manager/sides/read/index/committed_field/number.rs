@@ -76,22 +76,30 @@ impl CommittedNumberField {
         's: 'iter,
     {
         let (min, max) = match filter_number {
-            NumberFilter::Equal(value) => (SerializableNumber(*value), SerializableNumber(*value)),
-            NumberFilter::Between((min, max)) => {
-                (SerializableNumber(*min), SerializableNumber(*max))
-            }
-            NumberFilter::GreaterThan(min) => {
-                (SerializableNumber(*min), SerializableNumber::max_value())
-            }
-            NumberFilter::GreaterThanOrEqual(min) => {
-                (SerializableNumber(*min), SerializableNumber::max_value())
-            }
-            NumberFilter::LessThan(max) => {
-                (SerializableNumber::min_value(), SerializableNumber(*max))
-            }
-            NumberFilter::LessThanOrEqual(max) => {
-                (SerializableNumber::min_value(), SerializableNumber(*max))
-            }
+            NumberFilter::Equal(value) => (
+                (true, SerializableNumber(*value)),
+                (true, SerializableNumber(*value)),
+            ),
+            NumberFilter::Between((min, max)) => (
+                (true, SerializableNumber(*min)),
+                (true, SerializableNumber(*max)),
+            ),
+            NumberFilter::GreaterThan(min) => (
+                (false, SerializableNumber(*min)),
+                (true, SerializableNumber::max_value()),
+            ),
+            NumberFilter::GreaterThanOrEqual(min) => (
+                (true, SerializableNumber(*min)),
+                (true, SerializableNumber::max_value()),
+            ),
+            NumberFilter::LessThan(max) => (
+                (true, SerializableNumber::min_value()),
+                (false, SerializableNumber(*max)),
+            ),
+            NumberFilter::LessThanOrEqual(max) => (
+                (true, SerializableNumber::min_value()),
+                (true, SerializableNumber(*max)),
+            ),
         };
 
         let items = self
@@ -127,4 +135,59 @@ pub struct NumberFieldInfo {
 pub struct CommittedNumberFieldStats {
     pub min: Number,
     pub max: Number,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::utils::generate_new_path;
+
+    use super::*;
+
+    #[test]
+    fn test_lt_gt() {
+        let path = generate_new_path();
+        let iter = vec![
+            (
+                SerializableNumber(Number::F32(1.0)),
+                HashSet::from([DocumentId(1), DocumentId(2)]),
+            ),
+            (
+                SerializableNumber(Number::F32(2.0)),
+                HashSet::from([DocumentId(3), DocumentId(4)]),
+            ),
+        ]
+        .into_iter();
+        let field = CommittedNumberField::from_iter(
+            vec!["a".to_string(), "b".to_string()].into_boxed_slice(),
+            iter,
+            path,
+        )
+        .unwrap();
+
+        let output = field
+            .filter(&NumberFilter::GreaterThan(Number::F32(1.0)))
+            .unwrap()
+            .collect::<HashSet<_>>();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output, HashSet::from([DocumentId(3), DocumentId(4)]));
+
+        let output = field
+            .filter(&NumberFilter::GreaterThanOrEqual(Number::F32(1.0)))
+            .unwrap()
+            .collect::<HashSet<_>>();
+        assert_eq!(output.len(), 4);
+
+        let output = field
+            .filter(&NumberFilter::LessThan(Number::F32(2.0)))
+            .unwrap()
+            .collect::<HashSet<_>>();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output, HashSet::from([DocumentId(1), DocumentId(2)]));
+
+        let output = field
+            .filter(&NumberFilter::LessThanOrEqual(Number::F32(2.0)))
+            .unwrap()
+            .collect::<HashSet<_>>();
+        assert_eq!(output.len(), 4);
+    }
 }

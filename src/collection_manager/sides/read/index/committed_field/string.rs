@@ -560,9 +560,6 @@ impl DocumentLengthsPerDocument {
 pub struct StringFieldInfo {
     pub field_path: Box<[String]>,
     pub data_dir: PathBuf,
-    // pub posting_id_storage_file_path: PathBuf,
-    // pub document_lengths_per_document_file_path: PathBuf,
-    // pub fst_file_path: PathBuf,
 }
 
 #[derive(Serialize, Debug)]

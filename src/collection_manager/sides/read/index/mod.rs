@@ -245,8 +245,6 @@ impl Index {
         // to the new folder.
         let is_promoted = self.promoted_to_runtime_index.load(Ordering::Relaxed);
 
-        println!("Committing index {:?} {:?}", self.id, is_promoted);
-
         // check if there's something to commit
         let something_to_commit = uncommitted_fields
             .bool_fields
@@ -272,11 +270,6 @@ impl Index {
         if !something_to_commit && !is_promoted {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
-            println!(
-                "Nothing to commit {:?} {:?}",
-                self.id,
-                self.path_to_index_id_map.serialize()
-            );
             return Ok(());
         }
 

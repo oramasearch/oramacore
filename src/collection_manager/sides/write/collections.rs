@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Ok, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::collection_manager::sides::hooks::HooksRuntime;
@@ -15,7 +15,7 @@ use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
 use crate::nlp::locales::Locale;
 use crate::nlp::NLPService;
-use crate::types::CollectionId;
+use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 
 use super::collection::CollectionWriter;
@@ -220,21 +220,39 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    pub async fn delete_collection(&self, collection_id: CollectionId) -> bool {
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> Option<Vec<DocumentId>> {
         let mut collections = self.collections.write().await;
         let collection = collections.remove(&collection_id);
 
         let collection = match collection {
-            None => return false,
+            None => return None,
             Some(coll) => coll,
         };
 
         let data_dir = &self.config.data_dir.join("collections");
         let collection_dir = data_dir.join(collection_id.as_str());
 
+        let mut document_ids = vec![];
+        let index_ids = collection.get_index_ids().await;
+        for index in index_ids {
+            let Some(index) = collection.get_index(index).await else {
+                continue;
+            };
+            document_ids.extend(index.get_document_ids().await);
+        }
+
         collection.remove_from_fs(collection_dir).await;
 
-        true
+        if let Err(error) = self
+            .op_sender
+            .send(WriteOperation::DeleteCollection(collection_id))
+            .await
+            .context("Cannot send delete collection")
+        {
+            error!(error = ?error, "Error sending delete collection");
+        }
+
+        Some(document_ids)
     }
 }
 
