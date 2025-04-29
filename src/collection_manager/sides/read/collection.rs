@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     ai::{llms::LLMService, AIService},
-    collection_manager::sides::{CollectionWriteOperation, Offset, SubstituteIndexReason},
+    collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
@@ -401,14 +401,14 @@ impl CollectionReader {
                         .with_context(|| format!("Cannot update index {:?}", index_id))?;
                 }
             }
-            CollectionWriteOperation::SubstituteIndex {
+            CollectionWriteOperation::ReplaceIndex {
                 runtime_index_id,
                 temp_index_id,
                 reference,
                 reason,
             } => {
                 println!(
-                    "Substituting index {} with temp index {}",
+                    "Replacing index {} with temp index {}",
                     runtime_index_id, temp_index_id
                 );
 
@@ -430,11 +430,11 @@ impl CollectionReader {
                     // This should not happen, since we already checked that the index exists
                     .unwrap();
                 match reason {
-                    SubstituteIndexReason::CollectionReindexed => {
+                    ReplaceIndexReason::CollectionReindexed => {
                         old_index
                             .mark_as_deleted(DeletionReason::CollectionReindexed { temp_index_id });
                     }
-                    SubstituteIndexReason::IndexResynced => {
+                    ReplaceIndexReason::IndexResynced => {
                         old_index.mark_as_deleted(DeletionReason::IndexResynced { temp_index_id });
                     }
                 };

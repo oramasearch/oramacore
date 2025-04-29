@@ -10,8 +10,8 @@ use crate::{
     ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
-        DocumentStorageWriteOperation, OperationSender, OramaModelSerializable,
-        SubstituteIndexReason, WriteOperation,
+        DocumentStorageWriteOperation, OperationSender, OramaModelSerializable, ReplaceIndexReason,
+        WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},
@@ -454,17 +454,17 @@ impl CollectionWriter {
         };
     }
 
-    pub async fn substiture_index(
+    pub async fn replace_index(
         &self,
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
-        reason: SubstituteIndexReason,
+        reason: ReplaceIndexReason,
         reference: Option<String>,
     ) -> Result<()> {
         self.op_sender
             .send(WriteOperation::Collection(
                 self.id,
-                CollectionWriteOperation::SubstituteIndex {
+                CollectionWriteOperation::ReplaceIndex {
                     reference,
                     runtime_index_id,
                     temp_index_id,

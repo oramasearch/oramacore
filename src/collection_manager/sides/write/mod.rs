@@ -50,7 +50,7 @@ use crate::{
         AIService, OramaModel, RemoteLLMProvider,
     },
     collection_manager::sides::{
-        DocumentStorageWriteOperation, DocumentToInsert, SubstituteIndexReason, WriteOperation,
+        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -58,7 +58,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, SubstituteIndexRequest,
+        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
     },
 };
 
@@ -346,16 +346,16 @@ impl WriteSide {
                 };
             }
 
-            let req = SubstituteIndexRequest {
+            let req = ReplaceIndexRequest {
                 runtime_index_id: copy_from,
                 temp_index_id: new_index_id,
                 reference: reference.clone(),
             };
-            self.substitute_index(
+            self.replace_index(
                 write_api_key,
                 collection_id,
                 req,
-                SubstituteIndexReason::CollectionReindexed,
+                ReplaceIndexReason::CollectionReindexed,
             )
             .await
             .context("Cannot substitute index")?;
@@ -366,12 +366,12 @@ impl WriteSide {
         Ok(())
     }
 
-    pub async fn substitute_index(
+    pub async fn replace_index(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        req: SubstituteIndexRequest,
-        reason: SubstituteIndexReason,
+        req: ReplaceIndexRequest,
+        reason: ReplaceIndexReason,
     ) -> Result<()> {
         let collection = self
             .collections
@@ -381,7 +381,7 @@ impl WriteSide {
         collection.check_write_api_key(write_api_key)?;
 
         collection
-            .substiture_index(
+            .replace_index(
                 req.runtime_index_id,
                 req.temp_index_id,
                 reason,

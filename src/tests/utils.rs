@@ -29,11 +29,11 @@ use crate::{
         triggers::Trigger,
         CollectionStats, CollectionsWriterConfig, IndexesConfig, InputSideChannelType,
         OramaModelSerializable, OutputSideChannelType, ReadSide, ReadSideConfig,
-        SubstituteIndexReason, WriteSide, WriteSideConfig,
+        ReplaceIndexReason, WriteSide, WriteSideConfig,
     },
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DocumentList, IndexId,
-        InsertDocumentsResult, LanguageDTO, SearchParams, SearchResult, SubstituteIndexRequest,
+        InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest, SearchParams, SearchResult,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -521,17 +521,17 @@ impl TestCollectionClient {
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
     ) -> Result<()> {
-        let req = SubstituteIndexRequest {
+        let req = ReplaceIndexRequest {
             runtime_index_id,
             temp_index_id,
             reference: None,
         };
         self.writer
-            .substitute_index(
+            .replace_index(
                 self.write_api_key,
                 self.collection_id,
                 req,
-                SubstituteIndexReason::IndexResynced,
+                ReplaceIndexReason::IndexResynced,
             )
             .await?;
 

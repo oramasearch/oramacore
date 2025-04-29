@@ -143,7 +143,7 @@ pub enum IndexWriteOperation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SubstituteIndexReason {
+pub enum ReplaceIndexReason {
     IndexResynced,
     CollectionReindexed,
 }
@@ -173,8 +173,8 @@ pub enum CollectionWriteOperation {
         index_id: IndexId,
         locale: Locale,
     },
-    SubstituteIndex {
-        reason: SubstituteIndexReason,
+    ReplaceIndex {
+        reason: ReplaceIndexReason,
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
         reference: Option<String>,
@@ -324,7 +324,7 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },
             ) => "create_temp_index",
-            WriteOperation::Collection(_, CollectionWriteOperation::SubstituteIndex { .. }) => {
+            WriteOperation::Collection(_, CollectionWriteOperation::ReplaceIndex { .. }) => {
                 "substitute_collection"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {
@@ -415,8 +415,8 @@ mod tests {
             ),
             WriteOperation::Collection(
                 collection_id,
-                CollectionWriteOperation::SubstituteIndex {
-                    reason: SubstituteIndexReason::CollectionReindexed,
+                CollectionWriteOperation::ReplaceIndex {
+                    reason: ReplaceIndexReason::CollectionReindexed,
                     runtime_index_id: index_id,
                     temp_index_id: index_id,
                     reference: Some("doo".to_string()),

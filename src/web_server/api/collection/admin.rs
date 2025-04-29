@@ -6,11 +6,11 @@ use serde_json::json;
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::{SubstituteIndexReason, WriteSide},
+    collection_manager::sides::{ReplaceIndexReason, WriteSide},
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
         DeleteDocuments, DeleteIndex, DescribeCollectionResponse, DocumentList, IndexId,
-        ReindexConfig, SubstituteIndexRequest,
+        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest,
     },
     web_server::api::util::print_error,
 };
@@ -28,7 +28,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(delete_index())
         .add(reindex())
         .add(create_temp_index())
-        .add(substitute_index())
+        .add(replace_index())
         .with_state(write_side)
 }
 
@@ -149,7 +149,7 @@ async fn delete_collection(
 async fn list_document_in_collection(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
-    Json(json): Json<DeleteCollection>,
+    Json(json): Json<ListDocumentInCollectionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = json.id;
 
@@ -167,7 +167,7 @@ async fn list_document_in_collection(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/indexes",
+    path = "/v1/collections/{collection_id}/indexes/create",
     description = "Create index inside a collection"
 )]
 async fn create_index(
@@ -192,8 +192,8 @@ async fn create_index(
 }
 
 #[endpoint(
-    method = "DELETE",
-    path = "/v1/collections/{collection_id}/indexes",
+    method = "POST",
+    path = "/v1/collections/{collection_id}/indexes/delete",
     description = "Create index inside a collection"
 )]
 async fn delete_index(
@@ -321,7 +321,7 @@ async fn reindex(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/indexes/{index_id}/temporary-index",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/create-temporary-index",
     description = "Create temporary index for a collection"
 )]
 async fn create_temp_index(
@@ -355,27 +355,27 @@ async fn create_temp_index(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/substitute-index",
+    path = "/v1/collections/{collection_id}/replace-index",
     description = "Substitute index for a collection"
 )]
-async fn substitute_index(
+async fn replace_index(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
-    Json(json): Json<SubstituteIndexRequest>,
+    Json(json): Json<ReplaceIndexRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     match write_side
-        .substitute_index(
+        .replace_index(
             write_api_key,
             collection_id,
             json,
-            SubstituteIndexReason::IndexResynced,
+            ReplaceIndexReason::IndexResynced,
         )
         .await
     {
         Ok(_) => {}
         Err(e) => {
-            print_error(&e, "Error index substitution");
+            print_error(&e, "Error index replacement");
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),
@@ -383,8 +383,5 @@ async fn substitute_index(
         }
     };
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "message": "Index substituted" })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "message": "Index replaced" }))))
 }

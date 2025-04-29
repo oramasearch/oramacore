@@ -580,12 +580,19 @@ impl PartialSchema for ApiKey {
 impl ToSchema for ApiKey {}
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct ListDocumentInCollectionRequest {
+    pub id: CollectionId,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct DeleteCollection {
+    #[serde(rename = "collection_id_to_delete")]
     pub id: CollectionId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct DeleteIndex {
+    #[serde(rename = "index_id_to_delete")]
     pub id: IndexId,
 }
 
@@ -1234,12 +1241,13 @@ pub enum IndexEmbeddingsCalculation {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CreateIndexRequest {
+    #[serde(rename = "id")]
     pub index_id: IndexId,
     pub embedding: Option<IndexEmbeddingsCalculation>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct SubstituteIndexRequest {
+pub struct ReplaceIndexRequest {
     pub runtime_index_id: IndexId,
     pub temp_index_id: IndexId,
     #[serde(default)]
