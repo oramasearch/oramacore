@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     Json, Router,
 };
-use axum_openapi3::*;
+use axum_openapi3::{utoipa::ToSchema, *};
 use serde::Deserialize;
 use serde_json::json;
 use utoipa::IntoParams;
@@ -14,7 +14,7 @@ use utoipa::IntoParams;
 use crate::{
     collection_manager::sides::ReadSide,
     types::{ApiKey, CollectionId, SearchParams},
-    web_server::api::collection::admin::print_error,
+    web_server::api::util::print_error,
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -24,7 +24,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .with_state(read_side)
 }
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize, IntoParams, ToSchema)]
 struct SearchQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,

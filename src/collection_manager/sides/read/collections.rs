@@ -7,12 +7,10 @@ use std::{
 use crate::{
     ai::{llms::LLMService, AIService},
     collection_manager::sides::{read::notify::Notifier, Offset},
-    file_utils::{
-        create_if_not_exists, create_if_not_exists_async, create_or_overwrite, BufferedFile,
-    },
-    metrics::{commit::COMMIT_CALCULATION_TIME, CollectionCommitLabels},
-    nlp::NLPService,
-    types::{ApiKey, CollectionId, LanguageDTO},
+    file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
+    metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
+    nlp::{locales::Locale, NLPService},
+    types::{ApiKey, CollectionId},
 };
 
 use anyhow::{Context, Result};
@@ -21,8 +19,6 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info, instrument, warn};
 
 use super::{collection::CollectionReader, IndexesConfig};
-
-const LIMIT: usize = 100;
 
 /// Lifecicle of a collection
 ///
@@ -34,17 +30,12 @@ const LIMIT: usize = 100;
 /// The collection still exists in the `collections` map.
 /// NB: `get_collection` will return `None`.
 ///
-/// # Collection substitution
-/// When a collection is substituted, the old collection is removed from the `collections` map.
-/// The old collection id is added to the `last_reindexed_collections`
-///
 
-#[derive(Debug)]
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
-    notifier: Option<Notifier>,
+    notifier: Option<Arc<Notifier>>,
 
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
@@ -69,28 +60,23 @@ impl CollectionsReader {
             notifier = Some(n);
         }
 
-        let collections_info: CollectionsInfo = match BufferedFile::open(data_dir.join("info.json"))
-            .and_then(|f| f.read_json_data())
-            .context("Cannot deserialize info.json file")
-        {
-            Ok(info) => info,
-            Err(e) => {
-                warn!(
-                    "Cannot read info.json file: {:?}. Skip loading collections",
-                    e
-                );
-                return Ok(Self {
-                    ai_service,
-                    nlp_service,
-                    llm_service,
-                    notifier,
+        let collections_info: CollectionsInfo =
+            match BufferedFile::open(data_dir.join("info.json")).and_then(|f| f.read_json_data()) {
+                Ok(info) => info,
+                Err(_) => {
+                    warn!("Cannot read info.json file. Skip loading collections",);
+                    return Ok(Self {
+                        ai_service,
+                        nlp_service,
+                        llm_service,
+                        notifier,
 
-                    collections: Default::default(),
-                    indexes_config,
-                    last_reindexed_collections: Default::default(),
-                });
-            }
-        };
+                        collections: Default::default(),
+                        indexes_config,
+                        last_reindexed_collections: Default::default(),
+                    });
+                }
+            };
 
         let CollectionsInfo::V1(collections_info) = collections_info;
 
@@ -111,6 +97,7 @@ impl CollectionsReader {
                 ai_service.clone(),
                 nlp_service.clone(),
                 llm_service.clone(),
+                notifier.clone(),
                 collection_dir,
             )
             .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
@@ -160,22 +147,20 @@ impl CollectionsReader {
         CollectionReadLock::try_new(collections_lock, last_reindexed_collections_lock, id)
     }
 
-    #[instrument(skip(self))]
-    pub async fn commit(&self) -> Result<()> {
-        info!("Committing collections");
-
+    #[instrument(skip(self, offset))]
+    pub async fn commit(&self, offset: Offset) -> Result<()> {
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
         let col = self.collections.read().await;
-        let col = &*col;
+
         let collection_ids: Vec<_> = col.keys().cloned().collect();
-        let mut deleted_collection_ids = HashSet::new();
-        for (id, collection) in col {
+        info!("Committing collections: {:?}", collection_ids);
+        for (id, collection) in col.iter() {
             let collection_dir = collections_dir.join(id.as_str());
 
             if collection.is_deleted() {
-                deleted_collection_ids.insert(*id);
+                // TODO: should we delete the collection from the disk?
                 continue;
             }
 
@@ -185,33 +170,30 @@ impl CollectionsReader {
                     format!("Cannot create directory for collection '{}'", id.as_str())
                 })?;
 
-            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: id.to_string(),
-                side: "read",
-            });
-            match collection.commit(collection_dir, false).await {
+            let m = COMMIT_CALCULATION_TIME.create(Empty);
+
+            match collection.commit(collection_dir, offset).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
                 }
             }
+
             drop(m);
         }
 
         let guard = self.last_reindexed_collections.read().await;
         let collections_info = CollectionsInfo::V1(CollectionsInfoV1 {
-            collection_ids: collection_ids
-                .into_iter()
-                .filter(|id| !deleted_collection_ids.contains(id))
-                .collect(),
+            collection_ids: collection_ids.into_iter().collect(),
             deleted_collection_ids: Default::default(),
             last_reindexed_collections: guard.iter().cloned().collect(),
         });
         drop(guard);
 
-        create_or_overwrite(data_dir.join("info.json"), &collections_info)
-            .await
-            .context("Cannot create info.json file")?;
+        BufferedFile::create_or_overwrite(data_dir.join("info.json"))
+            .context("Cannot create info.json file")?
+            .write_json_data(&collections_info)
+            .context("Cannot write info.json file")?;
 
         info!("Collections committed");
 
@@ -220,10 +202,9 @@ impl CollectionsReader {
 
     pub async fn create_collection(
         &self,
-        _offset: Offset,
         id: CollectionId,
         description: Option<String>,
-        default_language: LanguageDTO,
+        default_locale: Locale,
         read_api_key: ApiKey,
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
@@ -231,11 +212,12 @@ impl CollectionsReader {
         let collection = CollectionReader::empty(
             id,
             description,
-            default_language,
+            default_locale,
             read_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
             self.llm_service.clone(),
+            self.notifier.clone(),
         );
 
         let mut guard = self.collections.write().await;
@@ -270,19 +252,19 @@ impl CollectionsReader {
     }
 
     pub async fn clean_fs_for_collection(&self, collection: &CollectionReader) -> Result<()> {
-        info!(collection_id=?collection.id, "Cleaning FS collection");
+        info!(collection_id=?collection.id(), "Cleaning FS collection");
 
         let data_dir = &self.indexes_config.data_dir;
         let collections_dir = data_dir.join("collections");
 
-        let collection_dir = collections_dir.join(collection.id.as_str());
+        let collection_dir = collections_dir.join(collection.id().as_str());
         if collection_dir.exists() {
             tokio::fs::remove_dir_all(&collection_dir)
                 .await
                 .with_context(|| {
                     format!(
                         "Cannot remove directory for collection '{}'",
-                        collection.id.as_str()
+                        collection.id().as_str()
                     )
                 })?;
         }
@@ -292,87 +274,14 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub async fn substitute_collection(
-        &self,
-        _offset: Offset,
-        target_collection_id: CollectionId,
-        source_collection_id: CollectionId,
-        reference: Option<String>,
-    ) -> Result<()> {
-        info!(
-            target_collection_id=?target_collection_id,
-            source_collection_id=?source_collection_id,
-            "ReadSide: Substitute collection {:?} with {:?}", target_collection_id, source_collection_id
-        );
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> Result<()> {
+        info!(collection_id=?collection_id, "ReadSide: Deleting collection {:?}", collection_id);
 
         let mut guard = self.collections.write().await;
-        let mut source = guard
-            .remove(&source_collection_id)
-            .ok_or_else(|| anyhow::anyhow!("Source collection not found"))?;
-        source.id = target_collection_id;
-        // Ignore return value: we don't care if the target collection was there or not.
-        let _ = guard.remove(&target_collection_id);
-        guard.insert(target_collection_id, source);
-        drop(guard);
-
-        let mut guard = self.last_reindexed_collections.write().await;
-        guard.push((source_collection_id, target_collection_id));
-        if guard.len() > LIMIT {
-            guard.remove(0);
+        if let Some(collection) = guard.get_mut(&collection_id) {
+            collection.mark_as_deleted();
+            info!(collection_id=?collection_id, "Collection marked as deleted {:?}", collection_id);
         }
-        drop(guard);
-
-        let data_dir = &self.indexes_config.data_dir;
-        let collections_dir = data_dir.join("collections");
-
-        let collection_dir = collections_dir.join(target_collection_id.as_str());
-        create_if_not_exists_async(&collection_dir)
-            .await
-            .with_context(|| {
-                format!(
-                    "Cannot create directory for collection '{}'",
-                    target_collection_id.as_str()
-                )
-            })?;
-
-        let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-            collection: target_collection_id.to_string(),
-            side: "read",
-        });
-        let collection = self
-            .get_collection(target_collection_id)
-            .await
-            .context("Cannot get collection")?;
-        collection
-            .commit(collection_dir, true)
-            .await
-            .with_context(|| format!("Cannot commit collection {:?}", collection.get_id()))?;
-        drop(m);
-
-        if let Some(notifier) = &self.notifier {
-            if let Err(error) = notifier
-                .notify_collection_substitution(
-                    target_collection_id,
-                    source_collection_id,
-                    reference,
-                )
-                .await
-                .context("Cannot notify collection substitution")
-            {
-                error!(
-                    error = ?error,
-                    target_collection_id=?target_collection_id,
-                    source_collection_id=?source_collection_id,
-                    "Cannot notify collection substitution. Skip it"
-                );
-            };
-        }
-
-        info!(
-            target_collection_id=?target_collection_id,
-            source_collection_id=?source_collection_id,
-            "Collection substituted {:?} with {:?}", target_collection_id, source_collection_id
-        );
 
         Ok(())
     }
@@ -434,225 +343,16 @@ impl Deref for CollectionReadLock<'_> {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
 enum CollectionsInfo {
     #[serde(rename = "1")]
     V1(CollectionsInfoV1),
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct CollectionsInfoV1 {
     collection_ids: HashSet<CollectionId>,
     #[serde(default)]
     deleted_collection_ids: HashSet<CollectionId>,
     last_reindexed_collections: Vec<(CollectionId, CollectionId)>,
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use http::uri::Scheme;
-
-    use crate::{ai::AIServiceConfig, tests::utils::generate_new_path};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_last_reindex_collections_simple() {
-        let ai_service = Arc::new(AIService::new(AIServiceConfig {
-            api_key: None,
-            host: "127.0.0.0".parse().unwrap(),
-            scheme: Scheme::HTTP,
-            port: 80,
-            max_connections: 0,
-            llm: crate::ai::AIServiceLLMConfig {
-                host: "localhost".to_string(),
-                port: 8000,
-                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-            },
-            remote_llms: None,
-            embeddings: None,
-        }));
-
-        let llm_service = Arc::new(
-            LLMService::try_new(
-                crate::ai::AIServiceLLMConfig {
-                    host: "localhost".to_string(),
-                    port: 8000,
-                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-                },
-                None,
-            )
-            .unwrap(),
-        );
-
-        let nlp_service = Arc::new(NLPService::new());
-        let collections = CollectionsReader::try_load(
-            ai_service,
-            nlp_service,
-            llm_service,
-            IndexesConfig {
-                commit_interval: Duration::from_secs(1_000),
-                data_dir: generate_new_path(),
-                insert_batch_commit_size: 100_000,
-                notifier: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        let target_collection_id = CollectionId::from("target".to_string());
-        let tmp_collection_id = CollectionId::from("tmp".to_string());
-
-        // Target collection
-        collections
-            .create_collection(
-                Offset(1),
-                target_collection_id,
-                None,
-                LanguageDTO::English,
-                ApiKey::try_from("read").unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // TMP collection
-        collections
-            .create_collection(
-                Offset(1),
-                tmp_collection_id,
-                None,
-                LanguageDTO::English,
-                ApiKey::try_from("read").unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // Substitute target collection with tmp collection
-        collections
-            .substitute_collection(Offset(2), target_collection_id, tmp_collection_id, None)
-            .await
-            .unwrap();
-
-        let collection = collections
-            .get_collection(target_collection_id)
-            .await
-            .unwrap();
-        let collection = &*collection;
-        assert_eq!(collection.get_id(), target_collection_id);
-
-        let collection = collections.get_collection(tmp_collection_id).await.unwrap();
-        let collection = &*collection;
-        assert_eq!(collection.get_id(), target_collection_id);
-    }
-
-    #[tokio::test]
-    async fn test_last_reindex_collections_limit() {
-        let ai_service = Arc::new(AIService::new(AIServiceConfig {
-            api_key: None,
-            host: "127.0.0.0".parse().unwrap(),
-            scheme: Scheme::HTTP,
-            port: 80,
-            max_connections: 0,
-            llm: crate::ai::AIServiceLLMConfig {
-                host: "localhost".to_string(),
-                port: 8000,
-                model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-            },
-            remote_llms: None,
-            embeddings: None,
-        }));
-        let nlp_service = Arc::new(NLPService::new());
-        let llm_service = Arc::new(
-            LLMService::try_new(
-                crate::ai::AIServiceLLMConfig {
-                    host: "localhost".to_string(),
-                    port: 8000,
-                    model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
-                },
-                None,
-            )
-            .unwrap(),
-        );
-        let collections = CollectionsReader::try_load(
-            ai_service,
-            nlp_service,
-            llm_service,
-            IndexesConfig {
-                commit_interval: Duration::from_secs(1_000),
-                data_dir: generate_new_path(),
-                insert_batch_commit_size: 100_000,
-                notifier: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        let couples: Vec<_> = (0..(LIMIT + 1))
-            .map(|i| {
-                let target_collection_id = CollectionId::from(format!("target-{}", i));
-                let tmp_collection_id = CollectionId::from(format!("tmp-{}", i));
-                (target_collection_id, tmp_collection_id)
-            })
-            .collect();
-
-        for (target_collection_id, tmp_collection_id) in &couples {
-            // Target collection
-            collections
-                .create_collection(
-                    Offset(1),
-                    *target_collection_id,
-                    None,
-                    LanguageDTO::English,
-                    ApiKey::try_from("read").unwrap(),
-                )
-                .await
-                .unwrap();
-
-            // TMP collection
-            collections
-                .create_collection(
-                    Offset(1),
-                    *tmp_collection_id,
-                    None,
-                    LanguageDTO::English,
-                    ApiKey::try_from("read").unwrap(),
-                )
-                .await
-                .unwrap();
-
-            // Substitute target collection with tmp collection
-            collections
-                .substitute_collection(Offset(2), *target_collection_id, *tmp_collection_id, None)
-                .await
-                .unwrap();
-
-            let collection = collections
-                .get_collection(*target_collection_id)
-                .await
-                .unwrap();
-            let collection = &*collection;
-            assert_eq!(collection.get_id(), target_collection_id.clone());
-
-            let collection = collections
-                .get_collection(*tmp_collection_id)
-                .await
-                .unwrap();
-            let collection = &*collection;
-            assert_eq!(collection.get_id(), target_collection_id.clone());
-        }
-
-        // All collections are there
-        for (target, _) in &couples {
-            let collection = collections.get_collection(*target).await;
-            assert!(collection.is_some());
-        }
-
-        let collection = collections.get_collection(couples[0].0).await;
-        assert!(collection.is_some());
-        // But the first one tmp collection is not there
-        let collection = collections.get_collection(couples[0].1).await;
-        assert!(collection.is_none());
-    }
 }

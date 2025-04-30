@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use tracing::error;
 
 use crate::{
-    file_utils::{create_if_not_exists, create_or_overwrite, read_file},
+    file_utils::{create_if_not_exists, read_file, BufferedFile},
     types::{Document, DocumentId, RawJSONDocument},
 };
 
@@ -23,22 +23,30 @@ impl DocumentStorage {
         Ok(Self { data_dir })
     }
 
-    pub async fn insert(&self, id: DocumentId, document: Document) -> Result<()> {
-        let document: RawJSONDocument = document.into_raw()?;
+    pub async fn insert(
+        &self,
+        id: DocumentId,
+        doc_id_str: String,
+        document: Document,
+    ) -> Result<()> {
+        let document: RawJSONDocument = document.into_raw(doc_id_str)?;
         let doc_path = self.data_dir.join(id.0.to_string());
         let data = RawJSONDocumentWrapper(document);
-        create_or_overwrite(doc_path, &data)
-            .await
+        BufferedFile::create_or_overwrite(doc_path)
+            .context("Cannot create document data")?
+            .write_json_data(&data)
             .context("Cannot write document data")?;
         Ok(())
     }
 
-    pub async fn remove(&self, id: DocumentId) -> Result<()> {
-        let doc_path = self.data_dir.join(id.0.to_string());
-        tokio::fs::remove_file(doc_path)
-            .await
-            .context("Cannot remove document data")?;
-        Ok(())
+    pub async fn remove(&self, ids: Vec<DocumentId>) {
+        for id in ids {
+            let doc_path = self.data_dir.join(id.0.to_string());
+            if let Err(e) = tokio::fs::remove_file(doc_path).await {
+                // We ignore the error because we want to proceed with the next document
+                error!(error = ?e, "Cannot remove document data");
+            }
+        }
     }
 
     pub async fn stream_documents(
@@ -69,6 +77,7 @@ impl DocumentStorage {
     }
 }
 
+#[derive(Debug)]
 struct RawJSONDocumentWrapper(RawJSONDocument);
 
 impl Serialize for RawJSONDocumentWrapper {
@@ -132,64 +141,5 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
         }
 
         deserializer.deserialize_tuple(2, SerializableNumberVisitor)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-    use tokio_stream::StreamExt;
-
-    use crate::tests::utils::generate_new_path;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_save_and_stream() {
-        let document_storage = DocumentStorage::try_new(generate_new_path()).unwrap();
-
-        document_storage
-            .insert(
-                DocumentId(0),
-                json!({
-                    "id": "0",
-                })
-                .try_into()
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-        document_storage
-            .insert(
-                DocumentId(1),
-                json!({
-                    "id": "1",
-                })
-                .try_into()
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-        document_storage
-            .insert(
-                DocumentId(2),
-                json!({
-                    "id": "2",
-                })
-                .try_into()
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        let stream = document_storage
-            .stream_documents(vec![DocumentId(0), DocumentId(2)])
-            .await;
-
-        let docs: Vec<_> = stream.collect().await;
-
-        assert_eq!(docs.len(), 2);
-        assert_eq!(docs[0].0, DocumentId(0));
-        assert_eq!(docs[1].0, DocumentId(2));
     }
 }

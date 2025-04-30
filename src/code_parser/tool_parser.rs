@@ -26,6 +26,12 @@ pub struct ToolValidator {
     error_reason: Option<String>,
 }
 
+impl Default for ToolValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolValidator {
     pub fn new() -> Self {
         Self {

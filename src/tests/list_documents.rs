@@ -1,39 +1,34 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::{
-    tests::utils::{create, create_collection, create_oramacore_config, insert_docs},
-    types::{ApiKey, CollectionId},
-};
+use crate::tests::utils::TestContext;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_list_documents() -> Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-    let mut config = create_oramacore_config();
-    config.reader_side.config.insert_batch_commit_size = 1_000_000;
-    config.writer_side.config.insert_batch_commit_size = 1_000_000;
-
-    let (write_side, _) = create(config.clone()).await?;
-
-    let collection_id = CollectionId::from("test-collection".to_string());
-    create_collection(write_side.clone(), collection_id).await?;
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
 
     let document_count = 10;
-    insert_docs(
-        write_side.clone(),
-        ApiKey::try_from("my-write-api-key").unwrap(),
-        collection_id,
-        (0..document_count).map(|i| {
+    let docs = (0..document_count)
+        .map(|i| {
             json!({
                 "id": i.to_string(),
                 "text": "text ".repeat(i + 1),
             })
-        }),
-    )
-    .await?;
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
 
-    let docs = write_side
-        .list_document(ApiKey::try_from("my-write-api-key").unwrap(), collection_id)
+    let docs = test_context
+        .writer
+        .list_document(
+            collection_client.write_api_key,
+            collection_client.collection_id,
+        )
         .await?;
     assert_eq!(docs.len(), document_count);
 

@@ -3,14 +3,16 @@ use std::sync::Arc;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
 use axum_openapi3::*;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
-    collection_manager::sides::WriteSide,
+    collection_manager::sides::{ReplaceIndexReason, WriteSide},
     types::{
-        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
-        DeleteCollection, DeleteDocuments, DocumentList, ReindexConfig, SwapCollections,
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
+        DeleteDocuments, DeleteIndex, DescribeCollectionResponse, DocumentList, IndexId,
+        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest,
     },
+    web_server::api::util::print_error,
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
@@ -21,9 +23,12 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(add_documents())
         .add(delete_documents())
         .add(delete_collection())
+        .add(create_index())
+        .add(list_document_in_collection())
+        .add(delete_index())
         .add(reindex())
-        .add(create_collection_from())
-        .add(swap_collections())
+        .add(create_temp_index())
+        .add(replace_index())
         .with_state(write_side)
 }
 
@@ -35,7 +40,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 async fn get_collections(
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<Vec<CollectionDTO>>, (StatusCode, impl IntoResponse)> {
+) -> Result<Json<Vec<DescribeCollectionResponse>>, (StatusCode, impl IntoResponse)> {
     let collections = match write_side.list_collections(master_api_key).await {
         Ok(collections) => collections,
         Err(e) => {
@@ -58,7 +63,7 @@ async fn get_collection_by_id(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<CollectionDTO>, (StatusCode, impl IntoResponse)> {
+) -> Result<Json<DescribeCollectionResponse>, (StatusCode, impl IntoResponse)> {
     let collection_dto = write_side
         .get_collection_dto(master_api_key, collection_id)
         .await;
@@ -137,14 +142,14 @@ async fn delete_collection(
 }
 
 #[endpoint(
-    method = "GET",
+    method = "POST",
     path = "/v1/collections/list",
     description = "Return all documents in a collection"
 )]
 async fn list_document_in_collection(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
-    Json(json): Json<DeleteCollection>,
+    Json(json): Json<ListDocumentInCollectionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let collection_id = json.id;
 
@@ -162,18 +167,71 @@ async fn list_document_in_collection(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/insert",
+    path = "/v1/collections/{collection_id}/indexes/create",
+    description = "Create index inside a collection"
+)]
+async fn create_index(
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: ApiKey,
+    collection_id: CollectionId,
+    Json(json): Json<CreateIndexRequest>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    match write_side
+        .create_index(write_api_key, collection_id, json)
+        .await
+    {
+        Ok(_) => Ok(Json(json!({}))),
+        Err(e) => {
+            print_error(&e, "Error deleting collection");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/indexes/delete",
+    description = "Create index inside a collection"
+)]
+async fn delete_index(
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: ApiKey,
+    collection_id: CollectionId,
+    Json(json): Json<DeleteIndex>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    match write_side
+        .delete_index(write_api_key, collection_id, json.id)
+        .await
+    {
+        Ok(_) => Ok(Json(json!({}))),
+        Err(e) => {
+            print_error(&e, "Error deleting collection");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/insert",
     description = "Add documents to a collection"
 )]
 async fn add_documents(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DocumentList>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     info!("Adding documents to collection {:?}", collection_id);
     match write_side
-        .insert_documents(write_api_key, collection_id, json)
+        .insert_documents(write_api_key, collection_id, index_id, json)
         .await
     {
         Ok(r) => Ok((StatusCode::OK, Json(r))),
@@ -189,68 +247,19 @@ async fn add_documents(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/create-from",
-    description = "Create a collection with same configuration as another collection"
-)]
-async fn create_collection_from(
-    write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
-    Json(json): Json<CreateCollectionFrom>,
-) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    match write_side.create_collection_from(write_api_key, json).await {
-        Ok(collection_id) => Ok((
-            StatusCode::OK,
-            Json(json!({ "collection_id": collection_id })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error creating collection from");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("{}", e) })),
-            ))
-        }
-    }
-}
-
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/swap",
-    description = "Swap two collections"
-)]
-async fn swap_collections(
-    write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
-    Json(json): Json<SwapCollections>,
-) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    match write_side.swap_collections(write_api_key, json).await {
-        Ok(collection_id) => Ok((
-            StatusCode::OK,
-            Json(json!({ "collection_id": collection_id })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error swapping collections");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("{}", e) })),
-            ))
-        }
-    }
-}
-
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/delete",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/delete",
     description = "Delete documents from a collection"
 )]
 async fn delete_documents(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DeleteDocuments>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     info!("Delete documents to collection {:?}", collection_id);
     match write_side
-        .delete_documents(write_api_key, collection_id, json)
+        .delete_documents(write_api_key, collection_id, index_id, json)
         .await
     {
         Ok(_) => {
@@ -274,7 +283,7 @@ async fn delete_documents(
 #[endpoint(
     method = "POST",
     path = "/v1/collections/{collection_id}/reindex",
-    description = "Reindex documents of a collection"
+    description = "Reindex collection after a runtime change"
 )]
 async fn reindex(
     collection_id: CollectionId,
@@ -282,10 +291,18 @@ async fn reindex(
     write_api_key: ApiKey,
     Json(json): Json<ReindexConfig>,
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
-    info!("Reindex collection {:?}", collection_id);
-    match write_side.reindex(write_api_key, collection_id, json).await {
+    match write_side
+        .reindex(
+            write_api_key,
+            collection_id,
+            json.language,
+            json.embedding_model.0,
+            json.reference,
+        )
+        .await
+    {
         Ok(_) => {
-            info!("Done");
+            info!("Collection reindexed");
         }
         Err(e) => {
             print_error(&e, "Error reindexing collection");
@@ -298,13 +315,73 @@ async fn reindex(
 
     Ok((
         StatusCode::OK,
-        Json(json!({ "message": "collection re-indexed" })),
+        Json(json!({ "message": "collection reindexed" })),
     ))
 }
 
-pub fn print_error(e: &anyhow::Error, msg: &'static str) {
-    error!(error = ?e, msg);
-    e.chain()
-        .skip(1)
-        .for_each(|cause| eprintln!("because: {}", cause));
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/create-temporary-index",
+    description = "Create temporary index for a collection"
+)]
+async fn create_temp_index(
+    collection_id: CollectionId,
+    index_id: IndexId,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: ApiKey,
+    Json(json): Json<CreateIndexRequest>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    match write_side
+        .create_temp_index(write_api_key, collection_id, index_id, json)
+        .await
+    {
+        Ok(_) => {
+            info!(" collection");
+        }
+        Err(e) => {
+            print_error(&e, "Error reindexing collection");
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("collection not found {}", e) })),
+            ));
+        }
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "message": "temp collection created" })),
+    ))
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/replace-index",
+    description = "Substitute index for a collection"
+)]
+async fn replace_index(
+    collection_id: CollectionId,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: ApiKey,
+    Json(json): Json<ReplaceIndexRequest>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    match write_side
+        .replace_index(
+            write_api_key,
+            collection_id,
+            json,
+            ReplaceIndexReason::IndexResynced,
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            print_error(&e, "Error index replacement");
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("collection not found {}", e) })),
+            ));
+        }
+    };
+
+    Ok((StatusCode::OK, Json(json!({ "message": "Index replaced" }))))
 }

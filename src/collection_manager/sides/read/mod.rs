@@ -1,9 +1,12 @@
 mod collection;
 mod collections;
 mod document_storage;
+mod index;
 pub mod notify;
 
-use collection::CollectionStats;
+pub use index::*;
+
+pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
 use std::sync::Arc;
@@ -12,12 +15,13 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
+pub use collection::IndexFieldStatsType;
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
@@ -44,11 +48,8 @@ use super::segments::{Segment, SelectedSegment};
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
-    CollectionWriteOperation, InputSideChannelType, Offset, OperationReceiver,
-    OperationReceiverCreator, WriteOperation,
+    InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
-
-pub use collection::{stats, FieldStats, FieldStatsType};
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -199,22 +200,122 @@ impl ReadSide {
 
     pub async fn commit(&self) -> Result<()> {
         // We stop insertion operations while we are committing
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+        // This lock is needed to prevent any collection from being created, deleted or changed
+        // ie, we stop to process any new events
+        let mut commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
 
-        self.collections.commit().await?;
+        let live_offset = self.live_offset.write().await;
+        let offset = *live_offset;
+
+        self.collections.commit(offset).await?;
         self.document_storage
             .commit()
             .await
             .context("Cannot commit document storage")?;
         self.kv.commit().await.context("Cannot commit KV")?;
 
-        let offset: Offset = *(self.live_offset.read().await);
         BufferedFile::create_or_overwrite(self.data_dir.join("read.info"))
             .context("Cannot create read.info file")?
             .write_json_data(&ReadInfo::V1(ReadInfoV1 { offset }))
             .context("Cannot write read.info file")?;
 
+        *commit_insert_mutex_lock = offset;
+
         drop(commit_insert_mutex_lock);
+
+        Ok(())
+    }
+
+    pub async fn collection_stats(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionStats> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
+        collection.stats().await
+    }
+
+    pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {
+        trace!(offset=?offset, "Updating read side");
+
+        let m = OPERATION_COUNT.create(Empty);
+
+        // We stop commit operations while we are updating
+        // The lock is released at the end of this function
+        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
+
+        // Already applied. We can skip this operation.
+        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
+            warn!(offset=?offset, "Operation already applied. Skipping");
+            return Ok(());
+        }
+
+        let mut live_offset = self.live_offset.write().await;
+        *live_offset = offset;
+        drop(live_offset);
+
+        match op {
+            WriteOperation::CreateCollection {
+                id,
+                read_api_key,
+                default_locale,
+                description,
+            } => {
+                self.collections
+                    .create_collection(id, description, default_locale, read_api_key)
+                    .await?;
+            }
+            WriteOperation::DeleteCollection(collection_id) => {
+                self.collections.delete_collection(collection_id).await?;
+            }
+            WriteOperation::Collection(collection_id, collection_operation) => {
+                let collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                collection.update(collection_operation).await?;
+            }
+            WriteOperation::DocumentStorage(op) => {
+                self.document_storage
+                    .update(op)
+                    .await
+                    .context("Cannot update document storage")?;
+            }
+            WriteOperation::KV(op) => {
+                self.kv
+                    .update(offset, op)
+                    .await
+                    .context("Cannot insert into KV")?;
+            }
+        }
+
+        drop(m);
+
+        let mut lock = self.operation_counter.write().await;
+        *lock += 1;
+        let should_commit = if *lock >= self.insert_batch_commit_size {
+            *lock = 0;
+            true
+        } else {
+            false
+        };
+        drop(lock);
+
+        drop(commit_insert_mutex_lock);
+
+        if should_commit {
+            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
+            self.commit().await?;
+        }
+
+        trace!(offset=?offset, "Updated");
 
         Ok(())
     }
@@ -249,7 +350,11 @@ impl ReadSide {
 
         let token_scores = collection.search(search_params).await?;
 
-        let facets = collection.calculate_facets(&token_scores, facets).await?;
+        let facets = if !facets.is_empty() {
+            Some(collection.calculate_facets(&token_scores, facets).await?)
+        } else {
+            None
+        };
 
         let count = token_scores.len();
 
@@ -293,137 +398,6 @@ impl ReadSide {
         })
     }
 
-    pub async fn collection_stats(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<CollectionStats> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_read_api_key(read_api_key)?;
-
-        collection.stats().await
-    }
-
-    #[instrument(skip(self, op), fields(offset=?op.0))]
-    pub async fn update(&self, op: (Offset, WriteOperation)) -> Result<()> {
-        trace!(offset=?op.0, "Updating read side");
-
-        let (offset, op) = op;
-
-        let m = OPERATION_COUNT.create(Empty);
-
-        // We stop commit operations while we are updating
-        // The lock is released at the end of this function
-        let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
-
-        let mut live_offset = self.live_offset.write().await;
-        *live_offset = offset;
-        drop(live_offset);
-
-        // Already applied. We can skip this operation.
-        if offset <= *commit_insert_mutex_lock && !commit_insert_mutex_lock.is_zero() {
-            warn!(offset=?offset, "Operation already applied. Skipping");
-            return Ok(());
-        }
-
-        match op {
-            WriteOperation::CreateCollection {
-                id,
-                read_api_key,
-                default_language,
-                description,
-            } => {
-                self.collections
-                    .create_collection(offset, id, description, default_language, read_api_key)
-                    .await?;
-            }
-            WriteOperation::DeleteCollection(coll_id) => {
-                // The order of those operations are important:
-                // 1. Remove collection from the hashmap
-                // 2. Commit
-                // 3. Clean the fs
-                // otherwise, if something crashed, we loose the collection.
-                info!(collection=?coll_id, "Deleting collection");
-                self.collections.remove_collection(coll_id).await?;
-
-                info!("Collection deleted");
-            }
-            WriteOperation::Collection(collection_id, collection_operation) => {
-                let collection = self
-                    .collections
-                    .get_collection(collection_id)
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-                if let CollectionWriteOperation::DeleteDocuments { doc_ids } = &collection_operation
-                {
-                    for doc_id in doc_ids {
-                        self.document_storage.delete_document(doc_id).await?;
-                    }
-                }
-
-                if let CollectionWriteOperation::InsertDocument { doc_id, doc } =
-                    collection_operation
-                {
-                    trace!(?doc_id, "Inserting document");
-                    collection.increment_document_count();
-                    self.document_storage.add_document(doc_id, doc.0).await?;
-                    trace!(?doc_id, "Document inserted");
-                } else {
-                    collection.update(offset, collection_operation).await?;
-                }
-            }
-            WriteOperation::KV(op) => {
-                self.kv
-                    .update(offset, op)
-                    .await
-                    .context("Cannot insert into KV")?;
-            }
-            WriteOperation::SubstituteCollection {
-                subject_collection_id,
-                target_collection_id,
-                reference,
-            } => {
-                self.collections
-                    .substitute_collection(
-                        offset,
-                        target_collection_id,
-                        subject_collection_id,
-                        reference,
-                    )
-                    .await?;
-            }
-        }
-        drop(m);
-
-        let mut lock = self.operation_counter.write().await;
-        *lock += 1;
-        let should_commit = if *lock >= self.insert_batch_commit_size {
-            *lock = 0;
-            true
-        } else {
-            false
-        };
-        drop(lock);
-
-        drop(commit_insert_mutex_lock);
-
-        if should_commit {
-            info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
-            self.commit().await?;
-        } else {
-            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
-        }
-
-        trace!("Updating done");
-
-        Ok(())
-    }
-
     // This is wrong. We should not expose the ai service to the read side.
     // TODO: Remove this method.
     pub fn get_ai_service(&self) -> Arc<AIService> {
@@ -434,11 +408,6 @@ impl ReadSide {
     // TODO: Remove this method.
     pub fn get_llm_service(&self) -> Arc<LLMService> {
         self.llm_service.clone()
-    }
-
-    pub async fn count_document_in_collection(&self, collection_id: CollectionId) -> Option<u64> {
-        let collection = self.collections.get_collection(collection_id).await?;
-        Some(collection.count_documents())
     }
 
     pub async fn get_system_prompt(
@@ -767,6 +736,8 @@ fn start_receive_operations(
                         .skip(1)
                         .for_each(|cause| eprintln!("because: {}", cause));
                 }
+
+                trace!("Operation applied");
             }
 
             warn!("Operation receiver is closed.");

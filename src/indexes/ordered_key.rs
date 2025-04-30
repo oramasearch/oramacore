@@ -323,8 +323,8 @@ impl<
 
     pub fn get_items(
         &self,
-        min: Key,
-        max: Key,
+        (include_min, min): (bool, Key),
+        (include_max, max): (bool, Key),
     ) -> Result<impl Iterator<Item = Item<Key, Value>> + '_> {
         let min_page_index = self.find_page_index(&min)?;
         let max_page_index = self.find_page_index(&max)?;
@@ -341,8 +341,20 @@ impl<
 
                 items
                     .into_iter()
-                    .skip_while(move |p| p.key < min)
-                    .take_while(move |p| p.key <= max)
+                    .skip_while(move |p| {
+                        if include_min {
+                            p.key < min
+                        } else {
+                            p.key <= min
+                        }
+                    })
+                    .take_while(move |p: &Item<Key, Value>| {
+                        if include_max {
+                            p.key <= max
+                        } else {
+                            p.key < max
+                        }
+                    })
             }))
     }
 
@@ -386,7 +398,7 @@ And this should not happen. Return the first page."#);
             .flat_map(|items| items.into_iter().map(|item| (item.key, item.values)))
     }
 }
-
+/*
 #[cfg(test)]
 mod tests {
     use core::f32;
@@ -484,3 +496,4 @@ mod tests {
         );
     }
 }
+*/

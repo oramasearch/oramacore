@@ -3,40 +3,42 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Ok, Result};
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tracing::info;
+use tracing::{error, info};
 
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::collection_manager::sides::hooks::HooksRuntime;
-use crate::collection_manager::sides::write::collection::DEFAULT_EMBEDDING_FIELD_NAME;
-use crate::collection_manager::sides::{OperationSender, OramaModelSerializable, WriteOperation};
+use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
-use crate::metrics::CollectionCommitLabels;
+use crate::metrics::Empty;
+use crate::nlp::locales::Locale;
 use crate::nlp::NLPService;
-use crate::types::CollectionId;
-use crate::types::{
-    CollectionDTO, CreateCollection, DocumentFields, EmbeddingTypedField, LanguageDTO, TypedField,
-};
+use crate::types::{CollectionId, DocumentId};
+use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 
+use super::collection::CollectionWriter;
+use super::embedding::MultiEmbeddingCalculationRequest;
 use super::CollectionsWriterConfig;
-use super::{collection::CollectionWriter, embedding::EmbeddingCalculationRequest};
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
-    embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
-    pub(super) collection_options: DashMap<CollectionId, CreateCollection>,
+    embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
+    op_sender: OperationSender,
+    hooks_runtime: Arc<HooksRuntime>,
+    nlp_service: Arc<NLPService>,
+    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
-        embedding_sender: tokio::sync::mpsc::Sender<EmbeddingCalculationRequest>,
+        embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
         hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
+        op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
@@ -56,10 +58,14 @@ impl CollectionsWriter {
                     data_dir
                 );
                 return Ok(CollectionsWriter {
-                    collection_options: Default::default(),
+                    // collection_options: Default::default(),
                     collections: Default::default(),
                     config,
                     embedding_sender,
+                    op_sender,
+                    hooks_runtime,
+                    nlp_service,
+                    automatic_embeddings_selector,
                 });
             }
         };
@@ -76,6 +82,8 @@ impl CollectionsWriter {
                 hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
+                hooks_runtime.clone(),
+                op_sender.clone(),
                 automatic_embeddings_selector.clone(),
             )
             .await?;
@@ -86,7 +94,10 @@ impl CollectionsWriter {
             collections: RwLock::new(collections),
             config,
             embedding_sender,
-            collection_options: collection_info.collection_options.into_iter().collect(),
+            op_sender,
+            hooks_runtime,
+            nlp_service,
+            automatic_embeddings_selector,
         };
 
         Ok(writer)
@@ -107,59 +118,34 @@ impl CollectionsWriter {
         &self,
         collection_option: CreateCollection,
         sender: OperationSender,
-        hooks_runtime: Arc<HooksRuntime>,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<()> {
         let CreateCollection {
             id,
             description,
             language,
-            embeddings,
+            embeddings_model,
             write_api_key,
             read_api_key,
-        } = collection_option.clone();
+        } = collection_option;
 
         info!("Creating collection {:?}", id);
 
-        let default_language = language.unwrap_or(LanguageDTO::English);
-        let default_embedding_fields = if cfg!(test) {
-            DocumentFields::AllStringProperties
-        } else {
-            DocumentFields::Automatic
-        };
+        let language = language.unwrap_or(LanguageDTO::English);
+        let default_locale: Locale = language.into();
 
         let collection = CollectionWriter::empty(
             id,
             description.clone(),
             write_api_key,
-            default_language,
+            read_api_key,
+            default_locale,
+            embeddings_model.0,
             self.embedding_sender.clone(),
+            self.hooks_runtime.clone(),
+            self.op_sender.clone(),
+            self.nlp_service.clone(),
+            self.automatic_embeddings_selector.clone(),
         );
-
-        let typed_fields = if !cfg!(feature = "no_auto_embedding_field_on_creation") {
-            let model = embeddings
-                .as_ref()
-                .and_then(|embeddings| embeddings.model.as_ref())
-                .unwrap_or(&self.config.default_embedding_model);
-            let model = model.0;
-            let document_fields = embeddings
-                .map(|embeddings| {
-                    // Empty array means all string properties
-                    if embeddings.document_fields.is_empty() {
-                        default_embedding_fields.clone()
-                    } else {
-                        DocumentFields::Properties(embeddings.document_fields)
-                    }
-                })
-                .unwrap_or(default_embedding_fields);
-            let typed_field = TypedField::Embedding(EmbeddingTypedField {
-                model: OramaModelSerializable(model),
-                document_fields,
-            });
-            HashMap::from_iter([(DEFAULT_EMBEDDING_FIELD_NAME.to_string(), typed_field)])
-        } else {
-            HashMap::new()
-        };
 
         let mut collections = self.collections.write().await;
 
@@ -172,50 +158,23 @@ impl CollectionsWriter {
             )));
         }
 
-        // Send event & Register field should be inside the lock transaction
+        collections.insert(id, collection);
+        drop(collections);
+
         sender
             .send(WriteOperation::CreateCollection {
                 id,
                 read_api_key,
                 description,
-                default_language,
+                default_locale,
             })
             .await
             .context("Cannot send create collection")?;
-        collection
-            .register_fields(
-                typed_fields,
-                sender.clone(),
-                hooks_runtime,
-                automatic_embeddings_selector,
-            )
-            .await
-            .context("Cannot register fields")?;
-
-        collections.insert(id, collection);
-        drop(collections);
-
-        self.collection_options.insert(id, collection_option);
 
         Ok(())
     }
 
-    pub async fn replace(
-        &self,
-        collection_id_tmp: CollectionId,
-        collection_id: CollectionId,
-    ) -> Result<()> {
-        let mut collections = self.collections.write().await;
-        let mut collection_tmp = collections
-            .remove(&collection_id_tmp)
-            .ok_or_else(|| anyhow!("Collection not found"))?;
-        collection_tmp.id = collection_id;
-        collections.insert(collection_id, collection_tmp);
-        drop(collections);
-        Ok(())
-    }
-
-    pub async fn list(&self) -> Vec<CollectionDTO> {
+    pub async fn list(&self) -> Vec<DescribeCollectionResponse> {
         let collections = self.collections.read().await;
 
         let mut r = vec![];
@@ -226,21 +185,20 @@ impl CollectionsWriter {
     }
 
     pub async fn commit(&self) -> Result<()> {
+        info!("Committing collections");
+
         // During the commit, we don't accept any new write operation
-        let collections = self.collections.write().await;
+        // This `write` lock is held until the commit is done
+        let mut collections = self.collections.write().await;
 
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        for (collection_id, collection) in collections.iter() {
-            let collection_dir = data_dir.join(collection_id);
+        let m = COMMIT_CALCULATION_TIME.create(Empty);
+        for (collection_id, collection) in collections.iter_mut() {
+            let collection_dir = data_dir.join(collection_id.as_str());
 
-            let m = COMMIT_CALCULATION_TIME.create(CollectionCommitLabels {
-                collection: collection_id.to_string(),
-                side: "write",
-            });
             collection.commit(collection_dir).await?;
-            drop(m);
         }
 
         let info_path = data_dir.join("info.json");
@@ -249,37 +207,52 @@ impl CollectionsWriter {
             .context("Cannot create info.json")?
             .write_json_data(&CollectionsInfo::V1(CollectionsInfoV1 {
                 collection_ids: collections.keys().cloned().collect::<Vec<_>>(),
-                collection_options: self
-                    .collection_options
-                    .iter()
-                    .map(|e| (*e.key(), e.value().clone()))
-                    .collect(),
             }))
             .context("Cannot write info.json")?;
 
+        drop(m);
+
         // Now it is safe to drop the lock
-        // because we safe everything to disk
+        // because we save everything to disk
         drop(collections);
-        info!("Commit done");
+        info!("Collections committed");
 
         Ok(())
     }
 
-    pub async fn delete_collection(&self, collection_id: CollectionId) -> bool {
+    pub async fn delete_collection(&self, collection_id: CollectionId) -> Option<Vec<DocumentId>> {
         let mut collections = self.collections.write().await;
         let collection = collections.remove(&collection_id);
 
         let collection = match collection {
-            None => return false,
+            None => return None,
             Some(coll) => coll,
         };
 
         let data_dir = &self.config.data_dir.join("collections");
         let collection_dir = data_dir.join(collection_id.as_str());
 
+        let mut document_ids = vec![];
+        let index_ids = collection.get_index_ids().await;
+        for index in index_ids {
+            let Some(index) = collection.get_index(index).await else {
+                continue;
+            };
+            document_ids.extend(index.get_document_ids().await);
+        }
+
         collection.remove_from_fs(collection_dir).await;
 
-        true
+        if let Err(error) = self
+            .op_sender
+            .send(WriteOperation::DeleteCollection(collection_id))
+            .await
+            .context("Cannot send delete collection")
+        {
+            error!(error = ?error, "Error sending delete collection");
+        }
+
+        Some(document_ids)
     }
 }
 
@@ -317,7 +290,6 @@ impl Deref for CollectionReadLock<'_> {
 #[derive(Debug, Serialize, Deserialize)]
 struct CollectionsInfoV1 {
     collection_ids: Vec<CollectionId>,
-    collection_options: HashMap<CollectionId, CreateCollection>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

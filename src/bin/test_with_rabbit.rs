@@ -9,7 +9,8 @@ use oramacore::{
         channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
         OutputSideChannelType, RabbitMQConsumerConfig, RabbitMQProducerConfig, WriteOperation,
     },
-    types::{ApiKey, CollectionId, LanguageDTO},
+    nlp::locales::Locale,
+    types::{ApiKey, CollectionId},
 };
 use rabbitmq_stream_client::ClientOptions;
 use tokio::time::sleep;
@@ -53,9 +54,9 @@ async fn main2() -> Result<()> {
     println!("Sending message");
     producer
         .send(WriteOperation::CreateCollection {
-            id: CollectionId::from("foo".to_string()),
-            read_api_key: ApiKey::try_from("too").unwrap(),
-            default_language: LanguageDTO::English,
+            id: CollectionId::try_new("foo").unwrap(),
+            read_api_key: ApiKey::try_new("too").unwrap(),
+            default_locale: Locale::EN,
             description: None,
         })
         .await?;

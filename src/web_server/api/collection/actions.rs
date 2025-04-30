@@ -13,7 +13,7 @@ use serde_json::json;
 use crate::{
     collection_manager::sides::ReadSide,
     types::{ApiKey, CollectionId, ExecuteActionPayload, SearchParams},
-    web_server::api::collection::admin::print_error,
+    web_server::api::util::print_error,
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
