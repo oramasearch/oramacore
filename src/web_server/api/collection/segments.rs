@@ -13,7 +13,7 @@ use serde_json::json;
 use crate::{
     collection_manager::sides::{segments::Segment, ReadSide, WriteSide},
     types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
-    web_server::api::collection::admin::print_error,
+    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]

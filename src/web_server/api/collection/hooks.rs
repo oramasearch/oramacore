@@ -11,8 +11,10 @@ use serde_json::json;
 
 use crate::{
     collection_manager::sides::WriteSide,
-    types::{ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, NewHookPostParams},
-    web_server::api::collection::admin::print_error,
+    types::{
+        ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, IndexId, NewHookPostParams,
+    },
+    web_server::api::util::print_error,
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
@@ -26,18 +28,19 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/hooks/create",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/hooks/create",
     description = "Add a new JavaScript hook"
 )]
 async fn add_hook_v0(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
     let NewHookPostParams { name, code } = params;
     match write_side
-        .insert_javascript_hook(write_api_key, collection_id, name, code)
+        .insert_javascript_hook(write_api_key, collection_id, index_id, name, code)
         .await
     {
         Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
@@ -53,18 +56,19 @@ async fn add_hook_v0(
 
 #[endpoint(
     method = "GET",
-    path = "/v1/{collection_id}/hooks/get",
+    path = "/v1/{collection_id}/indexes/{index_id}/hooks/get",
     description = "Get an existing JavaScript hook"
 )]
 async fn get_hook_v0(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     params: Query<GetHookQueryParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, impl IntoResponse)> {
     let GetHookQueryParams { name } = params.0;
     match write_side
-        .get_javascript_hook(write_api_key, collection_id, name)
+        .get_javascript_hook(write_api_key, collection_id, index_id, name)
         .await
     {
         Ok(Some(full_hook)) => Ok(Json(json!({ "hook": full_hook.to_string() }))),

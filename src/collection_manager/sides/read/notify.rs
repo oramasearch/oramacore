@@ -1,5 +1,5 @@
 use core::fmt;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use duration_str::deserialize_duration;
@@ -8,7 +8,7 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use crate::types::CollectionId;
+use crate::types::{CollectionId, IndexId};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NotifierConfig {
@@ -37,7 +37,7 @@ impl fmt::Debug for Notifier {
 }
 
 impl Notifier {
-    pub fn try_new(config: &NotifierConfig) -> Result<Self> {
+    pub fn try_new(config: &NotifierConfig) -> Result<Arc<Self>> {
         let mut authorization_token = None;
         if let Some(token) = &config.authorization_token {
             authorization_token =
@@ -64,20 +64,22 @@ impl Notifier {
             .build()
             .context("Failed to build HTTP client")?;
 
-        Ok(Self {
+        Ok(Arc::new(Self {
             url: config.url.clone(),
             client,
             retry_count: config.retry_count,
-        })
+        }))
     }
 
     pub async fn notify_collection_substitution(
         &self,
-        target_collection: CollectionId,
-        source_collection: CollectionId,
+        collection_id: CollectionId,
+        target_collection: IndexId,
+        source_collection: IndexId,
         reference: Option<String>,
     ) -> Result<()> {
         self.notify(Notification::CollectionSubstituted {
+            collection_id,
             target_collection,
             source_collection,
             reference,
@@ -120,8 +122,9 @@ fn default_retry_count() -> u8 {
 #[serde(tag = "type", content = "data")]
 enum Notification {
     CollectionSubstituted {
-        target_collection: CollectionId,
-        source_collection: CollectionId,
+        collection_id: CollectionId,
+        target_collection: IndexId,
+        source_collection: IndexId,
         reference: Option<String>,
     },
 }
@@ -133,8 +136,9 @@ mod tests {
     #[test]
     fn test_notification_serialization() {
         let notification = Notification::CollectionSubstituted {
-            target_collection: CollectionId::from("target_collection".to_string()),
-            source_collection: CollectionId::from("source_collection".to_string()),
+            collection_id: CollectionId::try_new("test_collection").unwrap(),
+            target_collection: IndexId::try_new("target_collection").unwrap(),
+            source_collection: IndexId::try_new("source_collection").unwrap(),
             reference: Some("reference".to_string()),
         };
         let json = serde_json::to_string(&notification).unwrap();

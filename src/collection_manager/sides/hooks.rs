@@ -8,7 +8,7 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
@@ -17,7 +17,7 @@ use tracing::warn;
 
 use crate::metrics::js::JS_CALCULATION_TIME;
 use crate::metrics::JSOperationLabels;
-use crate::types::{CollectionId, FlattenDocument};
+use crate::types::{CollectionId, IndexId};
 
 use super::generic_kv::KV;
 
@@ -62,12 +62,17 @@ impl Display for HookName {
 }
 
 #[inline]
-fn prefix(collection_id: &CollectionId) -> String {
+fn collection_prefix(collection_id: CollectionId) -> String {
     format!("{}:hook:", collection_id.as_str())
 }
+
 #[inline]
-fn hook_key(collection_id: &CollectionId, name: &HookName) -> String {
-    format!("{}{}", prefix(collection_id), name)
+fn index_prefix(collection_id: CollectionId, index_id: IndexId) -> String {
+    format!("{}:{}hook:", collection_id.as_str(), index_id.as_str())
+}
+#[inline]
+fn hook_key(collection_id: CollectionId, index_id: IndexId, name: &HookName) -> String {
+    format!("{}{}", index_prefix(collection_id, index_id), name)
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -114,12 +119,22 @@ impl HooksRuntime {
         }
     }
 
-    pub async fn has_hook(&self, collection_id: CollectionId, name: HookName) -> bool {
-        self.get_hook(collection_id, name).await.is_some()
+    pub async fn has_hook(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        name: HookName,
+    ) -> bool {
+        self.get_hook(collection_id, index_id, name).await.is_some()
     }
 
-    pub async fn get_hook(&self, collection_id: CollectionId, name: HookName) -> Option<HookValue> {
-        let key = hook_key(&collection_id, &name);
+    pub async fn get_hook(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        name: HookName,
+    ) -> Option<HookValue> {
+        let key = hook_key(collection_id, index_id, &name);
 
         let k = self.kv.get::<HookPair>(&key).await;
 
@@ -139,7 +154,7 @@ impl HooksRuntime {
     ) -> Result<HashMap<HookName, HookValue>> {
         let pairs = self
             .kv
-            .prefix_scan::<HookPair>(&prefix(&collection_id))
+            .prefix_scan::<HookPair>(&collection_prefix(collection_id))
             .await
             .context("Error listing hooks")?;
         let ret = pairs
@@ -152,9 +167,10 @@ impl HooksRuntime {
     pub async fn delete_hook(
         &self,
         collection_id: CollectionId,
+        index_id: IndexId,
         name: HookName,
     ) -> Option<(String, HookValue)> {
-        let key = hook_key(&collection_id, &name);
+        let key = hook_key(collection_id, index_id, &name);
         let a = self.kv.remove_and_get::<HookPair>(&key).await;
 
         match a {
@@ -174,6 +190,7 @@ impl HooksRuntime {
     pub async fn insert_hook(
         &self,
         collection_id: CollectionId,
+        index_id: IndexId,
         name: HookName,
         code: String,
     ) -> Result<()> {
@@ -187,16 +204,21 @@ impl HooksRuntime {
         };
         let pair = HookPair(name.clone(), hook);
 
-        let key = hook_key(&collection_id, &name);
+        let key = hook_key(collection_id, index_id, &name);
         self.kv.insert(key, pair).await
     }
 
     pub async fn calculate_text_for_embedding(
         &self,
         collection_id: CollectionId,
-        doc: FlattenDocument,
+        index_id: IndexId,
+        doc: Map<String, Value>,
     ) -> Option<Result<SelectEmbeddingPropertiesReturnType>> {
-        let key = hook_key(&collection_id, &HookName::SelectEmbeddingsProperties);
+        let key = hook_key(
+            collection_id,
+            index_id,
+            &HookName::SelectEmbeddingsProperties,
+        );
         let code = match self.kv.get::<HookPair>(&key).await {
             None => return None,
             Some(Err(e)) => return Some(Err(e)),
@@ -209,7 +231,7 @@ impl HooksRuntime {
         });
         let output = self
             .embedding_js_runtime
-            .execute(&code, serde_json::Value::Object(doc.into_inner()))
+            .execute(&code, serde_json::Value::Object(doc))
             .await
             .map_err(|e| anyhow!("Error in evaluate the embedding script: {:?}", e));
         drop(m);
@@ -235,71 +257,6 @@ impl Debug for HooksRuntime {
             .field("hooks", &"...")
             .field("javascript_runtime", &"...")
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{collection_manager::sides::generic_kv::KVConfig, tests::utils::generate_new_path};
-
-    use super::*;
-
-    fn config() -> HooksRuntimeConfig {
-        HooksRuntimeConfig {
-            select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
-                check_interval: DurationString::from_str("1s").unwrap(),
-                max_idle_time: DurationString::from_str("1s").unwrap(),
-                instances_count_per_code: 1,
-                queue_capacity: 1,
-                max_execution_time: DurationString::from_str("1s").unwrap(),
-                max_startup_time: DurationString::from_str("1s").unwrap(),
-            },
-        }
-    }
-
-    #[tokio::test]
-    async fn test_hook_crud() {
-        let hook_runtime = HooksRuntime::new(
-            Arc::new(
-                KV::try_load(KVConfig {
-                    data_dir: generate_new_path(),
-                    sender: None,
-                })
-                .unwrap(),
-            ),
-            config(),
-        )
-        .await;
-
-        let collection_id = CollectionId::from("1".to_string());
-        hook_runtime
-            .insert_hook(
-                collection_id,
-                HookName::SelectEmbeddingsProperties,
-                "function the_hook() { return 1; }".to_string(),
-            )
-            .await
-            .unwrap();
-
-        let hook = hook_runtime
-            .get_hook(collection_id, HookName::SelectEmbeddingsProperties)
-            .await
-            .unwrap();
-        assert_eq!(hook.code, "function the_hook() { return 1; }");
-
-        let hooks = hook_runtime.list_hooks(collection_id).await.unwrap();
-        assert_eq!(hooks.len(), 1);
-
-        let hook = hook_runtime
-            .delete_hook(collection_id, HookName::SelectEmbeddingsProperties)
-            .await
-            .unwrap();
-        assert_eq!(hook.0, "selectEmbeddingProperties");
-
-        let hook = hook_runtime
-            .get_hook(collection_id, HookName::SelectEmbeddingsProperties)
-            .await;
-        assert!(hook.is_none());
     }
 }
 

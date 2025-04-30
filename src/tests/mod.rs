@@ -1,24 +1,16 @@
-mod hurl_search;
+// mod old;
 
-mod all;
-mod delete_collection;
-mod delete_document;
-mod dump;
-mod insert_document;
-mod kv_actions;
-#[cfg(feature = "test-mem-alloc")]
-mod mem_allocation;
-mod reindex;
-mod string_filter;
-
+mod commit;
+mod delete_doc;
+mod entity_lifecycle;
+mod facets;
+mod filter;
 mod fulltext_search;
-
-mod string_facets;
-
+// mod hurl;
+mod index_rebuild;
 mod list_documents;
-
-mod temp_insert_swap;
-
+mod replace_doc_on_insert;
+mod trigger;
 mod vector_search;
 
 pub mod utils;

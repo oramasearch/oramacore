@@ -1,7 +1,8 @@
+use std::fmt::Debug;
+
 use anyhow::Result;
 use ptrie::Trie;
 
-#[derive(Debug)]
 pub struct RadixIndex<Value> {
     pub inner: Trie<u8, Value>,
 }
@@ -44,5 +45,23 @@ impl<Value: Clone> RadixIndex<Value> {
         }
 
         Ok(others)
+    }
+}
+
+impl<Value: Clone + Debug> Debug for RadixIndex<Value> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let all: Vec<_> = self
+            .inner
+            .iter()
+            .map(|(key, value)| {
+                let key = String::from_utf8(key).unwrap();
+                (key, value)
+            })
+            .collect();
+
+        f.debug_struct("RadixIndex")
+            .field("len", &self.len())
+            .field("data", &all)
+            .finish()
     }
 }

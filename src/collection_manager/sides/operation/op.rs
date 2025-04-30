@@ -4,11 +4,10 @@ use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::sides::{hooks::HookName, OramaModelSerializable},
+    collection_manager::sides::{hooks::HookName, index::IndexedValue, OramaModelSerializable},
     nlp::locales::Locale,
     types::{
-        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, LanguageDTO, Number,
-        RawJSONDocument,
+        ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
 };
 
@@ -115,7 +114,43 @@ impl<'de> Deserialize<'de> for DocumentToInsert {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexWriteOperationFieldType {
+    Number,
+    Bool,
+    StringFilter,
+    String,
+    Embedding(OramaModelSerializable),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexWriteOperation {
+    CreateField2 {
+        field_id: FieldId,
+        field_path: Box<[String]>,
+        is_array: bool,
+        field_type: IndexWriteOperationFieldType,
+    },
+    Index {
+        doc_id: DocumentId,
+        indexed_values: Vec<IndexedValue>,
+    },
+    IndexEmbedding {
+        data: Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>,
+    },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReplaceIndexReason {
+    IndexResynced,
+    CollectionReindexed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectionWriteOperation {
+    /*
     InsertDocument {
         doc_id: DocumentId,
         doc: DocumentToInsert,
@@ -129,6 +164,25 @@ pub enum CollectionWriteOperation {
         field: TypedFieldWrapper,
     },
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
+    */
+    CreateIndex2 {
+        index_id: IndexId,
+        locale: Locale,
+    },
+    CreateTemporaryIndex2 {
+        index_id: IndexId,
+        locale: Locale,
+    },
+    ReplaceIndex {
+        reason: ReplaceIndexReason,
+        runtime_index_id: IndexId,
+        temp_index_id: IndexId,
+        reference: Option<String>,
+    },
+    DeleteIndex2 {
+        index_id: IndexId,
+    },
+    IndexWriteOperation(IndexId, IndexWriteOperation),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +252,17 @@ pub enum KVWriteOperation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DocumentStorageWriteOperation {
+    InsertDocument {
+        doc_id: DocumentId,
+        doc: DocumentToInsert,
+    },
+    DeleteDocuments {
+        doc_ids: Vec<DocumentId>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WriteOperation {
     KV(KVWriteOperation),
     CreateCollection {
@@ -208,15 +273,11 @@ pub enum WriteOperation {
         )]
         read_api_key: ApiKey,
         description: Option<String>,
-        default_language: LanguageDTO,
+        default_locale: Locale,
     },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
-    SubstituteCollection {
-        subject_collection_id: CollectionId,
-        target_collection_id: CollectionId,
-        reference: Option<String>,
-    },
+    DocumentStorage(DocumentStorageWriteOperation),
 }
 
 impl WriteOperation {
@@ -224,6 +285,7 @@ impl WriteOperation {
         match self {
             WriteOperation::CreateCollection { .. } => "create_collection",
             WriteOperation::DeleteCollection(_) => "delete_collection",
+            /*
             WriteOperation::Collection(_, CollectionWriteOperation::CreateField { .. }) => {
                 "create_field"
             }
@@ -234,9 +296,53 @@ impl WriteOperation {
                 "insert_document"
             }
             WriteOperation::Collection(_, CollectionWriteOperation::Index(_, _, _)) => "index",
+            */
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
-            WriteOperation::SubstituteCollection { .. } => "substitute_collection",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::CreateField2 { .. },
+                ),
+            ) => "create_field_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::Index { .. }),
+            ) => "index_document_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::DeleteDocuments { .. },
+                ),
+            ) => "delete_document_2",
+            WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
+                "create_index"
+            }
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::CreateTemporaryIndex2 { .. },
+            ) => "create_temp_index",
+            WriteOperation::Collection(_, CollectionWriteOperation::ReplaceIndex { .. }) => {
+                "substitute_collection"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {
+                "delete_index"
+            }
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::IndexEmbedding { .. },
+                ),
+            ) => "index_embedding",
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
+                ..
+            }) => "document_storage_insert_document",
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
+                ..
+            }) => "document_storage_delete_documents",
         }
     }
 }
@@ -264,158 +370,118 @@ mod tests {
     use serde_json::value::RawValue;
 
     use crate::{
-        ai::OramaModel,
-        collection_manager::sides::{hooks::HookName, OramaModelSerializable},
         nlp::locales::Locale,
-        types::{CollectionId, DocumentId, RawJSONDocument},
+        types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber},
     };
 
     #[test]
     fn test_bincode() {
+        let collection_id = CollectionId::try_new("col").unwrap();
+        let index_id = IndexId::try_new("index").unwrap();
+        let locale = Locale::EN;
+        let field_id = FieldId(1);
+        let field_path = vec!["foo".to_string(), "bar".to_string()].into_boxed_slice();
+
         let ops = [
             WriteOperation::CreateCollection {
-                id: CollectionId::from("col".to_string()),
-                read_api_key: ApiKey::try_from("foo").unwrap(),
+                id: collection_id,
+                read_api_key: ApiKey::try_new("foo").unwrap(),
                 description: Some("bar".to_string()),
-                default_language: LanguageDTO::English,
+                default_locale: locale,
             },
+            WriteOperation::DeleteCollection(collection_id),
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
+                doc_ids: vec![DocumentId(2)],
+            }),
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
+                doc_id: DocumentId(1),
+                doc: DocumentToInsert(RawJSONDocument {
+                    id: Some("foo".to_string()),
+                    inner: RawValue::from_string("{\"foo\": \"bar\"}".to_string()).unwrap(),
+                }),
+            }),
+            WriteOperation::KV(KVWriteOperation::Create(
+                "key".to_string(),
+                "value".to_string(),
+            )),
+            WriteOperation::KV(KVWriteOperation::Delete("key".to_string())),
             WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Text(Locale::IT),
+                collection_id,
+                CollectionWriteOperation::CreateIndex2 { index_id, locale },
+            ),
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::CreateTemporaryIndex2 { index_id, locale },
+            ),
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::ReplaceIndex {
+                    reason: ReplaceIndexReason::CollectionReindexed,
+                    runtime_index_id: index_id,
+                    temp_index_id: index_id,
+                    reference: Some("doo".to_string()),
                 },
             ),
             WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Bool,
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
-                        document_fields: DocumentFieldsWrapper(DocumentFields::Properties(vec![
-                            "foo".to_string(),
-                        ])),
-                        model: OramaModelSerializable(OramaModel::BgeBase),
-                    }),
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
-                        document_fields: DocumentFieldsWrapper(DocumentFields::Properties(vec![
-                            "foo".to_string(),
-                        ])),
-                        model: OramaModelSerializable(OramaModel::BgeBase),
-                    }),
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
-                        document_fields: DocumentFieldsWrapper(DocumentFields::AllStringProperties),
-                        model: OramaModelSerializable(OramaModel::BgeBase),
-                    }),
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Embedding(EmbeddingTypedFieldWrapper {
-                        document_fields: DocumentFieldsWrapper(DocumentFields::Hook(
-                            HookName::SelectEmbeddingsProperties,
-                        )),
-                        model: OramaModelSerializable(OramaModel::BgeBase),
-                    }),
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Number,
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::CreateField {
-                    field_id: FieldId(1),
-                    field_name: "Foo".to_string(),
-                    field: TypedFieldWrapper::Number,
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::DeleteDocuments {
-                    doc_ids: vec![DocumentId(1)],
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::InsertDocument {
-                    doc_id: DocumentId(1),
-                    doc: DocumentToInsert(RawJSONDocument {
-                        id: Some("docid".to_string()),
-                        inner: RawValue::from_string("{}".to_string()).unwrap(),
-                    }),
-                },
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::Index(
-                    DocumentId(1),
-                    FieldId(1),
-                    DocumentFieldIndexOperation::IndexString {
-                        field_length: 1,
-                        terms: HashMap::from([(
-                            Term("foo".to_string()),
-                            TermStringField { positions: vec![1] },
-                        )]),
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::CreateField2 {
+                        field_id,
+                        field_path: field_path.clone(),
+                        is_array: false,
+                        field_type: IndexWriteOperationFieldType::Embedding(
+                            OramaModelSerializable(crate::ai::OramaModel::BgeSmall),
+                        ),
                     },
                 ),
             ),
             WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::Index(
-                    DocumentId(1),
-                    FieldId(1),
-                    DocumentFieldIndexOperation::IndexBoolean { value: false },
-                ),
-            ),
-            WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::Index(
-                    DocumentId(1),
-                    FieldId(1),
-                    DocumentFieldIndexOperation::IndexNumber {
-                        value: NumberWrapper(Number::I32(1)),
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::Index {
+                        doc_id: DocumentId(1),
+                        indexed_values: Vec::from([
+                            IndexedValue::FilterBool(field_id, true),
+                            IndexedValue::FilterNumber(
+                                field_id,
+                                SerializableNumber(Number::F32(1.0)),
+                            ),
+                            IndexedValue::FilterString(field_id, "foo".to_string()),
+                            IndexedValue::ScoreString(
+                                field_id,
+                                1,
+                                HashMap::from([
+                                    (
+                                        Term("foo".to_string()),
+                                        TermStringField { positions: vec![1] },
+                                    ),
+                                    (
+                                        Term("bar".to_string()),
+                                        TermStringField { positions: vec![2] },
+                                    ),
+                                ]),
+                            ),
+                        ]),
                     },
                 ),
             ),
             WriteOperation::Collection(
-                CollectionId::from("col".to_string()),
-                CollectionWriteOperation::Index(
-                    DocumentId(1),
-                    FieldId(1),
-                    DocumentFieldIndexOperation::IndexNumber {
-                        value: NumberWrapper(Number::F32(1.5)),
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::DeleteDocuments {
+                        doc_ids: vec![DocumentId(1)],
+                    },
+                ),
+            ),
+            WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::IndexEmbedding {
+                        data: vec![(field_id, vec![(DocumentId(1), vec![vec![1.0, 2.0, 3.0]])])],
                     },
                 ),
             ),
@@ -427,10 +493,11 @@ mod tests {
         }
     }
 
+    /*
     #[test]
     fn test_bincode_index_number() {
         let op = WriteOperation::Collection(
-            CollectionId::from("col".to_string()),
+            CollectionId::try_new("col").unwrap(),
             CollectionWriteOperation::Index(
                 DocumentId(1),
                 FieldId(1),
@@ -455,4 +522,6 @@ mod tests {
         };
         assert_eq!(value.0, Number::I32(1));
     }
+
+    */
 }

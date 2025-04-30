@@ -10,7 +10,8 @@ use tracing::{debug, info, trace, warn};
 use anyhow::{anyhow, Context, Result};
 
 use crate::{
-    file_utils::{create_or_overwrite, read_file},
+    collection_manager::sides::DocumentStorageWriteOperation,
+    file_utils::{read_file, BufferedFile},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
@@ -103,8 +104,9 @@ impl CommittedDiskDocumentStorage {
             let doc_path = self.path.join(format!("{}", doc_id.0));
 
             let doc = RawJSONDocumentWrapper(doc);
-            create_or_overwrite(doc_path, &doc)
-                .await
+            BufferedFile::create_or_overwrite(doc_path)
+                .context("Cannot write document data")?
+                .write_json_data(&doc)
                 .context("Cannot write document data")?;
         }
 
@@ -135,7 +137,19 @@ impl DocumentStorage {
         })
     }
 
-    pub async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
+    pub async fn update(&self, op: DocumentStorageWriteOperation) -> Result<()> {
+        match op {
+            DocumentStorageWriteOperation::InsertDocument { doc_id, doc } => {
+                self.add_document(doc_id, doc.0).await
+            }
+            DocumentStorageWriteOperation::DeleteDocuments { doc_ids } => {
+                self.delete_documents(doc_ids).await?;
+                Ok(())
+            }
+        }
+    }
+
+    async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
         let doc = Arc::new(doc);
         let mut uncommitted = self.uncommitted.write().await;
         if uncommitted.insert(doc_id, doc).is_some() {
@@ -144,9 +158,9 @@ impl DocumentStorage {
         Ok(())
     }
 
-    pub async fn delete_document(&self, doc_id: &DocumentId) -> Result<()> {
+    async fn delete_documents(&self, doc_ids: Vec<DocumentId>) -> Result<()> {
         let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
-        uncommitted_document_deletions.insert(*doc_id);
+        uncommitted_document_deletions.extend(doc_ids);
 
         Ok(())
     }
@@ -249,7 +263,6 @@ impl PartialEq for RawJSONDocumentWrapper {
         self.0.id == other.0.id && self.0.inner.get() == other.0.inner.get()
     }
 }
-#[cfg(test)]
 impl Debug for RawJSONDocumentWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RawJSONDocumentWrapper")

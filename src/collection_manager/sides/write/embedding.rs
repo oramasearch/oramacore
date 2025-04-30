@@ -1,75 +1,97 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::mpsc::Receiver;
-use tracing::{debug, info, trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
     ai::{AIService, OramaModel},
     collection_manager::sides::{
-        CollectionWriteOperation, DocumentFieldIndexOperation, OperationSender, WriteOperation,
+        CollectionWriteOperation, IndexWriteOperation, OperationSender, WriteOperation,
     },
-    types::{CollectionId, DocumentId, FieldId},
+    types::{CollectionId, DocumentId, FieldId, IndexId},
 };
 
 pub struct EmbeddingCalculationRequestInput {
     pub text: String,
+    pub doc_id: DocumentId,
+    pub field_id: FieldId,
+}
+
+#[derive(Debug)]
+pub struct MultiEmbeddingCalculationRequest {
+    pub model: OramaModel,
     pub coll_id: CollectionId,
     pub doc_id: DocumentId,
     pub field_id: FieldId,
-    pub op_sender: OperationSender,
+    pub index_id: IndexId,
+    pub text: Vec<String>,
 }
 
-pub struct EmbeddingCalculationRequest {
-    pub model: OramaModel,
-    pub input: EmbeddingCalculationRequestInput,
-}
-
-async fn process<I>(ai_service: Arc<AIService>, cache: I)
+async fn process<I>(op_sender: &OperationSender, ai_service: Arc<AIService>, cache: I)
 where
-    I: Iterator<Item = (OramaModel, Vec<EmbeddingCalculationRequestInput>)>,
+    I: Iterator<
+        Item = (
+            OramaModel,
+            HashMap<(CollectionId, IndexId), Vec<EmbeddingCalculationRequestInput>>,
+        ),
+    >,
 {
     info!("Processing embedding batch");
 
-    for (model, inputs) in cache {
+    for (model, inputs_per_collection_index) in cache {
         let model_name = model.as_str_name();
-        trace!(model_name = ?model_name, inputs = %inputs.len(), "Process embedding batch");
-        let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
 
-        // If something goes wrong, we will just log it and continue
-        // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
-        // TODO: Add circuit breaker
-        let output = ai_service.embed_passage(model, text_inputs).await;
+        let mut res: HashMap<
+            (CollectionId, IndexId),
+            HashMap<FieldId, HashMap<DocumentId, Vec<Vec<f32>>>>,
+        > = HashMap::new();
+        for ((collection_id, index_id), inputs) in inputs_per_collection_index {
+            trace!(model_name = ?model_name, inputs = ?inputs.len(), "Process embedding batch");
+            let text_inputs: Vec<&String> = inputs.iter().map(|input| &input.text).collect();
 
-        info!("Embedding done");
+            // If something goes wrong, we will just log it and continue
+            // We should put a circuit breaker here like https://docs.rs/tokio-retry2/latest/tokio_retry2/
+            // TODO: Add circuit breaker
+            let output = ai_service.embed_passage(model, text_inputs).await;
 
-        match output {
-            Ok(output) => {
-                for (input, output) in inputs.into_iter().zip(output.into_iter()) {
-                    let EmbeddingCalculationRequestInput {
-                        doc_id,
-                        coll_id,
-                        field_id,
-                        op_sender,
-                        ..
-                    } = input;
-
-                    op_sender
-                        .send(WriteOperation::Collection(
-                            coll_id,
-                            CollectionWriteOperation::Index(
-                                doc_id,
-                                field_id,
-                                DocumentFieldIndexOperation::IndexEmbedding { value: output },
-                            ),
-                        ))
-                        .await
-                        .unwrap();
-                    debug!("Embedding sent to the read side");
+            let output = match output {
+                Ok(output) => output,
+                Err(e) => {
+                    warn!("Failed to calculate embedding {:?}", e);
+                    continue;
                 }
+            };
+
+            let output = inputs.into_iter().zip(output.into_iter());
+
+            for (req, embeddings) in output {
+                let EmbeddingCalculationRequestInput {
+                    doc_id, field_id, ..
+                } = req;
+                let entry = res.entry((collection_id, index_id)).or_default();
+                let entry = entry.entry(field_id).or_default();
+                let entry = entry.entry(doc_id).or_default();
+                entry.push(embeddings);
             }
-            Err(e) => {
-                warn!("Failed to calculate embedding {:?}", e);
-            }
+        }
+
+        for ((collection_id, index_id), data) in res {
+            let op = WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::IndexEmbedding {
+                        data: data
+                            .into_iter()
+                            .map(|(field_id, data)| {
+                                let data: Vec<_> = data.into_iter().collect();
+                                (field_id, data)
+                            })
+                            .collect(),
+                    },
+                ),
+            );
+            op_sender.send(op).await.unwrap();
         }
     }
 
@@ -78,7 +100,8 @@ where
 
 pub fn start_calculate_embedding_loop(
     ai_service: Arc<AIService>,
-    mut receiver: Receiver<EmbeddingCalculationRequest>,
+    mut receiver: Receiver<MultiEmbeddingCalculationRequest>,
+    op_sender: OperationSender,
     limit: u32,
 ) {
     // `limit` is the number of items to process in a batch
@@ -88,8 +111,10 @@ pub fn start_calculate_embedding_loop(
         info!("Starting embedding calculation loop...");
 
         let mut buffer = Vec::with_capacity(limit as usize);
-        let mut cache: HashMap<OramaModel, Vec<EmbeddingCalculationRequestInput>> =
-            Default::default();
+        let mut cache: HashMap<
+            OramaModel,
+            HashMap<(CollectionId, IndexId), Vec<EmbeddingCalculationRequestInput>>,
+        > = Default::default();
 
         loop {
             // `recv_many` waits for at least one available item
@@ -101,13 +126,28 @@ pub fn start_calculate_embedding_loop(
             }
 
             for item in buffer.drain(..) {
-                let EmbeddingCalculationRequest { model, input } = item;
+                let MultiEmbeddingCalculationRequest {
+                    model,
+                    coll_id,
+                    doc_id,
+                    field_id,
+                    index_id,
+                    text,
+                } = item;
 
                 let inputs = cache.entry(model).or_default();
-                inputs.push(input);
+                let inputs = inputs.entry((coll_id, index_id)).or_default();
+                for t in text {
+                    let input = EmbeddingCalculationRequestInput {
+                        text: t,
+                        doc_id,
+                        field_id,
+                    };
+                    inputs.push(input);
+                }
             }
 
-            process(ai_service.clone(), cache.drain()).await;
+            process(&op_sender, ai_service.clone(), cache.drain()).await;
         }
 
         warn!("Stop embedding calculation loop");

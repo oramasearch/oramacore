@@ -17,6 +17,7 @@ macro_rules! create_counter_histogram {
 #[macro_export]
 macro_rules! create_time_histogram {
     ($name:ident, $key:expr, $type: ident) => {
+        #[allow(dead_code)]
         pub static $name: $crate::metrics::histogram::TimeHistogram<$type> =
             $crate::metrics::histogram::TimeHistogram {
                 key: $key,

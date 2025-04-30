@@ -2,7 +2,9 @@ pub mod collection;
 mod collections;
 pub mod document_storage;
 mod embedding;
-mod fields;
+pub mod index;
+use collection::DEFAULT_EMBEDDING_FIELD_NAME;
+pub use index::OramaModelSerializable;
 
 use std::{
     collections::HashMap,
@@ -15,6 +17,7 @@ use std::{
 };
 
 use super::{
+    field_name_to_path,
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
@@ -23,7 +26,7 @@ use super::{
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
@@ -33,12 +36,10 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use collections::CollectionsWriter;
-use embedding::{start_calculate_embedding_loop, EmbeddingCalculationRequest};
-
-pub use fields::*;
+use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
     ai::{
@@ -46,16 +47,18 @@ use crate::{
         gpu::LocalGPUManager,
         llms::LLMService,
         tools::{Tool, ToolsRuntime},
-        AIService, RemoteLLMProvider,
+        AIService, OramaModel, RemoteLLMProvider,
     },
-    collection_manager::sides::{CollectionWriteOperation, DocumentToInsert, WriteOperation},
+    collection_manager::sides::{
+        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
+    },
     file_utils::BufferedFile,
-    metrics::{document_insertion::DOCUMENT_CALCULATION_TIME, CollectionLabels},
+    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionDTO, CollectionId, CreateCollection, CreateCollectionFrom,
-        DeleteDocuments, Document, DocumentId, DocumentList, InsertDocumentsResult,
-        InteractionLLMConfig, ReindexConfig, SwapCollections,
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
+        DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
+        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
     },
 };
 
@@ -83,7 +86,7 @@ pub struct WriteSideConfig {
 }
 
 pub struct WriteSide {
-    sender: OperationSender,
+    op_sender: OperationSender,
     collections: CollectionsWriter,
     document_count: AtomicU64,
     data_dir: PathBuf,
@@ -100,13 +103,11 @@ pub struct WriteSide {
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
-
-    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 }
 
 impl WriteSide {
     pub async fn try_load(
-        sender_creator: OperationSenderCreator,
+        op_sender_creator: OperationSenderCreator,
         config: WriteSideConfig,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
@@ -123,7 +124,7 @@ impl WriteSide {
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
 
-        let (sx, rx) = tokio::sync::mpsc::channel::<EmbeddingCalculationRequest>(
+        let (sx, rx) = tokio::sync::mpsc::channel::<MultiEmbeddingCalculationRequest>(
             embedding_queue_limit as usize,
         );
 
@@ -132,15 +133,15 @@ impl WriteSide {
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
-        let sender = if let Ok(info) = r {
+        let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
             document_count.store(info.document_count, Ordering::Relaxed);
-            sender_creator
+            op_sender_creator
                 .create(info.offset)
                 .await
                 .context("Cannot create sender")?
         } else {
-            sender_creator
+            op_sender_creator
                 .create(Offset(0))
                 .await
                 .context("Cannot create sender")?
@@ -148,7 +149,7 @@ impl WriteSide {
 
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
-            sender: Some(sender.clone()),
+            sender: Some(op_sender.clone()),
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
@@ -164,6 +165,7 @@ impl WriteSide {
             sx,
             hook_runtime.clone(),
             nlp_service.clone(),
+            op_sender.clone(),
             automatic_embeddings_selector.clone(),
         )
         .await
@@ -181,7 +183,7 @@ impl WriteSide {
             insert_batch_commit_size,
             master_api_key,
             operation_counter: Default::default(),
-            sender,
+            op_sender: op_sender.clone(),
             segments,
             triggers,
             system_prompts,
@@ -189,18 +191,16 @@ impl WriteSide {
             kv,
             local_gpu_manager,
             llm_service,
-            automatic_embeddings_selector,
         };
 
         let write_side = Arc::new(write_side);
 
         start_commit_loop(write_side.clone(), commit_interval);
-        start_calculate_embedding_loop(ai_service, rx, embedding_queue_limit);
+        start_calculate_embedding_loop(ai_service, rx, op_sender, embedding_queue_limit);
 
         Ok(write_side)
     }
 
-    #[instrument(skip(self))]
     pub async fn commit(&self) -> Result<()> {
         info!("Committing write side");
 
@@ -208,7 +208,7 @@ impl WriteSide {
 
         self.kv.commit().await?;
 
-        let offset = self.sender.get_offset();
+        let offset = self.op_sender.get_offset();
         // This load is not atomic with the commit.
         // This means, we save a document count possible higher.
         // Anyway it is not a problem, because the document count is only used for the document id generation
@@ -234,13 +234,213 @@ impl WriteSide {
         self.check_master_api_key(master_api_key)?;
 
         self.collections
-            .create_collection(
-                option,
-                self.sender.clone(),
-                self.hook_runtime.clone(),
-                self.automatic_embeddings_selector.clone(),
+            .create_collection(option, self.op_sender.clone())
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        req: CreateIndexRequest,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        let CreateIndexRequest {
+            index_id,
+            embedding,
+        } = req;
+
+        let default_string_calculation = if cfg!(test) {
+            IndexEmbeddingsCalculation::AllProperties
+        } else {
+            IndexEmbeddingsCalculation::Automatic
+        };
+        let embedding: IndexEmbeddingsCalculation = embedding.unwrap_or(default_string_calculation);
+
+        collection.create_index(index_id, embedding).await?;
+
+        Ok(())
+    }
+
+    pub async fn reindex(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        language: LanguageDTO,
+        model: OramaModel,
+        reference: Option<String>,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection
+            .change_runtime_config(language.into(), model)
+            .await;
+
+        // We should lock the collection during the reindex.
+        // Adding documents during the reindex could create problems
+        // TODO: check if we should lock the collection
+
+        info!("Reindexing collection {}", collection_id);
+
+        let index_ids = collection.get_index_ids().await;
+        for copy_from in index_ids {
+            info!("Reindexing index {}", copy_from);
+            let copy_from_index = collection
+                .get_index(copy_from)
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+
+            let new_index_id = cuid2::create_id();
+            let new_index_id = IndexId::try_new(new_index_id)
+                // This is safe because cuid2 is less than 64 bytes
+                .expect("Cannot create new index id");
+
+            // Copy the embedding calculation mechanism from the old index
+            let embedding = copy_from_index
+                .get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME))
+                .await?;
+            let document_ids = copy_from_index.get_document_ids().await;
+
+            // Free the read lock, so we can add new index
+            drop(copy_from_index);
+
+            collection
+                .create_temp_index(copy_from, new_index_id, embedding)
+                .await
+                .context("Cannot create temporary index")?;
+            let new_index = collection
+                .get_temporary_index(new_index_id)
+                .await
+                .expect("Temporary index not found but it should be there because already created");
+
+            let mut stream = self.document_storage.stream_documents(document_ids).await;
+            while let Some((doc_id, doc)) = stream.next().await {
+                let inner = doc.inner;
+                let inner: Map<String, Value> = serde_json::from_str(inner.get())
+                    // This is safe because the document is a valid JSON
+                    .context("Cannot deserialize document")?;
+                let doc = Document { inner };
+                match new_index
+                    .reindex_document(doc_id, doc)
+                    .await
+                    .context("Cannot process document")
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Ignore the error and continue to process the rest of the documents
+                        error!(error = ?e, "Cannot process document during the reindexing. Ignore the error and continue");
+                    }
+                };
+            }
+
+            let req = ReplaceIndexRequest {
+                runtime_index_id: copy_from,
+                temp_index_id: new_index_id,
+                reference: reference.clone(),
+            };
+            self.replace_index(
+                write_api_key,
+                collection_id,
+                req,
+                ReplaceIndexReason::CollectionReindexed,
+            )
+            .await
+            .context("Cannot substitute index")?;
+
+            info!("Index reindexed {}", copy_from);
+        }
+
+        Ok(())
+    }
+
+    pub async fn replace_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        req: ReplaceIndexRequest,
+        reason: ReplaceIndexReason,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        collection
+            .replace_index(
+                req.runtime_index_id,
+                req.temp_index_id,
+                reason,
+                req.reference,
             )
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_temp_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        copy_from: IndexId,
+        req: CreateIndexRequest,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        let CreateIndexRequest {
+            index_id: new_index_id,
+            embedding,
+        } = req;
+
+        let default_string_calculation = if cfg!(test) {
+            IndexEmbeddingsCalculation::AllProperties
+        } else {
+            IndexEmbeddingsCalculation::Automatic
+        };
+        let embedding: IndexEmbeddingsCalculation = embedding.unwrap_or(default_string_calculation);
+
+        collection
+            .create_temp_index(copy_from, new_index_id, embedding)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_index(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+    ) -> Result<()> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_write_api_key(write_api_key)?;
+
+        let document_to_remove = collection.delete_index(index_id).await?;
+
+        self.document_storage.remove(document_to_remove).await;
 
         Ok(())
     }
@@ -249,6 +449,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
+        index_id: IndexId,
         document_list: DocumentList,
     ) -> Result<InsertDocumentsResult> {
         let document_count = document_list.len();
@@ -262,120 +463,100 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
+        let index = collection
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+
         let mut result = InsertDocumentsResult {
             inserted: 0,
             replaced: 0,
             failed: 0,
         };
-        let sender = self.sender.clone();
-        for mut doc in document_list {
-            let metric = DOCUMENT_CALCULATION_TIME.create(CollectionLabels {
-                collection: collection_id.to_string(),
-            });
+        let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
 
+        for mut doc in document_list {
             debug!("Inserting doc");
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
-            let doc_id_value = doc.get("id");
-            // Forces the id to be set, if not set
-            if doc_id_value.is_none() {
-                doc.inner.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(cuid2::create_id()),
-                );
-            } else if let Some(doc_id_value) = doc_id_value {
-                if !doc_id_value.is_string() {
-                    // The search result contains the document id and it is defined as a string.
-                    // So, if the original document id is not a string, we should overwrite it with a new one
-                    // Anyway, this implies the loss of the original document id. For instance we could support number as well
-                    // TODO: think better
-                    warn!("Document id is not a string, overwriting it with new one");
-                    doc.inner.insert(
-                        "id".to_string(),
-                        serde_json::Value::String(cuid2::create_id()),
-                    );
-                }
-            }
+            // We try to guess the document id from the document
+            // Eventually, we generate a new one
 
-            // We update the document if it already exists
-            let doc_id_value = doc
-                .get("id")
-                .expect("id is set")
-                .as_str()
-                .expect("id is a string");
-            if collection.contains(doc_id_value).await {
-                result.replaced += 1;
-                collection
-                    .delete_documents(vec![doc_id_value.to_string()], self.sender.clone())
-                    .await?;
+            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
+            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
+                if doc_id_str.is_empty() {
+                    cuid2::create_id()
+                } else {
+                    doc_id_str.to_string()
+                }
             } else {
-                result.inserted += 1;
-            }
+                cuid2::create_id()
+            };
+            // Ensure the document contains a valid id
+            // NB: this overwrite the previous id if it is not a string
+            // TODO: is it correct?
+            doc.inner.insert(
+                "id".to_string(),
+                serde_json::Value::String(doc_id_str.clone()),
+            );
 
             let doc_id = DocumentId(doc_id);
 
             self.document_storage
-                .insert(doc_id, doc.clone())
+                .insert(doc_id, doc_id_str.clone(), doc.clone())
                 .await
                 .context("Cannot inser document into document storage")?;
 
-            // We send the document to index *before* indexing it, so we can
-            // guarantee that the document is there during the search.
-            // Otherwise, we could find the document without having it yet.
-            self.sender
-                .send(WriteOperation::Collection(
-                    collection_id,
-                    CollectionWriteOperation::InsertDocument {
+            // High inefficiency here: we send a message for each document
+            // We could send a unique message with a batch of documents
+            // Anyway, for now, we keep it simple
+            // TODO: check if we can send a batch of documents
+            self.op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocument {
                         doc_id,
-                        doc: DocumentToInsert(doc.into_raw()?),
+                        doc: DocumentToInsert(
+                            doc.clone()
+                                .into_raw(format!("{}:{}", index_id, doc_id_str))
+                                .expect("Cannot get raw document"),
+                        ),
                     },
                 ))
                 .await
-                .map_err(|e| anyhow!("Error sending document to index writer: {:?}", e))?;
+                .context("Cannot send document storage operation")?;
 
-            info!(?doc_id, "Inserting document");
-            match collection
-                .process_new_document(
-                    doc_id,
-                    doc,
-                    sender.clone(),
-                    self.hook_runtime.clone(),
-                    self.automatic_embeddings_selector.clone(),
-                )
+            trace!(?doc_id, "Inserting document");
+            match index
+                .process_new_document(doc_id, doc)
                 .await
                 .context("Cannot process document")
             {
-                Ok(_) => {}
+                Ok(Some(old_doc_id)) => {
+                    self.document_storage.remove(vec![old_doc_id]).await;
+                    result.inserted += 1;
+                }
+                Ok(None) => {
+                    result.inserted += 1;
+                }
                 Err(e) => {
                     // If the document cannot be processed, we should remove it from the document storage
                     // and from the read side
                     // NB: check if the error handling is correct
-
-                    self.document_storage
-                        .remove(doc_id)
-                        .await
-                        .context("Cannot remove document from document storage")?;
-
-                    self.sender
-                        .send(WriteOperation::Collection(
-                            collection_id,
-                            CollectionWriteOperation::DeleteDocuments {
-                                doc_ids: vec![doc_id],
-                            },
-                        ))
-                        .await
-                        .context("Cannot send delete document operation")?;
+                    self.document_storage.remove(vec![doc_id]).await;
 
                     tracing::error!(error = ?e, "Cannot process document");
                     result.failed += 1;
                 }
             };
-            info!("Document inserted");
 
-            drop(metric);
-
-            info!("Doc inserted");
+            debug!("Document inserted");
         }
+
+        info!("All documents are inserted");
+
+        drop(index);
+        drop(collection);
+        drop(metric);
 
         let mut lock = self.operation_counter.write().await;
         *lock += document_count as u64;
@@ -390,11 +571,7 @@ impl WriteSide {
         if should_commit {
             info!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size reached, committing");
             self.commit().await?;
-        } else {
-            trace!(insert_batch_commit_size=?self.insert_batch_commit_size, "insert_batch_commit_size not reached, not committing");
         }
-
-        info!("Batch of documents inserted");
 
         Ok(result)
     }
@@ -403,6 +580,7 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
+        index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<()> {
         let collection = self
@@ -410,12 +588,14 @@ impl WriteSide {
             .get_collection(collection_id)
             .await
             .context("Collection not found")?;
-
         collection.check_write_api_key(write_api_key)?;
+        let index = collection
+            .get_index(index_id)
+            .await
+            .context("Cannot get index")?;
+        let doc_ids = index.delete_documents(document_ids_to_delete).await?;
 
-        collection
-            .delete_documents(document_ids_to_delete, self.sender.clone())
-            .await?;
+        self.document_storage.remove(doc_ids).await;
 
         Ok(())
     }
@@ -425,15 +605,15 @@ impl WriteSide {
         master_api_key: ApiKey,
         collection_id: CollectionId,
     ) -> Result<()> {
-        self.check_master_api_key(master_api_key).unwrap();
+        self.check_master_api_key(master_api_key)?;
 
-        let deleted = self.collections.delete_collection(collection_id).await;
-        if deleted {
+        let document_ids = self.collections.delete_collection(collection_id).await;
+        if let Some(document_ids) = document_ids {
             self.commit()
                 .await
                 .context("Cannot commit collections after collection deletion")?;
 
-            self.sender
+            self.op_sender
                 .send(WriteOperation::DeleteCollection(collection_id))
                 .await
                 .context("Cannot send delete collection operation")?;
@@ -442,6 +622,8 @@ impl WriteSide {
                 .delete_with_prefix(collection_id.as_str())
                 .await
                 .context("Cannot delete collection from KV")?;
+
+            self.document_storage.remove(document_ids).await;
         }
 
         Ok(())
@@ -486,14 +668,10 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
+        index_id: IndexId,
         name: HookName,
         code: String,
     ) -> Result<()> {
-        self.hook_runtime
-            .insert_hook(collection_id, name.clone(), code)
-            .await
-            .context("Cannot insert hook")?;
-
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -502,15 +680,27 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
-        collection
-            .set_embedding_hook(name)
+        let index = collection
+            .get_index(index_id)
+            .await
+            .context("Cannot get index")?;
+        index
+            .switch_to_embedding_hook(self.hook_runtime.clone())
             .await
             .context("Cannot set embedding hook")?;
+
+        self.hook_runtime
+            .insert_hook(collection_id, index_id, name.clone(), code)
+            .await
+            .context("Cannot insert hook")?;
 
         Ok(())
     }
 
-    pub async fn list_collections(&self, master_api_key: ApiKey) -> Result<Vec<CollectionDTO>> {
+    pub async fn list_collections(
+        &self,
+        master_api_key: ApiKey,
+    ) -> Result<Vec<DescribeCollectionResponse>> {
         self.check_master_api_key(master_api_key)?;
 
         Ok(self.collections.list().await)
@@ -520,7 +710,7 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Option<CollectionDTO>> {
+    ) -> Result<Option<DescribeCollectionResponse>> {
         self.check_master_api_key(master_api_key)?;
         let collection = match self.collections.get_collection(collection_id).await {
             Some(collection) => collection,
@@ -529,189 +719,11 @@ impl WriteSide {
         Ok(Some(collection.as_dto().await))
     }
 
-    pub async fn create_collection_from(
-        &self,
-        write_api_key: ApiKey,
-        request: CreateCollectionFrom,
-    ) -> Result<CollectionId> {
-        info!("create temporary collection");
-        self.check_write_api_key(request.from, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-
-        let collection_id_tmp = cuid2::create_id();
-        let collection_id_tmp = CollectionId::from(collection_id_tmp);
-
-        let mut option = self
-            .collections
-            .collection_options
-            .get(&request.from)
-            .ok_or_else(|| anyhow!("Collection options not found"))?
-            .clone();
-        option.language = request.language.or(option.language);
-        option.embeddings = request.embeddings.or(option.embeddings);
-        option.id = collection_id_tmp;
-
-        self.collections
-            .create_collection(
-                option,
-                self.sender.clone(),
-                self.hook_runtime.clone(),
-                self.automatic_embeddings_selector.clone(),
-            )
-            .await?;
-
-        let hook = self
-            .get_javascript_hook(
-                write_api_key,
-                request.from,
-                HookName::SelectEmbeddingsProperties,
-            )
-            .await
-            .context("Cannot get embedding hook")?;
-        if let Some(hook) = hook {
-            self.insert_javascript_hook(
-                write_api_key,
-                collection_id_tmp,
-                HookName::SelectEmbeddingsProperties,
-                hook,
-            )
-            .await
-            .context("Cannot insert embedding hook to new collection")?;
-        }
-
-        Ok(collection_id_tmp)
-    }
-
-    pub async fn swap_collections(
-        &self,
-        write_api_key: ApiKey,
-        request: SwapCollections,
-    ) -> Result<()> {
-        info!("Replacing collection");
-        self.check_write_api_key(request.from, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-        self.check_write_api_key(request.to, write_api_key)
-            .await
-            .context("Check write api key fails")?;
-
-        self.collections
-            .replace(request.from, request.to)
-            .await
-            .context("Cannot replace collection")?;
-        info!("Replaced");
-
-        info!("Substitute collection");
-        self.sender
-            .send(WriteOperation::SubstituteCollection {
-                subject_collection_id: request.from,
-                target_collection_id: request.to,
-                reference: request.reference,
-            })
-            .await?;
-
-        self.commit()
-            .await
-            .context("Cannot commit collection after replace")?;
-
-        Ok(())
-    }
-
-    pub async fn reindex(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        reindex_config: ReindexConfig,
-    ) -> Result<()> {
-        info!("Reindexing collection {:?}", collection_id);
-        let collection_id_tmp = self
-            .create_collection_from(
-                write_api_key,
-                CreateCollectionFrom {
-                    from: collection_id,
-                    embeddings: reindex_config.embeddings.clone(),
-                    language: reindex_config.language,
-                },
-            )
-            .await
-            .context("Cannot create temporary collection")?;
-
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        let document_ids = collection.get_document_ids().await;
-        drop(collection);
-
-        let collection = self
-            .collections
-            .get_collection(collection_id_tmp)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        let mut stream = self.document_storage.stream_documents(document_ids).await;
-        while let Some((doc_id, doc)) = stream.next().await {
-            debug!(?doc_id, "Reindexing document");
-
-            let inner = doc.inner;
-            let inner: Map<String, Value> =
-                serde_json::from_str(inner.get()).context("Cannot deserialize document")?;
-            let doc = Document { inner };
-            match collection
-                .process_new_document(
-                    doc_id,
-                    doc,
-                    self.sender.clone(),
-                    self.hook_runtime.clone(),
-                    self.automatic_embeddings_selector.clone(),
-                )
-                .await
-                .context("Cannot process document")
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    // If the document cannot be processed, we should remove it from the document storage
-                    // and from the read side
-                    // NB: check if the error handling is correct
-
-                    self.sender
-                        .send(WriteOperation::Collection(
-                            collection_id,
-                            CollectionWriteOperation::DeleteDocuments {
-                                doc_ids: vec![doc_id],
-                            },
-                        ))
-                        .await
-                        .context("Cannot send delete document operation")?;
-
-                    return Err(e);
-                }
-            };
-            info!("Document reindexed");
-        }
-        drop(collection);
-
-        self.swap_collections(
-            write_api_key,
-            SwapCollections {
-                from: collection_id_tmp,
-                to: collection_id,
-                reference: reindex_config.reference,
-            },
-        )
-        .await
-        .context("Cannot swap collections")?;
-
-        Ok(())
-    }
-
     pub async fn get_javascript_hook(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
+        index_id: IndexId,
         name: HookName,
     ) -> Result<Option<String>> {
         let collection = self
@@ -723,7 +735,7 @@ impl WriteSide {
 
         Ok(self
             .hook_runtime
-            .get_hook(collection_id, name)
+            .get_hook(collection_id, index_id, name)
             .await
             .map(|hook| hook.code))
     }

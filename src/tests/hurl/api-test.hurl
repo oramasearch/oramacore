@@ -14,7 +14,8 @@ Authorization: Bearer my-master-api-key
 {
     "id": "{{collection_id}}",
     "read_api_key": "my-read-api-key",
-    "write_api_key": "my-write-api-key"
+    "write_api_key": "my-write-api-key",
+    "embeddings_model": "BGESmall"
 }
 HTTP 201
 
