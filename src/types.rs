@@ -970,6 +970,8 @@ pub struct SearchParams {
     pub where_filter: HashMap<String, Filter>,
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
+    #[serde(default)]
+    pub indexes: Option<Vec<IndexId>>,
 }
 impl PartialSchema for SearchParams {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {

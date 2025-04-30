@@ -324,11 +324,13 @@ impl ReadSide {
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        mut search_params: SearchParams,
+        search_params: SearchParams,
     ) -> Result<SearchResult> {
-        let facets = std::mem::take(&mut search_params.facets);
         let limit = search_params.limit;
         let offset = search_params.offset;
+
+        let has_filter = !search_params.where_filter.is_empty();
+        let has_facets = !search_params.facets.is_empty();
 
         let collection = self
             .collections
@@ -340,18 +342,18 @@ impl ReadSide {
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
             collection: collection_id.to_string().into(),
             mode: search_params.mode.as_str(),
-            has_filter: if search_params.where_filter.is_empty() {
-                "false"
-            } else {
-                "true"
-            },
-            has_facet: if facets.is_empty() { "false" } else { "true" },
+            has_filter: if has_filter { "true" } else { "false" },
+            has_facet: if has_facets { "true" } else { "false" },
         });
 
-        let token_scores = collection.search(search_params).await?;
+        let token_scores = collection.search(&search_params).await?;
 
-        let facets = if !facets.is_empty() {
-            Some(collection.calculate_facets(&token_scores, facets).await?)
+        let facets = if has_facets {
+            Some(
+                collection
+                    .calculate_facets(&token_scores, &search_params)
+                    .await?,
+            )
         } else {
             None
         };

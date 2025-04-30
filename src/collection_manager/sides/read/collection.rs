@@ -18,10 +18,7 @@ use crate::{
     collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
-    types::{
-        ApiKey, CollectionId, DocumentId, FacetDefinition, FacetResult, FieldId, IndexId,
-        SearchParams,
-    },
+    types::{ApiKey, CollectionId, DocumentId, FacetResult, FieldId, IndexId, SearchParams},
 };
 
 use super::{
@@ -270,15 +267,22 @@ impl CollectionReader {
 
     pub async fn search(
         &self,
-        search_params: SearchParams,
+        search_params: &SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
         let mut result: HashMap<DocumentId, f32> = HashMap::new();
         let indexes_lock = self.indexes.read().await;
+
+        let indexes_to_search_on =
+            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
+
         for index in indexes_lock.iter() {
             if index.is_deleted() {
                 continue;
             }
-            index.search(&search_params, &mut result).await?;
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+            index.search(search_params, &mut result).await?;
         }
 
         if result.is_empty() && !search_params.where_filter.is_empty() {
@@ -315,13 +319,24 @@ impl CollectionReader {
     pub async fn calculate_facets(
         &self,
         token_scores: &HashMap<DocumentId, f32>,
-        facets: HashMap<String, FacetDefinition>,
+        search_params: &SearchParams,
     ) -> Result<HashMap<String, FacetResult>> {
         let mut result: HashMap<String, FacetResult> = HashMap::new();
         let indexes_lock = self.indexes.read().await;
+
+        let indexes_to_search_on =
+            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
+
         for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+
             index
-                .calculate_facets(token_scores, &facets, &mut result)
+                .calculate_facets(token_scores, &search_params.facets, &mut result)
                 .await?;
         }
 
@@ -631,6 +646,40 @@ fn get_index_in_vector(vec: &Vec<Index>, wanted: IndexId) -> Option<usize> {
     }
 
     None
+}
+
+fn calculate_index_to_search_on(
+    indexes: &[Index],
+    indexes_from_user: Option<&Vec<IndexId>>,
+) -> Result<Vec<IndexId>> {
+    let all_indexes = indexes.iter().map(|i| i.id()).collect::<Vec<_>>();
+    // No indexes from user -> search on all indexes
+    let Some(indexes_from_user) = indexes_from_user else {
+        return Ok(all_indexes);
+    };
+    // Empty indexes from user -> search on all indexes
+    // It doens't make sense to search on empty indexes list
+    if indexes_from_user.is_empty() {
+        return Ok(all_indexes);
+    }
+
+    let unknown_indexes = indexes_from_user
+        .iter()
+        .filter(|index| !all_indexes.contains(index))
+        .collect::<Vec<_>>();
+    if !unknown_indexes.is_empty() {
+        bail!(
+            "Unknown indexes: {:?}. Available indexes: {:?}",
+            unknown_indexes,
+            all_indexes
+        )
+    }
+
+    let res = all_indexes
+        .into_iter()
+        .filter(|index| indexes_from_user.contains(index))
+        .collect();
+    Ok(res)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
