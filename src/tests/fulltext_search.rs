@@ -331,3 +331,143 @@ async fn test_fulltext_search_offset() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_multi_index() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client_1 = collection_client.create_index().await.unwrap();
+    let docs_1 = vec![
+        json!({
+            "id": "1",
+            "text": "cat",
+        }),
+        json!({
+            "id": "2",
+            "text": "cat cat",
+        }),
+        json!({
+            "id": "3",
+            "text": "cat cat cat",
+        }),
+    ];
+    index_client_1
+        .insert_documents(json!(docs_1).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let index_client_2 = collection_client.create_index().await.unwrap();
+    let docs_2 = vec![
+        json!({
+            "id": "1",
+            "text": "dog",
+        }),
+        json!({
+            "id": "2",
+            "text": "dog dog",
+        }),
+        json!({
+            "id": "3",
+            "text": "dog dog dog",
+        }),
+    ];
+    index_client_2
+        .insert_documents(json!(docs_2).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 6);
+
+    // Empty array means all indexes
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+                "indexes": [],
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 6);
+
+    // All indexes
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+                "indexes": [
+                    index_client_1.index_id.to_string(),
+                    index_client_2.index_id.to_string(),
+                ],
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 6);
+
+    // Only cat
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+                "indexes": [
+                    index_client_1.index_id.to_string(),
+                ],
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    // Only dog
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+                "indexes": [
+                    index_client_2.index_id.to_string(),
+                ],
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    // Unknown index
+    let output = collection_client
+        .search(
+            json!({
+                "term": "cat dog",
+                "indexes": [
+                    "unknown_index".to_string(),
+                ],
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await;
+    assert!(output.is_err());
+    assert!(format!("{:?}", output.err().unwrap()).contains("Unknown indexes"));
+
+    drop(test_context);
+}
