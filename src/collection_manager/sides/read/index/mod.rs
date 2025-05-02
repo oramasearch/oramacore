@@ -114,6 +114,8 @@ pub struct Index {
     committed_fields: RwLock<CommittedFields>,
 
     path_to_index_id_map: PathToIndexId,
+
+    is_new: AtomicBool,
 }
 
 impl Index {
@@ -141,6 +143,7 @@ impl Index {
             uncommitted_fields: Default::default(),
 
             path_to_index_id_map: PathToIndexId::new(),
+            is_new: AtomicBool::new(true),
         }
     }
 
@@ -227,15 +230,17 @@ impl Index {
             uncommitted_fields: RwLock::new(uncommitted_fields),
 
             path_to_index_id_map: PathToIndexId::from(dump.path_to_index_id_map),
+            is_new: AtomicBool::new(false),
         })
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+        println!("Committing index {:?}", self.id);
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
-        create_if_not_exists(&data_dir_with_offset).context("Cannot create data directory")?;
-
         let uncommitted_fields = self.uncommitted_fields.read().await;
+
+        let is_new = self.is_new.load(Ordering::Relaxed);
 
         // This index was a temp index and from the last commit, it was promoted to a runtime index
         // That means all committed fields are inside "temp_indexes" folder and
@@ -267,7 +272,7 @@ impl Index {
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || !self.uncommitted_deleted_documents.is_empty();
-        if !something_to_commit && !is_promoted {
+        if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
             return Ok(());
@@ -530,8 +535,10 @@ impl Index {
             .write_json_data(&dump)
             .context("Cannot write index.json")?;
 
+        // Force flags after commit
         self.promoted_to_runtime_index
             .store(false, Ordering::Relaxed);
+        self.is_new.store(false, Ordering::Relaxed);
 
         debug!("Index committed: {:?}", self.id);
 

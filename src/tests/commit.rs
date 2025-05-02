@@ -52,3 +52,62 @@ async fn test_commit_after_operation_limit_reached() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_empty_index_reload() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    collection_client.create_index().await.unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let stats = collection_client.reader_stats().await.unwrap();
+
+    let total_fields: usize = stats
+        .indexes_stats
+        .iter()
+        .map(|index| index.fields_stats.len())
+        .sum();
+
+    // Embedding fields (committed and uncommitted)
+    assert_eq!(total_fields, 2, "Expected no fields in the index");
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_empty_collection_reload() {
+    init_log();
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    collection_client
+        .reader_stats()
+        .await
+        .expect("Collection must exists");
+
+    drop(test_context);
+}
