@@ -65,14 +65,14 @@ impl UncommittedStringFilterField {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
 
         UncommittedStringFilterFieldStats {
-            variant_count: self.inner.len(),
-            doc_count,
+            key_count: self.inner.len(),
+            document_count: doc_count,
         }
     }
 }
 
 #[derive(Serialize, Debug)]
 pub struct UncommittedStringFilterFieldStats {
-    pub variant_count: usize,
-    pub doc_count: usize,
+    pub key_count: usize,
+    pub document_count: usize,
 }

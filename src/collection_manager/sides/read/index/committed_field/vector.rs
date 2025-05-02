@@ -182,7 +182,7 @@ impl CommittedVectorField {
     pub fn stats(&self) -> Result<CommittedVectorFieldStats> {
         Ok(CommittedVectorFieldStats {
             dimensions: self.inner.dim(),
-            count: self.inner.len(),
+            vector_count: self.inner.len(),
         })
     }
 }
@@ -197,5 +197,5 @@ pub struct VectorFieldInfo {
 #[derive(Serialize, Debug)]
 pub struct CommittedVectorFieldStats {
     pub dimensions: usize,
-    pub count: usize,
+    pub vector_count: usize,
 }

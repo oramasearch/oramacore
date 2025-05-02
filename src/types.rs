@@ -1250,6 +1250,7 @@ pub struct CreateIndexRequest {
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct ReplaceIndexRequest {
+    #[serde(rename = "target_index_id")]
     pub runtime_index_id: IndexId,
     pub temp_index_id: IndexId,
     #[serde(default)]

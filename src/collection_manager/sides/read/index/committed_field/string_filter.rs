@@ -80,8 +80,8 @@ impl CommittedStringFilterField {
     pub fn stats(&self) -> CommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
         CommittedStringFilterFieldStats {
-            variant_count: self.inner.len(),
-            doc_count,
+            key_count: self.inner.len(),
+            document_count: doc_count,
         }
     }
 
@@ -117,8 +117,8 @@ pub struct StringFilterFieldInfo {
 
 #[derive(Serialize, Debug)]
 pub struct CommittedStringFilterFieldStats {
-    pub variant_count: usize,
-    pub doc_count: usize,
+    pub key_count: usize,
+    pub document_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
