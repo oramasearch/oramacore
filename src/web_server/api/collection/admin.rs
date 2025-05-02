@@ -156,7 +156,7 @@ async fn list_document_in_collection(
     match write_side.list_document(write_api_key, collection_id).await {
         Ok(docs) => Ok(Json(docs)),
         Err(e) => {
-            print_error(&e, "Error deleting collection");
+            print_error(&e, "Error in listing collection");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -182,7 +182,7 @@ async fn create_index(
     {
         Ok(_) => Ok(Json(json!({}))),
         Err(e) => {
-            print_error(&e, "Error deleting collection");
+            print_error(&e, "Error creating index");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
@@ -208,7 +208,7 @@ async fn delete_index(
     {
         Ok(_) => Ok(Json(json!({}))),
         Err(e) => {
-            print_error(&e, "Error deleting collection");
+            print_error(&e, "Error deleting index");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),
