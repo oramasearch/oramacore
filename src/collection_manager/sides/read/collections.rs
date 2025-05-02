@@ -154,7 +154,7 @@ impl CollectionsReader {
 
         let col = self.collections.read().await;
 
-        let collection_ids: Vec<_> = col.keys().cloned().collect();
+        let mut collection_ids: Vec<_> = vec![];
         info!("Committing collections: {:?}", collection_ids);
         for (id, collection) in col.iter() {
             let collection_dir = collections_dir.join(id.as_str());
@@ -163,6 +163,8 @@ impl CollectionsReader {
                 // TODO: should we delete the collection from the disk?
                 continue;
             }
+
+            collection_ids.push(*id);
 
             create_if_not_exists_async(&collection_dir)
                 .await
