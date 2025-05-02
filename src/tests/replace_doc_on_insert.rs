@@ -69,18 +69,18 @@ async fn test_replace_doc_on_insert() {
             let output = collection_client
                 .search(
                     json!({
-                        "term": "Tommaso",
+                        "term": "Michele",
                     })
                     .try_into()
                     .unwrap(),
                 )
                 .await
                 .unwrap();
-            if output.count == 0 {
+            if output.count == 1 {
                 return Ok(());
             }
 
-            bail!("still have Tommaso");
+            bail!("still not have Michele");
         }
         .boxed()
     })

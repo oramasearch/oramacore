@@ -391,6 +391,7 @@ impl PartyPlanner {
                     facets: HashMap::new(),
                     properties: Properties::Star,
                     where_filter: HashMap::new(),
+                    indexes: None, // Search all indexes.
                 },
             )
             .await?;

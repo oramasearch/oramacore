@@ -8,6 +8,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info};
 
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
+use crate::ai::OramaModel;
 use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
@@ -30,6 +31,7 @@ pub struct CollectionsWriter {
     hooks_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+    default_model: OramaModel,
 }
 
 impl CollectionsWriter {
@@ -42,6 +44,7 @@ impl CollectionsWriter {
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
+        let default_model = config.default_embedding_model.0;
 
         let data_dir = &config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
@@ -66,6 +69,7 @@ impl CollectionsWriter {
                     hooks_runtime,
                     nlp_service,
                     automatic_embeddings_selector,
+                    default_model,
                 });
             }
         };
@@ -98,6 +102,7 @@ impl CollectionsWriter {
             hooks_runtime,
             nlp_service,
             automatic_embeddings_selector,
+            default_model,
         };
 
         Ok(writer)
@@ -139,7 +144,7 @@ impl CollectionsWriter {
             write_api_key,
             read_api_key,
             default_locale,
-            embeddings_model.0,
+            embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
             self.embedding_sender.clone(),
             self.hooks_runtime.clone(),
             self.op_sender.clone(),

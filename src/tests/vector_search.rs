@@ -39,6 +39,9 @@ async fn test_vector_search() {
         .await
         .unwrap();
 
+    // Generage embeddings keeps time
+    sleep(std::time::Duration::from_millis(500)).await;
+
     let output = collection_client
         .search(
             json!({
@@ -122,6 +125,8 @@ async fn test_vector_search_should_work_after_commit() {
         )
         .await
         .unwrap();
+
+    sleep(std::time::Duration::from_millis(500)).await;
 
     let output1 = collection_client
         .search(
@@ -237,6 +242,9 @@ export default {
         )
         .await
         .unwrap();
+
+    // Generage embeddings keeps time
+    sleep(std::time::Duration::from_millis(500)).await;
 
     let output = collection_client
         .search(

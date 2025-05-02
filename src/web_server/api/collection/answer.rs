@@ -465,6 +465,7 @@ async fn answer_v1(
                     boost: HashMap::new(),
                     facets: HashMap::new(),
                     properties: Properties::Star,
+                    indexes: None, // Search all indexes
                 },
             )
             .await

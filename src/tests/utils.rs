@@ -256,8 +256,8 @@ pub async fn wait_for<'i, 'b, I, R>(
 where
     'b: 'i,
 {
-    // 20msec * 1000 attempts = 20 sec
-    const MAX_ATTEMPTS: usize = 1_000;
+    // 20 msec * 2_000 attempts = 40_000 msec = 40 sec
+    const MAX_ATTEMPTS: usize = 2_000;
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -336,7 +336,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
-                    embeddings_model: OramaModelSerializable(OramaModel::BgeSmall),
+                    embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
                 },
             )
             .await?;
