@@ -80,7 +80,8 @@ pub struct OramacoreConfig {
 }
 
 pub async fn start(config: OramacoreConfig) -> Result<()> {
-    info!("Starting oramacore");
+    let build_info = build_info::get_build_info();
+    info!(build_info = ?build_info, "Starting oramacore");
 
     let prometheus_hadler = if config.http.with_prometheus {
         Some(
