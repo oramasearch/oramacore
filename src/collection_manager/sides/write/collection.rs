@@ -267,15 +267,21 @@ impl CollectionWriter {
         &self,
         copy_from: IndexId,
         new_index_id: IndexId,
-        embedding: IndexEmbeddingsCalculation,
+        embedding: Option<IndexEmbeddingsCalculation>,
     ) -> Result<()> {
         let indexes_lock = self.indexes.write().await;
-        if !indexes_lock.contains_key(&copy_from) {
+        let Some(copy_from_index) = indexes_lock.get(&copy_from) else {
             bail!("Index with id {} not found", copy_from);
-        }
+        };
         if indexes_lock.contains_key(&new_index_id) {
             bail!("Index with id {} already exists", new_index_id);
         }
+
+        // Use "copy_from" index embedding calculation as default
+        let copy_from_index_embedding_calculation = copy_from_index.get_embedding_field(field_name_to_path(
+            DEFAULT_EMBEDDING_FIELD_NAME,
+        )).await?;
+        let embedding = embedding.unwrap_or(copy_from_index_embedding_calculation);
 
         let mut temp_indexes_lock = self.temp_indexes.write().await;
 

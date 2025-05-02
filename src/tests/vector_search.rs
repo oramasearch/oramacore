@@ -39,6 +39,9 @@ async fn test_vector_search() {
         .await
         .unwrap();
 
+    // Generage embeddings keeps time
+    sleep(std::time::Duration::from_millis(500)).await;
+
     let output = collection_client
         .search(
             json!({

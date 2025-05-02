@@ -3,7 +3,6 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use collection::DEFAULT_EMBEDDING_FIELD_NAME;
 pub use index::OramaModelSerializable;
 
 use std::{
@@ -17,7 +16,6 @@ use std::{
 };
 
 use super::{
-    field_name_to_path,
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
@@ -307,18 +305,13 @@ impl WriteSide {
             let new_index_id = IndexId::try_new(new_index_id)
                 // This is safe because cuid2 is less than 64 bytes
                 .expect("Cannot create new index id");
-
-            // Copy the embedding calculation mechanism from the old index
-            let embedding = copy_from_index
-                .get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME))
-                .await?;
             let document_ids = copy_from_index.get_document_ids().await;
 
             // Free the read lock, so we can add new index
             drop(copy_from_index);
 
             collection
-                .create_temp_index(copy_from, new_index_id, embedding)
+                .create_temp_index(copy_from, new_index_id, None)
                 .await
                 .context("Cannot create temporary index")?;
             let new_index = collection
@@ -410,13 +403,6 @@ impl WriteSide {
             index_id: new_index_id,
             embedding,
         } = req;
-
-        let default_string_calculation = if cfg!(test) {
-            IndexEmbeddingsCalculation::AllProperties
-        } else {
-            IndexEmbeddingsCalculation::Automatic
-        };
-        let embedding: IndexEmbeddingsCalculation = embedding.unwrap_or(default_string_calculation);
 
         collection
             .create_temp_index(copy_from, new_index_id, embedding)
