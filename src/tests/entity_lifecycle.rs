@@ -76,6 +76,39 @@ async fn test_delete_collection() {
         .await;
     assert!(err.is_err());
 
+    test_context.commit_all().await.unwrap();
+
+    let err = collection_client
+        .search(
+            json!({
+                "term": "",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await;
+    assert!(err.is_err());
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let err = collection_client
+        .search(
+            json!({
+                "term": "",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await;
+    assert!(err.is_err());
+
     drop(test_context);
 }
 
