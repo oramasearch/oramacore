@@ -336,7 +336,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
-                    embeddings_model: OramaModelSerializable(OramaModel::BgeSmall),
+                    embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
                 },
             )
             .await?;

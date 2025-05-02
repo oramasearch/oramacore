@@ -278,9 +278,9 @@ impl CollectionWriter {
         }
 
         // Use "copy_from" index embedding calculation as default
-        let copy_from_index_embedding_calculation = copy_from_index.get_embedding_field(field_name_to_path(
-            DEFAULT_EMBEDDING_FIELD_NAME,
-        )).await?;
+        let copy_from_index_embedding_calculation = copy_from_index
+            .get_embedding_field(field_name_to_path(DEFAULT_EMBEDDING_FIELD_NAME))
+            .await?;
         let embedding = embedding.unwrap_or(copy_from_index_embedding_calculation);
 
         let mut temp_indexes_lock = self.temp_indexes.write().await;

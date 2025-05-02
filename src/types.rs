@@ -613,7 +613,7 @@ pub struct CreateCollection {
     pub write_api_key: ApiKey,
 
     pub language: Option<LanguageDTO>,
-    pub embeddings_model: OramaModelSerializable,
+    pub embeddings_model: Option<OramaModelSerializable>,
 }
 
 #[derive(Debug, Deserialize, Clone, ToSchema)]
