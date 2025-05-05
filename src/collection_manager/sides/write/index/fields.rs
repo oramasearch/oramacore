@@ -763,44 +763,88 @@ impl EmbeddingField {
                 join_vec_strings(&result)
             }
             EmbeddingStringCalculation::Properties(v) => {
-                fn recursive_object_inspection<'doc>(
-                    obj: &'doc Map<String, Value>,
-                    path: &[String],
-                    path_index: usize,
-                    result: &mut Vec<&'doc String>,
-                ) {
-                    let key = &path[path_index];
-                    let Some(v) = obj.get(key) else {
-                        // Nothig to add to result
-                        return;
-                    };
+                // This function used to be recursive, but on certain objects it could cause a nasty
+                // thread 'tokio-runtime-worker' panicked at /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/alloc/src/string.rs:490:23: capacity overflow
+                // error. Let's keep a non-recursive version for now.
+                fn extract_values_at_paths<'doc>(
+                    doc: &'doc Map<String, Value>,
+                    paths: &Box<[Box<[String]>]>,
+                    max_result_size: usize,
+                ) -> String {
+                    let mut result_strings: Vec<String> = Vec::new();
+                    let mut current_size: usize = 0;
 
-                    if path.len() == path_index {
-                        if let Value::String(s) = v {
-                            result.push(s);
-                        }
-                        if let Value::Array(arr) = v {
-                            result.extend(arr.iter().filter_map(|v| {
-                                if let Value::String(s) = v {
-                                    Some(s)
+                    // Flatten the nested structure to work with individual paths
+                    for path_group in paths.iter() {
+                        for path_str in path_group.iter() {
+                            // Split path by dots to handle nested fields. @todo: check if we want to access arrays too.
+                            let path_components: Vec<&str> = path_str.split('.').collect();
+
+                            // Start navigation from the document root
+                            let mut current_obj = doc;
+
+                            // Navigate through the path components
+                            'path_navigation: for (i, component) in
+                                path_components.iter().enumerate()
+                            {
+                                // Try to get the value at this path component
+                                if let Some(value) = current_obj.get(*component) {
+                                    // If this is the last component, collect the value
+                                    if i == path_components.len() - 1 {
+                                        match value {
+                                            Value::String(s) => {
+                                                // Check if adding this would exceed max size
+                                                if current_size + s.len() > max_result_size {
+                                                    // Stop collecting if we'd exceed the limit
+                                                    break 'path_navigation;
+                                                }
+                                                result_strings.push(s.clone());
+                                                current_size += s.len();
+                                            }
+                                            Value::Array(arr) => {
+                                                for item in arr {
+                                                    if let Value::String(s) = item {
+                                                        // Check size limit
+                                                        if current_size + s.len() > max_result_size
+                                                        {
+                                                            break 'path_navigation;
+                                                        }
+                                                        result_strings.push(s.clone());
+                                                        current_size += s.len();
+                                                    }
+                                                }
+                                            }
+                                            // Ignore non-string values. For now, we only care about strings, although automatic embeddings
+                                            // detection extends to numbers and booleans too.
+                                            _ => {}
+                                        }
+                                    } else {
+                                        // Not the last component, continue traversing if it's an object
+                                        if let Value::Object(next_obj) = value {
+                                            current_obj = next_obj;
+                                        } else {
+                                            // Can't traverse further, path doesn't exist fully
+                                            break 'path_navigation;
+                                        }
+                                    }
                                 } else {
-                                    None
+                                    // Component not found, path doesn't exist
+                                    break 'path_navigation;
                                 }
-                            }));
+                            }
                         }
-                        return;
                     }
 
-                    if let Value::Object(obj) = v {
-                        recursive_object_inspection(obj, path, path_index + 1, result);
-                    }
-                }
-                let mut result = vec![];
-                for path in v {
-                    recursive_object_inspection(doc, path, 0, &mut result);
+                    // Join the results with a space separator
+                    result_strings.join(" ")
                 }
 
-                join_vec_strings(&result)
+                // Set a reasonable maximum size limit. For now, let's keep it at 10MB.
+                // @todo: make this configurable?
+                const MAX_RESULT_SIZE: usize = 10 * 1024 * 1024;
+
+                // Extract and join the values safely
+                extract_values_at_paths(doc, v, MAX_RESULT_SIZE)
             }
             EmbeddingStringCalculation::Hook(hooks_runtime) => {
                 let a = hooks_runtime

@@ -1230,12 +1230,12 @@ pub struct InsertDocumentsResult {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
 pub enum IndexEmbeddingsCalculation {
     #[serde(rename = "automatic")]
     Automatic,
     #[serde(rename = "all_properties")]
     AllProperties,
-    #[serde(rename = "properties")]
     Properties(Vec<String>),
     #[serde(rename = "hook")]
     Hook,
@@ -1260,6 +1260,7 @@ pub struct ReplaceIndexRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertToolsParams {
     pub id: String,
+    pub system_prompt: Option<String>,
     pub description: String,
     pub parameters: String,
     pub code: Option<String>,
@@ -1273,6 +1274,7 @@ pub struct DeleteToolParams {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateToolParams {
     pub id: String,
+    pub system_prompt: Option<String>,
     pub name: String,
     pub description: String,
     pub parameters: String,
