@@ -743,6 +743,7 @@ pub enum FacetDefinition {
 pub struct FulltextMode {
     pub term: String,
     pub threshold: Option<Threshold>,
+    pub exact: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -806,6 +807,7 @@ pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
     pub threshold: Option<Threshold>,
+    pub exact: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -843,6 +845,7 @@ impl<'de> Deserialize<'de> for SearchMode {
             term: String,
             similarity: Option<Similarity>,
             threshold: Option<Threshold>,
+            exact: Option<bool>,
         }
 
         let mode = match HiddenSearchMode::deserialize(deserializer) {
@@ -856,6 +859,7 @@ impl<'de> Deserialize<'de> for SearchMode {
             "fulltext" => Ok(SearchMode::FullText(FulltextMode {
                 term: mode.term,
                 threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
             })),
             "vector" => Ok(SearchMode::Vector(VectorMode {
                 term: mode.term,
@@ -865,10 +869,12 @@ impl<'de> Deserialize<'de> for SearchMode {
                 term: mode.term,
                 similarity: mode.similarity.unwrap_or_default(),
                 threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
             })),
             "default" => Ok(SearchMode::Default(FulltextMode {
                 term: mode.term,
                 threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
             })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
@@ -884,6 +890,7 @@ impl Default for SearchMode {
         SearchMode::Default(FulltextMode {
             term: "".to_string(),
             threshold: None,
+            exact: false,
         })
     }
 }
@@ -904,6 +911,7 @@ impl SearchMode {
             "fulltext" => SearchMode::FullText(FulltextMode {
                 term,
                 threshold: None,
+                exact: false,
             }),
             "vector" => SearchMode::Vector(VectorMode {
                 similarity: Similarity(0.8),
@@ -913,11 +921,13 @@ impl SearchMode {
                 similarity: Similarity(0.8),
                 term,
                 threshold: None,
+                exact: false,
             }),
             "auto" => SearchMode::Auto(AutoMode { term }),
             _ => SearchMode::Default(FulltextMode {
                 term,
                 threshold: None,
+                exact: false,
             }),
         }
     }

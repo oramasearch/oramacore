@@ -46,6 +46,19 @@ impl<Value: Clone> RadixIndex<Value> {
 
         Ok(others)
     }
+
+    pub fn search_exact<'s, 'input>(&'s self, token: &'input str) -> Result<Vec<&'s Value>>
+    where
+        'input: 's,
+    {
+        let (exact_match, _) = self.inner.find_postfixes_with_current(token.bytes());
+
+        if let Some(value) = exact_match {
+            Ok(vec![value])
+        } else {
+            Ok(vec![])
+        }
+    }
 }
 
 impl<Value: Clone + Debug> Debug for RadixIndex<Value> {

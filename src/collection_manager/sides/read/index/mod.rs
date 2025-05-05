@@ -735,11 +735,13 @@ impl Index {
                     "fulltext" => SearchMode::FullText(FulltextMode {
                         term: mode_result.term.clone(),
                         threshold: None,
+                        exact: false,
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity(0.8),
                         threshold: None,
+                        exact: false,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
@@ -762,6 +764,7 @@ impl Index {
                     self.search_full_text(
                         &search_mode.term,
                         search_mode.threshold,
+                        search_mode.exact,
                         properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -802,6 +805,7 @@ impl Index {
                     self.search_full_text(
                         &search_mode.term,
                         search_mode.threshold,
+                        search_mode.exact,
                         string_properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -1301,6 +1305,7 @@ impl Index {
         &self,
         term: &str,
         threshold: Option<Threshold>,
+        exact: bool,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
@@ -1310,10 +1315,14 @@ impl Index {
         let committed_fields = self.committed_fields.read().await;
 
         let tokens = self.text_parser.tokenize_and_stem(term);
-        let tokens: Vec<_> = tokens
-            .into_iter()
-            .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
-            .collect();
+        let tokens: Vec<_> = if exact {
+            tokens.into_iter().map(|e| e.0).collect()
+        } else {
+            tokens
+                .into_iter()
+                .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
+                .collect()
+        };
 
         let mut scorer: BM25Scorer<DocumentId> = match threshold {
             Some(Threshold(threshold)) => {
@@ -1342,6 +1351,7 @@ impl Index {
             field
                 .search(
                     &tokens,
+                    exact,
                     boost,
                     &mut scorer,
                     filtered_doc_ids,
@@ -1354,6 +1364,7 @@ impl Index {
                 committed
                     .search(
                         &tokens,
+                        exact,
                         boost,
                         &mut scorer,
                         filtered_doc_ids,
