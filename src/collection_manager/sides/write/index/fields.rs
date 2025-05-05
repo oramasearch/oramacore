@@ -774,69 +774,88 @@ impl EmbeddingField {
                     let mut result_strings: Vec<String> = Vec::new();
                     let mut current_size: usize = 0;
 
-                    // Flatten the nested structure to work with individual paths
                     for path_group in paths.iter() {
-                        for path_str in path_group.iter() {
-                            // Split path by dots to handle nested fields. @todo: check if we want to access arrays too.
-                            let path_components: Vec<&str> = path_str.split('.').collect();
+                        println!("  - {:?}", path_group);
+                    }
 
-                            // Start navigation from the document root
-                            let mut current_obj = doc;
+                    // Process each path group
+                    for path_group in paths.iter() {
+                        // Here's where the fix comes in:
+                        // If the path_group has multiple strings, join them with dots to form a single path
+                        let combined_path = if path_group.len() > 1 {
+                            path_group.join(".")
+                        } else if path_group.len() == 1 {
+                            path_group[0].clone()
+                        } else {
+                            continue; // Skip empty path groups
+                        };
 
-                            // Navigate through the path components
-                            'path_navigation: for (i, component) in
-                                path_components.iter().enumerate()
-                            {
-                                // Try to get the value at this path component
-                                if let Some(value) = current_obj.get(*component) {
-                                    // If this is the last component, collect the value
-                                    if i == path_components.len() - 1 {
-                                        match value {
-                                            Value::String(s) => {
-                                                // Check if adding this would exceed max size
+                        // Split path by dots to handle nested fields
+                        let path_components: Vec<&str> = combined_path.split('.').collect();
+
+                        // Start navigation from the document root
+                        let mut current_obj = doc;
+
+                        // Navigate through all path components except the last one
+                        let mut reached_final_component = true;
+                        for (i, component) in path_components
+                            .iter()
+                            .take(path_components.len() - 1)
+                            .enumerate()
+                        {
+                            // Try to get the value at this path component
+                            if let Some(value) = current_obj.get(*component) {
+                                // We need this component to be an object to continue
+                                if let Value::Object(next_obj) = value {
+                                    current_obj = next_obj;
+                                } else {
+                                    // Value exists but is not an object, can't go deeper
+                                    reached_final_component = false;
+                                    break;
+                                }
+                            } else {
+                                reached_final_component = false;
+                                break;
+                            }
+                        }
+
+                        // If path is valid so far, process the final component
+                        if reached_final_component && !path_components.is_empty() {
+                            let final_component = path_components.last().unwrap();
+
+                            if let Some(value) = current_obj.get(*final_component) {
+                                match value {
+                                    Value::String(s) => {
+                                        // Check if adding this would exceed max size
+                                        if current_size + s.len() > max_result_size {
+                                            continue;
+                                        }
+                                        result_strings.push(s.clone());
+                                        current_size += s.len();
+                                    }
+                                    Value::Array(arr) => {
+                                        for (_i, item) in arr.iter().enumerate() {
+                                            if let Value::String(s) = item {
+                                                // Check size limit
                                                 if current_size + s.len() > max_result_size {
-                                                    // Stop collecting if we'd exceed the limit
-                                                    break 'path_navigation;
+                                                    // Skipping remaining array items due to size limit
+                                                    break;
                                                 }
                                                 result_strings.push(s.clone());
                                                 current_size += s.len();
                                             }
-                                            Value::Array(arr) => {
-                                                for item in arr {
-                                                    if let Value::String(s) = item {
-                                                        // Check size limit
-                                                        if current_size + s.len() > max_result_size
-                                                        {
-                                                            break 'path_navigation;
-                                                        }
-                                                        result_strings.push(s.clone());
-                                                        current_size += s.len();
-                                                    }
-                                                }
-                                            }
-                                            // Ignore non-string values. For now, we only care about strings, although automatic embeddings
-                                            // detection extends to numbers and booleans too.
-                                            _ => {}
-                                        }
-                                    } else {
-                                        // Not the last component, continue traversing if it's an object
-                                        if let Value::Object(next_obj) = value {
-                                            current_obj = next_obj;
-                                        } else {
-                                            // Can't traverse further, path doesn't exist fully
-                                            break 'path_navigation;
                                         }
                                     }
-                                } else {
-                                    // Component not found, path doesn't exist
-                                    break 'path_navigation;
+                                    // We don't currently handle other types. @todo: check if we actually want to.
+                                    _ => {}
                                 }
                             }
                         }
                     }
 
-                    // Join the results with a space separator
-                    result_strings.join(" ")
+                    // Concatenate all strings into a single string
+                    // and return it like "string1. string2. ..."
+                    result_strings.join(". ")
                 }
 
                 // Set a reasonable maximum size limit. For now, let's keep it at 10MB.
