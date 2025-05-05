@@ -516,6 +516,7 @@ impl CommittedStringField {
 
 #[derive(Debug)]
 struct PostingIdStorage {
+    // id -> (doc_id, (exact positions, stemmed positions))
     inner: Map<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>>,
 }
 impl PostingIdStorage {

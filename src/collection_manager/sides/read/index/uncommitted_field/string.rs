@@ -59,6 +59,7 @@ pub struct UncommittedStringField {
 
     inner: RadixIndex<(
         TotalDocumentsWithTermInField,
+        // doc_id => (exact positions, stemmed positions)
         HashMap<DocumentId, (Positions, Positions)>,
     )>,
 }
