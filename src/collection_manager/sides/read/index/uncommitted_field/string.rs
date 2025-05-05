@@ -158,6 +158,8 @@ impl UncommittedStringField {
 
         let mut total_matches = 0_usize;
         for token in tokens {
+            scorer.next_term();
+
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
             // TODO: think about this
@@ -202,6 +204,7 @@ impl UncommittedStringField {
                         1.2,
                         0.75,
                         boost,
+                        0,
                     );
 
                     total_matches += 1;

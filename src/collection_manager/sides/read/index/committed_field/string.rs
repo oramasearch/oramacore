@@ -325,6 +325,7 @@ impl CommittedStringField {
                     1.2,
                     0.75,
                     boost,
+                    0,
                 );
             }
         }
@@ -348,10 +349,11 @@ impl CommittedStringField {
         struct PhraseMatchStorage {
             positions: HashSet<usize>,
             matches: Vec<(u32, usize, usize)>,
+            token_indexes: u32,
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        for token in tokens {
+        for (token_index, token) in tokens.iter().enumerate() {
             let iter = self
                 .index
                 .search(token)
@@ -384,6 +386,7 @@ impl CommittedStringField {
                     .or_insert_with(|| PhraseMatchStorage {
                         positions: Default::default(),
                         matches: Default::default(),
+                        token_indexes: 0,
                     });
                 v.positions.extend(positions);
                 v.matches.push((
@@ -391,11 +394,20 @@ impl CommittedStringField {
                     positions.len(),
                     total_documents_with_term_in_field,
                 ));
+                v.token_indexes |= 1 << token_index;
             }
         }
 
         let mut total_matches = 0_usize;
-        for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
+        for (
+            doc_id,
+            PhraseMatchStorage {
+                matches,
+                positions,
+                token_indexes,
+            },
+        ) in storage
+        {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
 
@@ -435,6 +447,7 @@ impl CommittedStringField {
                     1.2,
                     0.75,
                     total_boost,
+                    token_indexes,
                 );
 
                 total_matches += 1;

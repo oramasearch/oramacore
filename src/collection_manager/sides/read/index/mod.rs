@@ -29,7 +29,7 @@ use crate::{
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        VectorMode,
+        Threshold, VectorMode,
     },
 };
 
@@ -235,7 +235,6 @@ impl Index {
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
-        println!("Committing index {:?}", self.id);
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -735,10 +734,12 @@ impl Index {
                 match serilized_final_mode.mode.as_str() {
                     "fulltext" => SearchMode::FullText(FulltextMode {
                         term: mode_result.term.clone(),
+                        threshold: None,
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity(0.8),
+                        threshold: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
@@ -760,6 +761,7 @@ impl Index {
                 results.extend(
                     self.search_full_text(
                         &search_mode.term,
+                        search_mode.threshold,
                         properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -799,6 +801,7 @@ impl Index {
                     ),
                     self.search_full_text(
                         &search_mode.term,
+                        search_mode.threshold,
                         string_properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -1297,13 +1300,12 @@ impl Index {
     async fn search_full_text(
         &self,
         term: &str,
+        threshold: Option<Threshold>,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
-
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
@@ -1312,6 +1314,15 @@ impl Index {
             .into_iter()
             .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
             .collect();
+
+        let mut scorer: BM25Scorer<DocumentId> = match threshold {
+            Some(Threshold(threshold)) => {
+                let perc = tokens.len() as f32 * threshold;
+                let threshold = perc.floor() as u32;
+                BM25Scorer::with_threshold(threshold)
+            }
+            None => BM25Scorer::plain(),
+        };
 
         for field_id in properties {
             let Some(field) = uncommitted_fields.string_fields.get(&field_id) else {
@@ -1327,6 +1338,7 @@ impl Index {
 
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
+            scorer.reset_term();
             field
                 .search(
                     &tokens,
@@ -1338,6 +1350,7 @@ impl Index {
                 )
                 .context("Cannot perform search")?;
             if let Some(committed) = committed {
+                scorer.reset_term();
                 committed
                     .search(
                         &tokens,
