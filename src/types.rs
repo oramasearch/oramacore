@@ -1242,19 +1242,44 @@ pub struct InsertDocumentsResult {
     pub failed: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[serde(untagged)]
+#[derive(Debug, ToSchema, PartialEq)]
 pub enum IndexEmbeddingsCalculation {
-    #[serde(rename = "automatic")]
     Automatic,
-    #[serde(rename = "all_properties")]
     AllProperties,
     Properties(Vec<String>),
-    #[serde(rename = "hook")]
     Hook,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        #[derive(Deserialize, Serialize, Debug)]
+        #[serde(untagged)]
+        enum HiddenIndexEmbeddingsCalculation {
+            S(String),
+            V(Vec<String>),
+        }
+
+        let v = HiddenIndexEmbeddingsCalculation::deserialize(deserializer)?;
+        match v {
+            HiddenIndexEmbeddingsCalculation::S(s) => {
+                match s.as_str() {
+                    "automatic" => Ok(IndexEmbeddingsCalculation::Automatic),
+                    "all_properties" => Ok(IndexEmbeddingsCalculation::AllProperties),
+                    "hook" => Ok(IndexEmbeddingsCalculation::Hook),
+                    _ => Err(de::Error::custom(
+                        "Invalid value for index embeddings calculation. Expected 'automatic', 'all_properties', or 'hook' or an array of strings",
+                    )),
+                }
+            },
+            HiddenIndexEmbeddingsCalculation::V(v) => Ok(IndexEmbeddingsCalculation::Properties(v)),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateIndexRequest {
     #[serde(rename = "id")]
     pub index_id: IndexId,
@@ -1507,6 +1532,52 @@ mod test {
         });
         let p = serde_json::from_value::<Foo>(j).unwrap();
         assert_eq!(p.similarity.0, 0.0);
+    }
+
+    #[test]
+    fn test_index_embedding_calculation() {
+        #[derive(Deserialize, Debug)]
+        struct Foo {
+            embedding: IndexEmbeddingsCalculation,
+        }
+        let j = json!({
+            "embedding": "automatic",
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.embedding, IndexEmbeddingsCalculation::Automatic);
+    }
+
+    #[test]
+    fn test_create_index() {
+        let j = json!({
+            "id": "foo",
+            "embedding": "automatic",
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(p.embedding, Some(IndexEmbeddingsCalculation::Automatic));
+
+        let j = json!({
+            "id": "foo",
+            "embedding": "all_properties",
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(p.embedding, Some(IndexEmbeddingsCalculation::AllProperties));
+
+        let j = json!({
+            "id": "foo",
+            "embedding": ["a", "b"],
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(
+            p.embedding,
+            Some(IndexEmbeddingsCalculation::Properties(vec![
+                "a".to_string(),
+                "b".to_string()
+            ]))
+        );
     }
 }
 
