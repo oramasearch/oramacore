@@ -798,11 +798,7 @@ impl EmbeddingField {
 
                         // Navigate through all path components except the last one
                         let mut reached_final_component = true;
-                        for (i, component) in path_components
-                            .iter()
-                            .take(path_components.len() - 1)
-                            .enumerate()
-                        {
+                        for component in path_components.iter().take(path_components.len() - 1) {
                             // Try to get the value at this path component
                             if let Some(value) = current_obj.get(*component) {
                                 // We need this component to be an object to continue
@@ -834,7 +830,7 @@ impl EmbeddingField {
                                         current_size += s.len();
                                     }
                                     Value::Array(arr) => {
-                                        for (_i, item) in arr.iter().enumerate() {
+                                        for item in arr.iter() {
                                             if let Value::String(s) = item {
                                                 // Check size limit
                                                 if current_size + s.len() > max_result_size {

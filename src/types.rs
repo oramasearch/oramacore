@@ -19,7 +19,7 @@ use async_openai::types::{
 };
 
 use redact::Secret;
-use serde::de::{Error, Unexpected, Visitor};
+use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -765,69 +765,14 @@ impl<'de> Deserialize<'de> for Threshold {
     where
         D: de::Deserializer<'de>,
     {
-        struct ThresholdVisitor;
+        #[derive(Deserialize)]
+        struct HiddenThreshold(f32);
 
-        fn check_threshold<E>(value: f32) -> Result<f32, E>
-        where
-            E: de::Error,
-        {
-            if !(0.0..=1.0).contains(&value) {
-                return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
-            }
-            Ok(value)
+        let v = HiddenThreshold::deserialize(deserializer).map(|v| v.0)?;
+        if !(0.0..=1.0).contains(&v) {
+            return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
         }
-
-        impl<'de> Visitor<'de> for ThresholdVisitor {
-            type Value = Threshold;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a valid threshold value")
-            }
-
-            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let f = f32::from(value);
-                check_threshold(f).map(Threshold)
-            }
-
-            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_threshold(value).map(Threshold)
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_threshold(value as f32).map(Threshold)
-            }
-
-            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-            where
-                V: de::MapAccess<'de>,
-            {
-                let k: Option<String> = visitor
-                    .next_key()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                if k.is_none() {
-                    return Err(de::Error::invalid_type(Unexpected::Map, &self));
-                }
-                let f: String = visitor
-                    .next_value()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                let f: f32 = f
-                    .parse()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-
-                check_threshold(f).map(Threshold)
-            }
-        }
-
-        deserializer.deserialize_any(ThresholdVisitor)
+        Ok(Threshold(v))
     }
 }
 
@@ -845,69 +790,14 @@ impl<'de> Deserialize<'de> for Similarity {
     where
         D: de::Deserializer<'de>,
     {
-        struct SimilarityVisitor;
+        #[derive(Deserialize)]
+        struct HiddenSimilarity(f32);
 
-        fn check_similarity<E>(value: f32) -> Result<f32, E>
-        where
-            E: de::Error,
-        {
-            if !(0.0..=1.0).contains(&value) {
-                return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
-            }
-            Ok(value)
+        let v = HiddenSimilarity::deserialize(deserializer).map(|v| v.0)?;
+        if !(0.0..=1.0).contains(&v) {
+            return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
         }
-
-        impl<'de> Visitor<'de> for SimilarityVisitor {
-            type Value = Similarity;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a valid similarity value")
-            }
-
-            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let f = f32::from(value);
-                check_similarity(f).map(Similarity)
-            }
-
-            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_similarity(value).map(Similarity)
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_similarity(value as f32).map(Similarity)
-            }
-
-            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-            where
-                V: de::MapAccess<'de>,
-            {
-                let k: Option<String> = visitor
-                    .next_key()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                if k.is_none() {
-                    return Err(de::Error::invalid_type(Unexpected::Map, &self));
-                }
-                let f: String = visitor
-                    .next_value()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                let f: f32 = f
-                    .parse()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-
-                check_similarity(f).map(Similarity)
-            }
-        }
-
-        deserializer.deserialize_any(SimilarityVisitor)
+        Ok(Similarity(v))
     }
 }
 
@@ -1418,6 +1308,18 @@ mod test {
         assert!(matches!(p.mode, SearchMode::FullText(_)));
 
         let j = json!({
+            "mode": "fulltext",
+            "term": "hello",
+            "threshold": 0.5,
+        });
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
+        assert!(matches!(p.mode, SearchMode::FullText(_)));
+        assert!(
+            matches!(p.mode, SearchMode::FullText(v) if (v.threshold.unwrap().0 - 0.5).abs() < 0.01)
+        );
+
+        let j = json!({
             "mode": "vector",
             "term": "hello",
         });
@@ -1521,6 +1423,80 @@ mod test {
         assert_eq!(deserialized_hit["score"], 0.5);
         assert_eq!(deserialized_hit["document"], Value::Null);
         assert_eq!(deserialized_hit["index_id"], "my-index-id");
+    }
+
+    #[test]
+    fn test_threshold() {
+        #[derive(Deserialize)]
+        struct Foo {
+            threshold: Threshold,
+        }
+        let j = json!({
+            "threshold": 1.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 1.0);
+
+        let j = json!({
+            "threshold": 1,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 1.0);
+
+        let j = json!({
+            "threshold": 0.5,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.5);
+
+        let j = json!({
+            "threshold": 0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.0);
+
+        let j = json!({
+            "threshold": 0.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.0);
+    }
+
+    #[test]
+    fn test_similarity() {
+        #[derive(Deserialize)]
+        struct Foo {
+            similarity: Similarity,
+        }
+        let j = json!({
+            "similarity": 1.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 1.0);
+
+        let j = json!({
+            "similarity": 1,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 1.0);
+
+        let j = json!({
+            "similarity": 0.5,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.5);
+
+        let j = json!({
+            "similarity": 0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.0);
+
+        let j = json!({
+            "similarity": 0.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.0);
     }
 }
 
