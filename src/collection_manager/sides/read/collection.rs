@@ -510,6 +510,10 @@ impl CollectionReader {
 
         Ok(CollectionStats {
             id: self.get_id(),
+            document_count: indexes_stats
+                .iter()
+                .map(|i| i.document_count)
+                .sum::<usize>(),
             description: self.description.clone(),
             default_locale: self.default_locale,
             indexes_stats,
@@ -554,7 +558,7 @@ pub enum IndexFieldStatsType {
 #[derive(Serialize, Debug)]
 pub struct IndexFieldStats {
     pub field_id: FieldId,
-    pub path: String,
+    pub field_path: String,
     #[serde(flatten)]
     pub stats: IndexFieldStatsType,
 }
@@ -562,6 +566,7 @@ pub struct IndexFieldStats {
 #[derive(Serialize, Debug)]
 pub struct CollectionStats {
     pub id: CollectionId,
+    pub document_count: usize,
     pub description: Option<String>,
     pub default_locale: Locale,
     pub indexes_stats: Vec<IndexStats>,

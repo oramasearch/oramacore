@@ -868,7 +868,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedBoolean(v.stats()),
             }
         }));
@@ -876,7 +876,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedNumber(v.stats()),
             }
         }));
@@ -888,7 +888,7 @@ impl Index {
                     let path = v.field_path().join(".");
                     IndexFieldStats {
                         field_id: *k,
-                        path,
+                        field_path: path,
                         stats: IndexFieldStatsType::UncommittedStringFilter(v.stats()),
                     }
                 }),
@@ -897,7 +897,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedString(v.stats()),
             }
         }));
@@ -905,7 +905,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedVector(v.stats()),
             }
         }));
@@ -914,7 +914,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedBoolean(v.stats().ok()?),
             })
         }));
@@ -922,7 +922,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedNumber(v.stats().ok()?),
             })
         }));
@@ -934,7 +934,7 @@ impl Index {
                     let path = v.field_path().join(".");
                     Some(IndexFieldStats {
                         field_id: *k,
-                        path,
+                        field_path: path,
                         stats: IndexFieldStatsType::CommittedStringFilter(v.stats()),
                     })
                 }),
@@ -943,7 +943,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedString(v.stats().ok()?),
             })
         }));
@@ -951,7 +951,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedVector(v.stats().ok()?),
             })
         }));
@@ -961,7 +961,7 @@ impl Index {
         Ok(IndexStats {
             id: self.id,
             default_locale: self.locale,
-            document_count: self.document_count,
+            document_count: self.document_count as usize,
             is_temp,
             fields_stats,
         })
@@ -1439,7 +1439,7 @@ impl Index {
 pub struct IndexStats {
     pub id: IndexId,
     pub default_locale: Locale,
-    pub document_count: u64,
+    pub document_count: usize,
     pub is_temp: bool,
     pub fields_stats: Vec<IndexFieldStats>,
 }
