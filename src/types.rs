@@ -1031,13 +1031,35 @@ impl TryFrom<serde_json::Value> for SearchParams {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResultHit {
     pub id: String,
     pub score: f32,
     pub document: Option<Arc<RawJSONDocument>>,
 }
+
+impl Serialize for SearchResultHit {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("SearchResultHit", 3)?;
+        state.serialize_field("id", &self.id)?;
+        // NB: `split_once` doesn't allocate a new string. it returns a tuple of slices
+        let (index_id, _) = match self.id.split_once(":") {
+            Some((index_id, _)) => (index_id, ()),
+            None => ("", ()),
+        };
+        state.serialize_field("index_id", &index_id)?;
+        state.serialize_field("score", &self.score)?;
+        state.serialize_field("document", &self.document)?;
+        state.end()
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -1592,6 +1614,33 @@ mod tests {
     use std::cmp::Ordering;
 
     use super::*;
+
+    #[test]
+    fn test_search_hit() {
+        let hit = SearchResultHit {
+            id: "foo".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "foo");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "");
+
+        let hit = SearchResultHit {
+            id: "my-index-id:55".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "my-index-id:55");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "my-index-id");
+    }
 
     #[test]
     fn test_number_eq() {

@@ -130,5 +130,5 @@ pub fn print_error(e: &anyhow::Error, msg: &'static str) {
     error!(error = ?e, msg);
     e.chain()
         .skip(1)
-        .for_each(|cause| eprintln!("because: {}", cause));
+        .for_each(|cause| println!("because: {:?}", cause));
 }

@@ -46,7 +46,7 @@ pub fn api_config(
 
     let counter = Arc::new(AtomicUsize::new(0));
 
-    const MAX_BODY_SIZE: usize = 1024 * 1024 * 100; // 100 MB
+    const MAX_BODY_SIZE: usize = 1024 * 1024 * 400; // 400 MB
 
     router
         .layer(
