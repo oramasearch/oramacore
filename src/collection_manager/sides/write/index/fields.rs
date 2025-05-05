@@ -596,11 +596,12 @@ impl StringScoreField {
                 Entry::Occupied(mut entry) => {
                     let p: &mut TermStringField = entry.get_mut();
 
-                    p.positions.push(position);
+                    p.exact_positions.push(position);
                 }
                 Entry::Vacant(entry) => {
                     let p = TermStringField {
-                        positions: vec![position],
+                        positions: vec![],
+                        exact_positions: vec![position],
                     };
                     entry.insert(p);
                 }
@@ -615,6 +616,7 @@ impl StringScoreField {
                     }
                     Entry::Vacant(entry) => {
                         let p = TermStringField {
+                            exact_positions: vec![],
                             positions: vec![position],
                         };
                         entry.insert(p);

@@ -16,6 +16,7 @@ pub struct Term(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TermStringField {
+    pub exact_positions: Vec<usize>,
     pub positions: Vec<usize>,
 }
 
@@ -455,11 +456,17 @@ mod tests {
                                 HashMap::from([
                                     (
                                         Term("foo".to_string()),
-                                        TermStringField { positions: vec![1] },
+                                        TermStringField {
+                                            positions: vec![1],
+                                            exact_positions: vec![3],
+                                        },
                                     ),
                                     (
                                         Term("bar".to_string()),
-                                        TermStringField { positions: vec![2] },
+                                        TermStringField {
+                                            positions: vec![2],
+                                            exact_positions: vec![4],
+                                        },
                                     ),
                                 ]),
                             ),
