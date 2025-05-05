@@ -471,3 +471,128 @@ async fn test_fulltext_multi_index() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_threshold() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client_1 = collection_client.create_index().await.unwrap();
+    let docs_1 = vec![
+        json!({
+            "id": "1",
+            "text": "The pen is on the table",
+        }),
+        json!({
+            "id": "2",
+            "text": "the pen",
+            "text2": "is on the table",
+        }),
+        json!({
+            "id": "3",
+            "text": "the pen",
+        }),
+    ];
+    index_client_1
+        .insert_documents(json!(docs_1).try_into().unwrap())
+        .await
+        .unwrap();
+
+    // match doc 1 and 2
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 0.7,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+    // threshold 1.0 means we consider only documents that contain all terms
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    // threshold 0.0 means we consider all documents
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 0.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+    // threshold 1.0 means we consider only documents that match all terms
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 0.7,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 0.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    drop(test_context);
+}

@@ -742,6 +742,7 @@ pub enum FacetDefinition {
 #[derive(Debug, Clone)]
 pub struct FulltextMode {
     pub term: String,
+    pub threshold: Option<Threshold>,
 }
 
 #[derive(Debug, Clone)]
@@ -754,6 +755,80 @@ pub struct VectorMode {
     pub term: String,
 
     pub similarity: Similarity,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Threshold(pub f32);
+
+impl<'de> Deserialize<'de> for Threshold {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct ThresholdVisitor;
+
+        fn check_threshold<E>(value: f32) -> Result<f32, E>
+        where
+            E: de::Error,
+        {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
+            }
+            Ok(value)
+        }
+
+        impl<'de> Visitor<'de> for ThresholdVisitor {
+            type Value = Threshold;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a valid threshold value")
+            }
+
+            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                let f = f32::from(value);
+                check_threshold(f).map(Threshold)
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                check_threshold(value).map(Threshold)
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                check_threshold(value as f32).map(Threshold)
+            }
+
+            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+            where
+                V: de::MapAccess<'de>,
+            {
+                let k: Option<String> = visitor
+                    .next_key()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+                if k.is_none() {
+                    return Err(de::Error::invalid_type(Unexpected::Map, &self));
+                }
+                let f: String = visitor
+                    .next_value()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+                let f: f32 = f
+                    .parse()
+                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
+
+                check_threshold(f).map(Threshold)
+            }
+        }
+
+        deserializer.deserialize_any(ThresholdVisitor)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -840,6 +915,7 @@ impl<'de> Deserialize<'de> for Similarity {
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
+    pub threshold: Option<Threshold>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -876,6 +952,7 @@ impl<'de> Deserialize<'de> for SearchMode {
             mode: String,
             term: String,
             similarity: Option<Similarity>,
+            threshold: Option<Threshold>,
         }
 
         let mode = match HiddenSearchMode::deserialize(deserializer) {
@@ -886,7 +963,10 @@ impl<'de> Deserialize<'de> for SearchMode {
         };
 
         match mode.mode.as_str() {
-            "fulltext" => Ok(SearchMode::FullText(FulltextMode { term: mode.term })),
+            "fulltext" => Ok(SearchMode::FullText(FulltextMode {
+                term: mode.term,
+                threshold: mode.threshold,
+            })),
             "vector" => Ok(SearchMode::Vector(VectorMode {
                 term: mode.term,
                 similarity: mode.similarity.unwrap_or_default(),
@@ -894,8 +974,12 @@ impl<'de> Deserialize<'de> for SearchMode {
             "hybrid" => Ok(SearchMode::Hybrid(HybridMode {
                 term: mode.term,
                 similarity: mode.similarity.unwrap_or_default(),
+                threshold: mode.threshold,
             })),
-            "default" => Ok(SearchMode::Default(FulltextMode { term: mode.term })),
+            "default" => Ok(SearchMode::Default(FulltextMode {
+                term: mode.term,
+                threshold: mode.threshold,
+            })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
                 "Invalid search mode: {}",
@@ -909,6 +993,7 @@ impl Default for SearchMode {
     fn default() -> Self {
         SearchMode::Default(FulltextMode {
             term: "".to_string(),
+            threshold: None,
         })
     }
 }
@@ -926,7 +1011,10 @@ impl SearchMode {
 
     pub fn from_str(s: &str, term: String) -> Self {
         match s {
-            "fulltext" => SearchMode::FullText(FulltextMode { term }),
+            "fulltext" => SearchMode::FullText(FulltextMode {
+                term,
+                threshold: None,
+            }),
             "vector" => SearchMode::Vector(VectorMode {
                 similarity: Similarity(0.8),
                 term,
@@ -934,9 +1022,13 @@ impl SearchMode {
             "hybrid" => SearchMode::Hybrid(HybridMode {
                 similarity: Similarity(0.8),
                 term,
+                threshold: None,
             }),
             "auto" => SearchMode::Auto(AutoMode { term }),
-            _ => SearchMode::Default(FulltextMode { term }),
+            _ => SearchMode::Default(FulltextMode {
+                term,
+                threshold: None,
+            }),
         }
     }
 }
@@ -1059,7 +1151,6 @@ impl Serialize for SearchResultHit {
         state.end()
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -1404,6 +1495,33 @@ mod test {
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
         assert_eq!(p.properties, Properties::Star);
     }
+
+    #[test]
+    fn test_search_hit() {
+        let hit = SearchResultHit {
+            id: "foo".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "foo");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "");
+
+        let hit = SearchResultHit {
+            id: "my-index-id:55".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "my-index-id:55");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "my-index-id");
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1614,33 +1732,6 @@ mod tests {
     use std::cmp::Ordering;
 
     use super::*;
-
-    #[test]
-    fn test_search_hit() {
-        let hit = SearchResultHit {
-            id: "foo".to_string(),
-            score: 0.5,
-            document: None,
-        };
-        let json = serde_json::to_string(&hit).unwrap();
-        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized_hit["id"], "foo");
-        assert_eq!(deserialized_hit["score"], 0.5);
-        assert_eq!(deserialized_hit["document"], Value::Null);
-        assert_eq!(deserialized_hit["index_id"], "");
-
-        let hit = SearchResultHit {
-            id: "my-index-id:55".to_string(),
-            score: 0.5,
-            document: None,
-        };
-        let json = serde_json::to_string(&hit).unwrap();
-        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized_hit["id"], "my-index-id:55");
-        assert_eq!(deserialized_hit["score"], 0.5);
-        assert_eq!(deserialized_hit["document"], Value::Null);
-        assert_eq!(deserialized_hit["index_id"], "my-index-id");
-    }
 
     #[test]
     fn test_number_eq() {

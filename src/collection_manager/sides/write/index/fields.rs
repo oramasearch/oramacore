@@ -766,8 +766,8 @@ impl EmbeddingField {
                 // This function used to be recursive, but on certain objects it could cause a nasty
                 // thread 'tokio-runtime-worker' panicked at /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/alloc/src/string.rs:490:23: capacity overflow
                 // error. Let's keep a non-recursive version for now.
-                fn extract_values_at_paths<'doc>(
-                    doc: &'doc Map<String, Value>,
+                fn extract_values_at_paths(
+                    doc: &Map<String, Value>,
                     paths: &Box<[Box<[String]>]>,
                     max_result_size: usize,
                 ) -> String {
