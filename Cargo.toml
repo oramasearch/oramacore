@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "1.1.26"
+version = "1.1.27"
 edition = "2021"
 
 [dependencies]
@@ -60,7 +60,7 @@ futures = "0.3.31"
 
 itertools = "0.14"
 duration-string = { version = "0.5.2", features = ["serde"] }
-chrono = "0.4.39"
+chrono = { version = "0.4.39", features = ["serde"] }
 
 # Webserver
 axum = { version = "0.8", features = ["macros"] }

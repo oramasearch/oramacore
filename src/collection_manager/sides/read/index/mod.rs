@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use committed_field::{
     BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringField,
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
@@ -29,7 +30,7 @@ use crate::{
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        VectorMode,
+        Threshold, VectorMode,
     },
 };
 
@@ -116,6 +117,9 @@ pub struct Index {
     path_to_index_id_map: PathToIndexId,
 
     is_new: AtomicBool,
+
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl Index {
@@ -144,6 +148,9 @@ impl Index {
 
             path_to_index_id_map: PathToIndexId::new(),
             is_new: AtomicBool::new(true),
+
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -231,11 +238,13 @@ impl Index {
 
             path_to_index_id_map: PathToIndexId::from(dump.path_to_index_id_map),
             is_new: AtomicBool::new(false),
+
+            created_at: dump.created_at,
+            updated_at: dump.updated_at,
         })
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
-        println!("Committing index {:?}", self.id);
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -525,6 +534,8 @@ impl Index {
                 .map(|(k, v)| (*k, v.get_field_info()))
                 .collect(),
             path_to_index_id_map: self.path_to_index_id_map.serialize(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         });
 
         drop(uncommitted_fields);
@@ -561,10 +572,13 @@ impl Index {
         self.aliases.push(previous_id);
         self.promoted_to_runtime_index
             .store(true, Ordering::Relaxed);
+        // We need to update the created_at and updated_at fields
+        self.updated_at = Utc::now();
     }
 
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
         self.deleted = Some(reason);
+        self.updated_at = Utc::now();
     }
 
     pub fn get_deletion_reason(&self) -> Option<DeletionReason> {
@@ -576,6 +590,7 @@ impl Index {
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
+        self.updated_at = Utc::now();
         let uncommitted_fields = self.uncommitted_fields.get_mut();
         match op {
             IndexWriteOperation::CreateField2 {
@@ -735,10 +750,14 @@ impl Index {
                 match serilized_final_mode.mode.as_str() {
                     "fulltext" => SearchMode::FullText(FulltextMode {
                         term: mode_result.term.clone(),
+                        threshold: None,
+                        exact: false,
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity(0.8),
+                        threshold: None,
+                        exact: false,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
@@ -760,6 +779,8 @@ impl Index {
                 results.extend(
                     self.search_full_text(
                         &search_mode.term,
+                        search_mode.threshold,
+                        search_mode.exact,
                         properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -799,6 +820,8 @@ impl Index {
                     ),
                     self.search_full_text(
                         &search_mode.term,
+                        search_mode.threshold,
+                        search_mode.exact,
                         string_properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -861,7 +884,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedBoolean(v.stats()),
             }
         }));
@@ -869,7 +892,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedNumber(v.stats()),
             }
         }));
@@ -881,7 +904,7 @@ impl Index {
                     let path = v.field_path().join(".");
                     IndexFieldStats {
                         field_id: *k,
-                        path,
+                        field_path: path,
                         stats: IndexFieldStatsType::UncommittedStringFilter(v.stats()),
                     }
                 }),
@@ -890,7 +913,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedString(v.stats()),
             }
         }));
@@ -898,7 +921,7 @@ impl Index {
             let path = v.field_path().join(".");
             IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::UncommittedVector(v.stats()),
             }
         }));
@@ -907,7 +930,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedBoolean(v.stats().ok()?),
             })
         }));
@@ -915,7 +938,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedNumber(v.stats().ok()?),
             })
         }));
@@ -927,7 +950,7 @@ impl Index {
                     let path = v.field_path().join(".");
                     Some(IndexFieldStats {
                         field_id: *k,
-                        path,
+                        field_path: path,
                         stats: IndexFieldStatsType::CommittedStringFilter(v.stats()),
                     })
                 }),
@@ -936,7 +959,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedString(v.stats().ok()?),
             })
         }));
@@ -944,7 +967,7 @@ impl Index {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
                 field_id: *k,
-                path,
+                field_path: path,
                 stats: IndexFieldStatsType::CommittedVector(v.stats().ok()?),
             })
         }));
@@ -954,9 +977,11 @@ impl Index {
         Ok(IndexStats {
             id: self.id,
             default_locale: self.locale,
-            document_count: self.document_count,
+            document_count: self.document_count as usize,
             is_temp,
             fields_stats,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         })
     }
 
@@ -1297,21 +1322,34 @@ impl Index {
     async fn search_full_text(
         &self,
         term: &str,
+        threshold: Option<Threshold>,
+        exact: bool,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
-        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::new();
-
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
         let tokens = self.text_parser.tokenize_and_stem(term);
-        let tokens: Vec<_> = tokens
-            .into_iter()
-            .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
-            .collect();
+        let tokens: Vec<_> = if exact {
+            tokens.into_iter().map(|e| e.0).collect()
+        } else {
+            tokens
+                .into_iter()
+                .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
+                .collect()
+        };
+
+        let mut scorer: BM25Scorer<DocumentId> = match threshold {
+            Some(Threshold(threshold)) => {
+                let perc = tokens.len() as f32 * threshold;
+                let threshold = perc.floor() as u32;
+                BM25Scorer::with_threshold(threshold)
+            }
+            None => BM25Scorer::plain(),
+        };
 
         for field_id in properties {
             let Some(field) = uncommitted_fields.string_fields.get(&field_id) else {
@@ -1327,9 +1365,11 @@ impl Index {
 
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
+            scorer.reset_term();
             field
                 .search(
                     &tokens,
+                    exact,
                     boost,
                     &mut scorer,
                     filtered_doc_ids,
@@ -1338,9 +1378,11 @@ impl Index {
                 )
                 .context("Cannot perform search")?;
             if let Some(committed) = committed {
+                scorer.reset_term();
                 committed
                     .search(
                         &tokens,
+                        exact,
                         boost,
                         &mut scorer,
                         filtered_doc_ids,
@@ -1415,9 +1457,11 @@ impl Index {
 pub struct IndexStats {
     pub id: IndexId,
     pub default_locale: Locale,
-    pub document_count: u64,
+    pub document_count: usize,
     pub is_temp: bool,
     pub fields_stats: Vec<IndexFieldStats>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1441,6 +1485,8 @@ struct DumpV1 {
     string_field_ids: Vec<(FieldId, StringFieldInfo)>,
     vector_field_ids: Vec<(FieldId, VectorFieldInfo)>,
     path_to_index_id_map: Vec<(Box<[String]>, (FieldId, FieldType))>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {

@@ -81,6 +81,13 @@ impl FSTIndex {
         }
     }
 
+    pub fn search_exact<'s, 'input>(&'s self, token: &'input str) -> Option<u64>
+    where
+        'input: 's,
+    {
+        self.inner.get(token)
+    }
+
     pub fn search_with_key<'s, 'input>(&'s self, token: &'input str) -> FTSIterWithKey<'s, 'input>
     where
         'input: 's,
@@ -133,7 +140,6 @@ impl Iterator for FTSIterWithKey<'_, '_> {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use crate::tests::utils::generate_new_path;
@@ -161,5 +167,37 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_fst_index_exact() -> Result<()> {
+        let data = vec![
+            ("bar".as_bytes(), 3),
+            ("far".as_bytes(), 2),
+            ("foo".as_bytes(), 1),
+        ];
+        let data_dir = generate_new_path();
+        let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
+
+        let output = paged_index.search_exact("f");
+        assert_eq!(output, None);
+
+        let output = paged_index.search_exact("foo");
+        assert_eq!(output, Some(1));
+
+        let output = paged_index.search_exact("foof");
+        assert_eq!(output, None);
+
+        let paged_index = FSTIndex::load(data_dir)?;
+
+        let output = paged_index.search_exact("f");
+        assert_eq!(output, None);
+
+        let output = paged_index.search_exact("foo");
+        assert_eq!(output, Some(1));
+
+        let output = paged_index.search_exact("foof");
+        assert_eq!(output, None);
+
+        Ok(())
+    }
 }
-*/

@@ -39,7 +39,7 @@ impl CommittedStringField {
                 Vec<u8>,
                 (
                     TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, Positions>,
+                    HashMap<DocumentId, (Positions, Positions)>,
                 ),
             ),
         >,
@@ -51,7 +51,7 @@ impl CommittedStringField {
 
         create_if_not_exists(&data_dir)?;
 
-        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, Vec<usize>)>> =
+        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>> =
             Default::default();
         let iter = uncommitted_iter.map(|(key, value)| {
             let new_posting_list_id = posting_id_generator;
@@ -63,7 +63,7 @@ impl CommittedStringField {
                     .1
                     .into_iter()
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
-                    .map(|(doc_id, positions)| (doc_id, positions.0))
+                    .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0)))
                     .collect(),
             );
 
@@ -102,7 +102,7 @@ impl CommittedStringField {
                 Vec<u8>,
                 (
                     TotalDocumentsWithTermInField,
-                    HashMap<DocumentId, Positions>,
+                    HashMap<DocumentId, (Positions, Positions)>,
                 ),
             ),
         >,
@@ -146,7 +146,7 @@ impl CommittedStringField {
                     positions_per_document_id
                         .into_iter()
                         .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id))
-                        .map(|(doc_id, positions)| (doc_id, positions.0))
+                        .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0)))
                         .collect(),
                 );
 
@@ -158,7 +158,7 @@ impl CommittedStringField {
                     committed_posting_id,
                     positions_per_document_id
                         .into_iter()
-                        .map(|(doc_id, positions)| (doc_id, positions.0)),
+                        .map(|(doc_id, positions)| (doc_id, (positions.0 .0, positions.1 .0))),
                     uncommitted_document_deletions,
                 );
 
@@ -236,6 +236,7 @@ impl CommittedStringField {
     pub fn search(
         &self,
         tokens: &[String],
+        exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
@@ -249,6 +250,7 @@ impl CommittedStringField {
         if tokens.len() == 1 {
             self.search_without_phrase_match(
                 tokens,
+                exact,
                 boost,
                 scorer,
                 filtered_doc_ids,
@@ -258,6 +260,7 @@ impl CommittedStringField {
         } else {
             self.search_with_phrase_match(
                 tokens,
+                exact,
                 boost,
                 scorer,
                 filtered_doc_ids,
@@ -270,6 +273,7 @@ impl CommittedStringField {
     fn search_without_phrase_match(
         &self,
         tokens: &[String],
+        exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
@@ -281,9 +285,17 @@ impl CommittedStringField {
         let average_field_length = total_field_length / total_documents_with_field;
 
         for token in tokens {
-            let matches = self
-                .index
-                .search(token)
+            let iter: Box<dyn Iterator<Item = u64>> = if exact {
+                if let Some(posting_list_id) = self.index.search_exact(token) {
+                    Box::new(vec![posting_list_id].into_iter())
+                } else {
+                    Box::new(std::iter::empty())
+                }
+            } else {
+                Box::new(self.index.search(token))
+            };
+
+            let matches = iter
                 .flat_map(|posting_list_id| self.posting_storage.get_posting(&posting_list_id))
                 .flat_map(|postings| {
                     let total_documents_with_term_in_field = postings.len();
@@ -295,16 +307,25 @@ impl CommittedStringField {
                                 .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
                         .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
-                        .map(move |(doc_id, positions)| {
+                        .filter_map(move |(doc_id, positions)| {
                             let field_length =
                                 self.document_lengths_per_document.get_length(doc_id);
-                            let term_occurrence_in_field = positions.len() as u32;
-                            (
+                            let term_occurrence_in_field = if exact {
+                                positions.0.len() as u32
+                            } else {
+                                (positions.0.len() + positions.1.len()) as u32
+                            };
+
+                            if term_occurrence_in_field == 0 {
+                                return None;
+                            }
+
+                            Some((
                                 doc_id,
                                 term_occurrence_in_field,
                                 field_length,
                                 total_documents_with_term_in_field,
-                            )
+                            ))
                         })
                 });
 
@@ -325,6 +346,7 @@ impl CommittedStringField {
                     1.2,
                     0.75,
                     boost,
+                    0,
                 );
             }
         }
@@ -335,6 +357,7 @@ impl CommittedStringField {
     fn search_with_phrase_match(
         &self,
         tokens: &[String],
+        exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
@@ -348,13 +371,22 @@ impl CommittedStringField {
         struct PhraseMatchStorage {
             positions: HashSet<usize>,
             matches: Vec<(u32, usize, usize)>,
+            token_indexes: u32,
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        for token in tokens {
-            let iter = self
-                .index
-                .search(token)
+        for (token_index, token) in tokens.iter().enumerate() {
+            let iter: Box<dyn Iterator<Item = u64>> = if exact {
+                if let Some(posting_list_id) = self.index.search_exact(token) {
+                    Box::new(vec![posting_list_id].into_iter())
+                } else {
+                    Box::new(std::iter::empty())
+                }
+            } else {
+                Box::new(self.index.search(token))
+            };
+
+            let iter = iter
                 .filter_map(|posting_id| self.posting_storage.get_posting(&posting_id))
                 .flat_map(|postings| {
                     let total_documents_with_term_in_field = postings.len();
@@ -366,15 +398,31 @@ impl CommittedStringField {
                                 .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
                         .filter(|(doc_id, _)| !uncommitted_deleted_documents.contains(doc_id))
-                        .map(move |(doc_id, positions)| {
+                        .filter_map(move |(doc_id, positions)| {
                             let field_lenght =
                                 self.document_lengths_per_document.get_length(doc_id);
-                            (
+
+                            let positions: Vec<usize> = if exact {
+                                positions.0.to_vec()
+                            } else {
+                                positions
+                                    .0
+                                    .iter()
+                                    .copied()
+                                    .chain(positions.1.iter().copied())
+                                    .collect()
+                            };
+
+                            if positions.is_empty() {
+                                return None;
+                            }
+
+                            Some((
                                 doc_id,
                                 field_lenght,
                                 positions,
                                 total_documents_with_term_in_field,
-                            )
+                            ))
                         })
                 });
 
@@ -384,18 +432,28 @@ impl CommittedStringField {
                     .or_insert_with(|| PhraseMatchStorage {
                         positions: Default::default(),
                         matches: Default::default(),
+                        token_indexes: 0,
                     });
-                v.positions.extend(positions);
                 v.matches.push((
                     field_length,
                     positions.len(),
                     total_documents_with_term_in_field,
                 ));
+                v.positions.extend(positions);
+                v.token_indexes |= 1 << token_index;
             }
         }
 
         let mut total_matches = 0_usize;
-        for (doc_id, PhraseMatchStorage { matches, positions }) in storage {
+        for (
+            doc_id,
+            PhraseMatchStorage {
+                matches,
+                positions,
+                token_indexes,
+            },
+        ) in storage
+        {
             let mut ordered_positions: Vec<_> = positions.iter().copied().collect();
             ordered_positions.sort_unstable(); // asc order
 
@@ -435,6 +493,7 @@ impl CommittedStringField {
                     1.2,
                     0.75,
                     total_boost,
+                    token_indexes,
                 );
 
                 total_matches += 1;
@@ -457,10 +516,11 @@ impl CommittedStringField {
 
 #[derive(Debug)]
 struct PostingIdStorage {
-    inner: Map<u64, Vec<(DocumentId, Vec<usize>)>>,
+    // id -> (doc_id, (exact positions, stemmed positions))
+    inner: Map<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>>,
 }
 impl PostingIdStorage {
-    fn from_map(inner: Map<u64, Vec<(DocumentId, Vec<usize>)>>) -> Self {
+    fn from_map(inner: Map<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>>) -> Self {
         Self { inner }
     }
 
@@ -474,7 +534,10 @@ impl PostingIdStorage {
         self.inner.commit()
     }
 
-    fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, Vec<usize>)>> {
+    fn get_posting(
+        &self,
+        posting_id: &u64,
+    ) -> Option<&Vec<(DocumentId, (Vec<usize>, Vec<usize>))>> {
         self.inner.get(posting_id)
     }
 
@@ -486,7 +549,7 @@ impl PostingIdStorage {
         self.inner.get_max_key().copied().unwrap_or(0)
     }
 
-    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, Vec<usize>)>) {
+    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, (Vec<usize>, Vec<usize>))>) {
         self.inner.insert(posting_id, posting);
     }
 
@@ -497,7 +560,7 @@ impl PostingIdStorage {
     fn merge(
         &mut self,
         posting_id: u64,
-        posting: impl Iterator<Item = (DocumentId, Vec<usize>)>,
+        posting: impl Iterator<Item = (DocumentId, (Vec<usize>, Vec<usize>))>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
     ) {
         self.inner

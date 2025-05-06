@@ -18,8 +18,9 @@ use async_openai::types::{
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
 };
 
+use chrono::{DateTime, Utc};
 use redact::Secret;
-use serde::de::{Error, Unexpected, Visitor};
+use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -657,6 +658,7 @@ pub struct DescribeCollectionResponse {
     pub id: CollectionId,
     pub description: Option<String>,
     pub document_count: usize,
+    pub created_at: DateTime<Utc>,
 
     pub indexes: Vec<DescribeCollectionIndexResponse>,
 }
@@ -742,6 +744,8 @@ pub enum FacetDefinition {
 #[derive(Debug, Clone)]
 pub struct FulltextMode {
     pub term: String,
+    pub threshold: Option<Threshold>,
+    pub exact: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -754,6 +758,25 @@ pub struct VectorMode {
     pub term: String,
 
     pub similarity: Similarity,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Threshold(pub f32);
+
+impl<'de> Deserialize<'de> for Threshold {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct HiddenThreshold(f32);
+
+        let v = HiddenThreshold::deserialize(deserializer).map(|v| v.0)?;
+        if !(0.0..=1.0).contains(&v) {
+            return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
+        }
+        Ok(Threshold(v))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -770,69 +793,14 @@ impl<'de> Deserialize<'de> for Similarity {
     where
         D: de::Deserializer<'de>,
     {
-        struct SimilarityVisitor;
+        #[derive(Deserialize)]
+        struct HiddenSimilarity(f32);
 
-        fn check_similarity<E>(value: f32) -> Result<f32, E>
-        where
-            E: de::Error,
-        {
-            if !(0.0..=1.0).contains(&value) {
-                return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
-            }
-            Ok(value)
+        let v = HiddenSimilarity::deserialize(deserializer).map(|v| v.0)?;
+        if !(0.0..=1.0).contains(&v) {
+            return Err(de::Error::custom("the value must be between 0.0 and 1.0"));
         }
-
-        impl<'de> Visitor<'de> for SimilarityVisitor {
-            type Value = Similarity;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a valid similarity value")
-            }
-
-            fn visit_i16<E>(self, value: i16) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let f = f32::from(value);
-                check_similarity(f).map(Similarity)
-            }
-
-            fn visit_f32<E>(self, value: f32) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_similarity(value).map(Similarity)
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                check_similarity(value as f32).map(Similarity)
-            }
-
-            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-            where
-                V: de::MapAccess<'de>,
-            {
-                let k: Option<String> = visitor
-                    .next_key()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                if k.is_none() {
-                    return Err(de::Error::invalid_type(Unexpected::Map, &self));
-                }
-                let f: String = visitor
-                    .next_value()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-                let f: f32 = f
-                    .parse()
-                    .map_err(|e| de::Error::custom(format!("error: {}", e)))?;
-
-                check_similarity(f).map(Similarity)
-            }
-        }
-
-        deserializer.deserialize_any(SimilarityVisitor)
+        Ok(Similarity(v))
     }
 }
 
@@ -840,6 +808,8 @@ impl<'de> Deserialize<'de> for Similarity {
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
+    pub threshold: Option<Threshold>,
+    pub exact: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -876,6 +846,8 @@ impl<'de> Deserialize<'de> for SearchMode {
             mode: String,
             term: String,
             similarity: Option<Similarity>,
+            threshold: Option<Threshold>,
+            exact: Option<bool>,
         }
 
         let mode = match HiddenSearchMode::deserialize(deserializer) {
@@ -886,7 +858,11 @@ impl<'de> Deserialize<'de> for SearchMode {
         };
 
         match mode.mode.as_str() {
-            "fulltext" => Ok(SearchMode::FullText(FulltextMode { term: mode.term })),
+            "fulltext" => Ok(SearchMode::FullText(FulltextMode {
+                term: mode.term,
+                threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
+            })),
             "vector" => Ok(SearchMode::Vector(VectorMode {
                 term: mode.term,
                 similarity: mode.similarity.unwrap_or_default(),
@@ -894,8 +870,14 @@ impl<'de> Deserialize<'de> for SearchMode {
             "hybrid" => Ok(SearchMode::Hybrid(HybridMode {
                 term: mode.term,
                 similarity: mode.similarity.unwrap_or_default(),
+                threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
             })),
-            "default" => Ok(SearchMode::Default(FulltextMode { term: mode.term })),
+            "default" => Ok(SearchMode::Default(FulltextMode {
+                term: mode.term,
+                threshold: mode.threshold,
+                exact: mode.exact.unwrap_or(false),
+            })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
                 "Invalid search mode: {}",
@@ -909,6 +891,8 @@ impl Default for SearchMode {
     fn default() -> Self {
         SearchMode::Default(FulltextMode {
             term: "".to_string(),
+            threshold: None,
+            exact: false,
         })
     }
 }
@@ -926,7 +910,11 @@ impl SearchMode {
 
     pub fn from_str(s: &str, term: String) -> Self {
         match s {
-            "fulltext" => SearchMode::FullText(FulltextMode { term }),
+            "fulltext" => SearchMode::FullText(FulltextMode {
+                term,
+                threshold: None,
+                exact: false,
+            }),
             "vector" => SearchMode::Vector(VectorMode {
                 similarity: Similarity(0.8),
                 term,
@@ -934,9 +922,15 @@ impl SearchMode {
             "hybrid" => SearchMode::Hybrid(HybridMode {
                 similarity: Similarity(0.8),
                 term,
+                threshold: None,
+                exact: false,
             }),
             "auto" => SearchMode::Auto(AutoMode { term }),
-            _ => SearchMode::Default(FulltextMode { term }),
+            _ => SearchMode::Default(FulltextMode {
+                term,
+                threshold: None,
+                exact: false,
+            }),
         }
     }
 }
@@ -1031,12 +1025,33 @@ impl TryFrom<serde_json::Value> for SearchParams {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResultHit {
     pub id: String,
     pub score: f32,
     pub document: Option<Arc<RawJSONDocument>>,
+}
+
+impl Serialize for SearchResultHit {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("SearchResultHit", 3)?;
+        state.serialize_field("id", &self.id)?;
+        // NB: `split_once` doesn't allocate a new string. it returns a tuple of slices
+        let (index_id, _) = match self.id.split_once(":") {
+            Some((index_id, _)) => (index_id, ()),
+            None => ("", ()),
+        };
+        state.serialize_field("index_id", &index_id)?;
+        state.serialize_field("score", &self.score)?;
+        state.serialize_field("document", &self.document)?;
+        state.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1229,19 +1244,44 @@ pub struct InsertDocumentsResult {
     pub failed: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, ToSchema, PartialEq)]
 pub enum IndexEmbeddingsCalculation {
-    #[serde(rename = "automatic")]
     Automatic,
-    #[serde(rename = "all_properties")]
     AllProperties,
-    #[serde(rename = "properties")]
     Properties(Vec<String>),
-    #[serde(rename = "hook")]
     Hook,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        #[derive(Deserialize, Serialize, Debug)]
+        #[serde(untagged)]
+        enum HiddenIndexEmbeddingsCalculation {
+            S(String),
+            V(Vec<String>),
+        }
+
+        let v = HiddenIndexEmbeddingsCalculation::deserialize(deserializer)?;
+        match v {
+            HiddenIndexEmbeddingsCalculation::S(s) => {
+                match s.as_str() {
+                    "automatic" => Ok(IndexEmbeddingsCalculation::Automatic),
+                    "all_properties" => Ok(IndexEmbeddingsCalculation::AllProperties),
+                    "hook" => Ok(IndexEmbeddingsCalculation::Hook),
+                    _ => Err(de::Error::custom(
+                        "Invalid value for index embeddings calculation. Expected 'automatic', 'all_properties', or 'hook' or an array of strings",
+                    )),
+                }
+            },
+            HiddenIndexEmbeddingsCalculation::V(v) => Ok(IndexEmbeddingsCalculation::Properties(v)),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateIndexRequest {
     #[serde(rename = "id")]
     pub index_id: IndexId,
@@ -1260,6 +1300,7 @@ pub struct ReplaceIndexRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct InsertToolsParams {
     pub id: String,
+    pub system_prompt: Option<String>,
     pub description: String,
     pub parameters: String,
     pub code: Option<String>,
@@ -1273,6 +1314,7 @@ pub struct DeleteToolParams {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateToolParams {
     pub id: String,
+    pub system_prompt: Option<String>,
     pub name: String,
     pub description: String,
     pub parameters: String,
@@ -1301,6 +1343,18 @@ mod test {
         let j = serde_json::to_string(&j).unwrap();
         let p = serde_json::from_str::<SearchParams>(&j).unwrap();
         assert!(matches!(p.mode, SearchMode::FullText(_)));
+
+        let j = json!({
+            "mode": "fulltext",
+            "term": "hello",
+            "threshold": 0.5,
+        });
+        let j = serde_json::to_string(&j).unwrap();
+        let p = serde_json::from_str::<SearchParams>(&j).unwrap();
+        assert!(matches!(p.mode, SearchMode::FullText(_)));
+        assert!(
+            matches!(p.mode, SearchMode::FullText(v) if (v.threshold.unwrap().0 - 0.5).abs() < 0.01)
+        );
 
         let j = json!({
             "mode": "vector",
@@ -1379,6 +1433,153 @@ mod test {
         });
         let p = serde_json::from_value::<SearchParams>(j).unwrap();
         assert_eq!(p.properties, Properties::Star);
+    }
+
+    #[test]
+    fn test_search_hit() {
+        let hit = SearchResultHit {
+            id: "foo".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "foo");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "");
+
+        let hit = SearchResultHit {
+            id: "my-index-id:55".to_string(),
+            score: 0.5,
+            document: None,
+        };
+        let json = serde_json::to_string(&hit).unwrap();
+        let deserialized_hit: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized_hit["id"], "my-index-id:55");
+        assert_eq!(deserialized_hit["score"], 0.5);
+        assert_eq!(deserialized_hit["document"], Value::Null);
+        assert_eq!(deserialized_hit["index_id"], "my-index-id");
+    }
+
+    #[test]
+    fn test_threshold() {
+        #[derive(Deserialize)]
+        struct Foo {
+            threshold: Threshold,
+        }
+        let j = json!({
+            "threshold": 1.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 1.0);
+
+        let j = json!({
+            "threshold": 1,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 1.0);
+
+        let j = json!({
+            "threshold": 0.5,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.5);
+
+        let j = json!({
+            "threshold": 0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.0);
+
+        let j = json!({
+            "threshold": 0.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.threshold.0, 0.0);
+    }
+
+    #[test]
+    fn test_similarity() {
+        #[derive(Deserialize)]
+        struct Foo {
+            similarity: Similarity,
+        }
+        let j = json!({
+            "similarity": 1.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 1.0);
+
+        let j = json!({
+            "similarity": 1,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 1.0);
+
+        let j = json!({
+            "similarity": 0.5,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.5);
+
+        let j = json!({
+            "similarity": 0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.0);
+
+        let j = json!({
+            "similarity": 0.0,
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.similarity.0, 0.0);
+    }
+
+    #[test]
+    fn test_index_embedding_calculation() {
+        #[derive(Deserialize, Debug)]
+        struct Foo {
+            embedding: IndexEmbeddingsCalculation,
+        }
+        let j = json!({
+            "embedding": "automatic",
+        });
+        let p = serde_json::from_value::<Foo>(j).unwrap();
+        assert_eq!(p.embedding, IndexEmbeddingsCalculation::Automatic);
+    }
+
+    #[test]
+    fn test_create_index() {
+        let j = json!({
+            "id": "foo",
+            "embedding": "automatic",
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(p.embedding, Some(IndexEmbeddingsCalculation::Automatic));
+
+        let j = json!({
+            "id": "foo",
+            "embedding": "all_properties",
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(p.embedding, Some(IndexEmbeddingsCalculation::AllProperties));
+
+        let j = json!({
+            "id": "foo",
+            "embedding": ["a", "b"],
+        });
+        let p = serde_json::from_value::<CreateIndexRequest>(j).unwrap();
+        assert_eq!(p.index_id, IndexId::try_new("foo").unwrap());
+        assert_eq!(
+            p.embedding,
+            Some(IndexEmbeddingsCalculation::Properties(vec![
+                "a".to_string(),
+                "b".to_string()
+            ]))
+        );
     }
 }
 
@@ -1746,6 +1947,7 @@ pub struct DescribeCollectionIndexResponse {
     pub document_count: usize,
     pub fields: Vec<IndexFieldType>,
     pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]

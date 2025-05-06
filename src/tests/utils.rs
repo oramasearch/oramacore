@@ -651,7 +651,7 @@ impl TestIndexClient {
             .find(|index| index.id == self.index_id)
             .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
         let document_count = index_stats.document_count;
-        let expected_document_count = documents.len() as u64 + document_count;
+        let expected_document_count = documents.len() + document_count;
 
         let result = self
             .writer
@@ -702,7 +702,7 @@ impl TestIndexClient {
             .find(|index| index.id == self.index_id)
             .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
         let document_count = index_stats.document_count;
-        let expected_document_count = document_count - ids.len() as u64;
+        let expected_document_count = document_count - ids.len();
 
         self.writer
             .delete_documents(self.write_api_key, self.collection_id, self.index_id, ids)

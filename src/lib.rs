@@ -104,6 +104,7 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
     web_server.start(config.http).await?;
 
     if let Some(write_side) = write_side {
+        write_side.stop().await?;
         write_side.commit().await?;
     }
     if let Some(read_side) = read_side {

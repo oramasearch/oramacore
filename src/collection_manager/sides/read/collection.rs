@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -46,6 +47,9 @@ pub struct CollectionReader {
     temp_indexes: RwLock<Vec<Index>>,
 
     notifier: Option<Arc<Notifier>>,
+
+    created_at: DateTime<Utc>,
+    updated_at: RwLock<DateTime<Utc>>,
 }
 
 impl CollectionReader {
@@ -73,6 +77,9 @@ impl CollectionReader {
             indexes: Default::default(),
             temp_indexes: Default::default(),
             notifier,
+
+            created_at: Utc::now(),
+            updated_at: RwLock::new(Utc::now()),
         }
     }
 
@@ -127,6 +134,9 @@ impl CollectionReader {
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
             notifier,
+
+            created_at: dump.created_at,
+            updated_at: RwLock::new(dump.updated_at),
         };
 
         Ok(s)
@@ -197,6 +207,8 @@ impl CollectionReader {
             read_api_key: self.read_api_key,
             index_ids,
             temp_index_ids,
+            created_at: self.created_at,
+            updated_at: *self.updated_at.read().await,
         });
 
         BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
@@ -249,6 +261,7 @@ impl CollectionReader {
     }
 
     pub fn mark_as_deleted(&mut self) {
+        *self.updated_at.get_mut() = Utc::now();
         self.deleted = true;
     }
 
@@ -348,17 +361,11 @@ impl CollectionReader {
         IndexReadLock::try_new(indexes_lock, index_id)
     }
 
-    async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
-        let indexes_lock = self.indexes.write().await;
-        IndexWriteLock::try_new(indexes_lock, index_id)
-    }
-
-    async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
-        let indexes_lock = self.temp_indexes.write().await;
-        IndexWriteLock::try_new(indexes_lock, index_id)
-    }
-
     pub async fn update(&self, collection_operation: CollectionWriteOperation) -> Result<()> {
+        let mut updated_at_lock = self.updated_at.write().await;
+        *updated_at_lock = Utc::now();
+        drop(updated_at_lock);
+
         match collection_operation {
             CollectionWriteOperation::CreateIndex2 { index_id, locale } => {
                 let mut indexes_lock = self.indexes.write().await;
@@ -510,10 +517,26 @@ impl CollectionReader {
 
         Ok(CollectionStats {
             id: self.get_id(),
+            document_count: indexes_stats
+                .iter()
+                .map(|i| i.document_count)
+                .sum::<usize>(),
             description: self.description.clone(),
             default_locale: self.default_locale,
             indexes_stats,
+            created_at: self.created_at,
+            updated_at: *self.updated_at.read().await,
         })
+    }
+
+    async fn get_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
+        let indexes_lock = self.indexes.write().await;
+        IndexWriteLock::try_new(indexes_lock, index_id)
+    }
+
+    async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
+        let indexes_lock = self.temp_indexes.write().await;
+        IndexWriteLock::try_new(indexes_lock, index_id)
     }
 }
 
@@ -554,7 +577,7 @@ pub enum IndexFieldStatsType {
 #[derive(Serialize, Debug)]
 pub struct IndexFieldStats {
     pub field_id: FieldId,
-    pub path: String,
+    pub field_path: String,
     #[serde(flatten)]
     pub stats: IndexFieldStatsType,
 }
@@ -562,9 +585,12 @@ pub struct IndexFieldStats {
 #[derive(Serialize, Debug)]
 pub struct CollectionStats {
     pub id: CollectionId,
+    pub document_count: usize,
     pub description: Option<String>,
     pub default_locale: Locale,
     pub indexes_stats: Vec<IndexStats>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 pub struct IndexReadLock<'guard> {
@@ -690,6 +716,8 @@ struct DumpV1 {
     read_api_key: ApiKey,
     index_ids: Vec<IndexId>,
     temp_index_ids: Vec<IndexId>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {

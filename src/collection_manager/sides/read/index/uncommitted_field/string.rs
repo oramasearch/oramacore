@@ -59,7 +59,8 @@ pub struct UncommittedStringField {
 
     inner: RadixIndex<(
         TotalDocumentsWithTermInField,
-        HashMap<DocumentId, Positions>,
+        // doc_id => (exact positions, stemmed positions)
+        HashMap<DocumentId, (Positions, Positions)>,
     )>,
 }
 
@@ -118,20 +119,29 @@ impl UncommittedStringField {
         for (term, term_string_field) in terms {
             let k = term.0;
 
-            let TermStringField { positions } = term_string_field;
+            let TermStringField {
+                positions,
+                exact_positions,
+            } = term_string_field;
 
             match self.inner.get_mut(k.bytes()) {
                 Some(v) => {
                     v.0.increment_by_one();
-                    let old_positions = v.1.entry(document_id).or_insert_with(|| Positions(vec![]));
-                    old_positions.0.extend(positions);
+                    let old_positions =
+                        v.1.entry(document_id)
+                            .or_insert_with(|| (Positions(vec![]), Positions(vec![])));
+                    old_positions.0 .0.extend(exact_positions);
+                    old_positions.1 .0.extend(positions);
                 }
                 None => {
                     self.inner.insert(
                         k.bytes(),
                         (
                             TotalDocumentsWithTermInField(1),
-                            HashMap::from_iter([(document_id, Positions(positions))]),
+                            HashMap::from_iter([(
+                                document_id,
+                                (Positions(exact_positions), Positions(positions)),
+                            )]),
                         ),
                     );
                 }
@@ -146,6 +156,7 @@ impl UncommittedStringField {
     pub fn search(
         &self,
         tokens: &[String],
+        exact_match: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
         filtered_doc_ids: Option<&HashSet<DocumentId>>,
@@ -158,10 +169,16 @@ impl UncommittedStringField {
 
         let mut total_matches = 0_usize;
         for token in tokens {
+            scorer.next_term();
+
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
             // TODO: think about this
-            let matches = self.inner.search(token)?;
+            let matches = if exact_match {
+                self.inner.search_exact(token)?
+            } else {
+                self.inner.search(token)?
+            };
 
             for (total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
@@ -182,7 +199,14 @@ impl UncommittedStringField {
                         }
                     };
 
-                    let term_occurrence_in_field = positions.0.len() as u32;
+                    let term_occurrence_in_field = if exact_match {
+                        if positions.0 .0.is_empty() {
+                            continue;
+                        }
+                        positions.0 .0.len() as u32
+                    } else {
+                        (positions.1 .0.len() + positions.0 .0.len()) as u32
+                    };
 
                     // We aren't consider the phrase matching here
                     // Instead for committed data, we do.
@@ -202,6 +226,7 @@ impl UncommittedStringField {
                         1.2,
                         0.75,
                         boost,
+                        0,
                     );
 
                     total_matches += 1;
@@ -221,7 +246,7 @@ impl UncommittedStringField {
             Vec<u8>,
             (
                 TotalDocumentsWithTermInField,
-                HashMap<DocumentId, Positions>,
+                HashMap<DocumentId, (Positions, Positions)>,
             ),
         ),
     > + '_ {

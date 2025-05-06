@@ -596,11 +596,12 @@ impl StringScoreField {
                 Entry::Occupied(mut entry) => {
                     let p: &mut TermStringField = entry.get_mut();
 
-                    p.positions.push(position);
+                    p.exact_positions.push(position);
                 }
                 Entry::Vacant(entry) => {
                     let p = TermStringField {
-                        positions: vec![position],
+                        positions: vec![],
+                        exact_positions: vec![position],
                     };
                     entry.insert(p);
                 }
@@ -615,6 +616,7 @@ impl StringScoreField {
                     }
                     Entry::Vacant(entry) => {
                         let p = TermStringField {
+                            exact_positions: vec![],
                             positions: vec![position],
                         };
                         entry.insert(p);
@@ -763,44 +765,103 @@ impl EmbeddingField {
                 join_vec_strings(&result)
             }
             EmbeddingStringCalculation::Properties(v) => {
-                fn recursive_object_inspection<'doc>(
-                    obj: &'doc Map<String, Value>,
-                    path: &[String],
-                    path_index: usize,
-                    result: &mut Vec<&'doc String>,
-                ) {
-                    let key = &path[path_index];
-                    let Some(v) = obj.get(key) else {
-                        // Nothig to add to result
-                        return;
-                    };
+                // This function used to be recursive, but on certain objects it could cause a nasty
+                // thread 'tokio-runtime-worker' panicked at /root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/alloc/src/string.rs:490:23: capacity overflow
+                // error. Let's keep a non-recursive version for now.
+                fn extract_values_at_paths(
+                    doc: &Map<String, Value>,
+                    paths: &Box<[Box<[String]>]>,
+                    max_result_size: usize,
+                ) -> String {
+                    let mut result_strings: Vec<String> = Vec::new();
+                    let mut current_size: usize = 0;
 
-                    if path.len() == path_index {
-                        if let Value::String(s) = v {
-                            result.push(s);
-                        }
-                        if let Value::Array(arr) = v {
-                            result.extend(arr.iter().filter_map(|v| {
-                                if let Value::String(s) = v {
-                                    Some(s)
+                    for path_group in paths.iter() {
+                        println!("  - {:?}", path_group);
+                    }
+
+                    // Process each path group
+                    for path_group in paths.iter() {
+                        // Here's where the fix comes in:
+                        // If the path_group has multiple strings, join them with dots to form a single path
+                        let combined_path = if path_group.len() > 1 {
+                            path_group.join(".")
+                        } else if path_group.len() == 1 {
+                            path_group[0].clone()
+                        } else {
+                            continue; // Skip empty path groups
+                        };
+
+                        // Split path by dots to handle nested fields
+                        let path_components: Vec<&str> = combined_path.split('.').collect();
+
+                        // Start navigation from the document root
+                        let mut current_obj = doc;
+
+                        // Navigate through all path components except the last one
+                        let mut reached_final_component = true;
+                        for component in path_components.iter().take(path_components.len() - 1) {
+                            // Try to get the value at this path component
+                            if let Some(value) = current_obj.get(*component) {
+                                // We need this component to be an object to continue
+                                if let Value::Object(next_obj) = value {
+                                    current_obj = next_obj;
                                 } else {
-                                    None
+                                    // Value exists but is not an object, can't go deeper
+                                    reached_final_component = false;
+                                    break;
                                 }
-                            }));
+                            } else {
+                                reached_final_component = false;
+                                break;
+                            }
                         }
-                        return;
+
+                        // If path is valid so far, process the final component
+                        if reached_final_component && !path_components.is_empty() {
+                            let final_component = path_components.last().unwrap();
+
+                            if let Some(value) = current_obj.get(*final_component) {
+                                match value {
+                                    Value::String(s) => {
+                                        // Check if adding this would exceed max size
+                                        if current_size + s.len() > max_result_size {
+                                            continue;
+                                        }
+                                        result_strings.push(s.clone());
+                                        current_size += s.len();
+                                    }
+                                    Value::Array(arr) => {
+                                        for item in arr.iter() {
+                                            if let Value::String(s) = item {
+                                                // Check size limit
+                                                if current_size + s.len() > max_result_size {
+                                                    // Skipping remaining array items due to size limit
+                                                    break;
+                                                }
+                                                result_strings.push(s.clone());
+                                                current_size += s.len();
+                                            }
+                                        }
+                                    }
+                                    // We don't currently handle other types. @todo: check if we actually want to.
+                                    _ => {}
+                                }
+                            }
+                        }
                     }
 
-                    if let Value::Object(obj) = v {
-                        recursive_object_inspection(obj, path, path_index + 1, result);
-                    }
-                }
-                let mut result = vec![];
-                for path in v {
-                    recursive_object_inspection(doc, path, 0, &mut result);
+                    // Concatenate all strings into a single string
+                    // and return it like "string1. string2. ..."
+                    result_strings.join(". ")
                 }
 
-                join_vec_strings(&result)
+                // Set a reasonable maximum size limit. For now, let's keep it at 10MB.
+                // @todo: make this configurable?
+                const MAX_RESULT_SIZE: usize = 10 * 1024 * 1024;
+
+                // Extract and join the values safely
+                extract_values_at_paths(doc, v, MAX_RESULT_SIZE)
             }
             EmbeddingStringCalculation::Hook(hooks_runtime) => {
                 let a = hooks_runtime

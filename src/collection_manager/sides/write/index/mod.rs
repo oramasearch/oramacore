@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use doc_id_storage::DocIdStorage;
 use fields::{
     GenericField, IndexFilterField, IndexScoreField, SerializedFilterFieldType,
@@ -60,6 +61,8 @@ pub struct Index {
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
     hook_runtime: Arc<HooksRuntime>,
     automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
+
+    created_at: DateTime<Utc>,
 }
 
 impl Index {
@@ -94,6 +97,8 @@ impl Index {
             hook_runtime,
             embedding_sender,
             automatically_chosen_properties,
+
+            created_at: Utc::now(),
         })
     }
 
@@ -152,6 +157,8 @@ impl Index {
             hook_runtime,
             embedding_sender,
             automatically_chosen_properties,
+
+            created_at: dump.created_at,
         })
     }
 
@@ -263,6 +270,7 @@ impl Index {
                 .load(std::sync::atomic::Ordering::Relaxed),
             filter_fields: filter_fields.iter().map(|f| f.serialize()).collect(),
             score_fields: score_fields.iter().map(|f| f.serialize()).collect(),
+            created_at: self.created_at,
         });
         drop(filter_fields);
         drop(score_fields);
@@ -479,6 +487,7 @@ impl Index {
             document_count,
             fields,
             automatically_chosen_properties,
+            created_at: self.created_at,
         }
     }
 
@@ -807,4 +816,6 @@ struct IndexDumpV1 {
     field_id_generator: u16,
     filter_fields: Vec<SerializedFilterFieldType>,
     score_fields: Vec<SerializedScoreFieldType>,
+
+    created_at: DateTime<Utc>,
 }

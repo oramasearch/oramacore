@@ -1,4 +1,4 @@
-use std::{pin::Pin, task::Poll, time::Instant};
+use std::{pin::Pin, task::Poll};
 
 use anyhow::{Context, Result};
 use futures::{Stream, StreamExt};
@@ -10,10 +10,7 @@ use rabbitmq_stream_client::{
 use serde::Deserialize;
 use tracing::{debug, error, info};
 
-use crate::{
-    metrics::{rabbit::RABBITMQ_ENQUEUE_CALCULATION_TIME, Empty},
-    types::CollectionId,
-};
+use crate::types::CollectionId;
 
 use super::{Offset, WriteOperation};
 
@@ -121,16 +118,8 @@ impl RabbitOperationSender {
         // Send interface accepts a Fn and not an FnOnce.
         // So, we cannot drop the TimeHistogram here as usual.
         // TODO: change the send interface to accept FnOnce
-        let i = Instant::now();
         self.producer
-            .send(message, move |r| {
-                RABBITMQ_ENQUEUE_CALCULATION_TIME.track(Empty {}, i.elapsed());
-
-                if let Err(e) = r {
-                    error!("Message send error {:?}", e);
-                }
-                async {}
-            })
+            .send_with_confirm(message)
             .await
             .context("Cannot send message")?;
 

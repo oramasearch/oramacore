@@ -471,3 +471,415 @@ async fn test_fulltext_multi_index() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_threshold() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    let docs = vec![
+        json!({
+            "id": "1",
+            "text": "The pen is on the table",
+        }),
+        json!({
+            "id": "2",
+            "text": "the pen",
+            "text2": "is on the table",
+        }),
+        json!({
+            "id": "3",
+            "text": "the pen",
+        }),
+    ];
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    // match doc 1 and 2
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 0.7,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+    // threshold 1.0 means we consider only documents that contain all terms
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    // threshold 0.0 means we consider all documents
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 0.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+    // threshold 1.0 means we consider only documents that match all terms
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "the pen is on the table",
+                "threshold": 0.7,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 0.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "pen",
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_exact() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client_1 = collection_client.create_index().await.unwrap();
+
+    let docs = vec![
+        json!({ "id": "1", "text": "Christopher Nolan" }),
+        json!({ "id": "2", "text": "Foxes" }),
+        json!({ "id": "3", "text": "Fox" }),
+    ];
+    index_client_1
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "christoph",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 0);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "christoph",
+                "exact": false,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox",
+                "exact": false,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "christoph",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 0);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "christoph",
+                "exact": false,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox",
+                "exact": false,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_exact_multi_terms() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client_1 = collection_client.create_index().await.unwrap();
+
+    let docs = vec![
+        json!({ "id": "1", "text": "Foxes table" }),
+        json!({ "id": "2", "text": "Fox table" }),
+    ];
+    index_client_1
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox table",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes table",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox table",
+                "exact": true,
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(output.hits[0].id, format!("{}:2", index_client_1.index_id));
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes table",
+                "exact": true,
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(output.hits[0].id, format!("{}:1", index_client_1.index_id));
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox table",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes table",
+                "exact": true,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 2);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Fox table",
+                "exact": true,
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(output.hits[0].id, format!("{}:2", index_client_1.index_id));
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Foxes table",
+                "exact": true,
+                "threshold": 1.0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(output.hits[0].id, format!("{}:1", index_client_1.index_id));
+
+    drop(test_context);
+}

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, bail, Context, Result};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -43,6 +44,8 @@ pub struct CollectionWriter {
     hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+
+    created_at: DateTime<Utc>,
 }
 
 impl CollectionWriter {
@@ -75,6 +78,8 @@ impl CollectionWriter {
             hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
+
+            created_at: Utc::now(),
         }
     }
 
@@ -149,6 +154,8 @@ impl CollectionWriter {
             hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
+
+            created_at: dump.created_at,
         })
     }
 
@@ -186,6 +193,7 @@ impl CollectionWriter {
             embeddings_model: OramaModelSerializable(embeddings_model),
             indexes,
             temporary_indexes,
+            created_at: self.created_at,
         });
 
         BufferedFile::create_or_overwrite(data_dir.join("info.json"))
@@ -426,6 +434,7 @@ impl CollectionWriter {
             description: self.description.clone(),
             document_count,
             indexes: indexes_desc,
+            created_at: self.created_at,
         }
     }
 
@@ -501,6 +510,7 @@ struct CollectionDumpV1 {
     embeddings_model: OramaModelSerializable,
     indexes: Vec<IndexId>,
     temporary_indexes: Vec<IndexId>,
+    created_at: DateTime<Utc>,
 }
 
 pub struct IndexReadLock<'guard> {
