@@ -86,6 +86,52 @@ impl RabbitOperationSender {
         Self { producer }
     }
 
+    pub async fn send_batch(&self, operations: &[WriteOperation]) -> Result<()> {
+        let mut messages = Vec::with_capacity(operations.len());
+
+        for operation in operations {
+            let coll_id: Option<CollectionId> = match operation {
+                WriteOperation::Collection(coll_id, _) => Some(*coll_id),
+                WriteOperation::DeleteCollection(id) => Some(*id),
+                WriteOperation::CreateCollection { id, .. } => Some(*id),
+                WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
+            };
+
+            let op_type_id = operation.get_type_id();
+
+            let message_body =
+                bincode::serialize(&operation).context("Cannot serialize operation")?;
+
+            let prop = Message::builder()
+                .message_annotations()
+                .message_builder()
+                .body(message_body)
+                .application_properties();
+
+            let prop = if let Some(coll_id) = coll_id {
+                prop.insert("coll_id", coll_id.to_string())
+            } else {
+                prop
+            };
+            let message = prop
+                .insert("v", 1)
+                .insert("op_type_id", op_type_id)
+                .message_builder()
+                .build();
+
+            messages.push(message);
+        }
+
+        // Same problem as in `send`
+        // TODO: think about a better solution
+        self.producer
+            .batch_send(messages, |_| async {})
+            .await
+            .context("Cannot send messages")?;
+
+        Ok(())
+    }
+
     pub async fn send(&self, operation: &WriteOperation) -> Result<()> {
         let coll_id: Option<CollectionId> = match operation {
             WriteOperation::Collection(coll_id, _) => Some(*coll_id),
@@ -115,11 +161,15 @@ impl RabbitOperationSender {
             .message_builder()
             .build();
 
-        // Send interface accepts a Fn and not an FnOnce.
-        // So, we cannot drop the TimeHistogram here as usual.
-        // TODO: change the send interface to accept FnOnce
+        // We aren't waiting for the result of the send
+        // but we should care about the result
+        // RabbitMQ will return an ACK if the message was sent successfully.
+        // If that ACK is not received, it could be a problem.
+        // Anyway, waiting for the result will slow down the insertion process
+        // We should propose a better solution in the future
+        // TODO: think about a better solution
         self.producer
-            .send_with_confirm(message)
+            .send(message, |_| async {})
             .await
             .context("Cannot send message")?;
 

@@ -78,6 +78,28 @@ impl OperationSender {
 
         Ok(())
     }
+
+    pub async fn send_batch(&self, operations: Vec<WriteOperation>) -> Result<()> {
+        trace!("Sending operation: {:?}", operations);
+        match self {
+            OperationSender::InMemory {
+                offset_counter,
+                sender,
+            } => {
+                for operation in operations {
+                    let offset = offset_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let message_body =
+                        bincode::serialize(&operation).context("Cannot serialize operation")?;
+                    sender.send((Offset(offset), message_body)).await?;
+                }
+            }
+            OperationSender::RabbitMQ(sender) => {
+                sender.send_batch(&operations).await?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub enum OperationReceiver {
