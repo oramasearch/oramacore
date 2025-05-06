@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     time::Duration,
@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
     sync::RwLock,
-    time::{Instant, MissedTickBehavior},
+    time::{sleep, Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
@@ -104,6 +104,19 @@ pub struct WriteSide {
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
+
+    // This counter is incremented each time we need to
+    // change the collections hashmap:
+    // - when we create a new collection
+    // - when we delete a collection
+    // After the operation, we decrement the counter
+    // DUring the documents insertion, we can use this counter
+    // to know if there're any changes that require to have
+    // write lock on collections hashmap
+    // In that case, we can pause the insertion for a while,
+    // allowing other operations to obtain the write lock,
+    // and then we can continue the insertion.
+    write_operation_counter: AtomicU32,
 }
 
 impl WriteSide {
@@ -199,6 +212,7 @@ impl WriteSide {
             llm_service,
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
+            write_operation_counter: AtomicU32::new(0),
         };
 
         let write_side = Arc::new(write_side);
@@ -275,9 +289,14 @@ impl WriteSide {
     ) -> Result<()> {
         self.check_master_api_key(master_api_key)?;
 
-        self.collections
+        self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
+        let res = self
+            .collections
             .create_collection(option, self.op_sender.clone())
-            .await?;
+            .await;
+        self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
+
+        res?;
 
         Ok(())
     }
@@ -320,7 +339,7 @@ impl WriteSide {
         model: OramaModel,
         reference: Option<String>,
     ) -> Result<()> {
-        let collection = self
+        let mut collection = self
             .collections
             .get_collection(collection_id)
             .await
@@ -358,13 +377,43 @@ impl WriteSide {
                 .create_temp_index(copy_from, new_index_id, None)
                 .await
                 .context("Cannot create temporary index")?;
-            let new_index = collection
+            let mut new_index = collection
                 .get_temporary_index(new_index_id)
                 .await
                 .expect("Temporary index not found but it should be there because already created");
 
+            let mut i = 0;
+
             let mut stream = self.document_storage.stream_documents(document_ids).await;
             while let Some((doc_id, doc)) = stream.next().await {
+                i += 1;
+
+                // We want to check if there's some pending write operation on collections hashmap
+                // If so, we need to yield the task to allow the other operations to acquire the write lock
+                if i % 50 == 0 && self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                    drop(new_index);
+                    drop(collection);
+
+                    tokio::task::yield_now().await;
+                    // `yield_now` doens't guarantee that the other task will be executed
+                    // If the scheduler will process this task without waiting the other task,
+                    // we propose a sleep of 10ms to be sure that the other task will be executed.
+                    // Anyway, this is not guaranteed again, it is just an hope.
+                    if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+
+                    collection = self
+                        .collections
+                        .get_collection(collection_id)
+                        .await
+                        .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                    new_index = collection
+                        .get_index(new_index_id)
+                        .await
+                        .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+                }
+
                 let inner = doc.inner;
                 let inner: Map<String, Value> = serde_json::from_str(inner.get())
                     // This is safe because the document is a valid JSON
@@ -485,7 +534,7 @@ impl WriteSide {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
-        let collection = self
+        let mut collection = self
             .collections
             .get_collection(collection_id)
             .await
@@ -493,7 +542,7 @@ impl WriteSide {
 
         collection.check_write_api_key(write_api_key)?;
 
-        let index = collection
+        let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
@@ -505,7 +554,37 @@ impl WriteSide {
         };
         let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
 
+        let mut i = 0;
+
         for mut doc in document_list {
+            i += 1;
+
+            // We want to check if there's some pending write operation on collections hashmap
+            // If so, we need to yield the task to allow the other operations to acquire the write lock
+            if i % 50 == 0 && self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(index);
+                drop(collection);
+
+                tokio::task::yield_now().await;
+                // `yield_now` doens't guarantee that the other task will be executed
+                // If the scheduler will process this task without waiting the other task,
+                // we propose a sleep of 10ms to be sure that the other task will be executed.
+                // Anyway, this is not guaranteed again, it is just an hope.
+                if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                    sleep(Duration::from_millis(10)).await;
+                }
+
+                collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                index = collection
+                    .get_index(index_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            }
+
             debug!("Inserting doc");
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
 
@@ -637,7 +716,10 @@ impl WriteSide {
     ) -> Result<()> {
         self.check_master_api_key(master_api_key)?;
 
+        self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let document_ids = self.collections.delete_collection(collection_id).await;
+        self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
+
         if let Some(document_ids) = document_ids {
             self.commit()
                 .await
