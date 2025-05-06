@@ -10,6 +10,7 @@ mod fulltext_search;
 mod index_rebuild;
 mod list_documents;
 mod replace_doc_on_insert;
+mod shutdown;
 mod trigger;
 mod vector_search;
 
