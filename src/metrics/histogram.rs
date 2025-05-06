@@ -56,6 +56,8 @@ impl<Labels: Into<Vec<Label>>> TimeHistogram<Labels> {
             already_recorded: false,
         }
     }
+
+    #[allow(dead_code)]
     pub fn track(&self, labels: Labels, duration: Duration) {
         let elapsed = duration.as_secs_f64();
         histogram!(self.key, labels.into()).record(elapsed);

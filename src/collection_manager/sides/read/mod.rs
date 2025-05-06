@@ -87,7 +87,7 @@ pub struct ReadSide {
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
-    stop_sender: tokio::sync::mpsc::Sender<()>,
+    stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
 }
 
@@ -145,9 +145,10 @@ impl ReadSide {
         let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
-        let (stop_sender, stop_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_sender, _) = tokio::sync::broadcast::channel(1);
+        let commit_loop_receiver = stop_sender.subscribe();
+        let receive_operation_loop_receiver = stop_sender.subscribe();
 
-        let stop_done_receiver = RwLock::new(stop_done_receiver);
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
@@ -164,18 +165,23 @@ impl ReadSide {
             llm_service,
             local_gpu_manager,
             stop_sender,
-            stop_done_receiver,
+            stop_done_receiver: RwLock::new(stop_done_receiver),
         };
 
         let operation_receiver = operation_receiver_creator.create(last_offset).await?;
 
         let read_side = Arc::new(read_side);
 
-        start_commit_loop(read_side.clone(), commit_interval);
+        start_commit_loop(
+            read_side.clone(),
+            commit_interval,
+            commit_loop_receiver,
+            stop_done_sender.clone(),
+        );
         start_receive_operations(
             read_side.clone(),
             operation_receiver,
-            stop_receiver,
+            receive_operation_loop_receiver,
             stop_done_sender,
         );
 
@@ -184,11 +190,17 @@ impl ReadSide {
 
     pub async fn stop(&self) -> Result<()> {
         info!("Stopping read side");
+        // Broadcast
         self.stop_sender
             .send(())
-            .await
             .context("Cannot send stop signal")?;
         let mut stop_done_receiver = self.stop_done_receiver.write().await;
+        // Commit loop
+        stop_done_receiver
+            .recv()
+            .await
+            .context("Cannot send stop signal")?;
+        // Operation receiver loop
         stop_done_receiver
             .recv()
             .await
@@ -662,7 +674,12 @@ fn default_insert_batch_commit_size() -> u64 {
     300
 }
 
-fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duration) {
+fn start_commit_loop(
+    read_side: Arc<ReadSide>,
+    insert_batch_commit_size: Duration,
+    mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
+    stop_done_sender: tokio::sync::mpsc::Sender<()>,
+) {
     tokio::task::spawn(async move {
         let start = Instant::now() + insert_batch_commit_size;
         let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
@@ -673,8 +690,16 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
         // the commit will be run due to the `insert_batch_commit_size` config.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        loop {
-            interval.tick().await;
+        'outer: loop {
+            tokio::select! {
+                _ = stop_receiver.recv() => {
+                    info!("Stopping commit loop");
+                    break 'outer;
+                }
+                _ = interval.tick() => {
+
+                }
+            };
             info!(
                 "{:?} time reached. Committing read side",
                 insert_batch_commit_size.clone()
@@ -683,13 +708,17 @@ fn start_commit_loop(read_side: Arc<ReadSide>, insert_batch_commit_size: Duratio
                 error!(error = ?e, "Cannot commit read side");
             }
         }
+
+        if let Err(e) = stop_done_sender.send(()).await {
+            error!(error = ?e, "Cannot send stop signal to read side");
+        }
     });
 }
 
 fn start_receive_operations(
     read_side: Arc<ReadSide>,
     mut operation_receiver: OperationReceiver,
-    stop_receiver: tokio::sync::mpsc::Receiver<()>,
+    stop_receiver: tokio::sync::broadcast::Receiver<()>,
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
     tokio::task::spawn(async move {
@@ -779,9 +808,9 @@ fn start_receive_operations(
             error!("Read side stopped to receive operations. It is disconnected and will not be able to update the read side");
         }
 
-        stop_done_sender.send(()).await.unwrap_or_else(|e| {
+        if let Err(e) = stop_done_sender.send(()).await {
             error!(error = ?e, "Cannot send stop signal to read side");
-        });
+        }
     });
 }
 

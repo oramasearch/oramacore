@@ -101,6 +101,9 @@ pub struct WriteSide {
     local_gpu_manager: Arc<LocalGPUManager>,
     master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+
+    stop_sender: tokio::sync::broadcast::Sender<()>,
+    stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
 }
 
 impl WriteSide {
@@ -172,6 +175,11 @@ impl WriteSide {
         let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
             .context("Cannot create document storage")?;
 
+        let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
+        let (stop_sender, _) = tokio::sync::broadcast::channel(1);
+        let commit_loop_receiver = stop_sender.subscribe();
+        let receive_operation_loop_receiver = stop_sender.subscribe();
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
@@ -189,14 +197,50 @@ impl WriteSide {
             kv,
             local_gpu_manager,
             llm_service,
+            stop_sender,
+            stop_done_receiver: RwLock::new(stop_done_receiver),
         };
 
         let write_side = Arc::new(write_side);
 
-        start_commit_loop(write_side.clone(), commit_interval);
-        start_calculate_embedding_loop(ai_service, rx, op_sender, embedding_queue_limit);
+        start_commit_loop(
+            write_side.clone(),
+            commit_interval,
+            commit_loop_receiver,
+            stop_done_sender.clone(),
+        );
+        start_calculate_embedding_loop(
+            ai_service,
+            rx,
+            op_sender,
+            embedding_queue_limit,
+            receive_operation_loop_receiver,
+            stop_done_sender.clone(),
+        );
 
         Ok(write_side)
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        info!("Stopping writer side");
+        // Broadcast
+        self.stop_sender
+            .send(())
+            .context("Cannot send stop signal")?;
+        let mut stop_done_receiver = self.stop_done_receiver.write().await;
+        // Commit loop
+        stop_done_receiver
+            .recv()
+            .await
+            .context("Cannot send stop signal")?;
+        // embedding calulcation loop
+        stop_done_receiver
+            .recv()
+            .await
+            .context("Cannot send stop signal")?;
+        info!("Writer side stopped");
+
+        Ok(())
     }
 
     pub async fn commit(&self) -> Result<()> {
@@ -1107,7 +1151,12 @@ impl WriteSide {
     }
 }
 
-fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Duration) {
+fn start_commit_loop(
+    write_side: Arc<WriteSide>,
+    insert_batch_commit_size: Duration,
+    mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
+    stop_done_sender: tokio::sync::mpsc::Sender<()>,
+) {
     tokio::task::spawn(async move {
         let start = Instant::now() + insert_batch_commit_size;
         let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
@@ -1118,8 +1167,16 @@ fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Durat
         // the commit will be run due to the `insert_batch_commit_size` config.
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        loop {
-            interval.tick().await;
+        'outer: loop {
+            tokio::select! {
+                _ = stop_receiver.recv() => {
+                    info!("Stopping commit loop");
+                    break 'outer;
+                }
+                _ = interval.tick() => {
+
+                }
+            };
             info!(
                 "{:?} time reached. Committing write side",
                 insert_batch_commit_size.clone()
@@ -1127,6 +1184,10 @@ fn start_commit_loop(write_side: Arc<WriteSide>, insert_batch_commit_size: Durat
             if let Err(e) = write_side.commit().await {
                 error!(error = ?e, "Cannot commit write side");
             }
+        }
+
+        if let Err(e) = stop_done_sender.send(()).await {
+            error!(error = ?e, "Cannot send stop signal to writer side");
         }
     });
 }

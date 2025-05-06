@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::mpsc::Receiver;
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     ai::{AIService, OramaModel},
@@ -103,6 +103,8 @@ pub fn start_calculate_embedding_loop(
     mut receiver: Receiver<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
     limit: u32,
+    mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
+    stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
     // `limit` is the number of items to process in a batch
     assert!(limit > 0);
@@ -116,9 +118,19 @@ pub fn start_calculate_embedding_loop(
             HashMap<(CollectionId, IndexId), Vec<EmbeddingCalculationRequestInput>>,
         > = Default::default();
 
-        loop {
+        'outer: loop {
             // `recv_many` waits for at least one available item
-            let item_count = receiver.recv_many(&mut buffer, limit as usize).await;
+            let item_count = tokio::select! {
+                _ = stop_receiver.recv() => {
+                    info!("Stopping operation receiver");
+                    break 'outer;
+                }
+                op = receiver.recv_many(&mut buffer, limit as usize) => {
+                    op
+                }
+            };
+
+            // let item_count = receiver.recv_many(&mut buffer, limit as usize).await;
             // `recv_many` returns 0 if the channel is closed
             if item_count == 0 {
                 warn!("Embedding calculation receiver closed");
@@ -150,7 +162,45 @@ pub fn start_calculate_embedding_loop(
             process(&op_sender, ai_service.clone(), cache.drain()).await;
         }
 
+        loop {
+            let item = match receiver.try_recv() {
+                Ok(item) => item,
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    break;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    warn!("Embedding calculation receiver closed");
+                    break;
+                }
+            };
+
+            let MultiEmbeddingCalculationRequest {
+                model,
+                coll_id,
+                doc_id,
+                field_id,
+                index_id,
+                text,
+            } = item;
+
+            let inputs = cache.entry(model).or_default();
+            let inputs = inputs.entry((coll_id, index_id)).or_default();
+            for t in text {
+                let input = EmbeddingCalculationRequestInput {
+                    text: t,
+                    doc_id,
+                    field_id,
+                };
+                inputs.push(input);
+            }
+        }
+
+        process(&op_sender, ai_service.clone(), cache.drain()).await;
+
         warn!("Stop embedding calculation loop");
-        panic!("Embedding calculation loop stopped");
+
+        if let Err(e) = stop_done_sender.send(()).await {
+            error!(error = ?e , "Failed to send stop signal");
+        }
     });
 }
