@@ -18,6 +18,7 @@ use async_openai::types::{
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
 };
 
+use chrono::{DateTime, Utc};
 use redact::Secret;
 use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
@@ -657,6 +658,7 @@ pub struct DescribeCollectionResponse {
     pub id: CollectionId,
     pub description: Option<String>,
     pub document_count: usize,
+    pub created_at: DateTime<Utc>,
 
     pub indexes: Vec<DescribeCollectionIndexResponse>,
 }
@@ -1945,6 +1947,7 @@ pub struct DescribeCollectionIndexResponse {
     pub document_count: usize,
     pub fields: Vec<IndexFieldType>,
     pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
