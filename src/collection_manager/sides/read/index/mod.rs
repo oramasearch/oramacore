@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use committed_field::{
     BoolFieldInfo, CommittedBoolField, CommittedNumberField, CommittedStringField,
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
@@ -116,6 +117,9 @@ pub struct Index {
     path_to_index_id_map: PathToIndexId,
 
     is_new: AtomicBool,
+
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl Index {
@@ -144,6 +148,9 @@ impl Index {
 
             path_to_index_id_map: PathToIndexId::new(),
             is_new: AtomicBool::new(true),
+
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -231,6 +238,9 @@ impl Index {
 
             path_to_index_id_map: PathToIndexId::from(dump.path_to_index_id_map),
             is_new: AtomicBool::new(false),
+
+            created_at: dump.created_at,
+            updated_at: dump.updated_at,
         })
     }
 
@@ -524,6 +534,8 @@ impl Index {
                 .map(|(k, v)| (*k, v.get_field_info()))
                 .collect(),
             path_to_index_id_map: self.path_to_index_id_map.serialize(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         });
 
         drop(uncommitted_fields);
@@ -560,10 +572,13 @@ impl Index {
         self.aliases.push(previous_id);
         self.promoted_to_runtime_index
             .store(true, Ordering::Relaxed);
+        // We need to update the created_at and updated_at fields
+        self.updated_at = Utc::now();
     }
 
     pub fn mark_as_deleted(&mut self, reason: DeletionReason) {
         self.deleted = Some(reason);
+        self.updated_at = Utc::now();
     }
 
     pub fn get_deletion_reason(&self) -> Option<DeletionReason> {
@@ -575,6 +590,7 @@ impl Index {
     }
 
     pub fn update(&mut self, op: IndexWriteOperation) -> Result<()> {
+        self.updated_at = Utc::now();
         let uncommitted_fields = self.uncommitted_fields.get_mut();
         match op {
             IndexWriteOperation::CreateField2 {
@@ -964,6 +980,8 @@ impl Index {
             document_count: self.document_count as usize,
             is_temp,
             fields_stats,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         })
     }
 
@@ -1442,6 +1460,8 @@ pub struct IndexStats {
     pub document_count: usize,
     pub is_temp: bool,
     pub fields_stats: Vec<IndexFieldStats>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1465,6 +1485,8 @@ struct DumpV1 {
     string_field_ids: Vec<(FieldId, StringFieldInfo)>,
     vector_field_ids: Vec<(FieldId, VectorFieldInfo)>,
     path_to_index_id_map: Vec<(Box<[String]>, (FieldId, FieldType))>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
