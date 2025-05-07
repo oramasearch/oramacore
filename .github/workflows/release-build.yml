@@ -62,4 +62,20 @@ jobs:
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Authenticate with GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_B64 }}
+    
+      - name: Trigger Cloud Build
+        run: |
+          gcloud builds triggers run deploy-orama-core \
+            --project=${{ secrets.GCP_PROJECT }} \
+            --branch=${{ secrets.GCP_BRANCH }} \
+            --region=${{ secrets.GCP_REGION }} \
+            --quiet > /dev/null 2>&1
 
