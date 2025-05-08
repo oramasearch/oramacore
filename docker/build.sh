@@ -1,7 +1,7 @@
 #!/bin/bash
 set -axe
 
-VERSION=1.1.4
+VERSION=1.1.30
 
 # Build OramaCore
 
