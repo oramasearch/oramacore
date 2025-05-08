@@ -3,11 +3,21 @@ title: "Create a new Collection"
 description: "APIs to create a new Collection in OramaCore."
 ---
 
-We can think of collections as a way to group documents together.
+A collection is a group of indexes. Each index can be thought of as a separate collection of documents, where each document is a JSON object.
 
-For example, if you want to index all the products in your e-commerce store, you might want to create a collection called `products`, where each document represents a single product.
+For example, let's say you're writing a support chatbot system. Some of your data may come from your documentation, some from your FAQ, some from your Slack channel and some from your GitHub issues.
 
-## APIs
+You can create a single collection called `"support"` and then create 4 indexes inside it:
+- `"documentation"`: all the documents from your documentation.
+- `"faq"`: all the documents from your FAQ.
+- `"slack"`: all the messages from your community Slack channel.
+- `"github"`: all the issues from your GitHub repository.
+
+This way, you can programmaticaly decide where to search for specific information on each query, narrowing down the search results to the most relevant indexes.
+
+When creating a collection, you can specify the **read** and **write** API keys for the collection. If they're not provided, OramaCore will generate them for you and return them in the response body.
+
+## Creating a new Collection
 
 <Callout>
 API Key type: **master**. Do not expose it to the public.
@@ -21,7 +31,7 @@ curl -X POST \
   http://localhost:8080/v1/collections/create \
   -H 'Authorization: Bearer <master-api-key>' \
   -d '{
-    "id": "products",
+    "id": "support",
     "write_api_key": "my-write-api-key",
     "read_api_key": "my-read-api-key"
   }'
@@ -36,7 +46,7 @@ const orama = new OramaCoreManager({
 })
 
 const newCollection = await orama.createCollection({
-  id: 'products',
+  id: 'support',
   writeAPIKey: 'my-write-api-key',
   readAPIKey: 'my-read-api-key'
 })
@@ -52,15 +62,12 @@ curl -X POST \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <master-api-key>' \
   -d '{
-    "id": "products",
+    "id": "support",
     "write_api_key": "my-write-api-key",
     "read_api_key": "my-read-api-key",
-    "description": "My optional description about this collection of products",
+    "description": "My optional description about this collection of support documents",
     "language": "english",
-    "embeddings": {
-      "model": "BGESmall",
-      "document_fields": ["title", "description"]
-    }
+    "embeddingsModel": "BGESmall",
   }'
 ```
 
@@ -73,15 +80,12 @@ const orama = new OramaCoreManager({
 })
 
 const newCollection = await orama.createCollection({
-  id: 'products',
+  id: 'support',
   writeAPIKey: 'my-write-api-key',
   readAPIKey: 'my-read-api-key',
-  description: 'My optional description about this collection of products',
+  description: 'My optional description about this collection of support documents',
   language: 'english',
-  embeddings: {
-    model: 'BGESmall',
-    documentFields: ['title', 'description']
-  }
+  embeddingsModel: 'BGESmall'
 })
 ```
 </Tabs>
@@ -90,63 +94,56 @@ In the next sections, we'll explain each of the parameters in detail.
 
 ### Parameters
 
-| Name           | Type     | Description | Required | Default |
-| -------------- | -------- | ----------- | -------- | ------- |
-| `id`         | `string`   | The id of the collection. Can be a name you use to identify it. | Yes | - |
-| `write_api_key` | `string`   | The write API key for this collection. | Yes | - |
-| `read_api_key`  | `string`   | The read API key for this collection. | Yes | - |
-| `description`   | `string`   | A description for this collection. | No | - |
-| `language`      | `string`   | The language of the documents in this collection. | No | `english` |
-| `embeddings`    | `object`   | The configuration for text embeddings. | No | - |
+| Name              | Type     | Description | Required | Default |
+| ----------------- | -------- | ----------- | -------- | ------- |
+| `id`              | `string` | The id of the collection. Can be a name you use to identify it. | Yes | - |
+| `write_api_key`   | `string` | The write API key for this collection. | Yes | - |
+| `read_api_key`    | `string` | The read API key for this collection. | Yes | - |
+| `description`     | `string` | A description for this collection. | No | - |
+| `language`        | `string` | The language of the documents in this collection. | No | `english` |
+| `embeddingsModel` | `string` | The embeddings model to use for the collection | No | `BGESmall` |
 
-The `embeddings` object is the parameter used by OramaCore to configure text embeddings generation for the documents in this collection.
+## Creating an index
 
-The `embeddings` object has the following parameters:
+Once you have created a collection, you'll need to create at least one index inside of it.
 
-| Name             | Type     | Description | Required | Default |
-| ---------------- | -------- | ----------- | -------- | ------- |
-| `model`          | `string`   | The model to use for text embeddings generation. | No | `MultilingualE5Small` |
-| `document_fields` | `string[]` | The fields to use for text embeddings generation. If not specified, OramaCore will use all the string fields found in the documents. | No | - |
+As an example, let's create an index called `"faq"` inside the `"support"` collection:
 
-Read more about text embeddings and their configurations [here](/docs/customizations/text-embeddings).
+<Tabs groupId='create' persist items={['cURL', 'JavaScript']}>
+```bash tab="cURL"
+# Please note that the URL contains the collection ID:
+# http://localhost:8080/v1/collections/{COLLECTION_ID}/indexes/create
+curl -X POST \
+  http://localhost:8080/v1/collections/support/indexes/create \
+  -H 'Authorization: Bearer <write-api-key>' \
+  -d '{
+    "id": "faq",
+    "embeddings": "automatic",
+  }'
+```
 
-## Hooks
+```js tab="JavaScript"
+import { CollectionManager } from '@orama/core'
 
-After creating a collection, you can start using some hooks. If you're not familiar with hooks, you can read more about them in the [Hooks](/docs/customizations/javascript-hooks/introduction) section.
+const supportCollection = new CollectionManager({
+  url: 'http://localhost:8080',
+  collectionID: 'support',
+  writeAPIKey: 'my-write-api-key',
+  readAPIKey: 'my-read-api-key'
+})
 
+const newIndex = await supportCollection.createIndex({
+  id: 'faq',
+  embeddings: 'automatic',
+})
+```
+</Tabs>
 
-At the time of writing, we have the following hooks available:
+Both `id` and `embeddings` are optional. If you don't provide an `id`, OramaCore will generate one for you. If you don't provide an `embeddings` value, OramaCore will use `automatic` by default, meaning it will automatically detect the best document properties to concatenate for generating the embeddings at insert time.
 
-- `selectEmbeddingProperties`: Allows you to programmatically select properties for text extraction during text embeddings generation.
+### Parameters
 
-  <Tabs groupId='hooks' persist items={['cURL', 'JavaScript']}>
-  ```bash tab="cURL"
-  curl -X POST http://localhost:8080/v1/{COLLECTION_ID}/hooks/add \
-    -H 'Content-Type: application/json' \
-    -d '{
-      "id": "selectEmbeddingProperties",
-      "code": "function selectEmbeddingProperties(document) { return document.title; }"
-    }'
-  ```
-
-  ```js tab="JavaScript"
-  import { CollectionManager } from '@orama/core'
-
-  const collection = new CollectionManager({
-    url: 'http://localhost:8080',
-    collectionID: '<COLLECTION_ID>',
-    writeAPIKey: '<write_api_key>'
-  })
-
-  function selectEmbeddingProperties(document) {
-    return document.title;
-  }
-
-  await collection.addHook({
-    name: 'selectEmbeddingProperties',
-    code: selectEmbeddingProperties.toString()
-  })
-  ```
-  </Tabs>
-
-  Read more about this hook [here](/docs/customizations/javascript-hooks/selectEmbeddingProperties).
+| Name        | Type     | Description | Required | Default |
+| ----------- | -------- | ----------- | -------- | ------- |
+| `id`        | `string` | The id of the index. Can be a name you use to identify it. | No | - |
+| `embeddings` | `string` | The embeddings to use for this index. Can be `automatic`, `manual` or `none`. | No | `automatic` |
