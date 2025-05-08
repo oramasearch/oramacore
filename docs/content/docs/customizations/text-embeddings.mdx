@@ -157,25 +157,22 @@ Since OramaCore is schemaless, concatenating all string fields is a simple and e
 
 ### Customizing Text Extraction during Collection creation
 
-To customize text extraction, you can specify the fields to use and the model to generate embeddings when creating a collection:
+To customize text extraction, you can specify the fields to use and the model to generate embeddings when creating an index:
 
-```bash title="Creating a collection"
+```bash title="Creating an index"
 curl -X POST \
-  http://localhost:8080/v0/collections \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/indexes/create \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <master-api-key>' \
+  -H 'Authorization: Bearer <write-api-key>' \
   -d '{
     "id": "products",
     "write_api_key": "my-write-api-key",
     "read_api_key": "my-read-api-key",
-    "embeddings": {
-      "model": "BGESmall",
-      "document_fields": ["productName", "description", "brand"]
-    }
+    "embedding": ["productName", "description", "brand"],
   }'
 ```
 
-In this example, we create a collection named `products` that uses the `BGESmall` model and extracts text from the `productName`, `description`, and `brand` fields.
+In this example, we create an index named `products` that extracts text from the `productName`, `description`, and `brand` fields.
 
 **Pros of this approach:**
 
@@ -186,8 +183,31 @@ In this example, we create a collection named `products` that uses the `BGESmall
 
 - Each document must contain these specified fields, which is not a guarantee in a schemaless system.
 
-### Using JavaScript Hooks
+A valid, recommended alternative is to let OramaCore automatically extract the text from the fields it finds most relevant for future queries.
 
-Since OramaCore ships with a JavaScript runtime integrated, you can use JavaScript hooks to customize text extraction and transformation.
+This is done by either specifying the `embedding` field as `automatic`, or by omitting it altogether.
 
-Since this is a more advanced topic, we decided to dedicate it an entire section. Please refer to the [JavaScript Hooks](/docs/customizations/javascript-hooks/selectEmbeddingProperties) documentation for more information.
+```bash title="Creating an index"
+curl -X POST \
+  http://localhost:8080/v0/collections/{COLLECTION_ID}/indexes/create \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <write-api-key>' \
+  -d '{
+    "id": "products",
+    "write_api_key": "my-write-api-key",
+    "read_api_key": "my-read-api-key",
+    "embedding": "automatic",
+  }'
+```
+
+**Pros of this approach:**
+
+- OramaCore will automatically extract the most relevant fields for text extraction, ensuring that the embeddings are generated from the most meaningful content.
+- This approach is more flexible and adaptable to different document structures, as it does not require a predefined schema.
+- It allows for easier updates and changes to the document structure without requiring changes to the embedding configuration.
+
+**Cons of this approach:**
+
+- You may not have full control over which fields are used for text extraction, which may lead to unexpected results if the document structure changes.
+- It may not be suitable for all use cases, especially if you have specific requirements for text extraction.
+- It may require additional testing and validation to ensure that the automatically extracted fields are appropriate for your use case. 

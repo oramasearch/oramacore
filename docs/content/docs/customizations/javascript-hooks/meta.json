@@ -1,9 +1,0 @@
-{
-  "title": "JavaScript Hooks",
-  "description": "OramaCore JavaScript Documentation",
-  "root": false,
-  "pages": [
-    "introduction",
-    "selectEmbeddingsProperties" 
-  ]
-}
