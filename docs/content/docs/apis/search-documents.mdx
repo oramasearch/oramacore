@@ -47,13 +47,41 @@ When performing search, you can use a number of parameters to customize the sear
 | `limit` | The maximum number of documents to return. | `10` |
 | `offset` | The number of documents to skip. | `0` |
 | `properties` | The properties to search in. <br />Should be an array of strings (for example: `["title", "description", "author.name"]`) | All properties |
+| `facets` | A list of facets to return. Read more [here](#facets) | - |
 | `where` | A filter to apply to the search results. Read more [here](#where-filters) | - |
+| `threshold` | The percentage of matches required to return a document. Read more [here](#understanding-the-orama-threshold-property)| `0` |
+| `exact` | Whether to use exact matching. | `false` |
 
 ### Where Filters
 
 At index time, OramaCore will index different datatypes in different ways. For example, a `string` will be indexed differently than a `number` or a `boolean`.
 
 When performing a search, you can use the `where` parameter to filter the search results based on the datatype of the property.
+
+#### Filtering Strings
+
+To filter strings, you can use the following API:
+
+<Tabs groupId='filters' persist items={['JSON', 'JavaScript']}>
+```json tab='JSON'
+{
+  "term": "John Doe",
+  "where": {
+    "job": "Software Engineer"
+  }
+}
+```
+
+```js tab='JavaScript'
+const results = await collection.search({
+  term: 'John Doe',
+  where: {
+    job: 'Software Engineer'
+  }
+})
+```
+</Tabs>
+
 
 #### Filtering Numbers
 
@@ -201,3 +229,82 @@ const results = await collection.search({
 })
 ```
 </Tabs>
+
+## Understanding the Orama Threshold Property
+
+The `threshold` property in Orama controls the minimum/maximum number of results to return when performing a search operation. It helps filter out potentially irrelevant results, especially with long search queries.
+
+### Example Data
+
+Let's consider these four documents:
+
+```json
+[
+  { "title": "Blue t-shirt, slim fit" },
+  { "title": "Blue t-shirt, regular fit" },
+  { "title": "Red t-shirt, slim fit" },
+  { "title": "Red t-shirt, oversize fit" }
+]
+```
+
+### Search Behavior Without Threshold
+
+If we search for `regular fit`:
+
+```json
+{
+  "term": "regular fit"
+}
+```
+
+OramaCore will return:
+
+```json
+{
+  "count": 4, // 4 results!
+  "hits": [...],
+  "elapsed": {...}
+}
+```
+
+**Why four results?** While only one document contains the exact phrase "regular fit", OramaCore returns all documents that match any of the search terms. In this case, all documents contain the word "fit", so they're all included in the results.
+
+### How Threshold Works
+
+The `threshold` property is a number between `0` and `1` representing the percentage of matching terms required for a document to be included in results:
+
+- **threshold: 0** (default) - Returns all documents matching ANY search term
+- **threshold: 1** - Returns only documents matching ALL search terms
+- **threshold: 0.5** - Returns documents with at least 50% of search terms
+
+### Examples
+
+#### With threshold: 0 (default)
+```json
+{
+  "term": "slim fit"
+}
+```
+Returns all documents containing either "slim" OR "fit" (all 4 documents in our example).
+
+#### With threshold: 1
+```json
+{
+  "term": "slim fit",
+  "threshold": 1
+}
+```
+Returns only documents containing BOTH "slim" AND "fit" (only the 2 documents with "slim fit").
+
+#### With threshold: 0.5
+```json
+{
+  "term": "slim fit",
+  "threshold": 0.5
+}
+```
+Prioritizes documents containing both "slim" and "fit", then returns 50% of documents containing either term.
+
+## Real-World Application
+
+For large document collections (e.g., 1 million documents), using an appropriate threshold becomes crucial. Long search queries like "red t-shirt with long sleeves and a motorbike printed on the front" could match too many irrelevant documents without a proper threshold setting.
