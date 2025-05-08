@@ -33,6 +33,17 @@ An NVIDIA GPU is highly recommended for running the application. For production
 usage, we recommend using minimum one NVIDIA A100. Optimal configuration would
 include four NVIDIA H100.
 
+## Available Dockerfiles
+
+Depending on your machine, you may want to use different Docker images.
+
+| Application   | CPU/GPU                              | Docker image                                                                                  |
+| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **OramaCore** | X86_64                               | [`oramasearch/oramacore`](https://hub.docker.com/r/oramasearch/oramacore)                     |
+| **OramaCore** | ARM64 (Mac M series for example)     | [`oramasearch/oramacore-arm64`](https://hub.docker.com/r/oramasearch/oramacore-arm64)         |
+| **AI Server** | Any CPU architecture, no CUDA access | [`oramasearch/oramacore-ai-server`](https://hub.docker.com/r/oramasearch/oramacore-ai-server) |
+| **AI Server** | Any CPU architecture, CUDA available | `coming soon`                                                                                 |
+
 ## Using the JavaScript SDK
 
 You can install the official JavaScript SDK with npm:
