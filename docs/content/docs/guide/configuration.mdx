@@ -17,8 +17,12 @@ http:
     with_prometheus: true
 
 log:
-    # Comment the following line to disable the logging
+    # Log levels.
+    # Comment out the following lines to disable logging. 
     file_path: "./log.log"
+    levels:
+        oramacore: trace
+        orama_js_pool: info
 
 writer_side:
     output:
@@ -69,11 +73,24 @@ ai_server:
             - CPUExecutionProvider
         total_threads: 8
 
+        # Specify which model and provider to use for the automatic embeddings selector.
+        # It's completely optional. If not specified, the internal LLM will be used.
+        automatic_embeddings_selector:
+            model: "gpt-4.1"
+            provider: openai
+
+    # The local LLM provider host, port and model.
     llm:
         port: 8000
         host: 0.0.0.0
         model: "Qwen/Qwen2.5-3B-Instruct"
 
+    # Optional, remote LLM providers.
+    # Currently, we support the following providers out of the box:
+    # - openai: OpenAI API (ChatGPT)
+    # - together: Together.ai (LLAMA, Mistral, Qwen, DeepSeek, and more)
+    # - fireworks: Fireworks.ai (LLAMA, Mistral, Qwen, DeepSeek, and more)
+    # You can specify the provider, API key and default model to use.
     remote_llms:
         - provider: openai
           api_key: "sk-******************************************"
@@ -84,7 +101,6 @@ ai_server:
         - provider: fireworks
           api_key: "sk-******************************************"
           default_model: "accounts/fireworks/models/llama-v3p1-8b-instruct"
-
 ```
 
 All the options above are optional, and you can customize them as needed.
@@ -100,6 +116,15 @@ The `http` section configures the HTTP server that serves the OramaCore API. Her
 - `allow_cors`: Whether to allow Cross-Origin Resource Sharing (CORS) requests. By default, it's set to `true`. We recommend keeping it enabled.
 - `with_prometheus`: Whether to expose Prometheus metrics. By default, it's set to `true`.
 
+## `log`
+
+The `log` section configures the logging settings for OramaCore. Here are the available options:
+
+- `file_path`: The path to the log file where OramaCore will write logs. By default, it's set to `"./log.log"`.
+- `levels`: The logging levels for different components of OramaCore. You can customize the verbosity of logs for each component:
+  - `oramacore`: The log level for the core components. Available levels are: trace, debug, info, warn, error. By default, it's set to `trace`.
+  - `orama_js_pool`: The log level for the JavaScript runtime pool. Available levels are: trace, debug, info, warn, error. By default, it's set to `info`.
+
 ## `writer_side`
 
 The `writer_side` section configures the writer side of OramaCore. Here are the available options:
@@ -109,8 +134,10 @@ The `writer_side` section configures the writer side of OramaCore. Here are the 
 - `config`: The configuration options for the writer side. Here are the available options:
   - `data_dir`: The directory where the writer side will persist the data on disk. By default, it's set to `./.data/writer`.
   - `embedding_queue_limit`: The maximum number of embeddings that can be stored in the queue before the writer starts to be blocked. By default, it's set to `50000`.
-  - `insert_batch_commit_size`: The number of document insertions after which the write side will commit the changes. By default, it's set to `5000`.
-  - `default_embedding_model`: The default embedding model used to calculate the embeddings if not specified in the collection creation. By default, it's set to `MultilingualE5Small`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
+  - `insert_batch_commit_size`: The number of document insertions after which the write side will commit the changes. By default, it's set to `50000000`.
+  - `default_embedding_model`: The default embedding model used to calculate the embeddings if not specified in the collection creation. By default, it's set to `BGESmall`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
+  - `javascript_queue_limit`: The maximum number of requests to the JavaScript runtime that can be stored in the queue. This is an in-memory queue, so be careful with this value. By default, it's set to `500000`.
+  - `commit_interval`: The time interval after which changes will be committed to disk, regardless of the number of operations performed. By default, it's set to `1m` (1 minute). You can use time units like `s` (seconds), `m` (minutes), and `h` (hours).
 
 ## `reader_side`
 
@@ -119,7 +146,8 @@ The `reader_side` section configures the reader side of OramaCore. Here are the 
 - `input`: The input where the reader side will store the data. By default, it's set to `in-memory`.
 - `config`: The configuration options for the reader side. Here are the available options:
   - `data_dir`: The directory where the reader side will persist the data on disk. By default, it's set to `./.data/reader`.
-  - `insert_batch_commit_size`: The number of write operations after which the read side will commit the changes. By default, it's set to `50000`.
+  - `insert_batch_commit_size`: The number of write operations after which the read side will commit the changes. By default, it's set to `50000000`.
+  - `commit_interval`: The time interval after which changes will be committed to disk, regardless of the number of operations performed. By default, it's set to `1m` (1 minute). You can use time units like `s` (seconds), `m` (minutes), and `h` (hours).
 
 ## `ai_server`
 
@@ -132,12 +160,19 @@ The `ai_server` section configures the Python gRPC server that is responsible fo
 - `max_connections`: The maximum number of connections that the AI server will accept. By default, it's set to `15`.
 - `total_threads`: The total number of threads that the AI server will use. By default, it's set to `12`.
 
+### `embeddings`
+
 The `embeddings` section configures the embeddings calculation. Here are the available options:
 
-- `default_model_group`: The default model group used to calculate the embeddings if not specified in the collection creation. By default, it's set to `multilingual`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
+- `default_model_group`: The default model group used to calculate the embeddings if not specified in the collection creation. By default, it's set to `small`. See more about the available models in the [Embedding Models](/docs/customizations/text-embeddings) section.
 - `dynamically_load_models`: Whether to dynamically load the models. By default, it's set to `false`.
 - `execution_providers`: The execution providers used to calculate the embeddings. By default, it's set to `CUDAExecutionProvider` and `CPUExecutionProvider`.
 - `total_threads`: The total number of threads used to calculate the embeddings. By default, it's set to `8`.
+- `automatic_embeddings_selector`: Specifies which model and provider to use for automatically selecting appropriate embedding models. If not specified, the internal LLM will be used. Available options:
+  - `model`: The model to use for embedding selection, e.g., `"gpt-4.1"`.
+  - `provider`: The provider of the model, e.g., `openai`.
+
+### `llm`
 
 The `llm` section configures the local Language Models. Here are the available options:
 
@@ -145,9 +180,11 @@ The `llm` section configures the local Language Models. Here are the available o
 - `host`: the local LLM provider host. By default, it's set on `0.0.0.0`.
 - `model`: the model used to run [Answer](/docs/apis/answer-session) and [Reasoning](/docs/apis/advanced-reasoning) Sessions. By default, it's set on `Qwen/Qwen2.5-3B-Instruct`.
 
+### `remote_llms`
+
 The `remote_llms` section configures the remote Large Language Models. It's optional and allows you to specify the remote LLM providers you want to use. Here are the available options:
 
-- `provider`: The name of the remote LLM provider. Currently, we support he following providers out of the box:
+- `provider`: The name of the remote LLM provider. Currently, we support the following providers out of the box:
     - `openai`: OpenAI API (ChatGPT).
     - `together`: [Together.ai](https://www.together.ai) (LLAMA, Mistral, Qwen, DeepSeek, and more).
     - `fireworks`: [Fireworks.ai](https://fireworks.ai) (LLAMA, Mistral, Qwen, DeepSeek, and more).

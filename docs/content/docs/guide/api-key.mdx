@@ -60,16 +60,16 @@ When using the JavaScript client, OramaCore will automatically set the correct A
 **Not safe to share**. Never share the write API key publicly. Treat it as a password.
 </Callout>
 
-The **write API key** is used to insert, update, or delete documents in a collection, as well as creating new [hooks](/docs/customizations/javascript-hooks/introduction) and [actions](/docs/architecture/party-planner#writing-custom-actions).
+The **write API key** is used to insert, update, or delete documents in a collection or index, as well as to create new hooks or tools.
 
 Every collection has its own write API key, which is generated when you create the collection.
 
 You will need this API key to:
 
-- Insert one or more documents into a collection
-- Update one or more documents in a collection
-- Delete one or more documents from a collection
-- Create a new hook or action
+- Insert one or more documents into a collection/index
+- Update one or more documents in a collection/index
+- Delete one or more documents from a collection/index
+- Create a new hook or tool
 
 In all the cases above, you will need to pass the write API key in the `Authorization` header of the request as a `Bearer` token.
 
@@ -78,17 +78,14 @@ Example:
 <Tabs groupId='insert' persist items={['cURL']}>
 ```bash tab="cURL"
 curl -X POST \
-  http://localhost:8080/v1/collections/{COLLECTION_ID}/insert \
+  http://localhost:8080/v1/collections/{COLLECTION_ID}/indexes/create` \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <write_api_key>' \
-  -d '[{
-    "title": "My first document",
-    "content": "This is the content of my first document."
-  }]'
+  -d '{ "id": "products", "embeddings": "automatic" }'
 ```
 </Tabs>
 
-Like with the master API key, when using the JavaScript client, OramaCore will automatically set the correct API key for you. If you're connecting to your OramaCore instance from a web browser, please make sure to never expose the write API key to the client.
+If you're connecting to your OramaCore instance from a web browser, please make sure to never expose the write API key to the client.
 
 ## Read API Key
 
@@ -105,6 +102,7 @@ You will need this API key to:
 - Perform full-text, hybrid, or vector search
 - Read the documents in a collection
 - Perform answer sessions
+- Run a tool
 
 In all the cases above, you will need to pass the read API key as a query parameter in the request.
 

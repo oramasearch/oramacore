@@ -6,14 +6,14 @@ VERSION=1.1.30
 # Build OramaCore
 
 ## Build OramaCore for x86_64
-docker buildx build --platform linux/amd64 -f Dockerfile-oramacore-x86 -t oramacore .
+docker buildx build --platform linux/amd64 -f Dockerfile-oramacore-x86 -t oramacore ..
 docker tag oramacore oramasearch/oramacore:$VERSION
 docker push oramasearch/oramacore:$VERSION
 docker tag oramacore oramasearch/oramacore:latest
 docker push oramasearch/oramacore:latest
 
 ## Build OramaCore for arm64
-docker buildx build --platform linux/arm64 -f Dockerfile-oramacore-arm64 -t oramacore-arm64 .
+docker buildx build --platform linux/arm64 -f Dockerfile-oramacore-arm64 -t oramacore-arm64 ..
 docker tag oramacore-arm64 oramasearch/oramacore-arm64:$VERSION
 docker push oramasearch/oramacore-arm64:$VERSION
 docker tag oramacore-arm64 oramasearch/oramacore-arm64:latest
