@@ -12,7 +12,7 @@ use merge::{
 };
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{RwLock, RwLockReadGuard};
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace};
 use uncommitted_field::*;
 
@@ -21,17 +21,14 @@ use crate::{
     collection_manager::{bm25::BM25Scorer, sides::Offset},
     file_utils::{create_if_not_exists, BufferedFile},
     metrics::{
-        search::{
-            FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
-            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
-        },
+        search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
-        DocumentId, FacetDefinition, FacetResult, Filter, FilterOnField, FulltextMode, HybridMode,
-        IndexId, Limit, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams,
-        Similarity, Threshold, VectorMode, WhereFilter,
+        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
+        NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
+        Threshold, VectorMode, WhereFilter,
     },
 };
 
@@ -1189,13 +1186,6 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
-        impl filters::DocId for DocumentId {
-            #[inline]
-            fn as_u64(&self) -> u64 {
-                self.0
-            }
-        }
-
         fn calculate_filter(
             document_count_estimate: u64,
             path_to_index_id_map: &PathToIndexId,
@@ -1642,4 +1632,11 @@ struct DumpV1 {
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+}
+
+impl filters::DocId for DocumentId {
+    #[inline]
+    fn as_u64(&self) -> u64 {
+        self.0
+    }
 }

@@ -1013,9 +1013,9 @@ impl<'de> Deserialize<'de> for WhereFilter {
 
                 Ok(WhereFilter {
                     filter_on_fields,
-                    and: and,
-                    or: or,
-                    not: not,
+                    and,
+                    or,
+                    not,
                 })
             }
         }
@@ -1024,18 +1024,11 @@ impl<'de> Deserialize<'de> for WhereFilter {
     }
 }
 
-enum WhereFilterEnum<T> {
-    And(Box<WhereFilterEnum<T>>, Box<WhereFilterEnum<T>>),
-    Or(Box<WhereFilterEnum<T>>, Box<WhereFilterEnum<T>>),
-    Not(Box<WhereFilterEnum<T>>),
-    Filter(T),
-}
-
 impl WhereFilter {
     pub fn is_empty(&self) -> bool {
         self.filter_on_fields.is_empty()
-            && self.and.as_ref().map_or(true, |v| v.is_empty())
-            && self.or.as_ref().map_or(true, |v| v.is_empty())
+            && self.and.as_ref().is_none_or(|v| v.is_empty())
+            && self.or.as_ref().is_none_or(|v| v.is_empty())
             && self.not.is_none()
     }
 
