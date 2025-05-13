@@ -324,9 +324,7 @@ impl CollectionReader {
             // It is checked in this way because:
             // - we don't want to affect the performance of the search
             // - we want to return a meaningful error message
-            let fields_in_filter = search_params
-                .where_filter
-                .get_all_keys();
+            let fields_in_filter = search_params.where_filter.get_all_keys();
 
             // We don't handle the case when the field type is different in different indexes
             // We should dedicate a message error for that

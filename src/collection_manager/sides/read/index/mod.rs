@@ -4,7 +4,7 @@ use committed_field::{
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
     StringFilterFieldInfo, VectorFieldInfo,
 };
-use filters::{PlainFilterResult, FilterResult};
+use filters::{FilterResult, PlainFilterResult};
 use futures::join;
 use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
@@ -12,7 +12,7 @@ use merge::{
 };
 use path_to_index_id_map::PathToIndexId;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace};
 use uncommitted_field::*;
 
@@ -29,7 +29,9 @@ use crate::{
     },
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
-        DocumentId, FacetDefinition, FacetResult, Filter, FilterOnField, FulltextMode, HybridMode, IndexId, Limit, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity, Threshold, VectorMode, WhereFilter
+        DocumentId, FacetDefinition, FacetResult, Filter, FilterOnField, FulltextMode, HybridMode,
+        IndexId, Limit, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams,
+        Similarity, Threshold, VectorMode, WhereFilter,
     },
 };
 
@@ -1194,139 +1196,219 @@ impl Index {
             }
         }
 
-        let document_count_estimate = self.document_count;
-        let mut filtered: Option<FilterResult<DocumentId>> = None;
-        fn update_with_iter<I: Iterator<Item = DocumentId>>(
-            filtered: &mut Option<FilterResult<DocumentId>>,
-            iter: I,
+        fn calculate_filter(
             document_count_estimate: u64,
-        ) {
-            if let Some(existing) = filtered.take() {
-                let mut filter = PlainFilterResult::new(document_count_estimate);
-                for id in iter {
-                    filter.add(&id);
-                }
+            path_to_index_id_map: &PathToIndexId,
+            where_filter: &WhereFilter,
+            uncommitted_fields: &UncommittedFields,
+            committed_fields: &CommittedFields,
+        ) -> Result<FilterResult<DocumentId>> {
+            let mut results = Vec::new();
+            for (k, filter) in &where_filter.filter_on_fields {
+                let (field_id, field_type) = match path_to_index_id_map.get(k) {
+                    None => {
+                        // If the user specified a field that is not in the index,
+                        // we should return an empty set.
+                        return Ok(FilterResult::Filter(PlainFilterResult::new(
+                            document_count_estimate,
+                        )));
+                    }
+                    Some((field_id, field_type)) => (field_id, field_type),
+                };
 
-                FilterResult::and(existing, FilterResult::Filter(filter));
-            } else {
-                let mut filter = PlainFilterResult::new(document_count_estimate);
-                for id in iter {
-                    filter.add(&id);
-                }
+                match (field_type, filter) {
+                    (FieldType::Bool, Filter::Bool(filter_bool)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .bool_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
 
-                *filtered = Some(FilterResult::Filter(filter));
+                        // We could check if uncommitted_field is empty
+                        // If so, we could skip the filter and the `and` operation
+                        // TODO: improve this
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(*filter_bool),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.bool_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(*filter_bool).with_context(|| {
+                                format!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
+                    (FieldType::Number, Filter::Number(filter_number)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .number_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(filter_number),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.number_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(filter_number).with_context(|| {
+                                format!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
+                    (FieldType::StringFilter, Filter::String(filter_string)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .string_filter_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(filter_string),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.string_filter_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(filter_string);
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
+                    _ => {
+                        // If the user specified a field that is not in the index,
+                        // we should return an empty set.
+                        return Ok(FilterResult::Filter(PlainFilterResult::new(
+                            document_count_estimate,
+                        )));
+                    }
+                }
             }
+
+            if let Some(filter) = where_filter.and.as_ref() {
+                for f in filter {
+                    let result = calculate_filter(
+                        document_count_estimate,
+                        path_to_index_id_map,
+                        f,
+                        uncommitted_fields,
+                        committed_fields,
+                    )?;
+                    results.push(result);
+                }
+            }
+
+            if let Some(filter) = where_filter.or.as_ref() {
+                let mut or = vec![];
+                for f in filter {
+                    let result = calculate_filter(
+                        document_count_estimate,
+                        path_to_index_id_map,
+                        f,
+                        uncommitted_fields,
+                        committed_fields,
+                    )?;
+                    or.push(result);
+                }
+
+                if or.is_empty() {
+                    return Ok(FilterResult::Filter(PlainFilterResult::new(
+                        document_count_estimate,
+                    )));
+                }
+
+                let mut result = or.pop().expect("we should have at least one result");
+                for f in or {
+                    result = FilterResult::or(result, f);
+                }
+
+                results.push(result);
+            }
+
+            if let Some(filter) = where_filter.not.as_ref() {
+                let result = calculate_filter(
+                    document_count_estimate,
+                    path_to_index_id_map,
+                    filter,
+                    uncommitted_fields,
+                    committed_fields,
+                )?;
+                results.push(FilterResult::Not(Box::new(result)));
+            }
+
+            // Is this correct????
+            if results.is_empty() {
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            }
+
+            let mut result = results.pop().expect("we should have at least one result");
+            for f in results {
+                result = FilterResult::and(result, f);
+            }
+
+            Ok(result)
         }
 
-        for v in where_filter.filter_on_fields.iter() {
-            let FilterOnField {
-                field: k,
-                filter,
-            } = v.clone();
-            let k = &k;
-            let filter = &filter;
+        let mut output = calculate_filter(
+            self.document_count,
+            &self.path_to_index_id_map,
+            where_filter,
+            &uncommitted_fields,
+            &committed_fields,
+        )?;
 
-            let (field_id, field_type) = match self.path_to_index_id_map.get(k) {
-                None => {
-                    // If the user specified a field that is not in the index,
-                    // we should return an empty set.
-                    return Ok(Some(FilterResult::Filter(PlainFilterResult::new(
-                        document_count_estimate,
-                    ))));
-                }
-                Some((field_id, field_type)) => (field_id, field_type),
-            };
-            match (field_type, filter) {
-                (FieldType::Bool, Filter::Bool(filter_bool)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .bool_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                    update_with_iter(
-                        &mut filtered,
-                        uncommitted_field.filter(*filter_bool),
-                        document_count_estimate,
-                    );
-
-                    let committed_field = committed_fields.bool_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(*filter_bool).with_context(|| {
-                            format!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                        update_with_iter(&mut filtered, a, document_count_estimate);
-                    }
-                }
-                (FieldType::Number, Filter::Number(filter_number)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .number_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                    update_with_iter(
-                        &mut filtered,
-                        uncommitted_field.filter(filter_number),
-                        document_count_estimate,
-                    );
-
-                    let committed_field = committed_fields.number_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(filter_number).with_context(|| {
-                            format!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                        update_with_iter(&mut filtered, a, document_count_estimate);
-                    }
-                }
-                (FieldType::StringFilter, Filter::String(filter_string)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .string_filter_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                    update_with_iter(
-                        &mut filtered,
-                        uncommitted_field.filter(filter_string),
-                        document_count_estimate,
-                    );
-
-                    let committed_field = committed_fields.string_filter_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(filter_string);
-                        update_with_iter(&mut filtered, a, document_count_estimate);
-                    }
-                }
-                _ => {
-                    // If the user specified a field that is not in the index,
-                    // we should return an empty set.
-                    return Ok(Some(FilterResult::Filter(PlainFilterResult::new(
-                        document_count_estimate,
-                    ))));
-                }
-            }
+        if !uncommitted_deleted_documents.is_empty() {
+            output = FilterResult::and(
+                output,
+                FilterResult::Not(Box::new(FilterResult::Filter(
+                    PlainFilterResult::from_iter(
+                        self.document_count,
+                        uncommitted_deleted_documents.iter().copied(),
+                    ),
+                ))),
+            );
         }
 
-        let output = filtered.map(|f| {
-            let mut uncommitted_deleted_documents_filter =
-                PlainFilterResult::new(document_count_estimate);
-            for doc_id in uncommitted_deleted_documents {
-                uncommitted_deleted_documents_filter.add(doc_id);
-            }
-            FilterResult::And(
-                Box::new(f),
-                Box::new(FilterResult::Not(Box::new(FilterResult::Filter(
-                    uncommitted_deleted_documents_filter,
-                )))),
-            )
-        });
-        Ok(output)
+        Ok(Some(output))
     }
 
     fn calculate_boost(&self, boost: &HashMap<String, f32>) -> HashMap<FieldId, f32> {

@@ -19,6 +19,29 @@ impl<Id: DocId> PlainFilterResult<Id> {
         }
     }
 
+    pub fn ones(expected_items: u64) -> Self {
+        let filter = FilterBuilder::new(expected_items, 0.01).build_bloom_filter();
+
+        PlainFilterResult {
+            filter,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn from_iter<I: Iterator<Item = Id>>(expected_items: u64, iter: I) -> Self {
+        let filter = FilterBuilder::new(expected_items, 0.01).build_bloom_filter();
+
+        let mut s = Self {
+            filter,
+            phantom: std::marker::PhantomData,
+        };
+        for id in iter {
+            s.add(&id);
+        }
+
+        s
+    }
+
     pub fn add(&mut self, id: &Id) {
         self.filter.add(&id.as_u64().to_be_bytes());
     }
@@ -56,11 +79,9 @@ impl<Id: DocId> FilterResult<Id> {
         match (filter_1, filter_2) {
             (FilterResult::Filter(filter1), FilterResult::Filter(filter2)) => {
                 let output = filter1.and(&filter2);
-                return FilterResult::Filter(output)
+                return FilterResult::Filter(output);
             }
-            (f1, f2) => {
-                return FilterResult::And(Box::new(f1), Box::new(f2))
-            }
+            (f1, f2) => return FilterResult::And(Box::new(f1), Box::new(f2)),
         }
     }
 
@@ -68,11 +89,9 @@ impl<Id: DocId> FilterResult<Id> {
         match (filter_1, filter_2) {
             (FilterResult::Filter(filter1), FilterResult::Filter(filter2)) => {
                 let output = filter1.or(&filter2);
-                return FilterResult::Filter(output)
+                return FilterResult::Filter(output);
             }
-            (f1, f2) => {
-                return FilterResult::Or(Box::new(f1), Box::new(f2))
-            }
+            (f1, f2) => return FilterResult::Or(Box::new(f1), Box::new(f2)),
         }
     }
 
