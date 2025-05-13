@@ -3,7 +3,7 @@ use std::{
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -50,6 +50,8 @@ pub struct CollectionReader {
 
     created_at: DateTime<Utc>,
     updated_at: RwLock<DateTime<Utc>>,
+
+    document_count_estimation: AtomicU64,
 }
 
 impl CollectionReader {
@@ -80,6 +82,8 @@ impl CollectionReader {
 
             created_at: Utc::now(),
             updated_at: RwLock::new(Utc::now()),
+
+            document_count_estimation: AtomicU64::new(0),
         }
     }
 
@@ -120,6 +124,8 @@ impl CollectionReader {
             temp_indexes.push(index);
         }
 
+        let document_count_estimation = indexes.iter().map(|i| i.document_count()).sum::<u64>();
+
         let s = Self {
             id: dump.id,
             description: dump.description,
@@ -137,6 +143,8 @@ impl CollectionReader {
 
             created_at: dump.created_at,
             updated_at: RwLock::new(dump.updated_at),
+
+            document_count_estimation: AtomicU64::new(document_count_estimation),
         };
 
         Ok(s)
@@ -163,6 +171,7 @@ impl CollectionReader {
         let mut index_id_to_remove = vec![];
         let mut temp_index_id_to_remove = vec![];
 
+        let mut count = 0;
         let indexes_dir = data_dir.join("indexes");
         for (i, index) in indexes_lock.iter().enumerate() {
             match index.get_deletion_reason() {
@@ -180,6 +189,7 @@ impl CollectionReader {
                 }
                 None => {}
             }
+            count += index.document_count();
             index_ids.push(index.id());
             let dir = indexes_dir.join(index.id().as_str());
             index.commit(dir, offset).await?;
@@ -248,6 +258,9 @@ impl CollectionReader {
             }
         }
 
+        self.document_count_estimation
+            .store(count, std::sync::atomic::Ordering::Relaxed);
+
         Ok(())
     }
 
@@ -282,7 +295,15 @@ impl CollectionReader {
         &self,
         search_params: &SearchParams,
     ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
-        let mut result: HashMap<DocumentId, f32> = HashMap::new();
+        let document_count_estimation = self
+            .document_count_estimation
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        // Let's suppose the number of matching document is 1/3 of the total number of documents
+        // This is a very rough estimation, but it is better than nothing
+        // This allows us to avoid reallocation of the result map
+        let mut result: HashMap<DocumentId, f32> =
+            HashMap::with_capacity((document_count_estimation / 3) as usize);
         let indexes_lock = self.indexes.read().await;
 
         let indexes_to_search_on =
@@ -303,11 +324,7 @@ impl CollectionReader {
             // It is checked in this way because:
             // - we don't want to affect the performance of the search
             // - we want to return a meaningful error message
-            let fields_in_filter = search_params
-                .where_filter
-                .keys()
-                .map(|k| k.as_str())
-                .collect::<Vec<_>>();
+            let fields_in_filter = search_params.where_filter.get_all_keys();
 
             // We don't handle the case when the field type is different in different indexes
             // We should dedicate a message error for that
@@ -316,7 +333,7 @@ impl CollectionReader {
             for field_in_filter in fields_in_filter {
                 if indexes_lock
                     .iter()
-                    .all(|index| !index.has_field(field_in_filter))
+                    .all(|index| !index.has_field(&field_in_filter))
                 {
                     return Err(anyhow!(
                         "Cannot filter by \"{}\": unknown field",

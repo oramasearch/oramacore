@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use filters::FilterResult;
 use serde::Serialize;
 use tracing::{debug, warn};
 
@@ -159,7 +160,7 @@ impl UncommittedStringField {
         exact_match: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         global_info: &GlobalInfo,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {

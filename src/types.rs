@@ -675,6 +675,7 @@ impl Default for Limit {
 pub struct SearchOffset(pub usize);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum Filter {
     Number(NumberFilter),
@@ -949,6 +950,142 @@ impl Default for Properties {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FilterOnField {
+    #[serde(rename = "$key$")]
+    pub field: String,
+    pub filter: Filter,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WhereFilter {
+    pub filter_on_fields: Vec<(String, Filter)>,
+    pub and: Option<Vec<WhereFilter>>,
+    pub or: Option<Vec<WhereFilter>>,
+    pub not: Option<Box<WhereFilter>>,
+}
+impl<'de> Deserialize<'de> for WhereFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        #[derive(Deserialize, Debug)]
+        #[serde(untagged)]
+        enum Value {
+            Filter(Filter),
+            WhereFilter(Vec<WhereFilter>),
+            NotWhereFilter(WhereFilter),
+        }
+
+        struct HiddenWhereFilterVisitor;
+
+        impl<'de> de::Visitor<'de> for HiddenWhereFilterVisitor {
+            type Value = WhereFilter;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a where filter")
+            }
+
+            fn visit_map<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+            where
+                V: de::MapAccess<'de>,
+            {
+                let mut filter_on_fields = Vec::new();
+                let mut and = None;
+                let mut or = None;
+                let mut not = None;
+
+                while let Some((key, value)) = visitor.next_entry::<String, Value>()? {
+                    match (key.as_str(), value) {
+                        ("and", Value::WhereFilter(f)) => and = Some(f),
+                        ("or", Value::WhereFilter(f)) => or = Some(f),
+                        ("not", Value::NotWhereFilter(f)) => not = Some(Box::new(f)),
+                        (_, Value::Filter(f)) => {
+                            filter_on_fields.push((key, f));
+                        }
+                        (_, value) => {
+                            return Err(de::Error::custom(format!(
+                                "Invalid where filter for key {}: {:?}",
+                                key, value
+                            )))
+                        }
+                    }
+                }
+
+                Ok(WhereFilter {
+                    filter_on_fields,
+                    and,
+                    or,
+                    not,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(HiddenWhereFilterVisitor)
+    }
+}
+
+impl WhereFilter {
+    pub fn is_empty(&self) -> bool {
+        self.filter_on_fields.is_empty()
+            && self.and.as_ref().is_none_or(|v| v.is_empty())
+            && self.or.as_ref().is_none_or(|v| v.is_empty())
+            && self.not.is_none()
+    }
+
+    pub fn get_all_keys(&self) -> Vec<String> {
+        let mut keys = self
+            .filter_on_fields
+            .iter()
+            .map(|(k, _)| k)
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(and) = &self.and {
+            for filter in and.iter() {
+                keys.extend(filter.get_all_keys());
+            }
+        }
+        if let Some(or) = &self.or {
+            for filter in or.iter() {
+                keys.extend(filter.get_all_keys());
+            }
+        }
+        if let Some(not) = &self.not {
+            keys.extend(not.get_all_keys());
+        }
+        keys
+    }
+
+    pub fn get_all_pairs(&self) -> (Vec<(&String, &Filter)>, ()) {
+        fn recursive_get_all_pairs<'filter>(
+            filter: &'filter WhereFilter,
+            pairs: &mut Vec<(&'filter String, &'filter Filter)>,
+        ) {
+            for (key, value) in filter.filter_on_fields.iter() {
+                pairs.push((key, value));
+            }
+            if let Some(and) = &filter.and {
+                for f in and.iter() {
+                    recursive_get_all_pairs(f, pairs);
+                }
+            }
+            if let Some(or) = &filter.or {
+                for f in or.iter() {
+                    recursive_get_all_pairs(f, pairs);
+                }
+            }
+            if let Some(not) = &filter.not {
+                recursive_get_all_pairs(not, pairs);
+            }
+        }
+
+        let mut pairs = vec![];
+        recursive_get_all_pairs(self, &mut pairs);
+
+        (pairs, ())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchParams {
     #[serde(flatten)]
     pub mode: SearchMode,
@@ -961,7 +1098,7 @@ pub struct SearchParams {
     #[serde(default, deserialize_with = "deserialize_properties")]
     pub properties: Properties,
     #[serde(default, rename = "where")]
-    pub where_filter: HashMap<String, Filter>,
+    pub where_filter: WhereFilter,
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
     #[serde(default)]
@@ -1581,6 +1718,298 @@ mod test {
             ]))
         );
     }
+
+    #[test]
+    fn test_filter_deserialize() {
+        let j = json!({
+            "foo": { "eq": 1 },
+            "bar": true,
+            "baz": "hello",
+            "and": [
+                {
+                    "foo": { "eq": 2 },
+                },
+                {
+                    "bar": false,
+                }
+            ],
+            "or": [
+                {
+                    "foo": { "eq": 3 },
+                },
+            ],
+            "not": {
+                "foo": { "eq": 4 },
+            }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 3);
+        assert_eq!(
+            p.filter_on_fields[0],
+            (
+                "foo".to_string(),
+                Filter::Number(NumberFilter::Equal(Number::I32(1)))
+            )
+        );
+        assert_eq!(
+            p.filter_on_fields[1],
+            ("bar".to_string(), Filter::Bool(true))
+        );
+        assert_eq!(
+            p.filter_on_fields[2],
+            ("baz".to_string(), Filter::String("hello".to_string()))
+        );
+        assert_eq!(p.and.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.and.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "foo".to_string(),
+                Filter::Number(NumberFilter::Equal(Number::I32(2)))
+            )
+        );
+        assert_eq!(
+            p.and.as_ref().unwrap()[1].filter_on_fields[0],
+            ("bar".to_string(), Filter::Bool(false))
+        );
+        assert_eq!(p.or.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            p.or.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "foo".to_string(),
+                Filter::Number(NumberFilter::Equal(Number::I32(3)))
+            )
+        );
+        assert_eq!(
+            p.not.as_ref().unwrap().filter_on_fields[0],
+            (
+                "foo".to_string(),
+                Filter::Number(NumberFilter::Equal(Number::I32(4)))
+            )
+        );
+
+        let j = json!({
+            "and": [
+                { "color": "black" },
+                { "price.amount": { "lte": 1000 } }
+            ]
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.and.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.and.as_ref().unwrap()[0].filter_on_fields[0],
+            ("color".to_string(), Filter::String("black".to_string()))
+        );
+        assert_eq!(
+            p.and.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "price.amount".to_string(),
+                Filter::Number(NumberFilter::LessThanOrEqual(Number::I32(1000)))
+            )
+        );
+        assert!(p.or.is_none());
+        assert!(p.not.is_none());
+
+        let j = json!({
+            "and": [
+                { "color": "black" },
+                { "price.amount": { "lte": 1000 } }
+            ],
+            "not": { "price.discount.amount": { "gt": 0 } }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.and.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.and.as_ref().unwrap()[0].filter_on_fields[0],
+            ("color".to_string(), Filter::String("black".to_string()))
+        );
+        assert_eq!(
+            p.and.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "price.amount".to_string(),
+                Filter::Number(NumberFilter::LessThanOrEqual(Number::I32(1000)))
+            )
+        );
+        assert_eq!(
+            p.not.as_ref().unwrap().filter_on_fields[0],
+            (
+                "price.discount.amount".to_string(),
+                Filter::Number(NumberFilter::GreaterThan(Number::I32(0)))
+            )
+        );
+        assert!(p.or.is_none());
+
+        let j = json!({
+            "or": [
+                { "productName": "my-phone-1" },
+                { "productName": "my-phone-2" }
+            ]
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.or.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.or.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-1".to_string())
+            )
+        );
+        assert_eq!(
+            p.or.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-2".to_string())
+            )
+        );
+        assert!(p.and.is_none());
+        assert!(p.not.is_none());
+
+        let j = json!({
+            "or": [
+            { "productName": "my-phone-1" },
+            { "productName": "my-phone-2" }
+            ],
+            "not": { "price.discount.amount": { "gt": 0 } }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.or.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.or.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-1".to_string())
+            )
+        );
+        assert_eq!(
+            p.or.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-2".to_string())
+            )
+        );
+        assert_eq!(
+            p.not.as_ref().unwrap().filter_on_fields[0],
+            (
+                "price.discount.amount".to_string(),
+                Filter::Number(NumberFilter::GreaterThan(Number::I32(0)))
+            )
+        );
+        assert!(p.and.is_none());
+
+        let j = json!({
+            "or": [
+                { "productName": "my-phone-1" },
+                { "productName": "my-phone-2" }
+            ],
+            "and": [
+                { "color": "black" }
+            ]
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.or.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.or.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-1".to_string())
+            )
+        );
+        assert_eq!(
+            p.or.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-2".to_string())
+            )
+        );
+        assert_eq!(p.and.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            p.and.as_ref().unwrap()[0].filter_on_fields[0],
+            ("color".to_string(), Filter::String("black".to_string()))
+        );
+        assert!(p.not.is_none());
+
+        let j = json!({
+            "or": [
+                { "productName": "my-phone-1" },
+                { "productName": "my-phone-2" }
+            ],
+            "and": [
+                { "color": "black" }
+            ],
+            "not": { "manufacturer.name": "my-phone-3" }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 0);
+        assert_eq!(p.or.as_ref().unwrap().len(), 2);
+        assert_eq!(
+            p.or.as_ref().unwrap()[0].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-1".to_string())
+            )
+        );
+        assert_eq!(
+            p.or.as_ref().unwrap()[1].filter_on_fields[0],
+            (
+                "productName".to_string(),
+                Filter::String("my-phone-2".to_string())
+            )
+        );
+        assert_eq!(p.and.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            p.and.as_ref().unwrap()[0].filter_on_fields[0],
+            ("color".to_string(), Filter::String("black".to_string()))
+        );
+        assert_eq!(
+            p.not.as_ref().unwrap().filter_on_fields[0],
+            (
+                "manufacturer.name".to_string(),
+                Filter::String("my-phone-3".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn test_filter_deserialize_with_bad_names() {
+        // if "and", "or", "not" are used as field names, they should be treated as normal fields
+        // and not as logical operators
+        let j = json!({
+            "and": "hello",
+            "or": { "eq": 3 },
+            "not": true,
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 3);
+        assert_eq!(
+            p.filter_on_fields[0],
+            ("and".to_string(), Filter::String("hello".to_string()))
+        );
+        assert_eq!(
+            p.filter_on_fields[1],
+            (
+                "or".to_string(),
+                Filter::Number(NumberFilter::Equal(Number::I32(3)))
+            )
+        );
+        assert_eq!(
+            p.filter_on_fields[2],
+            ("not".to_string(), Filter::Bool(true))
+        );
+        assert!(p.and.is_none());
+        assert!(p.or.is_none());
+        assert!(p.not.is_none());
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1771,6 +2200,7 @@ impl<'de> Deserialize<'de> for SerializableNumber {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum NumberFilter {
     #[serde(rename = "eq")]
     Equal(Number),

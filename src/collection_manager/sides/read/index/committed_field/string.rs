@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use filters::FilterResult;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -239,7 +240,7 @@ impl CommittedStringField {
         exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         global_info: &GlobalInfo,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
@@ -276,7 +277,7 @@ impl CommittedStringField {
         exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         global_info: &GlobalInfo,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
@@ -360,7 +361,7 @@ impl CommittedStringField {
         exact: bool,
         boost: f32,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         global_info: &GlobalInfo,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {

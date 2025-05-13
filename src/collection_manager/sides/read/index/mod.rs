@@ -4,6 +4,7 @@ use committed_field::{
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
     StringFilterFieldInfo, VectorFieldInfo,
 };
+use filters::{FilterResult, PlainFilterResult};
 use futures::join;
 use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
@@ -20,17 +21,14 @@ use crate::{
     collection_manager::{bm25::BM25Scorer, sides::Offset},
     file_utils::{create_if_not_exists, BufferedFile},
     metrics::{
-        search::{
-            FILTER_COUNT_CALCULATION_COUNT, FILTER_PERC_CALCULATION_COUNT,
-            MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT,
-        },
+        search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels,
     },
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        Threshold, VectorMode,
+        Threshold, VectorMode, WhereFilter,
     },
 };
 
@@ -38,6 +36,7 @@ use super::collection::{IndexFieldStats, IndexFieldStatsType};
 mod committed_field;
 mod merge;
 mod path_to_index_id_map;
+mod search_context;
 mod uncommitted_field;
 
 use std::{
@@ -747,6 +746,7 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
+            /*
             FILTER_PERC_CALCULATION_COUNT.track(
                 CollectionLabels {
                     collection: self.id.to_string(),
@@ -759,6 +759,7 @@ impl Index {
                 },
                 filtered_doc_ids.len(),
             );
+            */
         }
 
         // Manage the "auto" search mode. OramaCore will automatically determine
@@ -1015,6 +1016,10 @@ impl Index {
         })
     }
 
+    pub fn document_count(&self) -> u64 {
+        self.document_count
+    }
+
     pub async fn calculate_facets(
         &self,
         token_scores: &HashMap<DocumentId, f32>,
@@ -1201,9 +1206,9 @@ impl Index {
 
     async fn calculate_filtered_doc_ids(
         &self,
-        where_filter: &HashMap<String, Filter>,
+        where_filter: &WhereFilter,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
-    ) -> Result<Option<HashSet<DocumentId>>> {
+    ) -> Result<Option<FilterResult<DocumentId>>> {
         if where_filter.is_empty() {
             return Ok(None);
         }
@@ -1213,83 +1218,219 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
-        let mut filtered: HashSet<DocumentId> = Default::default();
-        for (k, filter) in where_filter {
-            let (field_id, field_type) = match self.path_to_index_id_map.get(k) {
-                None => {
-                    // If the user specified a field that is not in the index,
-                    // we should return an empty set.
-                    return Ok(Some(HashSet::new()));
-                }
-                Some((field_id, field_type)) => (field_id, field_type),
-            };
-            match (field_type, filter) {
-                (FieldType::Bool, Filter::Bool(filter_bool)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .bool_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-
-                    filtered.extend(uncommitted_field.filter(*filter_bool));
-
-                    let committed_field = committed_fields.bool_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(*filter_bool).with_context(|| {
-                            format!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-                        filtered.extend(a);
+        fn calculate_filter(
+            document_count_estimate: u64,
+            path_to_index_id_map: &PathToIndexId,
+            where_filter: &WhereFilter,
+            uncommitted_fields: &UncommittedFields,
+            committed_fields: &CommittedFields,
+        ) -> Result<FilterResult<DocumentId>> {
+            let mut results = Vec::new();
+            for (k, filter) in &where_filter.filter_on_fields {
+                let (field_id, field_type) = match path_to_index_id_map.get(k) {
+                    None => {
+                        // If the user specified a field that is not in the index,
+                        // we should return an empty set.
+                        return Ok(FilterResult::Filter(PlainFilterResult::new(
+                            document_count_estimate,
+                        )));
                     }
-                }
-                (FieldType::Number, Filter::Number(filter_number)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .number_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
+                    Some((field_id, field_type)) => (field_id, field_type),
+                };
 
-                    filtered.extend(uncommitted_field.filter(filter_number));
+                match (field_type, filter) {
+                    (FieldType::Bool, Filter::Bool(filter_bool)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .bool_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
 
-                    let committed_field = committed_fields.number_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(filter_number).with_context(|| {
-                            format!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
-                        filtered.extend(a);
+                        // We could check if uncommitted_field is empty
+                        // If so, we could skip the filter and the `and` operation
+                        // TODO: improve this
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(*filter_bool),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.bool_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(*filter_bool).with_context(|| {
+                                format!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
                     }
-                }
-                (FieldType::StringFilter, Filter::String(filter_string)) => {
-                    let uncommitted_field = uncommitted_fields
-                        .string_filter_fields
-                        .get(&field_id)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                        })?;
+                    (FieldType::Number, Filter::Number(filter_number)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .number_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
 
-                    filtered.extend(uncommitted_field.filter(filter_string));
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(filter_number),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
 
-                    let committed_field = committed_fields.string_filter_fields.get(&field_id);
-                    if let Some(committed_field) = committed_field {
-                        let a = committed_field.filter(filter_string);
-                        filtered.extend(a);
+                        let committed_field = committed_fields.number_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(filter_number).with_context(|| {
+                                format!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
                     }
-                }
-                _ => {
-                    // If the user specified a field that is not in the index,
-                    // we should return an empty set.
-                    return Ok(Some(HashSet::new()));
+                    (FieldType::StringFilter, Filter::String(filter_string)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .string_filter_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(filter_string),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.string_filter_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let a = committed_field.filter(filter_string);
+
+                            filtered = FilterResult::and(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    a,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
+                    _ => {
+                        // If the user specified a field that is not in the index,
+                        // we should return an empty set.
+                        return Ok(FilterResult::Filter(PlainFilterResult::new(
+                            document_count_estimate,
+                        )));
+                    }
                 }
             }
+
+            if let Some(filter) = where_filter.and.as_ref() {
+                for f in filter {
+                    let result = calculate_filter(
+                        document_count_estimate,
+                        path_to_index_id_map,
+                        f,
+                        uncommitted_fields,
+                        committed_fields,
+                    )?;
+                    results.push(result);
+                }
+            }
+
+            if let Some(filter) = where_filter.or.as_ref() {
+                let mut or = vec![];
+                for f in filter {
+                    let result = calculate_filter(
+                        document_count_estimate,
+                        path_to_index_id_map,
+                        f,
+                        uncommitted_fields,
+                        committed_fields,
+                    )?;
+                    or.push(result);
+                }
+
+                if or.is_empty() {
+                    return Ok(FilterResult::Filter(PlainFilterResult::new(
+                        document_count_estimate,
+                    )));
+                }
+
+                let mut result = or.pop().expect("we should have at least one result");
+                for f in or {
+                    result = FilterResult::or(result, f);
+                }
+
+                results.push(result);
+            }
+
+            if let Some(filter) = where_filter.not.as_ref() {
+                let result = calculate_filter(
+                    document_count_estimate,
+                    path_to_index_id_map,
+                    filter,
+                    uncommitted_fields,
+                    committed_fields,
+                )?;
+                results.push(FilterResult::Not(Box::new(result)));
+            }
+
+            // Is this correct????
+            if results.is_empty() {
+                return Ok(FilterResult::Filter(PlainFilterResult::new(
+                    document_count_estimate,
+                )));
+            }
+
+            let mut result = results.pop().expect("we should have at least one result");
+            for f in results {
+                result = FilterResult::and(result, f);
+            }
+
+            Ok(result)
         }
 
-        let doc_ids: HashSet<_> = filtered
-            .difference(uncommitted_deleted_documents)
-            .copied()
-            .collect();
+        let mut output = calculate_filter(
+            self.document_count,
+            &self.path_to_index_id_map,
+            where_filter,
+            &uncommitted_fields,
+            &committed_fields,
+        )?;
 
-        Ok(Some(doc_ids))
+        if !uncommitted_deleted_documents.is_empty() {
+            output = FilterResult::and(
+                output,
+                FilterResult::Not(Box::new(FilterResult::Filter(
+                    PlainFilterResult::from_iter(
+                        self.document_count,
+                        uncommitted_deleted_documents.iter().copied(),
+                    ),
+                ))),
+            );
+        }
+
+        Ok(Some(output))
     }
 
     fn calculate_boost(&self, boost: &HashMap<String, f32>) -> HashMap<FieldId, f32> {
@@ -1358,7 +1499,7 @@ impl Index {
         exact: bool,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -1433,7 +1574,7 @@ impl Index {
         term: &str,
         properties: Vec<FieldId>,
         similarity: Similarity,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         limit: Limit,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
@@ -1523,4 +1664,11 @@ struct DumpV1 {
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+}
+
+impl filters::DocId for DocumentId {
+    #[inline]
+    fn as_u64(&self) -> u64 {
+        self.0
+    }
 }
