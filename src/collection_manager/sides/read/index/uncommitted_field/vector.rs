@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
+use filters::FilterResult;
 use serde::Serialize;
 
 use crate::{ai::OramaModel, types::DocumentId};
@@ -50,7 +51,7 @@ impl UncommittedVectorField {
         &self,
         target: &[f32],
         similarity: f32,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {

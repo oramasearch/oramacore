@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use filters::FilterResult;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -141,7 +142,7 @@ impl CommittedVectorField {
         target: &[f32],
         similarity: f32,
         limit: usize,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         output: &mut HashMap<DocumentId, f32>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {

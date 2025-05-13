@@ -461,7 +461,7 @@ async fn answer_v1(
                     }),
                     limit: Limit(5),
                     offset: SearchOffset(0),
-                    where_filter: HashMap::new(),
+                    where_filter: Default::default(),
                     boost: HashMap::new(),
                     facets: HashMap::new(),
                     properties: Properties::Star,

@@ -334,3 +334,81 @@ async fn test_array_types() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_filter_and_or_not() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": format!("text {}", i % 3 == 0),
+                "number": i,
+                "bool": i % 2 == 0,
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "and": [
+                        { "bool": true },
+                        { "number": { "gte": 50 } },
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 25);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "or": [
+                        { "bool": true },
+                        { "number": { "gte": 50 } },
+                    ]
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 75);
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "not": {
+                        "bool": true,
+                    }
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 50);
+
+    drop(test_context);
+}
