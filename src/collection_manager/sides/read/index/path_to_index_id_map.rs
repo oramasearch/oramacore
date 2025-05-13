@@ -5,33 +5,61 @@ use crate::{collection_manager::sides::field_name_to_path, types::FieldId};
 use super::FieldType;
 
 pub struct PathToIndexId {
-    map: HashMap<Box<[String]>, (FieldId, FieldType)>,
+    filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,
+    score_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,
 }
 
 impl PathToIndexId {
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
-            map: HashMap::new(),
+            filter_fields: HashMap::new(),
+            score_fields: HashMap::new(),
         }
     }
 
-    pub fn from(map: Vec<(Box<[String]>, (FieldId, FieldType))>) -> Self {
+    pub fn new(
+        filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,
+        score_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,
+    ) -> Self {
         Self {
-            map: map.into_iter().collect(),
+            filter_fields,
+            score_fields,
         }
     }
 
-    pub fn serialize(&self) -> Vec<(Box<[String]>, (FieldId, FieldType))> {
-        self.map.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    pub fn insert_filter_field(
+        &mut self,
+        path: Box<[String]>,
+        field_id: FieldId,
+        field_type: FieldType,
+    ) {
+        self.filter_fields.insert(path, (field_id, field_type));
     }
 
-    pub fn insert(&mut self, path: Box<[String]>, field_id: FieldId, field_type: FieldType) {
-        self.map.insert(path, (field_id, field_type));
+    pub fn insert_score_field(
+        &mut self,
+        path: Box<[String]>,
+        field_id: FieldId,
+        field_type: FieldType,
+    ) {
+        self.score_fields.insert(path, (field_id, field_type));
     }
 
     pub fn get(&self, field_name: &str) -> Option<(FieldId, FieldType)> {
         let path = field_name_to_path(field_name);
-        self.map
+        self.score_fields
+            .get(&path)
+            .map(|(field_id, field_type)| (*field_id, *field_type))
+            .or_else(|| {
+                self.filter_fields
+                    .get(&path)
+                    .map(|(field_id, field_type)| (*field_id, *field_type))
+            })
+    }
+
+    pub fn get_filter_field(&self, field_name: &str) -> Option<(FieldId, FieldType)> {
+        let path = field_name_to_path(field_name);
+        self.filter_fields
             .get(&path)
             .map(|(field_id, field_type)| (*field_id, *field_type))
     }
