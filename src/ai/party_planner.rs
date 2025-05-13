@@ -390,7 +390,7 @@ impl PartyPlanner {
                     boost: HashMap::new(),
                     facets: HashMap::new(),
                     properties: Properties::Star,
-                    where_filter: HashMap::new(),
+                    where_filter: Default::default(),
                     indexes: None, // Search all indexes.
                 },
             )

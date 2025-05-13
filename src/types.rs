@@ -23,6 +23,7 @@ use redact::Secret;
 use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
+use serde_with::{serde_as, KeyValueMap};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
@@ -675,6 +676,7 @@ impl Default for Limit {
 pub struct SearchOffset(pub usize);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum Filter {
     Number(NumberFilter),
@@ -949,6 +951,54 @@ impl Default for Properties {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FilterOnField {
+    #[serde(rename = "$key$")]
+    pub field: String,
+    pub filter: Filter,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WhereFilter {
+    #[serde(flatten)]
+    #[serde_as(as = "KeyValueMap<_>")]
+    pub filter_on_fields: Vec<FilterOnField>,
+    pub and: Option<Vec<Box<WhereFilter>>>,
+    pub or: Option<Vec<Box<WhereFilter>>>,
+    pub not: Option<Box<WhereFilter>>,
+}
+
+impl WhereFilter {
+    pub fn is_empty(&self) -> bool {
+        self.filter_on_fields.is_empty()
+            && self.and.as_ref().map_or(true, |v| v.is_empty())
+            && self.or.as_ref().map_or(true, |v| v.is_empty())
+            && self.not.is_none()
+    }
+
+    pub fn get_all_keys(&self) -> Vec<String> {
+        let mut keys = self.filter_on_fields.iter()
+            .map(|v| &v.field)
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(and) = &self.and {
+            for filter in and.iter() {
+                keys.extend(filter.get_all_keys());
+            }
+        }
+        if let Some(or) = &self.or {
+            for filter in or.iter() {
+                keys.extend(filter.get_all_keys());
+            }
+        }
+        if let Some(not) = &self.not {
+            keys.extend(not.get_all_keys());
+        }
+        keys
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchParams {
     #[serde(flatten)]
     pub mode: SearchMode,
@@ -961,7 +1011,7 @@ pub struct SearchParams {
     #[serde(default, deserialize_with = "deserialize_properties")]
     pub properties: Properties,
     #[serde(default, rename = "where")]
-    pub where_filter: HashMap<String, Filter>,
+    pub where_filter: WhereFilter,
     #[serde(default)]
     pub facets: HashMap<String, FacetDefinition>,
     #[serde(default)]
@@ -1581,6 +1631,44 @@ mod test {
             ]))
         );
     }
+
+    #[test]
+    fn test_filter_deserialize() {
+        let j = json!({
+            "foo": { "eq": 1 },
+            "bar": true,
+            "baz": "hello",
+            "and": [
+                {
+                    "foo": { "eq": 2 },
+                },
+                {
+                    "bar": false,
+                }
+            ],
+            "or": [
+                {
+                    "foo": { "eq": 3 },
+                },
+            ],
+            "not": {
+                "foo": { "eq": 4 },
+            }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j).unwrap();
+
+        assert_eq!(p.filter_on_fields.len(), 3);
+        // assert_eq!(p.filter_on_fields[0], ("foo".to_string(), Filter::Number(NumberFilter::Equal(Number::I32(1)))));
+        // assert_eq!(p.filter_on_fields[1], ("bar".to_string(), Filter::Bool(true)));
+        // assert_eq!(p.filter_on_fields[2], ("baz".to_string(), Filter::String("hello".to_string())));
+        // assert_eq!(p.and.as_ref().unwrap().len(), 2);
+        // assert_eq!(p.and.as_ref().unwrap()[0].filter_on_fields[0], ("foo".to_string(), Filter::Number(NumberFilter::Equal(Number::I32(2)))));
+        // assert_eq!(p.and.as_ref().unwrap()[1].filter_on_fields[1], ("bar".to_string(), Filter::Bool(false)));
+        // assert_eq!(p.or.as_ref().unwrap().len(), 1);
+        // assert_eq!(p.or.as_ref().unwrap()[0].filter_on_fields[0], ("foo".to_string(), Filter::Number(NumberFilter::Equal(Number::I32(3)))));
+        // assert_eq!(p.not.as_ref().unwrap().filter_on_fields[1], ("foo".to_string(), Filter::Number(NumberFilter::Equal(Number::I32(4)))));
+
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1771,6 +1859,7 @@ impl<'de> Deserialize<'de> for SerializableNumber {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum NumberFilter {
     #[serde(rename = "eq")]
     Equal(Number),

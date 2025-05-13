@@ -4,6 +4,7 @@ use committed_field::{
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
     StringFilterFieldInfo, VectorFieldInfo,
 };
+use filters::{PlainFilterResult, FilterResult};
 use futures::join;
 use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
@@ -28,9 +29,7 @@ use crate::{
     },
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
-        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
-        NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        Threshold, VectorMode,
+        DocumentId, FacetDefinition, FacetResult, Filter, FilterOnField, FulltextMode, HybridMode, IndexId, Limit, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity, Threshold, VectorMode, WhereFilter
     },
 };
 
@@ -38,6 +37,7 @@ use super::collection::{IndexFieldStats, IndexFieldStatsType};
 mod committed_field;
 mod merge;
 mod path_to_index_id_map;
+mod search_context;
 mod uncommitted_field;
 
 use std::{
@@ -717,6 +717,7 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
+            /*
             FILTER_PERC_CALCULATION_COUNT.track(
                 CollectionLabels {
                     collection: self.id.to_string(),
@@ -729,6 +730,7 @@ impl Index {
                 },
                 filtered_doc_ids.len(),
             );
+            */
         }
 
         // Manage the "auto" search mode. OramaCore will automatically determine
@@ -985,6 +987,10 @@ impl Index {
         })
     }
 
+    pub fn document_count(&self) -> u64 {
+        self.document_count
+    }
+
     pub async fn calculate_facets(
         &self,
         token_scores: &HashMap<DocumentId, f32>,
@@ -1169,9 +1175,9 @@ impl Index {
 
     async fn calculate_filtered_doc_ids(
         &self,
-        where_filter: &HashMap<String, Filter>,
+        where_filter: &WhereFilter,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
-    ) -> Result<Option<HashSet<DocumentId>>> {
+    ) -> Result<Option<FilterResult<DocumentId>>> {
         if where_filter.is_empty() {
             return Ok(None);
         }
@@ -1181,13 +1187,52 @@ impl Index {
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
 
-        let mut filtered: HashSet<DocumentId> = Default::default();
-        for (k, filter) in where_filter {
+        impl filters::DocId for DocumentId {
+            #[inline]
+            fn as_u64(&self) -> u64 {
+                self.0
+            }
+        }
+
+        let document_count_estimate = self.document_count;
+        let mut filtered: Option<FilterResult<DocumentId>> = None;
+        fn update_with_iter<I: Iterator<Item = DocumentId>>(
+            filtered: &mut Option<FilterResult<DocumentId>>,
+            iter: I,
+            document_count_estimate: u64,
+        ) {
+            if let Some(existing) = filtered.take() {
+                let mut filter = PlainFilterResult::new(document_count_estimate);
+                for id in iter {
+                    filter.add(&id);
+                }
+
+                FilterResult::and(existing, FilterResult::Filter(filter));
+            } else {
+                let mut filter = PlainFilterResult::new(document_count_estimate);
+                for id in iter {
+                    filter.add(&id);
+                }
+
+                *filtered = Some(FilterResult::Filter(filter));
+            }
+        }
+
+        for v in where_filter.filter_on_fields.iter() {
+            let FilterOnField {
+                field: k,
+                filter,
+            } = v.clone();
+            let k = &k;
+            let filter = &filter;
+
             let (field_id, field_type) = match self.path_to_index_id_map.get(k) {
                 None => {
                     // If the user specified a field that is not in the index,
                     // we should return an empty set.
-                    return Ok(Some(HashSet::new()));
+                    return Ok(Some(FilterResult::Filter(PlainFilterResult::new(
+                        document_count_estimate,
+                    ))));
                 }
                 Some((field_id, field_type)) => (field_id, field_type),
             };
@@ -1200,14 +1245,19 @@ impl Index {
                             anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
                         })?;
 
-                    filtered.extend(uncommitted_field.filter(*filter_bool));
+                    update_with_iter(
+                        &mut filtered,
+                        uncommitted_field.filter(*filter_bool),
+                        document_count_estimate,
+                    );
 
                     let committed_field = committed_fields.bool_fields.get(&field_id);
                     if let Some(committed_field) = committed_field {
                         let a = committed_field.filter(*filter_bool).with_context(|| {
                             format!("Cannot filter by \"{}\": unknown field", &k)
                         })?;
-                        filtered.extend(a);
+
+                        update_with_iter(&mut filtered, a, document_count_estimate);
                     }
                 }
                 (FieldType::Number, Filter::Number(filter_number)) => {
@@ -1218,14 +1268,19 @@ impl Index {
                             anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
                         })?;
 
-                    filtered.extend(uncommitted_field.filter(filter_number));
+                    update_with_iter(
+                        &mut filtered,
+                        uncommitted_field.filter(filter_number),
+                        document_count_estimate,
+                    );
 
                     let committed_field = committed_fields.number_fields.get(&field_id);
                     if let Some(committed_field) = committed_field {
                         let a = committed_field.filter(filter_number).with_context(|| {
                             format!("Cannot filter by \"{}\": unknown field", &k)
                         })?;
-                        filtered.extend(a);
+
+                        update_with_iter(&mut filtered, a, document_count_estimate);
                     }
                 }
                 (FieldType::StringFilter, Filter::String(filter_string)) => {
@@ -1236,28 +1291,42 @@ impl Index {
                             anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
                         })?;
 
-                    filtered.extend(uncommitted_field.filter(filter_string));
+                    update_with_iter(
+                        &mut filtered,
+                        uncommitted_field.filter(filter_string),
+                        document_count_estimate,
+                    );
 
                     let committed_field = committed_fields.string_filter_fields.get(&field_id);
                     if let Some(committed_field) = committed_field {
                         let a = committed_field.filter(filter_string);
-                        filtered.extend(a);
+                        update_with_iter(&mut filtered, a, document_count_estimate);
                     }
                 }
                 _ => {
                     // If the user specified a field that is not in the index,
                     // we should return an empty set.
-                    return Ok(Some(HashSet::new()));
+                    return Ok(Some(FilterResult::Filter(PlainFilterResult::new(
+                        document_count_estimate,
+                    ))));
                 }
             }
         }
 
-        let doc_ids: HashSet<_> = filtered
-            .difference(uncommitted_deleted_documents)
-            .copied()
-            .collect();
-
-        Ok(Some(doc_ids))
+        let output = filtered.map(|f| {
+            let mut uncommitted_deleted_documents_filter =
+                PlainFilterResult::new(document_count_estimate);
+            for doc_id in uncommitted_deleted_documents {
+                uncommitted_deleted_documents_filter.add(doc_id);
+            }
+            FilterResult::And(
+                Box::new(f),
+                Box::new(FilterResult::Not(Box::new(FilterResult::Filter(
+                    uncommitted_deleted_documents_filter,
+                )))),
+            )
+        });
+        Ok(output)
     }
 
     fn calculate_boost(&self, boost: &HashMap<String, f32>) -> HashMap<FieldId, f32> {
@@ -1326,7 +1395,7 @@ impl Index {
         exact: bool,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -1401,7 +1470,7 @@ impl Index {
         term: &str,
         properties: Vec<FieldId>,
         similarity: Similarity,
-        filtered_doc_ids: Option<&HashSet<DocumentId>>,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
         limit: Limit,
         uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<HashMap<DocumentId, f32>> {
