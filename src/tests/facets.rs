@@ -151,6 +151,99 @@ async fn test_facets_bool() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_facets_string() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": format!("text {}", i % 2 == 0),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "facets": {
+                    "text": {},
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let facets = output.facets.expect("Facet should be there");
+    let string_facet = facets
+        .get("text")
+        .expect("Facet on field 'bool' should be there");
+
+    assert_eq!(string_facet.count, 2);
+    assert_eq!(string_facet.values.len(), 2);
+
+    assert_eq!(
+        string_facet.values,
+        HashMap::from_iter(vec![
+            ("text true".to_string(), 50),
+            ("text false".to_string(), 50),
+        ])
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_facets_unknown_field() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": format!("text {}", i % 2 == 0),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "facets": {
+                    "unknown": {},
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await;
+
+    assert!(format!("{:?}", output).contains("Unknown field name 'unknown'"));
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_facets_should_based_on_term() {
     init_log();
 

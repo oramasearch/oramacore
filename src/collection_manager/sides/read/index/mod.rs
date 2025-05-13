@@ -146,7 +146,7 @@ impl Index {
             committed_fields: Default::default(),
             uncommitted_fields: Default::default(),
 
-            path_to_index_id_map: PathToIndexId::new(),
+            path_to_index_id_map: PathToIndexId::empty(),
             is_new: AtomicBool::new(true),
 
             created_at: Utc::now(),
@@ -173,9 +173,14 @@ impl Index {
             index_id, dump.id
         );
 
+        let mut filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
+        let mut score_fields: HashMap<Box<[String]>, (FieldId, FieldType)> = Default::default();
+
         let mut uncommitted_fields = UncommittedFields::default();
         let mut committed_fields = CommittedFields::default();
         for (field_id, info) in dump.bool_field_ids {
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Bool));
+
             uncommitted_fields.bool_fields.insert(
                 field_id,
                 UncommittedBoolField::empty(info.field_path.clone()),
@@ -184,6 +189,8 @@ impl Index {
             committed_fields.bool_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.number_field_ids {
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Number));
+
             uncommitted_fields.number_fields.insert(
                 field_id,
                 UncommittedNumberField::empty(info.field_path.clone()),
@@ -192,6 +199,8 @@ impl Index {
             committed_fields.number_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.string_filter_field_ids {
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
+
             uncommitted_fields.string_filter_fields.insert(
                 field_id,
                 UncommittedStringFilterField::empty(info.field_path.clone()),
@@ -203,6 +212,8 @@ impl Index {
                 .insert(field_id, field);
         }
         for (field_id, info) in dump.string_field_ids {
+            score_fields.insert(info.field_path.clone(), (field_id, FieldType::String));
+
             uncommitted_fields.string_fields.insert(
                 field_id,
                 UncommittedStringField::empty(info.field_path.clone()),
@@ -211,6 +222,8 @@ impl Index {
             committed_fields.string_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.vector_field_ids {
+            score_fields.insert(info.field_path.clone(), (field_id, FieldType::Vector));
+
             uncommitted_fields.vector_fields.insert(
                 field_id,
                 UncommittedVectorField::empty(info.field_path.clone(), info.model.0),
@@ -236,7 +249,7 @@ impl Index {
             committed_fields: RwLock::new(committed_fields),
             uncommitted_fields: RwLock::new(uncommitted_fields),
 
-            path_to_index_id_map: PathToIndexId::from(dump.path_to_index_id_map),
+            path_to_index_id_map: PathToIndexId::new(filter_fields, score_fields),
             is_new: AtomicBool::new(false),
 
             created_at: dump.created_at,
@@ -533,7 +546,8 @@ impl Index {
                 .iter()
                 .map(|(k, v)| (*k, v.get_field_info()))
                 .collect(),
-            path_to_index_id_map: self.path_to_index_id_map.serialize(),
+            // Not used anymore. We calculate it on the fly
+            path_to_index_id_map: Vec::new(),
             created_at: self.created_at,
             updated_at: self.updated_at,
         });
@@ -599,42 +613,58 @@ impl Index {
                 is_array: _,
                 field_type,
             } => {
-                let field_type = match field_type {
+                match field_type {
                     IndexWriteOperationFieldType::Bool => {
+                        self.path_to_index_id_map.insert_filter_field(
+                            field_path.clone(),
+                            field_id,
+                            FieldType::Bool,
+                        );
                         uncommitted_fields
                             .bool_fields
-                            .insert(field_id, UncommittedBoolField::empty(field_path.clone()));
-                        FieldType::Bool
+                            .insert(field_id, UncommittedBoolField::empty(field_path));
                     }
                     IndexWriteOperationFieldType::Number => {
+                        self.path_to_index_id_map.insert_filter_field(
+                            field_path.clone(),
+                            field_id,
+                            FieldType::Number,
+                        );
                         uncommitted_fields
                             .number_fields
-                            .insert(field_id, UncommittedNumberField::empty(field_path.clone()));
-                        FieldType::Number
+                            .insert(field_id, UncommittedNumberField::empty(field_path));
                     }
                     IndexWriteOperationFieldType::StringFilter => {
-                        uncommitted_fields.string_filter_fields.insert(
+                        self.path_to_index_id_map.insert_filter_field(
+                            field_path.clone(),
                             field_id,
-                            UncommittedStringFilterField::empty(field_path.clone()),
+                            FieldType::StringFilter,
                         );
-                        FieldType::StringFilter
+                        uncommitted_fields
+                            .string_filter_fields
+                            .insert(field_id, UncommittedStringFilterField::empty(field_path));
                     }
                     IndexWriteOperationFieldType::String => {
+                        self.path_to_index_id_map.insert_score_field(
+                            field_path.clone(),
+                            field_id,
+                            FieldType::String,
+                        );
                         uncommitted_fields
                             .string_fields
-                            .insert(field_id, UncommittedStringField::empty(field_path.clone()));
-                        FieldType::String
+                            .insert(field_id, UncommittedStringField::empty(field_path));
                     }
                     IndexWriteOperationFieldType::Embedding(model) => {
-                        uncommitted_fields.vector_fields.insert(
+                        self.path_to_index_id_map.insert_score_field(
+                            field_path.clone(),
                             field_id,
-                            UncommittedVectorField::empty(field_path.clone(), model.0),
+                            FieldType::Vector,
                         );
-                        FieldType::Vector
+                        uncommitted_fields
+                            .vector_fields
+                            .insert(field_id, UncommittedVectorField::empty(field_path, model.0));
                     }
                 };
-                self.path_to_index_id_map
-                    .insert(field_path, field_id, field_type);
             }
             IndexWriteOperation::Index {
                 doc_id,
@@ -1001,8 +1031,10 @@ impl Index {
         let committed_fields = self.committed_fields.read().await;
 
         for (field_name, facet) in facets {
-            let Some((field_id, field_type)) = self.path_to_index_id_map.get(field_name) else {
-                bail!("Unknown field name {}", field_name);
+            let Some((field_id, field_type)) =
+                self.path_to_index_id_map.get_filter_field(field_name)
+            else {
+                bail!("Unknown field name '{}'", field_name);
             };
             let facet_definition =
                 res_facets
@@ -1154,7 +1186,7 @@ impl Index {
                 }
                 (_, t) => {
                     bail!(
-                        "Cannot calculate facet on field {:?}: wrong type. Expected {:?} filter",
+                        "Cannot calculate facet on field {:?}: wrong type. Expected {:?} facet",
                         field_name,
                         t
                     );
