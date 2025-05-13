@@ -4,10 +4,6 @@ on:
   release:
     types: [created]
 
-permissions:
-  contents: write
-  id-token: write
-
 jobs:
   build-and-upload:
     name: Build and Upload Release Assets
@@ -63,21 +59,5 @@ jobs:
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-      
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-    
-      - name: Trigger Cloud Build
-        run: |
-          gcloud builds triggers run deploy-orama-core \
-            --project=${{ secrets.GCP_PROJECT }} \
-            --branch=${{ secrets.GCP_BRANCH }} \
-            --region=${{ secrets.GCP_REGION }} \
-            --quiet > /dev/null 2>&1
+
 
