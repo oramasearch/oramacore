@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use filters::FilterResult;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -13,7 +12,10 @@ use crate::{
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
-        sides::read::index::uncommitted_field::{Positions, TotalDocumentsWithTermInField},
+        sides::read::index::{
+            search_context::FullTextSearchContext,
+            uncommitted_field::{Positions, TotalDocumentsWithTermInField},
+        },
     },
     file_utils::create_if_not_exists,
     indexes::{fst::FSTIndex, map::Map},
@@ -234,59 +236,35 @@ impl CommittedStringField {
         self.document_lengths_per_document.global_info.clone()
     }
 
-    pub fn search(
+    pub fn search<'run, 'index>(
         &self,
-        tokens: &[String],
-        exact: bool,
-        boost: f32,
+        context: &mut FullTextSearchContext<'run, 'index>,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        global_info: &GlobalInfo,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        if tokens.is_empty() {
+        if context.tokens.is_empty() {
             return Ok(());
         }
 
-        if tokens.len() == 1 {
-            self.search_without_phrase_match(
-                tokens,
-                exact,
-                boost,
-                scorer,
-                filtered_doc_ids,
-                global_info,
-                uncommitted_deleted_documents,
-            )
+        if context.tokens.len() == 1 {
+            self.search_without_phrase_match(context, scorer)
         } else {
-            self.search_with_phrase_match(
-                tokens,
-                exact,
-                boost,
-                scorer,
-                filtered_doc_ids,
-                global_info,
-                uncommitted_deleted_documents,
-            )
+            self.search_with_phrase_match(context, scorer)
         }
     }
 
-    fn search_without_phrase_match(
+    fn search_without_phrase_match<'run, 'index>(
         &self,
-        tokens: &[String],
-        exact: bool,
-        boost: f32,
+        context: &mut FullTextSearchContext<'run, 'index>,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        global_info: &GlobalInfo,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let total_field_length = global_info.total_document_length as f32;
-        let total_documents_with_field = global_info.total_documents as f32;
+        let total_field_length = context.global_info.total_document_length as f32;
+        let total_documents_with_field = context.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
-        for token in tokens {
-            let iter: Box<dyn Iterator<Item = u64>> = if exact {
+        for token in context.tokens {
+            context.increment_term_count();
+
+            let iter: Box<dyn Iterator<Item = u64>> = if context.exact_match {
                 if let Some(posting_list_id) = self.index.search_exact(token) {
                     Box::new(vec![posting_list_id].into_iter())
                 } else {
@@ -301,9 +279,13 @@ impl CommittedStringField {
                 .flat_map(|postings| {
                     let total_documents_with_term_in_field = postings.len();
 
+                    let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
+                    let exact_match = context.exact_match;
+                    let filtered_doc_ids = context.filtered_doc_ids;
+
                     postings
                         .iter()
-                        .filter(|(doc_id, _)| {
+                        .filter(move |(doc_id, _)| {
                             filtered_doc_ids
                                 .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
@@ -311,7 +293,7 @@ impl CommittedStringField {
                         .filter_map(move |(doc_id, positions)| {
                             let field_length =
                                 self.document_lengths_per_document.get_length(doc_id);
-                            let term_occurrence_in_field = if exact {
+                            let term_occurrence_in_field = if exact_match {
                                 positions.0.len() as u32
                             } else {
                                 (positions.0.len() + positions.1.len()) as u32
@@ -342,11 +324,11 @@ impl CommittedStringField {
                     term_occurrence_in_field,
                     field_length,
                     average_field_length,
-                    global_info.total_documents as f32,
+                    context.global_info.total_documents as f32,
                     total_documents_with_term_in_field,
                     1.2,
                     0.75,
-                    boost,
+                    context.boost,
                     0,
                 );
             }
@@ -355,18 +337,13 @@ impl CommittedStringField {
         Ok(())
     }
 
-    fn search_with_phrase_match(
+    fn search_with_phrase_match<'run, 'index>(
         &self,
-        tokens: &[String],
-        exact: bool,
-        boost: f32,
+        context: &mut FullTextSearchContext<'run, 'index>,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        global_info: &GlobalInfo,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let total_field_length = global_info.total_document_length as f32;
-        let total_documents_with_field = global_info.total_documents as f32;
+        let total_field_length = context.global_info.total_document_length as f32;
+        let total_documents_with_field = context.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
         struct PhraseMatchStorage {
@@ -376,8 +353,10 @@ impl CommittedStringField {
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
 
-        for (token_index, token) in tokens.iter().enumerate() {
-            let iter: Box<dyn Iterator<Item = u64>> = if exact {
+        for (token_index, token) in context.tokens.iter().enumerate() {
+            context.increment_term_count();
+
+            let iter: Box<dyn Iterator<Item = u64>> = if context.exact_match {
                 if let Some(posting_list_id) = self.index.search_exact(token) {
                     Box::new(vec![posting_list_id].into_iter())
                 } else {
@@ -392,9 +371,13 @@ impl CommittedStringField {
                 .flat_map(|postings| {
                     let total_documents_with_term_in_field = postings.len();
 
+                    let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
+                    let exact_match = context.exact_match;
+                    let filtered_doc_ids = context.filtered_doc_ids;
+
                     postings
                         .iter()
-                        .filter(|(doc_id, _)| {
+                        .filter(move |(doc_id, _)| {
                             filtered_doc_ids
                                 .is_none_or(|filtered_doc_ids| filtered_doc_ids.contains(doc_id))
                         })
@@ -403,7 +386,7 @@ impl CommittedStringField {
                             let field_lenght =
                                 self.document_lengths_per_document.get_length(doc_id);
 
-                            let positions: Vec<usize> = if exact {
+                            let positions: Vec<usize> = if exact_match {
                                 positions.0.to_vec()
                             } else {
                                 positions
@@ -479,7 +462,7 @@ impl CommittedStringField {
             // TODO: think about this
             let boost_any_order = positions.len() as f32;
             let boost_sequence = sequences_count as f32 * 2.0;
-            let total_boost = boost_any_order + boost_sequence + boost;
+            let total_boost = boost_any_order + boost_sequence + context.boost;
 
             for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
                 matches
@@ -489,7 +472,7 @@ impl CommittedStringField {
                     term_occurrence_in_field as u32,
                     field_length,
                     average_field_length,
-                    global_info.total_documents as f32,
+                    context.global_info.total_documents as f32,
                     total_documents_with_term_in_field,
                     1.2,
                     0.75,

@@ -11,6 +11,7 @@ use merge::{
     merge_vector_field,
 };
 use path_to_index_id_map::PathToIndexId;
+use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace};
@@ -18,7 +19,7 @@ use uncommitted_field::*;
 
 use crate::{
     ai::{llms, AIService},
-    collection_manager::{bm25::BM25Scorer, sides::Offset},
+    collection_manager::{bm25::BM25Scorer, global_info::GlobalInfo, sides::Offset},
     file_utils::{create_if_not_exists, BufferedFile},
     metrics::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
@@ -1524,6 +1525,17 @@ impl Index {
             None => BM25Scorer::plain(),
         };
 
+        let mut context = FullTextSearchContext {
+            tokens: &tokens,
+            exact_match: exact,
+            boost: 1.0,
+            filtered_doc_ids,
+            global_info: GlobalInfo::default(),
+            uncommitted_deleted_documents,
+
+            total_term_count: 0,
+        };
+
         for field_id in properties {
             let Some(field) = uncommitted_fields.string_fields.get(&field_id) else {
                 bail!("Cannot search on field {:?}: unknown field", field_id);
@@ -1538,30 +1550,18 @@ impl Index {
 
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
+            context.boost = boost;
+            context.global_info = global_info;
+
             scorer.reset_term();
+
             field
-                .search(
-                    &tokens,
-                    exact,
-                    boost,
-                    &mut scorer,
-                    filtered_doc_ids,
-                    &global_info,
-                    uncommitted_deleted_documents,
-                )
+                .search(&mut context, &mut scorer)
                 .context("Cannot perform search")?;
             if let Some(committed) = committed {
                 scorer.reset_term();
                 committed
-                    .search(
-                        &tokens,
-                        exact,
-                        boost,
-                        &mut scorer,
-                        filtered_doc_ids,
-                        &global_info,
-                        uncommitted_deleted_documents,
-                    )
+                    .search(&mut context, &mut scorer)
                     .context("Cannot perform search")?;
             }
         }
