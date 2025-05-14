@@ -236,9 +236,9 @@ impl CommittedStringField {
         self.document_lengths_per_document.global_info.clone()
     }
 
-    pub fn search<'run, 'index>(
+    pub fn search(
         &self,
-        context: &mut FullTextSearchContext<'run, 'index>,
+        context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
     ) -> Result<()> {
         if context.tokens.is_empty() {
@@ -252,9 +252,9 @@ impl CommittedStringField {
         }
     }
 
-    fn search_without_phrase_match<'run, 'index>(
+    fn search_without_phrase_match(
         &self,
-        context: &mut FullTextSearchContext<'run, 'index>,
+        context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;
@@ -337,9 +337,9 @@ impl CommittedStringField {
         Ok(())
     }
 
-    fn search_with_phrase_match<'run, 'index>(
+    fn search_with_phrase_match(
         &self,
-        context: &mut FullTextSearchContext<'run, 'index>,
+        context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;

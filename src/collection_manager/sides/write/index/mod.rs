@@ -63,6 +63,8 @@ pub struct Index {
     automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
 
     created_at: DateTime<Utc>,
+
+    runtime_index_id: Option<IndexId>,
 }
 
 impl Index {
@@ -74,6 +76,7 @@ impl Index {
         op_sender: OperationSender,
         hook_runtime: Arc<HooksRuntime>,
         automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
+        runtime_index_id: Option<IndexId>,
     ) -> Result<Self> {
         let field_id = 0;
         let score_fields = vec![];
@@ -99,6 +102,8 @@ impl Index {
             automatically_chosen_properties,
 
             created_at: Utc::now(),
+
+            runtime_index_id,
         })
     }
 
@@ -116,7 +121,18 @@ impl Index {
             .context("Cannot create info.json file")?
             .read_json_data()
             .context("Cannot serialize collection info")?;
-        let IndexDump::V1(dump) = dump;
+        let dump = match dump {
+            IndexDump::V1(dump) => IndexDumpV2 {
+                id: dump.id,
+                locale: dump.locale,
+                field_id_generator: dump.field_id_generator,
+                filter_fields: dump.filter_fields,
+                score_fields: dump.score_fields,
+                created_at: dump.created_at,
+                runtime_index_id: None,
+            },
+            IndexDump::V2(dump) => dump,
+        };
 
         let filter_fields = dump
             .filter_fields
@@ -159,11 +175,17 @@ impl Index {
             automatically_chosen_properties,
 
             created_at: dump.created_at,
+
+            runtime_index_id: dump.runtime_index_id,
         })
     }
 
     pub fn get_locale(&self) -> Locale {
         self.locale
+    }
+
+    pub fn get_runtime_index_id(&self) -> Option<IndexId> {
+        self.runtime_index_id
     }
 
     pub async fn get_embedding_field(
@@ -807,6 +829,8 @@ struct FlattenFields<'field>(Vec<Vec<&'field str>>);
 enum IndexDump {
     #[serde(rename = "v1")]
     V1(IndexDumpV1),
+    #[serde(rename = "v2")]
+    V2(IndexDumpV2),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -818,4 +842,17 @@ struct IndexDumpV1 {
     score_fields: Vec<SerializedScoreFieldType>,
 
     created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IndexDumpV2 {
+    id: IndexId,
+    locale: Locale,
+    field_id_generator: u16,
+    filter_fields: Vec<SerializedFilterFieldType>,
+    score_fields: Vec<SerializedScoreFieldType>,
+
+    created_at: DateTime<Utc>,
+
+    runtime_index_id: Option<IndexId>,
 }

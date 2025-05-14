@@ -746,6 +746,7 @@ impl Index {
             .calculate_filtered_doc_ids(&search_params.where_filter, uncommitted_deleted_documents)
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
+
         if let Some(filtered_doc_ids) = &filtered_doc_ids {
             /*
             FILTER_PERC_CALCULATION_COUNT.track(
@@ -1228,7 +1229,7 @@ impl Index {
         ) -> Result<FilterResult<DocumentId>> {
             let mut results = Vec::new();
             for (k, filter) in &where_filter.filter_on_fields {
-                let (field_id, field_type) = match path_to_index_id_map.get(k) {
+                let (field_id, field_type) = match path_to_index_id_map.get_filter_field(k) {
                     None => {
                         // If the user specified a field that is not in the index,
                         // we should return an empty set.

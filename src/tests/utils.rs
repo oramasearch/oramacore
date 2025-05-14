@@ -408,7 +408,7 @@ pub struct TestCollectionClient {
 }
 impl TestCollectionClient {
     pub async fn create_index(&self) -> Result<TestIndexClient> {
-        let index_id = Self::generate_index_id();
+        let index_id = Self::generate_index_id("index");
         self.writer
             .create_index(
                 self.write_api_key,
@@ -443,7 +443,7 @@ impl TestCollectionClient {
     }
 
     pub async fn create_temp_index(&self, copy_from: IndexId) -> Result<TestIndexClient> {
-        let index_id = Self::generate_index_id();
+        let index_id = Self::generate_index_id("temp");
         self.writer
             .create_temp_index(
                 self.write_api_key,
@@ -516,7 +516,7 @@ impl TestCollectionClient {
             .await
     }
 
-    pub async fn substitute_index(
+    pub async fn replace_index(
         &self,
         runtime_index_id: IndexId,
         temp_index_id: IndexId,
@@ -611,8 +611,8 @@ impl TestCollectionClient {
         Ok(())
     }
 
-    fn generate_index_id() -> IndexId {
-        let id: String = Faker.fake();
+    fn generate_index_id(prefix: &str) -> IndexId {
+        let id: String = format!("{}:{}", prefix, Faker.fake::<String>());
         IndexId::try_new(id).unwrap()
     }
 }
