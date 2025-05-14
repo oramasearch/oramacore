@@ -446,11 +446,6 @@ impl CollectionReader {
                 reference,
                 reason,
             } => {
-                println!(
-                    "Replacing index {} with temp index {}",
-                    runtime_index_id, temp_index_id
-                );
-
                 let mut temp_index_lock = self.temp_indexes.write().await;
                 let mut runtime_index_lock = self.indexes.write().await;
 

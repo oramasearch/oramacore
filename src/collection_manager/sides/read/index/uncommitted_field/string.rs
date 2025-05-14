@@ -155,9 +155,9 @@ impl UncommittedStringField {
         self.field_length_per_doc.clone()
     }
 
-    pub fn search<'run, 'index>(
+    pub fn search(
         &self,
-        context: &mut FullTextSearchContext<'run, 'index>,
+        context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;

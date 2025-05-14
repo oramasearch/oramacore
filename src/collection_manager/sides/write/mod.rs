@@ -547,6 +547,11 @@ impl WriteSide {
             .await
             .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
 
+        // The doc_id_str is the composition of index_id + document_id
+        // Anyway, for temp indexes, instead of using the temp index id,
+        // we use the original index id
+        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
+
         let mut result = InsertDocumentsResult {
             inserted: 0,
             replaced: 0,
@@ -626,7 +631,7 @@ impl WriteSide {
                         doc_id,
                         doc: DocumentToInsert(
                             doc.clone()
-                                .into_raw(format!("{}:{}", index_id, doc_id_str))
+                                .into_raw(format!("{}:{}", target_index_id, doc_id_str))
                                 .expect("Cannot get raw document"),
                         ),
                     },

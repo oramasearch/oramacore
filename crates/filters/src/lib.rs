@@ -36,6 +36,7 @@ impl<Id: DocId> PlainFilterResult<Id> {
             phantom: std::marker::PhantomData,
         };
         for id in iter {
+            println!("Adding id: {}", id.as_u64());
             s.add(&id);
         }
 
