@@ -53,8 +53,6 @@ pub fn merge_number_field(
                         "when promoting, data_dir should be different from the one in the field info"
                     );
 
-                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
-
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;
 
@@ -150,8 +148,6 @@ pub fn merge_string_filter_field(
                         data_dir,
                         "when promoting, data_dir should be different from the one in the field info"
                     );
-
-                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
 
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;
@@ -256,8 +252,6 @@ pub fn merge_bool_field(
                         "when promoting, data_dir should be different from the one in the field info"
                     );
 
-                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
-
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;
 
@@ -346,8 +340,6 @@ pub fn merge_string_field(
                         data_dir,
                         "when promoting, data_dir should be different from the one in the field info"
                     );
-
-                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
 
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;
@@ -441,8 +433,6 @@ pub fn merge_vector_field(
                         data_dir,
                         "when promoting, data_dir should be different from the one in the field info"
                     );
-
-                    print!("Moving data from {:?} to {:?}", info.data_dir, data_dir);
 
                     create_if_not_exists(&data_dir)
                         .context("Failed to create data directory for vector field")?;

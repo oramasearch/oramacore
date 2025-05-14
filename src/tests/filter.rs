@@ -264,6 +264,45 @@ async fn test_filter_bool() {
     drop(test_context);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_filter_string() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": format!("text {}", i % 2 == 0),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "where": {
+                    "text": "text true",
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 50);
+
+    drop(test_context);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 async fn test_array_types() {
     init_log();

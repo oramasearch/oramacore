@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use filters::FilterResult;
 use serde::Serialize;
 use tracing::{debug, warn};
 
@@ -9,7 +8,9 @@ use crate::{
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
-        sides::{InsertStringTerms, TermStringField},
+        sides::{
+            read::index::search_context::FullTextSearchContext, InsertStringTerms, TermStringField,
+        },
     },
     indexes::radix::RadixIndex,
     types::DocumentId,
@@ -156,26 +157,23 @@ impl UncommittedStringField {
 
     pub fn search(
         &self,
-        tokens: &[String],
-        exact_match: bool,
-        boost: f32,
+        context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
-        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
-        global_info: &GlobalInfo,
-        uncommitted_deleted_documents: &HashSet<DocumentId>,
     ) -> Result<()> {
-        let total_field_length = global_info.total_document_length as f32;
-        let total_documents_with_field = global_info.total_documents as f32;
+        let total_field_length = context.global_info.total_document_length as f32;
+        let total_documents_with_field = context.global_info.total_documents as f32;
         let average_field_length = total_field_length / total_documents_with_field;
 
         let mut total_matches = 0_usize;
-        for token in tokens {
+        for token in context.tokens {
             scorer.next_term();
+
+            context.increment_term_count();
 
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
             // TODO: think about this
-            let matches = if exact_match {
+            let matches = if context.exact_match {
                 self.inner.search_exact(token)?
             } else {
                 self.inner.search(token)?
@@ -183,12 +181,12 @@ impl UncommittedStringField {
 
             for (total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
-                    if let Some(filtered_doc_ids) = filtered_doc_ids {
+                    if let Some(filtered_doc_ids) = context.filtered_doc_ids {
                         if !filtered_doc_ids.contains(doc_id) {
                             continue;
                         }
                     }
-                    if uncommitted_deleted_documents.contains(doc_id) {
+                    if context.uncommitted_deleted_documents.contains(doc_id) {
                         continue;
                     }
 
@@ -200,7 +198,7 @@ impl UncommittedStringField {
                         }
                     };
 
-                    let term_occurrence_in_field = if exact_match {
+                    let term_occurrence_in_field = if context.exact_match {
                         if positions.0 .0.is_empty() {
                             continue;
                         }
@@ -222,11 +220,11 @@ impl UncommittedStringField {
                         term_occurrence_in_field,
                         field_length,
                         average_field_length,
-                        global_info.total_documents as f32,
+                        context.global_info.total_documents as f32,
                         total_documents_with_term_in_field,
                         1.2,
                         0.75,
-                        boost,
+                        context.boost,
                         0,
                     );
 

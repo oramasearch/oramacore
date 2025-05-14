@@ -232,6 +232,7 @@ impl CollectionWriter {
             self.op_sender.clone(),
             self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
+            None,
         )
         .await
         .context("Cannot create index")?;
@@ -306,6 +307,7 @@ impl CollectionWriter {
             self.op_sender.clone(),
             self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
+            Some(copy_from),
         )
         .await
         .context("Cannot create index")?;
