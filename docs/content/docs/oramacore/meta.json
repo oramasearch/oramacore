@@ -1,7 +1,7 @@
 {
 	"root": true,
 	"title": "OramaCore",
-	"description": "OramaCore Documentation",
+	"description": "The Open Source AI Runtime",
 	"icon": "DatabaseZap",
 	"pages": [
 		"---Guide---",
