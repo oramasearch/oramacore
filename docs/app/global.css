@@ -1,3 +1,32 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+:root {
+	--oramacore-color: hsl(264, 93%, 68%);
+	--cloud-color: hsl(217, 100%, 58%);
+	--orama-js-color: hsl(37, 100%, 55%);
+}
+
+.dark {
+	--oramacore-color: hsl(275, 93%, 68%);
+	--cloud-color: hsl(204, 100%, 58%);
+	--orama-js-color: hsl(43, 100%, 55%);
+}
+
+body {
+	overscroll-behavior-y: none;
+	background-color: var(--color-fd-background);
+}
+
+.oramacore {
+	--color-fd-primary: var(--oramacore-color);
+}
+
+.cloud {
+	--color-fd-primary: var(--cloud-color);
+}
+
+.orama-js {
+	--color-fd-primary: var(--orama-js-color);
+}

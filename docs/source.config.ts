@@ -1,13 +1,13 @@
-import { defineConfig, defineDocs } from "fumadocs-mdx/config";
-import { remarkInstall } from "fumadocs-docgen";
+import { defineConfig, defineDocs } from 'fumadocs-mdx/config'
+import { remarkInstall } from 'fumadocs-docgen'
 
 export const { docs, meta } = defineDocs({
-  dir: "content/docs",
-});
+  dir: 'content/docs'
+})
 
 export default defineConfig({
-  lastModifiedTime: "git",
+  lastModifiedTime: 'git',
   mdxOptions: {
-    remarkPlugins: [remarkInstall],
-  },
-});
+    remarkPlugins: [remarkInstall]
+  }
+})
