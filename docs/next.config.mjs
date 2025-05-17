@@ -9,7 +9,7 @@ const config = {
     return [
       {
         source: '/',
-        destination: '/docs',
+        destination: '/docs/oramacore',
         permanent: true,
       },
     ]
