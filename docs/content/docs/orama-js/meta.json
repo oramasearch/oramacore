@@ -4,6 +4,7 @@
 	"description": "Orama for your browser",
 	"icon": "Hexagon",
 	"pages": [
+		"---Getting Started---",
 		"index",
 		"usage",
 		"search",
@@ -12,6 +13,7 @@
 		"...supported-languages",
 		"---Advanced Orama---",
 		"internals",
-		"plugins"
+		"plugins",
+		"text-analysis"
 	]
 }
