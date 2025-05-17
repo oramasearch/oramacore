@@ -18,3 +18,15 @@ body {
   overscroll-behavior-y: none;
   background-color: var(--color-fd-background);
 }
+
+.oramacore {
+  --color-fd-primary: var(--oramacore-color);
+}
+
+.cloud {
+  --color-fd-primary: var(--cloud-color);
+}
+
+.orama-js {
+  --color-fd-primary: var(--orama-js-color);
+}
