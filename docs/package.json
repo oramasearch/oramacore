@@ -6,7 +6,9 @@
 		"build": "next build",
 		"dev": "next dev",
 		"start": "next start",
-		"postinstall": "fumadocs-mdx"
+		"postinstall": "fumadocs-mdx",
+		"format": "npx @biomejs/biome format --write .",
+		"lint": "npx @biomejs/biome lint --fix ."
 	},
 	"dependencies": {
 		"fumadocs-core": "15.3.2",
@@ -21,6 +23,7 @@
 		"react-dom": "^19.1.0"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "1.9.4",
 		"@tailwindcss/postcss": "^4.1.7",
 		"@types/mdx": "^2.0.13",
 		"@types/node": "22.15.18",

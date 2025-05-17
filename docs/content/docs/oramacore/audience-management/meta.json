@@ -1,8 +1,4 @@
 {
-    "title": "Audience Management",
-    "pages": [
-      "introduction",
-      "segments",
-      "triggers"
-    ]
-  }
+	"title": "Audience Management",
+	"pages": ["introduction", "segments", "triggers"]
+}
