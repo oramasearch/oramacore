@@ -1,0 +1,8 @@
+{
+	"pages": [
+		"index",
+		"writing-your-own-plugins",
+		"plugin-embeddings",
+		"plugin-vitepress"
+	]
+}
