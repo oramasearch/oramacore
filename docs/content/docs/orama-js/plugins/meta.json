@@ -1,0 +1,18 @@
+{
+	"pages": [
+		"index",
+		"writing-your-own-plugins",
+		"plugin-embeddings",
+		"plugin-data-persistence",
+		"plugin-qps",
+		"plugin-pt15",
+		"plugin-docusaurus",
+		"plugin-secure-proxy",
+		"plugin-vitepress",
+		"plugin-analytics",
+		"plugin-astro",
+		"plugin-nextra",
+		"plugin-parsedoc",
+		"plugin-match-highlight"
+	]
+}

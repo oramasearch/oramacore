@@ -1,0 +1,20 @@
+{
+	"root": true,
+	"title": "OramaCore",
+	"description": "The Open Source AI Runtime",
+	"icon": "DatabaseZap",
+	"pages": [
+		"---Guide---",
+		"index",
+		"...guide",
+		"apis",
+		"---Audience Management---",
+		"...audience-management",
+		"---Customizations---",
+		"...customizations",
+		"---Architecture---",
+		"architecture/overview",
+		"architecture/write-read",
+		"architecture/party-planner"
+	]
+}
