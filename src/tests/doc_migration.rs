@@ -7,6 +7,8 @@ use crate::{tests::utils::{create_oramacore_config, TestContext}, types::{ApiKey
 async fn test_doc_migration() -> Result<()> {
     let mut config: OramacoreConfig = create_oramacore_config();
     config.writer_side.config.data_dir = std::env::current_dir().unwrap()
+        .join("src")
+        .join("tests")
         .join("dump-test")
         .join("migration_docs")
         .join("writer");
@@ -17,39 +19,10 @@ async fn test_doc_migration() -> Result<()> {
 
     let colls = test_context.get_writer_collections().await;
 
-    println!("Collections: {:#?}", colls);
     assert_eq!(colls.len(), 1);
-
-    
-
-
-    /*
-    let collection_client = test_context.create_collection().await.unwrap();
-    let index_client = collection_client.create_index().await.unwrap();
-
-    let document_count = 10;
-    let docs = (0..document_count)
-        .map(|i| {
-            json!({
-                "id": i.to_string(),
-                "text": "text ".repeat(i + 1),
-            })
-        })
-        .collect::<Vec<_>>();
-    index_client
-        .insert_documents(json!(docs).try_into().unwrap())
-        .await
-        .unwrap();
-
-    let docs = test_context
-        .writer
-        .list_document(
-            collection_client.write_api_key,
-            collection_client.collection_id,
-        )
-        .await?;
-    assert_eq!(docs.len(), document_count);
-    */
+    assert_eq!(colls[0].document_count, 5);
+    assert_eq!(colls[0].indexes.len(), 1);
+    assert_eq!(colls[0].indexes[0].document_count, 5);
 
     Ok(())
 }
