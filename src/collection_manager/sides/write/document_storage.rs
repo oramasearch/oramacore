@@ -1,26 +1,47 @@
 use futures::Stream;
 use serde::{de::Unexpected, Deserialize, Serialize};
-use std::path::PathBuf;
-use tokio::sync::mpsc;
+use serde_json::value::RawValue;
+use zebo::Zebo;
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 
 use anyhow::{Context, Result};
 use tracing::error;
 
 use crate::{
-    file_utils::{create_if_not_exists, read_file, BufferedFile},
+    file_utils::{create_if_not_exists, read_file},
     types::{Document, DocumentId, RawJSONDocument},
 };
 
+// 1GB
+const PAGE_SIZE: u64 = 1024 * 1024 * 1024;
+
 pub struct DocumentStorage {
-    data_dir: PathBuf,
+    zebo: Arc<RwLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
 }
 
 impl DocumentStorage {
-    pub fn try_new(data_dir: PathBuf) -> Result<Self> {
+    pub async fn try_new(data_dir: PathBuf) -> Result<Self> {
         create_if_not_exists(&data_dir).context("Cannot create data directory")?;
 
-        Ok(Self { data_dir })
+        let zebo_dir = data_dir.join("zebo");
+        create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
+
+        let zebo_index_path = zebo_dir.join("index");
+        let zebo = if std::fs::exists(zebo_index_path)
+            .unwrap_or(false) {
+            Zebo::try_new(zebo_dir)
+                .context("Cannot create zebo")?
+        } else {
+            migrate_to_zebo(&data_dir)
+                .await
+                .context("Cannot migrate to zebo")?
+        };
+
+        Ok(Self {
+            zebo: Arc::new(RwLock::new(zebo)),
+        })
     }
 
     pub async fn insert(
@@ -28,25 +49,22 @@ impl DocumentStorage {
         id: DocumentId,
         doc_id_str: String,
         document: Document,
-    ) -> Result<()> {
-        let document: RawJSONDocument = document.into_raw(doc_id_str)?;
-        let doc_path = self.data_dir.join(id.0.to_string());
-        let data = RawJSONDocumentWrapper(document);
-        BufferedFile::create_or_overwrite(doc_path)
-            .context("Cannot create document data")?
-            .write_json_data(&data)
-            .context("Cannot write document data")?;
+    ) -> Result<()> {        
+        let document =
+            serde_json::value::to_raw_value(&document.inner).context("Cannot serialize document")?;
+        let document = document.get();
+
+        let mut zebo = self.zebo.write().await;
+        zebo
+            .add_documents(vec![(id, ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)))])
+            .context("Cannot add document to zebo")?;
+
         Ok(())
     }
 
     pub async fn remove(&self, ids: Vec<DocumentId>) {
-        for id in ids {
-            let doc_path = self.data_dir.join(id.0.to_string());
-            if let Err(e) = tokio::fs::remove_file(doc_path).await {
-                // We ignore the error because we want to proceed with the next document
-                error!(error = ?e, "Cannot remove document data");
-            }
-        }
+        let mut zebo = self.zebo.write().await;
+        zebo.remove_documents(ids, false).unwrap();
     }
 
     pub async fn stream_documents(
@@ -55,18 +73,46 @@ impl DocumentStorage {
     ) -> impl Stream<Item = (DocumentId, RawJSONDocument)> {
         let (tx, rx) = mpsc::channel(100);
 
-        let data_dir = self.data_dir.clone();
+        let zebo = self.zebo.clone();
         tokio::spawn(async move {
-            for id in ids {
-                let doc_path = data_dir.join(id.0.to_string());
-                let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
-                    Ok(data) => data,
+            println!("stream_documents");
+            let zebo = zebo.read().await;
+
+            println!("get_documents {:?}", ids);
+            let docs_iter = match zebo.get_documents(ids) {
+                Ok(a) => a,
+                Err(e) => {
+                    error!(error = ?e, "Cannot get documents");
+                    return;
+                }
+            };
+
+            for doc in docs_iter {
+                println!("doc {:?}", doc);
+                let (doc_id, data) = match doc {
+                    Ok(doc) => doc,
                     Err(e) => {
-                        error!(error = ?e, "Cannot read document data");
+                        error!(error = ?e, "Cannot get document");
                         continue;
                     }
                 };
-                if let Err(e) = tx.send((id, data.0)).await {
+
+                let doc = match ZeboDocument::from_bytes(data)
+                    .context("Cannot convert bytes to document") {
+                        Ok(doc) => doc,
+                        Err(e) => {
+                            error!(error = ?e, "Cannot convert bytes to document");
+                            continue;
+                        }
+                };
+                let inner = RawValue::from_string(doc.1.to_string())
+                        .context("Cannot convert bytes to document").unwrap();
+                let d = RawJSONDocument {
+                    id: Some(doc.0.to_string()),
+                    inner,
+                };
+
+                if let Err(e) = tx.send((doc_id, d)).await {
                     error!(error = ?e, "Cannot send document data. Stopped stream_documents");
                     break;
                 }
@@ -142,4 +188,95 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
 
         deserializer.deserialize_tuple(2, SerializableNumberVisitor)
     }
+}
+
+impl zebo::DocumentId for DocumentId {
+    fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    fn from_u64(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
+    let mut files_in_dir = std::fs::read_dir(data_dir)
+        .context("Cannot read data directory")?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.is_file() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .filter_map(|entry| {
+            let file_name = entry.file_name()?;
+            let file_name = file_name.to_str()?;
+            let doc_id = file_name.parse::<u64>().ok()?;
+            let doc_id = DocumentId(doc_id);
+            Some(doc_id)
+        })
+        .collect::<Vec<_>>();
+    files_in_dir.sort_by_key(|id| id.0);
+
+    let mut zebo = Zebo::try_new(data_dir.join("zebo"))
+        .context("Cannot create zebo")?;
+
+    for doc_id in files_in_dir {
+        let doc_path = data_dir.join(doc_id.0.to_string());
+        let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
+            Ok(data) => data,
+            Err(e) => {
+                error!(error = ?e, "Cannot read document data");
+                continue;
+            }
+        };
+        let doc_id_str = data.0.id.unwrap_or_default();
+        let doc = data.0.inner.get();
+
+        zebo.add_documents(vec![
+            (doc_id, ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(doc))),
+        ]).unwrap();
+
+    }
+
+    Ok(zebo)
+}
+
+static ZERO: &[u8] = b"\0";
+
+struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
+
+impl<'a> zebo::Document for ZeboDocument<'a> {
+    fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
+        let mut bytes = Vec::with_capacity(3);
+        bytes.push(Cow::Borrowed(self.0.as_bytes()));
+        bytes.push(Cow::Borrowed(ZERO));
+        bytes.push(Cow::Borrowed(self.1.as_bytes()));
+        Cow::Owned(bytes)
+    }
+}
+
+impl ZeboDocument<'_> {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+        let mut parts = bytes.split(|b| *b == b'\0');
+        let id = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("Cannot split document bytes")
+        })?;
+        let data = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("Cannot split document bytes")
+        })?;
+
+        let id = String::from_utf8(id.to_vec()).context("Cannot convert id to string")?;
+        let data = String::from_utf8(data.to_vec()).context("Cannot convert data to string")?;
+
+        Ok(ZeboDocument(
+            Cow::Owned(id),
+            Cow::Owned(data)
+        ))
+    }
+
 }

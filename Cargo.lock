@@ -4144,6 +4144,7 @@ dependencies = [
  "tree-sitter-html",
  "tree-sitter-javascript",
  "tree-sitter-typescript",
+ "zebo",
 ]
 
 [[package]]
@@ -8097,6 +8098,10 @@ dependencies = [
  "syn",
  "synstructure",
 ]
+
+[[package]]
+name = "zebo"
+version = "0.0.1"
 
 [[package]]
 name = "zerocopy"
