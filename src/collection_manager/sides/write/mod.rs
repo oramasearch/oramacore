@@ -147,6 +147,9 @@ impl WriteSide {
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
+
+        println!("Write side info: {:#?}", r);
+
         let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
             document_count.store(info.document_count, Ordering::Relaxed);
