@@ -17,7 +17,6 @@ use crate::{
     collection_manager::sides::DocumentStorageWriteOperation,
     file_utils::{create_if_not_exists, read_file},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
-    nlp::stop_words::id,
     types::{DocumentId, RawJSONDocument},
 };
 
@@ -64,7 +63,7 @@ impl CommittedDiskDocumentStorage {
         doc_ids: &[DocumentId],
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
         let lock = self.cache.read().await;
-        let mut from_cache: HashMap<DocumentId, Arc<RawJSONDocument>> = doc_ids
+        let from_cache: HashMap<DocumentId, Arc<RawJSONDocument>> = doc_ids
             .iter()
             .filter_map(|id| lock.get(id).map(|d| (*id, d.clone())))
             .collect();
@@ -72,7 +71,7 @@ impl CommittedDiskDocumentStorage {
 
         trace!(doc_len=?doc_ids.len(), "Read document");
 
-        let mut result: Vec<Option<Arc<RawJSONDocument>>> = Vec::with_capacity(doc_ids.len());
+        let result: Vec<Option<Arc<RawJSONDocument>>> = Vec::with_capacity(doc_ids.len());
 
         let zebo = self.zebo.read().await;
         let output = zebo
@@ -329,28 +328,6 @@ impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_document_storage_raw_json_document_wrapper_serialize_deserialize() {
-        let value = json!({
-            "id": "the-id",
-            "foo": "bar",
-        });
-        let raw_json_document: RawJSONDocument = value.try_into().unwrap();
-        assert_eq!(raw_json_document.id, Some("the-id".to_string()));
-
-        let raw_json_document_wrapper = RawJSONDocumentWrapper(Arc::new(raw_json_document));
-        let serialized = serde_json::to_string(&raw_json_document_wrapper).unwrap();
-        let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
-
-        assert_eq!(raw_json_document_wrapper, deserialized);
-    }
-}
-
 pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
     let mut files_in_dir = std::fs::read_dir(data_dir)
         .context("Cannot read data directory")?
@@ -404,7 +381,7 @@ enum ZeboDocument<'s> {
     FromJSONDoc(Arc<RawJSONDocument>),
 }
 
-impl<'a> zebo::Document for ZeboDocument<'a> {
+impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
         match self {
             Self::Split(id, json) => {
@@ -416,9 +393,8 @@ impl<'a> zebo::Document for ZeboDocument<'a> {
             }
             Self::FromJSONDoc(a) => {
                 let mut bytes = Vec::with_capacity(3);
-                match &a.id {
-                    Some(id) => bytes.push(Cow::Borrowed(id.as_bytes())),
-                    None => {}
+                if let Some(id) = &a.id {
+                    bytes.push(Cow::Borrowed(id.as_bytes()))
                 };
                 bytes.push(Cow::Borrowed(ZERO));
 
@@ -456,5 +432,27 @@ impl ZeboDocument<'_> {
             }
             Self::FromJSONDoc(a) => Ok(a.clone()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_document_storage_raw_json_document_wrapper_serialize_deserialize() {
+        let value = json!({
+            "id": "the-id",
+            "foo": "bar",
+        });
+        let raw_json_document: RawJSONDocument = value.try_into().unwrap();
+        assert_eq!(raw_json_document.id, Some("the-id".to_string()));
+
+        let raw_json_document_wrapper = RawJSONDocumentWrapper(Arc::new(raw_json_document));
+        let serialized = serde_json::to_string(&raw_json_document_wrapper).unwrap();
+        let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(raw_json_document_wrapper, deserialized);
     }
 }

@@ -254,7 +254,7 @@ static ZERO: &[u8] = b"\0";
 
 struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
 
-impl<'a> zebo::Document for ZeboDocument<'a> {
+impl zebo::Document for ZeboDocument<'_> {
     fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
         let mut bytes = Vec::with_capacity(3);
         bytes.push(Cow::Borrowed(self.0.as_bytes()));

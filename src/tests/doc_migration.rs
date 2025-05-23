@@ -2,7 +2,6 @@ use anyhow::Result;
 
 use crate::{
     tests::utils::{create_oramacore_config, init_log, TestContext},
-    types::{ApiKey, CollectionId},
     OramacoreConfig,
 };
 
