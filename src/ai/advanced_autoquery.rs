@@ -7,7 +7,6 @@ use crate::types::{CollectionId, InteractionLLMConfig, InteractionMessage};
 pub enum AdvancedAutoQuerySteps {
     Init,
     AnalyzeInput,
-    GetAllProps,
     SelectProps,
     GetPropValues,
     GenerateQueries,

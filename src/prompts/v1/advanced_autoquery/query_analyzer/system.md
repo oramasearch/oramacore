@@ -77,7 +77,7 @@ Return a JSON array of search query strings:
 **Output:**
 ```json
 [
-  "Finding the compatible version of Docker for Orama on Windows with WSL"
+  "Checking the compatible version of Docker for Orama on Windows with WSL"
 ]
 ```
 
@@ -120,7 +120,7 @@ Return a JSON array of search query strings:
 **Output:**
 ```json
 [
-  "Finding the status of order 123456789 placed on 15th of March, shipped from 30th Street, New York to 123 Main Street, Los Angeles, made by customer 987654321"
+  "Checking the status of order 123456789 placed on 15th of March, shipped from 30th Street, New York to 123 Main Street, Los Angeles, made by customer 987654321"
 ]
 ```
 
