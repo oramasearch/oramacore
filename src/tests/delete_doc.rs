@@ -4,7 +4,7 @@ use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_delete_search() {
+async fn test_delete_search_ok() {
     init_log();
 
     let test_context = TestContext::new().await;

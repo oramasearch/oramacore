@@ -747,23 +747,6 @@ impl Index {
             .await
             .with_context(|| format!("Cannot calculate filtered doc in index {:?}", self.id))?;
 
-        if let Some(filtered_doc_ids) = &filtered_doc_ids {
-            /*
-            FILTER_PERC_CALCULATION_COUNT.track(
-                CollectionLabels {
-                    collection: self.id.to_string(),
-                },
-                filtered_doc_ids.len() as f64 / self.document_count as f64,
-            );
-            FILTER_COUNT_CALCULATION_COUNT.track_usize(
-                CollectionLabels {
-                    collection: self.id.to_string(),
-                },
-                filtered_doc_ids.len(),
-            );
-            */
-        }
-
         // Manage the "auto" search mode. OramaCore will automatically determine
         // wether to use full text search, vector search or hybrid search.
         let search_mode: SearchMode = match &search_params.mode {

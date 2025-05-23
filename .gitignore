@@ -21,5 +21,4 @@ flamegraph.svg
 log.log
 .DS_Store
 
-src/tests/dump-test
 *.html

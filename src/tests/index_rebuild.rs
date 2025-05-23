@@ -12,7 +12,7 @@ use crate::tests::utils::TestContext;
 use crate::types::LanguageDTO;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_change_language() {
+async fn test_change_language_without_commit() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -30,16 +30,22 @@ async fn test_change_language() {
         .await
         .unwrap();
 
+    println!("Inserted document------\n\n---\n\n--");
+
     let output = collection_client
         .search(json!({ "term": "avvocato" }).try_into().unwrap())
         .await
         .unwrap();
     assert_eq!(output.count, 0);
 
+    println!("Rebuild ------\n\n---\n\n--");
+
     collection_client
         .rebuild_index(LanguageDTO::Italian)
         .await
         .unwrap();
+
+    println!("waiting...\n\n---\n\n--");
 
     wait_for(&test_context, |test_context| {
         let collection_client = test_context

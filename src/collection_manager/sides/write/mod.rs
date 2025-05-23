@@ -147,6 +147,7 @@ impl WriteSide {
         let write_side_info_path = data_dir.join("info.json");
         let r = BufferedFile::open(write_side_info_path)
             .and_then(|f| f.read_json_data::<WriteSideInfo>());
+
         let op_sender = if let Ok(info) = r {
             let WriteSideInfo::V1(info) = info;
             document_count.store(info.document_count, Ordering::Relaxed);
@@ -186,6 +187,7 @@ impl WriteSide {
         .context("Cannot load collections")?;
 
         let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
+            .await
             .context("Cannot create document storage")?;
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);

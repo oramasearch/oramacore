@@ -2,6 +2,7 @@
 
 mod commit;
 mod delete_doc;
+mod doc_migration;
 mod entity_lifecycle;
 mod facets;
 mod filter;
