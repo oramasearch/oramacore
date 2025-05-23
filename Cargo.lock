@@ -4117,7 +4117,6 @@ dependencies = [
  "rayon",
  "redact",
  "regex",
- "repair_json",
  "reqwest",
  "rust-stemmers",
  "rustls",
@@ -5509,15 +5508,6 @@ name = "regex-syntax"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
-
-[[package]]
-name = "repair_json"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee191e184125fe72cb59b74160e25584e3908f2aaa84cbda1e161347102aa15"
-dependencies = [
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "reqwest"

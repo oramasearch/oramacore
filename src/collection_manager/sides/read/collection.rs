@@ -15,11 +15,14 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
-    ai::{llms::LLMService, AIService},
+    ai::{advanced_autoquery::AdvancedAutoQuery, llms::LLMService, AIService},
     collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
-    types::{ApiKey, CollectionId, DocumentId, FacetResult, FieldId, IndexId, SearchParams},
+    types::{
+        ApiKey, CollectionId, DocumentId, FacetResult, FieldId, IndexId, InteractionMessage,
+        NLPSearchRequest, Role, SearchParams,
+    },
 };
 
 use super::{
@@ -289,6 +292,26 @@ impl CollectionReader {
     #[inline]
     pub fn get_id(&self) -> CollectionId {
         self.id
+    }
+
+    pub async fn nlp_search(
+        &self,
+        search_params: &NLPSearchRequest,
+        collection_id: CollectionId,
+    ) -> Result<Vec<String>> {
+        let llm_service = self.llm_service.clone();
+        let llm_config = search_params.llm_config.clone();
+        let query = search_params.query.clone();
+
+        let advanced_autoquery = AdvancedAutoQuery::new(collection_id, llm_service, llm_config);
+        let conversation = vec![InteractionMessage {
+            role: Role::User,
+            content: query,
+        }];
+
+        let analyze_result = advanced_autoquery.analyze_input(conversation).await?;
+
+        return Ok(analyze_result);
     }
 
     pub async fn search(
