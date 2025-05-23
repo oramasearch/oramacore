@@ -1,18 +1,23 @@
+use itertools::Itertools;
 use serde::{de::Unexpected, Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
     sync::Arc,
 };
-use tracing::{debug, info, trace, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, trace, warn};
+use zebo::Zebo;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 
 use crate::{
     collection_manager::sides::DocumentStorageWriteOperation,
-    file_utils::{read_file, BufferedFile},
+    file_utils::{create_if_not_exists, read_file},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
+    nlp::stop_words::id,
     types::{DocumentId, RawJSONDocument},
 };
 
@@ -22,17 +27,36 @@ use crate::{
 // We should find a good balance between memory and disk usage.
 // TODO: think about a better implementation.
 
+// 1 GB
+static PAGE_SIZE: u64 = 1024 * 1024 * 1024;
+
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
-    path: PathBuf,
+    zebo: Arc<RwLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
     cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>>,
 }
 impl CommittedDiskDocumentStorage {
-    fn new(path: PathBuf) -> Self {
+    async fn try_new(data_dir: PathBuf) -> Result<Self> {
         let cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>> =
             Default::default();
 
-        Self { path, cache }
+        let zebo_dir = data_dir.join("zebo");
+        create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
+
+        let zebo_index_path = zebo_dir.join("index");
+        let zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
+            info!("Zebo index exists");
+            Zebo::try_new(zebo_dir).context("Cannot create zebo")?
+        } else {
+            warn!("Migrate documents to zebo");
+            migrate_to_zebo(&data_dir)
+                .await
+                .context("Cannot migrate to zebo")?
+        };
+
+        let zebo = Arc::new(RwLock::new(zebo));
+
+        Ok(Self { zebo, cache })
     }
 
     async fn get_documents_by_ids(
@@ -47,68 +71,45 @@ impl CommittedDiskDocumentStorage {
         drop(lock);
 
         trace!(doc_len=?doc_ids.len(), "Read document");
-        let mut result = Vec::with_capacity(doc_ids.len());
-        for id in doc_ids {
-            trace!(?id, "Reading document");
-            if let Some(d) = from_cache.remove(id) {
-                trace!("In cache. skip");
-                result.push(Some(d));
-                continue;
-            }
 
-            let doc_path = self.path.join(format!("{}", id.0));
-            trace!(?doc_path, "Check on FS");
+        let mut result: Vec<Option<Arc<RawJSONDocument>>> = Vec::with_capacity(doc_ids.len());
 
-            let exists = tokio::fs::try_exists(&doc_path).await;
-            match exists {
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Error while checking if the document exists: {:?}",
-                        e
-                    ));
-                }
-                std::result::Result::Ok(false) => {
-                    trace!("Not found on FS");
-                    result.push(None);
-                    continue;
-                }
-                std::result::Result::Ok(true) => {}
-            };
+        let zebo = self.zebo.read().await;
+        let output = zebo
+            .get_documents(doc_ids.to_vec())
+            .context("Cannot get documents from zebo")?;
+        let output: Result<Vec<_>, zebo::ZeboError> = output.collect();
+        let output = output.context("Failed to got documents")?;
+        let mut output: Vec<_> = output
+            .into_iter()
+            .map(|d| {
+                let doc = match ZeboDocument::from_bytes(d.1) {
+                    Ok(doc) => Some(doc),
+                    Err(_) => None,
+                };
+                (d.0, doc)
+            })
+            .collect();
+        output.sort_by_key(|d| doc_ids.iter().find_position(|dd| **dd == d.0));
 
-            let doc: RawJSONDocumentWrapper = match read_file(doc_path).await {
-                std::result::Result::Err(_) => {
-                    // It could happen the `commit` method creates the file (so the previous check passes)
-                    // but not with the full content written.
-                    // In that case, `read_file` will fail.
-                    // If it happens, this arm is triggered.
-                    trace!("Error on read from FS");
-                    result.push(None);
-                    continue;
-                }
-                std::result::Result::Ok(doc) => doc,
-            };
+        let output: Vec<_> = output
+            .into_iter()
+            .map(|(_, d)| match d {
+                None => None,
+                Some(d) => d.into_raw_json_doc().ok(),
+            })
+            .collect();
 
-            let doc = doc.0;
-            let mut lock = self.cache.write().await;
-            lock.insert(*id, doc.clone());
-            drop(lock);
-
-            result.push(Some(doc));
-        }
-
-        Ok(result)
+        Ok(output)
     }
 
     async fn add(&self, docs: Vec<(DocumentId, Arc<RawJSONDocument>)>) -> Result<()> {
-        for (doc_id, doc) in docs {
-            let doc_path = self.path.join(format!("{}", doc_id.0));
-
-            let doc = RawJSONDocumentWrapper(doc);
-            BufferedFile::create_or_overwrite(doc_path)
-                .context("Cannot write document data")?
-                .write_json_data(&doc)
-                .context("Cannot write document data")?;
-        }
+        let mut zebo = self.zebo.write().await;
+        zebo.add_documents(
+            docs.into_iter()
+                .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc))),
+        )
+        .context("Cannot add documents")?;
 
         Ok(())
     }
@@ -127,12 +128,16 @@ pub struct DocumentStorage {
 }
 
 impl DocumentStorage {
-    pub fn try_new(config: DocumentStorageConfig) -> Result<Self> {
+    pub async fn try_new(config: DocumentStorageConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir).context("Cannot create document directory")?;
+
+        let committed = CommittedDiskDocumentStorage::try_new(config.data_dir)
+            .await
+            .context("Cannot create CommittedDiskDocumentStorage")?;
 
         Ok(Self {
             uncommitted: Default::default(),
-            committed: CommittedDiskDocumentStorage::new(config.data_dir),
+            committed,
             uncommitted_document_deletions: Default::default(),
         })
     }
@@ -179,26 +184,26 @@ impl DocumentStorage {
         trace!("Get from uncommitted documents");
         let uncommitted = self.uncommitted.read().await;
         let uncommitted: Vec<_> = doc_ids
-            .into_iter()
-            .map(|doc_id| uncommitted.get(&doc_id).cloned())
+            .iter()
+            .map(|doc_id| uncommitted.get(doc_id).cloned())
             .collect();
         trace!("Get from uncommitted documents done");
 
-        let result = committed
-            .into_iter()
-            .zip(uncommitted)
-            .map(|(committed, uncommitted)| {
-                if let Some(doc) = uncommitted {
-                    Some(doc)
-                } else {
-                    if committed.is_none() {
-                        warn!("Document not found");
-                    }
+        let mut result = Vec::with_capacity(doc_ids.len());
+        for i in 0..doc_ids.len() {
+            let doc_id = doc_ids[i];
+            let committed = committed.get(i).cloned().flatten();
+            let uncommitted = uncommitted.get(i).cloned().flatten();
 
-                    committed
+            if let Some(doc) = uncommitted {
+                result.push(Some(doc));
+            } else {
+                if committed.is_none() {
+                    warn!("Document {:?} not found", doc_id);
                 }
-            })
-            .collect();
+                result.push(committed);
+            }
+        }
 
         Ok(result)
     }
@@ -223,26 +228,12 @@ impl DocumentStorage {
         drop(m);
 
         let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
-        for doc_id in uncommitted_document_deletions.drain() {
-            let doc_path = self.committed.path.join(format!("{}", doc_id.0));
-            match tokio::fs::remove_file(doc_path).await {
-                Ok(_) => {
-                    debug!("Document {:?} deleted", doc_id);
-                }
-                // Not found is not an error
-                Err(e) if e.raw_os_error() == Some(2) => {
-                    warn!("Error while deleting document {:?}: {:?}", doc_id, e);
-                }
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Error while deleting document {:?}: {:?}",
-                        doc_id,
-                        e
-                    ))
-                }
-            }
-        }
-        uncommitted_document_deletions.clear();
+        let doc_to_delete: Vec<_> = uncommitted_document_deletions.drain().collect();
+
+        let mut zebo = self.committed.zebo.write().await;
+        zebo.remove_documents(doc_to_delete, false)
+            .context("Cannot remove documents")?;
+
         drop(uncommitted_document_deletions);
 
         info!("Documents committed");
@@ -357,5 +348,113 @@ mod tests {
         let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(raw_json_document_wrapper, deserialized);
+    }
+}
+
+pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_SIZE, DocumentId>> {
+    let mut files_in_dir = std::fs::read_dir(data_dir)
+        .context("Cannot read data directory")?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.is_file() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .filter_map(|entry| {
+            let file_name = entry.file_name()?;
+            let file_name = file_name.to_str()?;
+            let doc_id = file_name.parse::<u64>().ok()?;
+            let doc_id = DocumentId(doc_id);
+            Some(doc_id)
+        })
+        .collect::<Vec<_>>();
+    files_in_dir.sort_by_key(|id| id.0);
+
+    let mut zebo = Zebo::try_new(data_dir.join("zebo")).context("Cannot create zebo")?;
+
+    for doc_id in files_in_dir {
+        let doc_path = data_dir.join(doc_id.0.to_string());
+        let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
+            Ok(data) => data,
+            Err(e) => {
+                error!(error = ?e, "Cannot read document data");
+                continue;
+            }
+        };
+        let doc_id_str = data.0.id.clone().unwrap_or_default();
+        let doc = data.0.inner.get();
+
+        zebo.add_documents(vec![(
+            doc_id,
+            ZeboDocument::Split(Cow::Owned(doc_id_str), Cow::Borrowed(doc)),
+        )])
+        .unwrap();
+    }
+
+    Ok(zebo)
+}
+
+static ZERO: &[u8] = b"\0";
+
+enum ZeboDocument<'s> {
+    Split(Cow<'s, str>, Cow<'s, str>),
+    FromJSONDoc(Arc<RawJSONDocument>),
+}
+
+impl<'a> zebo::Document for ZeboDocument<'a> {
+    fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
+        match self {
+            Self::Split(id, json) => {
+                let mut bytes = Vec::with_capacity(3);
+                bytes.push(Cow::Borrowed(id.as_bytes()));
+                bytes.push(Cow::Borrowed(ZERO));
+                bytes.push(Cow::Borrowed(json.as_bytes()));
+                Cow::Owned(bytes)
+            }
+            Self::FromJSONDoc(a) => {
+                let mut bytes = Vec::with_capacity(3);
+                match &a.id {
+                    Some(id) => bytes.push(Cow::Borrowed(id.as_bytes())),
+                    None => {}
+                };
+                bytes.push(Cow::Borrowed(ZERO));
+
+                bytes.push(Cow::Borrowed(a.inner.get().as_bytes()));
+                Cow::Owned(bytes)
+            }
+        }
+    }
+}
+
+impl ZeboDocument<'_> {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+        let mut parts = bytes.split(|b| *b == b'\0');
+        let id = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Cannot split document bytes"))?;
+        let data = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Cannot split document bytes"))?;
+
+        let id = String::from_utf8(id.to_vec()).context("Cannot convert id to string")?;
+        let data = String::from_utf8(data.to_vec()).context("Cannot convert data to string")?;
+
+        Ok(ZeboDocument::Split(Cow::Owned(id), Cow::Owned(data)))
+    }
+
+    fn into_raw_json_doc(&self) -> Result<Arc<RawJSONDocument>> {
+        match self {
+            Self::Split(id, json) => {
+                let inner = serde_json::value::RawValue::from_string(json.to_string())?;
+                Ok(Arc::new(RawJSONDocument {
+                    id: Some(id.to_string()),
+                    inner,
+                }))
+            }
+            Self::FromJSONDoc(a) => Ok(a.clone()),
+        }
     }
 }

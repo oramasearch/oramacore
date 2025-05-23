@@ -32,7 +32,9 @@ use crate::{
         ReplaceIndexReason, WriteSide, WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest, SearchParams, SearchResult
+        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DescribeCollectionResponse,
+        DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest,
+        SearchParams, SearchResult,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -322,7 +324,10 @@ impl TestContext {
     }
 
     pub async fn get_writer_collections(&self) -> Vec<DescribeCollectionResponse> {
-        self.writer.list_collections(self.master_api_key).await.unwrap()
+        self.writer
+            .list_collections(self.master_api_key)
+            .await
+            .unwrap()
     }
 
     pub async fn create_collection(&self) -> Result<TestCollectionClient> {

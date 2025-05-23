@@ -1,13 +1,13 @@
 use futures::Stream;
 use serde::{de::Unexpected, Deserialize, Serialize};
 use serde_json::value::RawValue;
-use zebo::Zebo;
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
+use zebo::Zebo;
 
 use anyhow::{Context, Result};
-use tracing::error;
+use tracing::{error, info, warn};
 
 use crate::{
     file_utils::{create_if_not_exists, read_file},
@@ -29,11 +29,11 @@ impl DocumentStorage {
         create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
 
         let zebo_index_path = zebo_dir.join("index");
-        let zebo = if std::fs::exists(zebo_index_path)
-            .unwrap_or(false) {
-            Zebo::try_new(zebo_dir)
-                .context("Cannot create zebo")?
+        let zebo = if std::fs::exists(zebo_index_path).unwrap_or(false) {
+            info!("Zebo index exists");
+            Zebo::try_new(zebo_dir).context("Cannot create zebo")?
         } else {
+            warn!("Migrate documents to zebo");
             migrate_to_zebo(&data_dir)
                 .await
                 .context("Cannot migrate to zebo")?
@@ -49,15 +49,17 @@ impl DocumentStorage {
         id: DocumentId,
         doc_id_str: String,
         document: Document,
-    ) -> Result<()> {        
-        let document =
-            serde_json::value::to_raw_value(&document.inner).context("Cannot serialize document")?;
+    ) -> Result<()> {
+        let document = serde_json::value::to_raw_value(&document.inner)
+            .context("Cannot serialize document")?;
         let document = document.get();
 
         let mut zebo = self.zebo.write().await;
-        zebo
-            .add_documents(vec![(id, ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)))])
-            .context("Cannot add document to zebo")?;
+        zebo.add_documents(vec![(
+            id,
+            ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(document)),
+        )])
+        .context("Cannot add document to zebo")?;
 
         Ok(())
     }
@@ -98,15 +100,17 @@ impl DocumentStorage {
                 };
 
                 let doc = match ZeboDocument::from_bytes(data)
-                    .context("Cannot convert bytes to document") {
-                        Ok(doc) => doc,
-                        Err(e) => {
-                            error!(error = ?e, "Cannot convert bytes to document");
-                            continue;
-                        }
+                    .context("Cannot convert bytes to document")
+                {
+                    Ok(doc) => doc,
+                    Err(e) => {
+                        error!(error = ?e, "Cannot convert bytes to document");
+                        continue;
+                    }
                 };
                 let inner = RawValue::from_string(doc.1.to_string())
-                        .context("Cannot convert bytes to document").unwrap();
+                    .context("Cannot convert bytes to document")
+                    .unwrap();
                 let d = RawJSONDocument {
                     id: Some(doc.0.to_string()),
                     inner,
@@ -222,8 +226,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
         .collect::<Vec<_>>();
     files_in_dir.sort_by_key(|id| id.0);
 
-    let mut zebo = Zebo::try_new(data_dir.join("zebo"))
-        .context("Cannot create zebo")?;
+    let mut zebo = Zebo::try_new(data_dir.join("zebo")).context("Cannot create zebo")?;
 
     for doc_id in files_in_dir {
         let doc_path = data_dir.join(doc_id.0.to_string());
@@ -237,10 +240,11 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
         let doc_id_str = data.0.id.unwrap_or_default();
         let doc = data.0.inner.get();
 
-        zebo.add_documents(vec![
-            (doc_id, ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(doc))),
-        ]).unwrap();
-
+        zebo.add_documents(vec![(
+            doc_id,
+            ZeboDocument(Cow::Owned(doc_id_str), Cow::Borrowed(doc)),
+        )])
+        .unwrap();
     }
 
     Ok(zebo)
@@ -263,20 +267,16 @@ impl<'a> zebo::Document for ZeboDocument<'a> {
 impl ZeboDocument<'_> {
     fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
         let mut parts = bytes.split(|b| *b == b'\0');
-        let id = parts.next().ok_or_else(|| {
-            anyhow::anyhow!("Cannot split document bytes")
-        })?;
-        let data = parts.next().ok_or_else(|| {
-            anyhow::anyhow!("Cannot split document bytes")
-        })?;
+        let id = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Cannot split document bytes"))?;
+        let data = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Cannot split document bytes"))?;
 
         let id = String::from_utf8(id.to_vec()).context("Cannot convert id to string")?;
         let data = String::from_utf8(data.to_vec()).context("Cannot convert data to string")?;
 
-        Ok(ZeboDocument(
-            Cow::Owned(id),
-            Cow::Owned(data)
-        ))
+        Ok(ZeboDocument(Cow::Owned(id), Cow::Owned(data)))
     }
-
 }
