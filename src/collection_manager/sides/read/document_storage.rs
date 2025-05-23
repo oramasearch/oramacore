@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use serde::{de::Unexpected, Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -32,13 +31,9 @@ static PAGE_SIZE: u64 = 1024 * 1024 * 1024;
 #[derive(Debug)]
 struct CommittedDiskDocumentStorage {
     zebo: Arc<RwLock<Zebo<1_000_000, PAGE_SIZE, DocumentId>>>,
-    cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>>,
 }
 impl CommittedDiskDocumentStorage {
     async fn try_new(data_dir: PathBuf) -> Result<Self> {
-        let cache: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>> =
-            Default::default();
-
         let zebo_dir = data_dir.join("zebo");
         create_if_not_exists(&zebo_dir).context("Cannot create zebo directory")?;
 
@@ -55,23 +50,14 @@ impl CommittedDiskDocumentStorage {
 
         let zebo = Arc::new(RwLock::new(zebo));
 
-        Ok(Self { zebo, cache })
+        Ok(Self { zebo })
     }
 
     async fn get_documents_by_ids(
         &self,
         doc_ids: &[DocumentId],
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
-        let lock = self.cache.read().await;
-        let from_cache: HashMap<DocumentId, Arc<RawJSONDocument>> = doc_ids
-            .iter()
-            .filter_map(|id| lock.get(id).map(|d| (*id, d.clone())))
-            .collect();
-        drop(lock);
-
         trace!(doc_len=?doc_ids.len(), "Read document");
-
-        let result: Vec<Option<Arc<RawJSONDocument>>> = Vec::with_capacity(doc_ids.len());
 
         let zebo = self.zebo.read().await;
         let output = zebo
@@ -174,6 +160,8 @@ impl DocumentStorage {
         &self,
         mut doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
+        println!("get_documents_by_ids: {doc_ids:?}");
+
         let uncommitted_document_deletions = self.uncommitted_document_deletions.read().await;
         doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
 
@@ -204,6 +192,8 @@ impl DocumentStorage {
             }
         }
 
+        println!("got {:?}", result);
+
         Ok(result)
     }
 
@@ -216,24 +206,34 @@ impl DocumentStorage {
         // TODO: fix me
 
         let m = DOCUMENT_COMMIT_CALCULATION_TIME.create(Empty {});
+
         let mut lock = self.uncommitted.write().await;
-        let uncommitted: Vec<_> = lock.drain().collect();
-        drop(lock);
+        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
+
+        println!("Moving...");
+
+        let doc_to_delete: Vec<_> = uncommitted_document_deletions.drain().collect();
+
+        let mut uncommitted: Vec<_> = lock.drain().collect();
+        uncommitted.sort_by_key(|(doc_id, _)| *doc_id);
+
+        println!("Moving {uncommitted:?}");
 
         self.committed
             .add(uncommitted)
             .await
             .context("Cannot commit documents")?;
-        drop(m);
-
-        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
-        let doc_to_delete: Vec<_> = uncommitted_document_deletions.drain().collect();
-
         let mut zebo = self.committed.zebo.write().await;
+
+        println!("Deleting: {doc_to_delete:?}");
+
         zebo.remove_documents(doc_to_delete, false)
             .context("Cannot remove documents")?;
 
+        drop(zebo);
         drop(uncommitted_document_deletions);
+        drop(lock);
+        drop(m);
 
         info!("Documents committed");
 
@@ -242,89 +242,6 @@ impl DocumentStorage {
 
     pub fn load(&mut self) -> Result<()> {
         Ok(())
-    }
-}
-
-struct RawJSONDocumentWrapper(Arc<RawJSONDocument>);
-
-#[cfg(test)]
-impl PartialEq for RawJSONDocumentWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.id == other.0.id && self.0.inner.get() == other.0.inner.get()
-    }
-}
-impl Debug for RawJSONDocumentWrapper {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RawJSONDocumentWrapper")
-            .field(&self.0)
-            .finish()
-    }
-}
-
-impl Serialize for RawJSONDocumentWrapper {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        use serde::ser::SerializeTuple;
-        let mut tuple = serializer.serialize_tuple(2)?;
-        tuple.serialize_element(&self.0.id)?;
-        tuple.serialize_element(&self.0.inner.get())?;
-        tuple.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use core::result::Result;
-        use core::result::Result::*;
-        use serde::de::{Error, Visitor};
-
-        struct SerializableNumberVisitor;
-
-        impl<'de> Visitor<'de> for SerializableNumberVisitor {
-            type Value = RawJSONDocumentWrapper;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(
-                    formatter,
-                    "a tuple of size 2 consisting of a id string and the raw value"
-                )
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let id: Option<String> = seq.next_element()?;
-                let inner: Option<String> = seq.next_element()?;
-
-                let inner = match inner {
-                    None => return Err(A::Error::missing_field("inner")),
-                    Some(inner) => inner,
-                };
-
-                let inner = match serde_json::value::RawValue::from_string(inner) {
-                    Err(_) => {
-                        return Err(A::Error::invalid_value(
-                            Unexpected::Str("Invalid RawValue"),
-                            &"A valid RawValue",
-                        ))
-                    }
-                    Ok(inner) => inner,
-                };
-
-                Result::Ok(RawJSONDocumentWrapper(Arc::new(RawJSONDocument {
-                    id,
-                    inner,
-                })))
-            }
-        }
-
-        deserializer.deserialize_tuple(2, SerializableNumberVisitor)
     }
 }
 
@@ -354,7 +271,7 @@ pub async fn migrate_to_zebo(data_dir: &PathBuf) -> Result<Zebo<1_000_000, PAGE_
 
     for doc_id in files_in_dir {
         let doc_path = data_dir.join(doc_id.0.to_string());
-        let data: RawJSONDocumentWrapper = match read_file(doc_path).await {
+        let data: wrapper::RawJSONDocumentWrapper = match read_file(doc_path).await {
             Ok(data) => data,
             Err(e) => {
                 error!(error = ?e, "Cannot read document data");
@@ -435,24 +352,117 @@ impl ZeboDocument<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
+// This module should not be used anymore.
+// It is only used for migrating the documents to zebo.
+mod wrapper {
+    use std::{fmt::Debug, sync::Arc};
 
-    #[test]
-    fn test_document_storage_raw_json_document_wrapper_serialize_deserialize() {
-        let value = json!({
-            "id": "the-id",
-            "foo": "bar",
-        });
-        let raw_json_document: RawJSONDocument = value.try_into().unwrap();
-        assert_eq!(raw_json_document.id, Some("the-id".to_string()));
+    use serde::{de::Unexpected, Deserialize, Serialize};
 
-        let raw_json_document_wrapper = RawJSONDocumentWrapper(Arc::new(raw_json_document));
-        let serialized = serde_json::to_string(&raw_json_document_wrapper).unwrap();
-        let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
+    use crate::types::RawJSONDocument;
 
-        assert_eq!(raw_json_document_wrapper, deserialized);
+    pub struct RawJSONDocumentWrapper(pub Arc<RawJSONDocument>);
+
+    #[cfg(test)]
+    impl PartialEq for RawJSONDocumentWrapper {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.id == other.0.id && self.0.inner.get() == other.0.inner.get()
+        }
+    }
+    impl Debug for RawJSONDocumentWrapper {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("RawJSONDocumentWrapper")
+                .field(&self.0)
+                .finish()
+        }
+    }
+
+    impl Serialize for RawJSONDocumentWrapper {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::ser::Serializer,
+        {
+            use serde::ser::SerializeTuple;
+            let mut tuple = serializer.serialize_tuple(2)?;
+            tuple.serialize_element(&self.0.id)?;
+            tuple.serialize_element(&self.0.inner.get())?;
+            tuple.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for RawJSONDocumentWrapper {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            use core::result::Result;
+            use core::result::Result::*;
+            use serde::de::{Error, Visitor};
+
+            struct SerializableNumberVisitor;
+
+            impl<'de> Visitor<'de> for SerializableNumberVisitor {
+                type Value = RawJSONDocumentWrapper;
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    write!(
+                        formatter,
+                        "a tuple of size 2 consisting of a id string and the raw value"
+                    )
+                }
+
+                fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::SeqAccess<'de>,
+                {
+                    let id: Option<String> = seq.next_element()?;
+                    let inner: Option<String> = seq.next_element()?;
+
+                    let inner = match inner {
+                        None => return Err(A::Error::missing_field("inner")),
+                        Some(inner) => inner,
+                    };
+
+                    let inner = match serde_json::value::RawValue::from_string(inner) {
+                        Err(_) => {
+                            return Err(A::Error::invalid_value(
+                                Unexpected::Str("Invalid RawValue"),
+                                &"A valid RawValue",
+                            ))
+                        }
+                        Ok(inner) => inner,
+                    };
+
+                    Result::Ok(RawJSONDocumentWrapper(Arc::new(RawJSONDocument {
+                        id,
+                        inner,
+                    })))
+                }
+            }
+
+            deserializer.deserialize_tuple(2, SerializableNumberVisitor)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn test_document_storage_raw_json_document_wrapper_serialize_deserialize() {
+            let value = json!({
+                "id": "the-id",
+                "foo": "bar",
+            });
+            let raw_json_document: RawJSONDocument = value.try_into().unwrap();
+            assert_eq!(raw_json_document.id, Some("the-id".to_string()));
+
+            let raw_json_document_wrapper = RawJSONDocumentWrapper(Arc::new(raw_json_document));
+            let serialized = serde_json::to_string(&raw_json_document_wrapper).unwrap();
+            let deserialized: RawJSONDocumentWrapper = serde_json::from_str(&serialized).unwrap();
+
+            assert_eq!(raw_json_document_wrapper, deserialized);
+        }
     }
 }
