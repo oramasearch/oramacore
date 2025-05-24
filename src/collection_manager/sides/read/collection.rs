@@ -298,18 +298,20 @@ impl CollectionReader {
         &self,
         search_params: &NLPSearchRequest,
         collection_id: CollectionId,
-    ) -> Result<Vec<String>> {
+        collection_stats: CollectionStats,
+    ) -> Result<String> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
 
-        let advanced_autoquery = AdvancedAutoQuery::new(collection_id, llm_service, llm_config);
+        let mut advanced_autoquery =
+            AdvancedAutoQuery::new(collection_id, collection_stats, llm_service, llm_config);
         let conversation = vec![InteractionMessage {
             role: Role::User,
             content: query,
         }];
 
-        let analyze_result = advanced_autoquery.analyze_input(conversation).await?;
+        let analyze_result = advanced_autoquery.run(conversation).await?;
 
         return Ok(analyze_result);
     }

@@ -417,7 +417,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<String>> {
+    ) -> Result<String> {
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -425,7 +425,10 @@ impl ReadSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
 
-        let result = collection.nlp_search(&search_params, collection_id).await?;
+        let collection_stats = self.collection_stats(read_api_key, collection_id).await?;
+        let result = collection
+            .nlp_search(&search_params, collection_id, collection_stats)
+            .await?;
 
         Ok(result)
     }

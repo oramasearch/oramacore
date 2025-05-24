@@ -944,7 +944,6 @@ impl Index {
         );
         fields_stats.extend(uncommitted_fields.string_fields.iter().map(|(k, v)| {
             let path = v.field_path().join(".");
-            dbg!(v);
             IndexFieldStats {
                 field_id: *k,
                 field_path: path,
