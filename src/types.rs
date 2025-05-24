@@ -1085,6 +1085,12 @@ impl WhereFilter {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NLPSearchRequest {
+    pub query: String,
+    pub llm_config: Option<InteractionLLMConfig>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SearchParams {
     #[serde(flatten)]
@@ -1257,6 +1263,13 @@ impl InteractionMessage {
                 .unwrap()
                 .into(),
         }
+    }
+
+    pub fn into_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "role": self.role,
+            "content": self.content,
+        })
     }
 }
 

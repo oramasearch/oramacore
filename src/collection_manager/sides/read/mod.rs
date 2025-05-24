@@ -34,8 +34,8 @@ use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, InteractionLLMConfig, InteractionMessage, SearchMode, SearchModeResult, SearchParams,
-    SearchResult, SearchResultHit, TokenScore,
+    ApiKey, InteractionLLMConfig, InteractionMessage, NLPSearchRequest, SearchMode,
+    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
@@ -410,6 +410,27 @@ impl ReadSide {
             hits,
             facets,
         })
+    }
+
+    pub async fn nlp_search(
+        &self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        search_params: NLPSearchRequest,
+    ) -> Result<String> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
+        let collection_stats = self.collection_stats(read_api_key, collection_id).await?;
+        let result = collection
+            .nlp_search(&search_params, collection_id, collection_stats)
+            .await?;
+
+        Ok(result)
     }
 
     // This is wrong. We should not expose the ai service to the read side.

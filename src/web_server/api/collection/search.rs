@@ -13,13 +13,14 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::sides::ReadSide,
-    types::{ApiKey, CollectionId, SearchParams},
+    types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams},
     web_server::api::util::print_error,
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(search())
+        .add(nlp_search())
         .add(stats())
         .with_state(read_side)
 }
@@ -44,6 +45,35 @@ async fn search(
     let read_api_key = query.api_key;
 
     let output = read_side.search(read_api_key, collection_id, json).await;
+
+    match output {
+        Ok(data) => Ok((StatusCode::OK, Json(data))),
+        Err(e) => {
+            print_error(&e, "Error searching collection");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "GET",
+    path = "/v1/collections/{collection_id}/nlp_search",
+    description = "Advanced NLP search endpoint powered by AI"
+)]
+async fn nlp_search(
+    collection_id: CollectionId,
+    read_side: State<Arc<ReadSide>>,
+    Query(query): Query<SearchQueryParams>,
+    Json(json): Json<NLPSearchRequest>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    let read_api_key = query.api_key;
+
+    let output = read_side
+        .nlp_search(read_api_key, collection_id, json)
+        .await;
 
     match output {
         Ok(data) => Ok((StatusCode::OK, Json(data))),
