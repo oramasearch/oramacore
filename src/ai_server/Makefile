@@ -1,6 +1,9 @@
 proto:
 	python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. service.proto
 
+prepare:
+	python -m spacy download en_core_web_sm
+
 test: proto
 	PYTHONPATH=${PWD} pytest tests/test_grpc_services.py -v
 
