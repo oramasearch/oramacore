@@ -52,12 +52,12 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
         result = self.search_intent_detector.process_search_query(query, None if autodetect_language else language)
 
         return NLPQueryTriggerResponseProto(
-            should_search=result.get("should_search"),
-            searchable_content=result.get("searchable_content"),
-            detected_language=result.get("detected_language"),
-            original_text=result.get("original_text"),
-            processing_time_ms=result.get("processing_time_ms"),
-            model_used=result.get("model_used"),
+            should_search=result.get("should_search", False),
+            searchable_content=result.get("searchable_content", ""),
+            detected_language=result.get("detected_language", ""),
+            original_text=result.get("original_text", ""),
+            processing_time_ms=result.get("processing_time_ms", 0.0),
+            model_used=result.get("model_used", ""),
         )
 
 
