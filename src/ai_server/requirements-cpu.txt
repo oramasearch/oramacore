@@ -28,129 +28,74 @@ einops==0.8.0
 # Core spaCy
 spacy==3.8.7
 
-# English Models
-# https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# English Model
 https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl
 
-# German Models
-# https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl
+# German Model
 https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/de_core_news_lg-3.8.0/de_core_news_lg-3.8.0-py3-none-any.whl
 
-# Spanish Models  
-# https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl
+# Spanish Model
 https://github.com/explosion/spacy-models/releases/download/es_core_news_md-3.8.0/es_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/es_core_news_lg-3.8.0/es_core_news_lg-3.8.0-py3-none-any.whl
 
-# French Models
-# https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0-py3-none-any.whl
+# French Model
 https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.8.0/fr_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/fr_core_news_lg-3.8.0/fr_core_news_lg-3.8.0-py3-none-any.whl
 
-# Italian Models
-# https://github.com/explosion/spacy-models/releases/download/it_core_news_sm-3.8.0/it_core_news_sm-3.8.0-py3-none-any.whl
+# Italian Model
 https://github.com/explosion/spacy-models/releases/download/it_core_news_md-3.8.0/it_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/it_core_news_lg-3.8.0/it_core_news_lg-3.8.0-py3-none-any.whl
 
-# Portuguese Models
-# https://github.com/explosion/spacy-models/releases/download/pt_core_news_sm-3.8.0/pt_core_news_sm-3.8.0-py3-none-any.whl
+# Portuguese Model
 https://github.com/explosion/spacy-models/releases/download/pt_core_news_md-3.8.0/pt_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/pt_core_news_lg-3.8.0/pt_core_news_lg-3.8.0-py3-none-any.whl
 
-# Dutch Models
-# https://github.com/explosion/spacy-models/releases/download/nl_core_news_sm-3.8.0/nl_core_news_sm-3.8.0-py3-none-any.whl
+# Dutch Model
 https://github.com/explosion/spacy-models/releases/download/nl_core_news_md-3.8.0/nl_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/nl_core_news_lg-3.8.0/nl_core_news_lg-3.8.0-py3-none-any.whl
 
-# Russian Models
-# https://github.com/explosion/spacy-models/releases/download/ru_core_news_sm-3.8.0/ru_core_news_sm-3.8.0-py3-none-any.whl
+# Russian Model
 https://github.com/explosion/spacy-models/releases/download/ru_core_news_md-3.8.0/ru_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/ru_core_news_lg-3.8.0/ru_core_news_lg-3.8.0-py3-none-any.whl
 
-# Chinese Models
-# https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-3.8.0/zh_core_web_sm-3.8.0-py3-none-any.whl
+# Chinese Model
 https://github.com/explosion/spacy-models/releases/download/zh_core_web_md-3.8.0/zh_core_web_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/zh_core_web_lg-3.8.0/zh_core_web_lg-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/zh_core_web_trf-3.8.0/zh_core_web_trf-3.8.0-py3-none-any.whl
 
-# Japanese Models
-# https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
+# Japanese Model
 https://github.com/explosion/spacy-models/releases/download/ja_core_news_md-3.8.0/ja_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/ja_core_news_lg-3.8.0/ja_core_news_lg-3.8.0-py3-none-any.whl
 
 # Korean Models
-# https://github.com/explosion/spacy-models/releases/download/ko_core_news_sm-3.8.0/ko_core_news_sm-3.8.0-py3-none-any.whl
 https://github.com/explosion/spacy-models/releases/download/ko_core_news_md-3.8.0/ko_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/ko_core_news_lg-3.8.0/ko_core_news_lg-3.8.0-py3-none-any.whl
 
-# Danish Models
-# https://github.com/explosion/spacy-models/releases/download/da_core_news_sm-3.8.0/da_core_news_sm-3.8.0-py3-none-any.whl
+# Danish Model
 https://github.com/explosion/spacy-models/releases/download/da_core_news_md-3.8.0/da_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/da_core_news_lg-3.8.0/da_core_news_lg-3.8.0-py3-none-any.whl
 
-# Swedish Models
-# https://github.com/explosion/spacy-models/releases/download/sv_core_news_sm-3.8.0/sv_core_news_sm-3.8.0-py3-none-any.whl
+# Swedish Model
 https://github.com/explosion/spacy-models/releases/download/sv_core_news_md-3.8.0/sv_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/sv_core_news_lg-3.8.0/sv_core_news_lg-3.8.0-py3-none-any.whl
 
-# Norwegian Models (Bokmål)
-# https://github.com/explosion/spacy-models/releases/download/nb_core_news_sm-3.8.0/nb_core_news_sm-3.8.0-py3-none-any.whl
+# Norwegian Model (Bokmål)
 https://github.com/explosion/spacy-models/releases/download/nb_core_news_md-3.8.0/nb_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/nb_core_news_lg-3.8.0/nb_core_news_lg-3.8.0-py3-none-any.whl
 
-# Finnish Models
-# https://github.com/explosion/spacy-models/releases/download/fi_core_news_sm-3.8.0/fi_core_news_sm-3.8.0-py3-none-any.whl
+# Finnish Model
 https://github.com/explosion/spacy-models/releases/download/fi_core_news_md-3.8.0/fi_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/fi_core_news_lg-3.8.0/fi_core_news_lg-3.8.0-py3-none-any.whl
 
-# Polish Models
-# https://github.com/explosion/spacy-models/releases/download/pl_core_news_sm-3.8.0/pl_core_news_sm-3.8.0-py3-none-any.whl
+# Polish Model
 https://github.com/explosion/spacy-models/releases/download/pl_core_news_md-3.8.0/pl_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/pl_core_news_lg-3.8.0/pl_core_news_lg-3.8.0-py3-none-any.whl
 
-# Romanian Models
-# https://github.com/explosion/spacy-models/releases/download/ro_core_news_sm-3.8.0/ro_core_news_sm-3.8.0-py3-none-any.whl
+# Romanian Model
 https://github.com/explosion/spacy-models/releases/download/ro_core_news_md-3.8.0/ro_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/ro_core_news_lg-3.8.0/ro_core_news_lg-3.8.0-py3-none-any.whl
 
-# Greek Models
-# https://github.com/explosion/spacy-models/releases/download/el_core_news_sm-3.8.0/el_core_news_sm-3.8.0-py3-none-any.whl
+# Greek Model
 https://github.com/explosion/spacy-models/releases/download/el_core_news_md-3.8.0/el_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/el_core_news_lg-3.8.0/el_core_news_lg-3.8.0-py3-none-any.whl
 
-# Croatian Models
-# https://github.com/explosion/spacy-models/releases/download/hr_core_news_sm-3.8.0/hr_core_news_sm-3.8.0-py3-none-any.whl
+# Croatian Model
 https://github.com/explosion/spacy-models/releases/download/hr_core_news_md-3.8.0/hr_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/hr_core_news_lg-3.8.0/hr_core_news_lg-3.8.0-py3-none-any.whl
 
-# Slovenian Models
-# https://github.com/explosion/spacy-models/releases/download/sl_core_news_sm-3.8.0/sl_core_news_sm-3.8.0-py3-none-any.whl
+# Slovenian Model
 https://github.com/explosion/spacy-models/releases/download/sl_core_news_md-3.8.0/sl_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/sl_core_news_lg-3.8.0/sl_core_news_lg-3.8.0-py3-none-any.whl
 
-# Ukrainian Models
-# https://github.com/explosion/spacy-models/releases/download/uk_core_news_sm-3.8.0/uk_core_news_sm-3.8.0-py3-none-any.whl
+# Ukrainian Model
 https://github.com/explosion/spacy-models/releases/download/uk_core_news_md-3.8.0/uk_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/uk_core_news_lg-3.8.0/uk_core_news_lg-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/uk_core_news_trf-3.8.0/uk_core_news_trf-3.8.0-py3-none-any.whl
 
-# Lithuanian Models
-# https://github.com/explosion/spacy-models/releases/download/lt_core_news_sm-3.8.0/lt_core_news_sm-3.8.0-py3-none-any.whl
+# Lithuanian Model
 https://github.com/explosion/spacy-models/releases/download/lt_core_news_md-3.8.0/lt_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/lt_core_news_lg-3.8.0/lt_core_news_lg-3.8.0-py3-none-any.whl
 
-# Macedonian Models
-# https://github.com/explosion/spacy-models/releases/download/mk_core_news_sm-3.8.0/mk_core_news_sm-3.8.0-py3-none-any.whl
+# Macedonian Model
 https://github.com/explosion/spacy-models/releases/download/mk_core_news_md-3.8.0/mk_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/mk_core_news_lg-3.8.0/mk_core_news_lg-3.8.0-py3-none-any.whl
 
-# Catalan Models
-# https://github.com/explosion/spacy-models/releases/download/ca_core_news_sm-3.8.0/ca_core_news_sm-3.8.0-py3-none-any.whl
+# Catalan Model
 https://github.com/explosion/spacy-models/releases/download/ca_core_news_md-3.8.0/ca_core_news_md-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/ca_core_news_lg-3.8.0/ca_core_news_lg-3.8.0-py3-none-any.whl
-
-# Multi-language Models
-# https://github.com/explosion/spacy-models/releases/download/xx_ent_wiki_sm-3.8.0/xx_ent_wiki_sm-3.8.0-py3-none-any.whl
-# https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
