@@ -5,6 +5,7 @@ package orama_ai_service;
 service LLMService {
     rpc CheckHealth (HealthCheckRequest) returns (HealthCheckResponse);
     rpc GetEmbedding (EmbeddingRequest) returns (EmbeddingResponse);
+    rpc NLPQueryTrigger (NLPQueryTriggerRequest) returns (NLPQueryTriggerResponse);
 }
 
 enum OramaModel {
@@ -49,4 +50,16 @@ message HealthCheckRequest {
 // Response message for health check
 message HealthCheckResponse {
     string status = 1;           // Service status
+}
+
+// Request message for NLP query trigger
+message NLPQueryTriggerRequest {
+    string language = 1;         // The language of the query
+    string query = 2;            // The NLP query string
+}
+
+// Response message for NLP query trigger
+message NLPQueryTriggerResponse {
+    bool should_search = 1;        // Indicates if a search should be triggered
+    bool language = 2;             // Indicates the automatically detected language, if needed
 }

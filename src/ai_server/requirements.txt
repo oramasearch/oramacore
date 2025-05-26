@@ -31,6 +31,10 @@ onnxruntime-gpu==1.20.1 --extra-index-url https://aiinfra.pkgs.visualstudio.com/
 accelerate==1.2.1
 einops==0.8.0
 bitsandbytes==0.45.0
+
+langdetect==1.0.9
+polyglot==16.7.4
+
 # Core spaCy
 spacy==3.8.7
 
