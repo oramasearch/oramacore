@@ -1,0 +1,19 @@
+{
+	"root": true,
+	"title": "Orama JS",
+	"description": "Orama for your browser",
+	"icon": "Hexagon",
+	"pages": [
+		"---Getting Started---",
+		"index",
+		"usage",
+		"search",
+		"answer-engine",
+		"---Supported Languages---",
+		"...supported-languages",
+		"---Advanced Orama---",
+		"internals",
+		"plugins",
+		"text-analysis"
+	]
+}

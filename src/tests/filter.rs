@@ -217,6 +217,8 @@ async fn test_filter_bool() {
         .await
         .unwrap();
 
+    println!("output: {:#?}", output);
+
     assert_eq!(output.count, 50);
     assert_eq!(output.hits.len(), 10);
     for hit in output.hits.iter() {
