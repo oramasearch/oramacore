@@ -60,6 +60,10 @@ message NLPQueryTriggerRequest {
 
 // Response message for NLP query trigger
 message NLPQueryTriggerResponse {
-    bool should_search = 1;        // Indicates if a search should be triggered
-    bool language = 2;             // Indicates the automatically detected language, if needed
+    bool should_search = 1;
+    string searchable_content = 2;
+    string detected_language = 3;
+    string original_text = 4;
+    float processing_time_ms = 5;
+    string model_used = 6;
 }

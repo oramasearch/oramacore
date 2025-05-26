@@ -14,14 +14,17 @@ from service_pb2 import (
     Embedding as EmbeddingProto,
     EmbeddingResponse as EmbeddingResponseProto,
     HealthCheckResponse,
+    NLPQueryTriggerRequest as NLPQueryTriggerRequestProto,
+    NLPQueryTriggerResponse as NLPQueryTriggerResponseProto,
 )
 from src.utils import OramaAIConfig
 
 
 class LLMService(service_pb2_grpc.LLMServiceServicer):
-    def __init__(self, embeddings_service, config: OramaAIConfig):
+    def __init__(self, embeddings_service, search_intent_detector, config: OramaAIConfig):
         self.config = config
         self.embeddings_service = embeddings_service
+        self.search_intent_detector = search_intent_detector
 
     def CheckHealth(self, request, context):
         return HealthCheckResponse(status="OK")
@@ -42,13 +45,28 @@ class LLMService(service_pb2_grpc.LLMServiceServicer):
             context.set_details(f"Error calculating embeddings: {str(e)}")
             return EmbeddingResponseProto()
 
+    def NLPQueryTrigger(self, request, context):
+        language = request.language
+        query = request.query
+        autodetect_language = language == "auto"
+        result = self.search_intent_detector.process_search_query(query, None if autodetect_language else language)
+
+        return NLPQueryTriggerResponseProto(
+            should_search=result.get("should_search"),
+            searchable_content=result.get("searchable_content"),
+            detected_language=result.get("detected_language"),
+            original_text=result.get("original_text"),
+            processing_time_ms=result.get("processing_time_ms"),
+            model_used=result.get("model_used"),
+        )
+
 
 class AuthInterceptor(grpc.ServerInterceptor):
     def intercept_service(self, continuation, handler_call_details):
 
         # Health check and embeddings won't require authentication.
         # This server should never be exposed to the public and it's meant for internal use only.
-        allowed_methods = ["CheckHealth", "GetEmbedding", "ServerReflection"]
+        allowed_methods = ["CheckHealth", "GetEmbedding", "ServerReflection", "NLPQueryTrigger"]
         if any(x in handler_call_details.method for x in allowed_methods):
             return continuation(handler_call_details)
 
@@ -62,13 +80,13 @@ class AuthInterceptor(grpc.ServerInterceptor):
         return continuation(handler_call_details)
 
 
-def serve(config, embeddings_service):
+def serve(config, embeddings_service, search_intent_detector):
     logger = logging.getLogger(__name__)
     logger.info(f"Starting gRPC server on port {config.port}")
     server = grpc.server(ThreadPoolExecutor(max_workers=10), interceptors=[AuthInterceptor()])
     logger.info("gRPC server created")
 
-    llm_service = LLMService(embeddings_service, config)
+    llm_service = LLMService(embeddings_service, search_intent_detector, config)
     service_pb2_grpc.add_LLMServiceServicer_to_server(llm_service, server)
 
     SERVICE_NAMES = (

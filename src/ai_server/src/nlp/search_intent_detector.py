@@ -4,7 +4,7 @@ import time
 import logging
 from typing import Dict, Optional, Tuple
 from collections import OrderedDict
-from src.nlp.stop_words import get_stop_words
+from .stop_words import get_stop_words
 
 try:
     from langdetect import detect_langs, DetectorFactory
@@ -415,16 +415,15 @@ class LazySpacyModelManager:
             self.logger.info("Cleared all cached models")
 
 
-# Enhanced Search Intent Detector with Lazy Loading and Auto Language Detection
-class AutoDetectSearchIntentDetector:
+class SearchIntentDetector:
     """
     Search intent detector with automatic language detection and lazy model loading.
     """
 
     def __init__(
         self,
-        max_models: int = 3,
-        eviction_time: int = 300,
+        max_models: int = 5,
+        eviction_time: int = 600,
         default_lang: str = "en",
         detection_method: str = "auto",
         confidence_threshold: float = 0.8,

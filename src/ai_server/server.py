@@ -5,6 +5,7 @@ import logging
 from src.grpc.server import serve
 from src.utils import OramaAIConfig
 from src.service.embedding import EmbeddingService
+from src.nlp.search_intent_detector import SearchIntentDetector
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -25,10 +26,11 @@ if __name__ == "__main__":
 
     logger.info("Initializing embedding service...")
     embeddings_service = EmbeddingService(config)
+    search_intent_detector = SearchIntentDetector()
 
     try:
         logger.info(f"Starting gRPC server on port {config.port}...")
-        serve(config, embeddings_service.embeddings_service)
+        serve(config, embeddings_service.embeddings_service, search_intent_detector)
     except KeyboardInterrupt:
         logger.info("\nShutting down gracefully...")
         sys.exit(0)
