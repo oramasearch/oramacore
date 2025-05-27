@@ -254,6 +254,16 @@ impl AdvancedAutoQuery {
                     match serde_json::from_str::<DeserializedStat>(&field_stat) {
                         Ok(deserialized_stat) => {
                             let total_docs = deserialized_stat.get_document_count();
+                            let is_unfiltrable_string = matches!(
+                                deserialized_stat,
+                                DeserializedStat::UncommittedString { .. }
+                                    | DeserializedStat::CommittedString { .. }
+                            );
+
+                            if is_unfiltrable_string {
+                                // Skip unfiltrable strings
+                                continue;
+                            }
 
                             if total_docs > 0 {
                                 if seen.contains_key(&field_path) {
