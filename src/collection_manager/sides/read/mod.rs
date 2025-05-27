@@ -103,6 +103,7 @@ impl ReadSide {
         let mut document_storage = DocumentStorage::try_new(DocumentStorageConfig {
             data_dir: config.config.data_dir.join("docs"),
         })
+        .await
         .context("Cannot create document storage")?;
 
         let insert_batch_commit_size = config.config.insert_batch_commit_size;
