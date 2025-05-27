@@ -159,6 +159,18 @@ impl TryFrom<Value> for Document {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub enum UpdateStrategy {
+    #[serde(rename = "merge")]
+    Merge,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDocumentRequest {
+    pub strategy: UpdateStrategy,
+    pub documents: DocumentList,
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub enum ScalarType {
     String,
@@ -1378,6 +1390,13 @@ pub struct UpdateTriggerParams {
 pub struct InsertDocumentsResult {
     pub inserted: usize,
     pub replaced: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDocumentsResult {
+    pub inserted: usize,
+    pub updated: usize,
     pub failed: usize,
 }
 

@@ -2,6 +2,7 @@ mod doc_id_storage;
 mod fields;
 
 use std::{
+    ops::Deref,
     path::PathBuf,
     sync::{atomic::AtomicU16, Arc},
 };
@@ -15,7 +16,7 @@ use fields::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, instrument, trace};
 
 use crate::{
@@ -331,6 +332,12 @@ impl Index {
             .context("Cannot process document")?;
 
         Ok(())
+    }
+
+    pub async fn get_document_id_storage<'index>(&'index self) -> DocIdStorageReadLock<'index> {
+        let doc_id_storage = self.doc_id_storage.read().await;
+
+        DocIdStorageReadLock { doc_id_storage }
     }
 
     pub async fn process_new_document(
@@ -855,4 +862,16 @@ struct IndexDumpV2 {
     created_at: DateTime<Utc>,
 
     runtime_index_id: Option<IndexId>,
+}
+
+pub struct DocIdStorageReadLock<'index> {
+    doc_id_storage: RwLockReadGuard<'index, DocIdStorage>,
+}
+
+impl Deref for DocIdStorageReadLock<'_> {
+    type Target = DocIdStorage;
+
+    fn deref(&self) -> &Self::Target {
+        &self.doc_id_storage
+    }
 }
