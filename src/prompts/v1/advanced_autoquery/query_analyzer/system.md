@@ -54,6 +54,9 @@ Return a JSON array of search query strings:
 ]
 ```
 
+**Reasoning:**
+The user's request is straightforward, focusing on a specific product category (shoes), a price limit ($150), and a use case (comfortable for playing basketball). The query captures all these details clearly.
+
 ### Example 2: Technical Support with Context
 
 **Input:**
@@ -80,6 +83,9 @@ Return a JSON array of search query strings:
   "Checking the compatible version of Docker for Orama on Windows with WSL"
 ]
 ```
+
+**Reasoning:**
+The user's request involves a specific technical issue related to software compatibility. The query captures the need to find the right Docker version for Orama, including the user's operating system context (Windows with WSL).
 
 ### Example 3: Order Status with Multiple Details
 
@@ -124,6 +130,9 @@ Return a JSON array of search query strings:
 ]
 ```
 
+**Reasoning:**
+The user's request involves checking the status of an order with multiple details: order ID, date, customer ID, and shipment addresses. The query captures all these elements to ensure a comprehensive search for the order status.
+
 ### Example 4: Multi-Aspect Technical Issue
 
 **Input:**
@@ -159,6 +168,32 @@ Return a JSON array of search query strings:
   "Reading troubleshooting guides for startup crashes on Dell XPS 13 Windows systems"
 ]
 ```
+
+**Reasoning:**
+The user's request involves a technical issue with a specific laptop model (Dell XPS 13) and operating system (Windows). The queries are designed to search for known hardware issues and troubleshooting guides related to startup crashes, ensuring comprehensive coverage of the user's problem.
+
+### Example 5: Multiple Distinct Queries
+
+**Input:**
+```json
+[
+  {
+    "role": "user",
+    "content": "I want to cook a healthy dinner tonight. I have chicken, broccoli, and quinoa at home. Can you suggest some recipes? Also, I need to find a good dessert recipe that uses chocolate but is low in sugar."
+  }
+]
+```
+
+**Output:**
+```json
+[
+  "Finding healthy dinner recipes using chicken, broccoli, and quinoa",
+  "Searching for low-sugar chocolate dessert recipes"
+]
+```
+
+**Reasoning:**
+The user's request has two distinct parts: one for a healthy dinner recipe using specific ingredients and another for a low-sugar chocolate dessert recipe. The queries are separated to address each aspect clearly.
 
 ## Edge Cases
 

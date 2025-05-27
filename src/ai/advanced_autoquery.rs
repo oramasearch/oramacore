@@ -117,6 +117,12 @@ impl DeserializedStat {
     }
 }
 
+#[derive(Serialize, Debug)]
+pub struct QueryAndProperties {
+    pub query: String,
+    pub properties: Value,
+}
+
 pub enum AdvancedAutoQuerySteps {
     Init,
     AnalyzeInput,
@@ -157,18 +163,22 @@ impl AdvancedAutoQuery {
         }
     }
 
-    pub async fn run(&mut self, conversation: Vec<InteractionMessage>) -> Result<String> {
+    pub async fn run(&mut self, conversation: Vec<InteractionMessage>) -> Result<Value> {
         let conversation_to_json = serde_json::to_string(&conversation)?;
         let optimized_queries = self.analyze_input(conversation_to_json).await?;
         let selected_properties = self.select_properties(optimized_queries.clone()).await?;
 
-        let zipped: Vec<(&String, &Value)> = optimized_queries
-            .iter()
-            .zip(selected_properties.iter())
+        let queries_and_properties: Vec<QueryAndProperties> = optimized_queries
+            .into_iter()
+            .zip(selected_properties)
+            .map(|(query, properties)| QueryAndProperties {
+                query,
+                properties: serde_json::to_value(properties).unwrap_or(Value::Null), // @todo: check if "null" is acceptable here
+            })
             .collect();
 
-        let to_json = serde_json::to_string(&zipped)?;
-        Ok(to_json)
+        let result = serde_json::to_value(&queries_and_properties)?;
+        Ok(result)
     }
 
     pub async fn analyze_input(&self, conversation_as_json: String) -> Result<Vec<String>> {

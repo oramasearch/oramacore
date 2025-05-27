@@ -9,6 +9,7 @@ pub use index::*;
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -418,7 +419,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<String> {
+    ) -> Result<Value> {
         let collection = self
             .collections
             .get_collection(collection_id)

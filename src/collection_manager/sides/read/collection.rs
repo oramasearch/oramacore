@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
@@ -299,7 +300,7 @@ impl CollectionReader {
         search_params: &NLPSearchRequest,
         collection_id: CollectionId,
         collection_stats: CollectionStats,
-    ) -> Result<String> {
+    ) -> Result<Value> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
