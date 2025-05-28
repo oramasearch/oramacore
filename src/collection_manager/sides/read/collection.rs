@@ -19,7 +19,10 @@ use crate::{
     collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
-    types::{ApiKey, CollectionId, DocumentId, FacetResult, FieldId, IndexId, SearchParams},
+    types::{
+        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
+        SearchParams,
+    },
 };
 
 use super::{
@@ -508,14 +511,14 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub async fn stats(&self) -> Result<CollectionStats> {
+    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats> {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         for i in indexes_lock.iter() {
             if i.is_deleted() {
                 continue;
             }
-            indexes_stats.push(i.stats(false).await?);
+            indexes_stats.push(i.stats(false, req.with_keys).await?);
         }
         drop(indexes_lock);
 
@@ -524,7 +527,7 @@ impl CollectionReader {
             if i.is_deleted() {
                 continue;
             }
-            indexes_stats.push(i.stats(true).await?);
+            indexes_stats.push(i.stats(true, req.with_keys).await?);
         }
 
         Ok(CollectionStats {
@@ -662,7 +665,7 @@ impl DerefMut for IndexWriteLock<'_> {
     }
 }
 
-fn get_index_in_vector(vec: &Vec<Index>, wanted: IndexId) -> Option<usize> {
+fn get_index_in_vector(vec: &[Index], wanted: IndexId) -> Option<usize> {
     // fast path
     for (i, index) in vec.iter().enumerate() {
         if index.is_deleted() {

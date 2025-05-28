@@ -61,12 +61,18 @@ impl UncommittedStringFilterField {
             .map(|(k, doc_ids)| (k.clone(), doc_ids.clone()))
     }
 
-    pub fn stats(&self) -> UncommittedStringFilterFieldStats {
+    pub fn stats(&self, with_keys: bool) -> UncommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
+        let keys = if with_keys {
+            Some(self.inner.keys().cloned().collect())
+        } else {
+            None
+        };
 
         UncommittedStringFilterFieldStats {
             key_count: self.inner.len(),
             document_count: doc_count,
+            keys,
         }
     }
 }
@@ -75,4 +81,5 @@ impl UncommittedStringFilterField {
 pub struct UncommittedStringFilterFieldStats {
     pub key_count: usize,
     pub document_count: usize,
+    pub keys: Option<Vec<String>>,
 }

@@ -177,8 +177,7 @@ impl DocumentStorage {
         trace!("Get from uncommitted documents done");
 
         let mut result = Vec::with_capacity(doc_ids.len());
-        for i in 0..doc_ids.len() {
-            let doc_id = doc_ids[i];
+        for (i, doc_id) in doc_ids.iter().enumerate() {
             let committed = committed.get(i).cloned().flatten();
             let uncommitted = uncommitted.get(i).cloned().flatten();
 
@@ -191,8 +190,6 @@ impl DocumentStorage {
                 result.push(committed);
             }
         }
-
-        println!("got {:?}", result);
 
         Ok(result)
     }

@@ -39,7 +39,7 @@ impl<E: node::FloatElement> Kmeans<E> {
             (0..self._data_range_end - self._data_range_begin)
                 .for_each(|i| z[i] -= self._residual[i + self._data_range_begin]);
         }
-        return metric(&z, y, self.mt).unwrap();
+        metric(&z, y, self.mt).unwrap()
     }
 
     pub fn set_residual(&mut self, residual: Vec<E>) {
@@ -150,7 +150,7 @@ impl<E: node::FloatElement> Kmeans<E> {
     pub fn split_center(
         &mut self,
         batch_size: usize,
-        n_assigned_per_center: &mut Vec<usize>,
+        n_assigned_per_center: &mut [usize],
     ) -> Result<(), &'static str> {
         let dimension = self._dimension;
         let n_center = self._n_center;
@@ -259,7 +259,7 @@ pub fn general_kmeans<E: node::FloatElement, T: node::IdxType>(
             .zip(cluster_count)
             .for_each(|(features, cnt)| {
                 features
-                    .lock()
+                    .get_mut()
                     .unwrap()
                     .iter_mut()
                     .for_each(|f| *f /= E::from_usize(*cnt.lock().unwrap()).unwrap())
@@ -276,7 +276,7 @@ pub fn general_kmeans<E: node::FloatElement, T: node::IdxType>(
         .map(|mean| {
             let mut mean_idx = 0;
             let mut mean_distance = E::max_value();
-            nodes.iter().zip(0..nodes.len()).for_each(|(node, i)| {
+            nodes.iter().enumerate().for_each(|(i, node)| {
                 let distance = node.metric(mean, mt).unwrap();
                 if distance < mean_distance {
                     mean_idx = i;

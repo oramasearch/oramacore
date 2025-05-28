@@ -13,7 +13,7 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::sides::ReadSide,
-    types::{ApiKey, CollectionId, SearchParams},
+    types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
     web_server::api::util::print_error,
 };
 
@@ -69,8 +69,14 @@ async fn stats(
 ) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
     let read_api_key = query.api_key;
 
+    // We don't want to expose the variants on HTTP API, so we force `with_keys: false`
+    // Anyway, if requested, we could add it on this enpoint in the future.
     match read_side
-        .collection_stats(read_api_key, collection_id)
+        .collection_stats(
+            read_api_key,
+            collection_id,
+            CollectionStatsRequest { with_keys: false },
+        )
         .await
     {
         Ok(data) => Ok(Json(data)),
