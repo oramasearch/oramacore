@@ -204,8 +204,6 @@ impl AdvancedAutoQuery {
         let optimized_queries = self.analyze_input(conversation_to_json).await?;
         let selected_properties = self.select_properties(optimized_queries.clone()).await?;
 
-        dbg!(&self.collection_stats);
-
         let queries_and_properties: Vec<QueryAndProperties> = optimized_queries
             .into_iter()
             .zip(selected_properties)
@@ -216,8 +214,11 @@ impl AdvancedAutoQuery {
             })
             .collect();
 
-        self.get_search_query(queries_and_properties.clone())
+        let x = self
+            .get_search_query(queries_and_properties.clone())
             .await?;
+
+        dbg!(&x);
 
         Ok(queries_and_properties)
     }
@@ -311,8 +312,11 @@ impl AdvancedAutoQuery {
     async fn get_search_query(
         &mut self,
         query_plan: Vec<QueryAndProperties>,
-    ) -> Result<SearchParams> {
-        let properties_by_collection = self.get_properties_values_to_retrieve(query_plan);
+    ) -> Result<Vec<QueryAndProperties>> {
+        let properties_by_collection = self.get_properties_values_to_retrieve(query_plan.clone());
+
+        // Collect all filter properties from all collections
+        let mut all_filter_properties: HashMap<String, Vec<String>> = HashMap::new();
 
         for (collection_name, properties) in &properties_by_collection {
             let index_stats = self
@@ -334,8 +338,6 @@ impl AdvancedAutoQuery {
                 .collect::<Vec<_>>();
 
             // Extract keys for each property
-            let mut field_keys: HashMap<String, Vec<String>> = HashMap::new();
-
             for property in properties {
                 let mut keys_for_property: Vec<String> = Vec::new();
 
@@ -378,26 +380,30 @@ impl AdvancedAutoQuery {
                 keys_for_property.dedup();
 
                 if !keys_for_property.is_empty() {
-                    field_keys.insert(property.clone(), keys_for_property);
+                    all_filter_properties.insert(property.clone(), keys_for_property);
                 }
             }
-
-            // Print the result in your desired format
-            if !field_keys.is_empty() {
-                println!(
-                    "Collection {}: {}",
-                    collection_name,
-                    serde_json::to_string(&field_keys)?
-                );
-            }
-
-            dbg!(&field_keys);
         }
 
-        unimplemented!(
-            "Need to construct SearchParams with properties: {:?}",
-            properties_by_collection
-        )
+        // Update the existing query_plan with filter_properties
+        let updated_queries_and_properties: Vec<QueryAndProperties> = query_plan
+            .into_iter()
+            .map(|mut query_and_props| {
+                query_and_props.filter_properties = all_filter_properties.clone();
+                query_and_props
+            })
+            .collect();
+
+        // Print the result to see the updated structure
+        for query_and_props in &updated_queries_and_properties {
+            println!(
+                "Updated QueryAndProperties: {}",
+                serde_json::to_string_pretty(query_and_props)?
+            );
+        }
+
+        // Return the updated queries and properties
+        Ok(updated_queries_and_properties)
     }
 
     fn get_properties_values_to_retrieve(
