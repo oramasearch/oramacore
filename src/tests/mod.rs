@@ -14,6 +14,7 @@ mod replace_doc_on_insert;
 mod replace_index;
 mod shutdown;
 mod trigger;
+mod update_docs;
 mod vector_search;
 
 pub mod utils;

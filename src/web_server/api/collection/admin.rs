@@ -10,7 +10,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
         DeleteDocuments, DeleteIndex, DescribeCollectionResponse, DocumentList, IndexId,
-        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest,
+        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest,
     },
     web_server::api::util::print_error,
 };
@@ -237,6 +237,34 @@ async fn add_documents(
         Ok(r) => Ok((StatusCode::OK, Json(r))),
         Err(e) => {
             print_error(&e, "Error adding documents to collection");
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": format!("collection not found {}", e) })),
+            ))
+        }
+    }
+}
+
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/update",
+    description = "Update documents to an index"
+)]
+async fn update_documents(
+    collection_id: CollectionId,
+    index_id: IndexId,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: ApiKey,
+    Json(json): Json<UpdateDocumentRequest>,
+) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+    info!("Update documents to collection {:?}", collection_id);
+    match write_side
+        .update_documents(write_api_key, collection_id, index_id, json)
+        .await
+    {
+        Ok(r) => Ok((StatusCode::OK, Json(r))),
+        Err(e) => {
+            print_error(&e, "Error update documents to collection");
             Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({ "error": format!("collection not found {}", e) })),

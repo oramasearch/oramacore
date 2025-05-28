@@ -57,6 +57,7 @@ use crate::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
         IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
+        UpdateDocumentRequest, UpdateDocumentsResult,
     },
 };
 
@@ -562,7 +563,6 @@ impl WriteSide {
         let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
 
         let mut i = 0;
-
         for mut doc in document_list {
             i += 1;
 
@@ -714,6 +714,173 @@ impl WriteSide {
         self.document_storage.remove(doc_ids).await;
 
         Ok(())
+    }
+
+    pub async fn update_documents(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        update_document_request: UpdateDocumentRequest,
+    ) -> Result<UpdateDocumentsResult> {
+        let mut collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .context("Collection not found")?;
+        collection.check_write_api_key(write_api_key)?;
+        let mut index = collection
+            .get_index(index_id)
+            .await
+            .context("Cannot get index")?;
+        let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
+
+        let document_id_storage = index.get_document_id_storage().await;
+        let document_ids_map: HashMap<_, _> = update_document_request
+            .documents
+            .0
+            .iter()
+            .filter_map(|d| {
+                d.get("id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| document_id_storage.get(s).map(|id| (id, s.to_string())))
+            })
+            .collect();
+        let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
+        drop(document_id_storage);
+
+        let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut doc_per_id_map: HashMap<&str, serde_json::value::Map<String, serde_json::Value>> =
+            HashMap::new();
+        while let Some((doc_id, doc)) = doc_stream.next().await {
+            if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
+                if let Ok(v) = serde_json::from_str(doc.inner.get()) {
+                    doc_per_id_map.insert(doc_id_str, v);
+                }
+            }
+        }
+
+        let mut result = UpdateDocumentsResult {
+            inserted: 0,
+            updated: 0,
+            failed: 0,
+        };
+
+        let mut i = 0;
+        for mut doc in update_document_request.documents {
+            i += 1;
+
+            // We want to check if there's some pending write operation on collections hashmap
+            // If so, we need to yield the task to allow the other operations to acquire the write lock
+            if i % 50 == 0 && self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(index);
+                drop(collection);
+
+                tokio::task::yield_now().await;
+                // `yield_now` doens't guarantee that the other task will be executed
+                // If the scheduler will process this task without waiting the other task,
+                // we propose a sleep of 10ms to be sure that the other task will be executed.
+                // Anyway, this is not guaranteed again, it is just an hope.
+                if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                    sleep(Duration::from_millis(10)).await;
+                }
+
+                collection = self
+                    .collections
+                    .get_collection(collection_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                index = collection
+                    .get_index(index_id)
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            }
+
+            debug!("Inserting doc");
+
+            // We try to guess the document id from the document
+            // Eventually, we generate a new one
+            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
+            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
+                if doc_id_str.is_empty() {
+                    cuid2::create_id()
+                } else {
+                    doc_id_str.to_string()
+                }
+            } else {
+                cuid2::create_id()
+            };
+            // Ensure the document contains a valid id
+            // NB: this overwrite the previous id if it is not a string
+            // TODO: is it correct?
+            doc.inner.insert(
+                "id".to_string(),
+                serde_json::Value::String(doc_id_str.clone()),
+            );
+
+            let Some(old_doc) = doc_per_id_map.get(doc_id_str.as_str()) else {
+                continue;
+            };
+
+            let new_document = merge(old_doc, doc);
+
+            let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
+            let doc_id = DocumentId(doc_id);
+
+            self.document_storage
+                .insert(doc_id, doc_id_str.clone(), new_document.clone())
+                .await
+                .context("Cannot inser document into document storage")?;
+
+            // High inefficiency here: we send a message for each document
+            // We could send a unique message with a batch of documents
+            // Anyway, for now, we keep it simple
+            // TODO: check if we can send a batch of documents
+            self.op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocument {
+                        doc_id,
+                        doc: DocumentToInsert(
+                            new_document
+                                .clone()
+                                .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                                .expect("Cannot get raw document"),
+                        ),
+                    },
+                ))
+                .await
+                .context("Cannot send document storage operation")?;
+
+            trace!(?doc_id, "Inserting document");
+            match index
+                .process_new_document(doc_id, new_document)
+                .await
+                .context("Cannot process document")
+            {
+                Ok(Some(old_doc_id)) => {
+                    self.document_storage.remove(vec![old_doc_id]).await;
+                    result.updated += 1;
+                }
+                Ok(None) => {
+                    result.inserted += 1;
+                }
+                Err(e) => {
+                    // If the document cannot be processed, we should remove it from the document storage
+                    // and from the read side
+                    // NB: check if the error handling is correct
+                    self.document_storage.remove(vec![doc_id]).await;
+
+                    tracing::error!(error = ?e, "Cannot process document");
+                    result.failed += 1;
+                }
+            };
+
+            debug!("Document inserted");
+        }
+
+        info!("All documents are inserted");
+
+        Ok(result)
     }
 
     pub async fn delete_collection(
@@ -1307,4 +1474,279 @@ fn embedding_model_default() -> OramaModelSerializable {
 
 fn default_insert_batch_commit_size() -> u64 {
     1_000
+}
+
+fn merge(old: &serde_json::value::Map<String, serde_json::Value>, delta: Document) -> Document {
+    let mut old = old.clone();
+    let delta = delta.inner;
+    for (k, v) in delta {
+        if k.contains(".") {
+            let mut path = k.split(".").peekable();
+            let mut nested_doc = Some(&mut old);
+            let k = loop {
+                let k = path.next();
+                let f = path.peek();
+                println!("k {k:?}, f {f:?}");
+                nested_doc = match (k, f) {
+                    (None, _) => break None,
+                    (Some(k), None) => break Some(k),
+                    (Some(k), _) => {
+                        nested_doc.and_then(|v| v.get_mut(k).and_then(|v| v.as_object_mut()))
+                    }
+                }
+            };
+            if let Some(nested_doc) = nested_doc {
+                if let Some(k) = k {
+                    if v.is_null() {
+                        // Null removes the key from an object
+                        nested_doc.remove(k);
+                    } else {
+                        nested_doc.insert(k.to_string(), v);
+                    }
+                }
+            }
+        } else {
+            // Fast path
+            if v.is_null() {
+                // Null removes the key from an object
+                old.remove(&k);
+            } else {
+                old.insert(k, v);
+            }
+        }
+    }
+    Document { inner: old }
+}
+
+#[allow(clippy::approx_constant)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_merge_documents_simple() {
+        let old = json!({
+            "id": "1",
+            "text": "foo",
+            "name": "Tommaso",
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "text": "bar",
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "text": "bar",
+                "name": "Tommaso",
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_documents_all_types() {
+        let old = json!({
+            "id": "1",
+            "name": "Tommaso",
+            "age": 34,
+            "amazing": false,
+            "another_float": 3.14,
+            "untouched_str": "hello",
+            "untouched_number": 42,
+            "untouched_bool": true,
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "name": "Michele",
+            "age": 30,
+            "amazing": true,
+            "another_float": 2.71,
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "name": "Michele",
+                "age": 30,
+                "amazing": true,
+                "another_float": 2.71,
+                "untouched_str": "hello",
+                "untouched_number": 42,
+                "untouched_bool": true,
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_documents_null_removes_key() {
+        let old = json!({
+            "id": "1",
+            "name": "Tommaso",
+            "age": 34,
+            "amazing": false,
+            "another_float": 3.14,
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "amazing": null,
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "name": "Tommaso",
+                "age": 34,
+                "another_float": 3.14,
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_documents_replace_whole_object() {
+        let old = json!({
+            "id": "1",
+            "person": {
+                "name": "Tommaso",
+                "age": 34,
+            }
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "person": {
+                "name": "Michele",
+                "age": 30,
+            }
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "person": {
+                    "name": "Michele",
+                    "age": 30,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_documents_update_nested_property() {
+        let old = json!({
+            "id": "1",
+            "person": {
+                "name": "Tommaso",
+                "age": 34,
+                "amazing": true,
+            }
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "person.name": "Michele",
+            "person.age": 30,
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "person": {
+                    "name": "Michele",
+                    "age": 30,
+                    "amazing": true,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_merge_documents_update_very_nested_property() {
+        let old = json!({
+            "id": "1",
+            "l1": {
+                "l2" : {
+                    "l3": {
+                        "l4": {
+                            "l5": {
+                                "l6": {
+                                    "l7": {
+                                        "l8": {
+                                            "l9": {
+                                                "value": 5,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let old = old.as_object().unwrap();
+        let serde_json::Value::Object(delta) = json!({
+            "id": "1",
+            "l1.l2.l3.l4.l5.l6.l7.l8.l9.value": 42,
+        }) else {
+            panic!("");
+        };
+        let delta = Document { inner: delta };
+        let new = merge(old, delta);
+
+        assert_eq!(
+            serde_json::Value::Object(new.inner),
+            json!({
+                "id": "1",
+                "l1": {
+                "l2" : {
+                    "l3": {
+                        "l4": {
+                            "l5": {
+                                "l6": {
+                                    "l7": {
+                                        "l8": {
+                                            "l9": {
+                                                "value": 42,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            })
+        );
+    }
 }

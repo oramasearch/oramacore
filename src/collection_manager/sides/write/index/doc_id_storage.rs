@@ -21,6 +21,10 @@ impl DocIdStorage {
         }
     }
 
+    pub fn get(&self, doc_id: &str) -> Option<DocumentId> {
+        self.document_ids.get(doc_id).copied()
+    }
+
     pub fn remove_document_ids(&mut self, doc_ids: Vec<String>) -> Vec<DocumentId> {
         doc_ids
             .into_iter()
