@@ -183,12 +183,16 @@ impl AdvancedAutoQuery {
 
     pub async fn analyze_input(&self, conversation_as_json: String) -> Result<Vec<String>> {
         let current_datetime = chrono::Utc::now().timestamp();
-        let current_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let formatted_datetime =
+            chrono::DateTime::<chrono::Utc>::from_timestamp(current_datetime, 0)
+                .unwrap() // This cannot fail as we are using a valid timestamp
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
 
         let variables = vec![
             ("conversation".to_string(), conversation_as_json),
-            ("timestamp".to_string(), current_datetime.to_string()),
-            ("date".to_string(), current_date),
+            ("timestamp".to_string(), formatted_datetime),
+            ("timestamp_unix".to_string(), current_datetime.to_string()),
         ];
 
         let result = self

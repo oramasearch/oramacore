@@ -432,7 +432,7 @@ impl ReadSide {
             .collection_stats(
                 read_api_key,
                 collection_id,
-                CollectionStatsRequest { with_keys: true },
+                CollectionStatsRequest { with_keys: false }, // We don't need keys at this point
             )
             .await?;
         let result = collection

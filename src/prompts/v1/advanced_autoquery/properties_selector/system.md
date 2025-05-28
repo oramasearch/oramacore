@@ -10,7 +10,7 @@ Your task is to analyze the provided list of properties and select the most rele
 You will receive two main inputs:
 
 1. **User Query** (## User Query): A natural language query that describes the user's search intent.
-2. **Properties List** (## Properties List): A list of properties that can be used to filter or search for documents. Each property will have a name and a type.
+2. **Properties List** (## Properties List): A list of properties that can be used to filter or search for documents. Each property will have a name and a type. If the property is of type `string` or `string_filter`, you may want to gain access to all of its value in order to select the most relevant ones. If that's the case, you will set the `get` field to `true` for that property, otherwise you will set it to `false`.
 
 The properties list will be in the following format:
 
@@ -68,7 +68,8 @@ Your output must be a valid JSON object that looks like this:
     "selected_properties": [
       {
         "property": "property-name",
-        "type": "string_filter"
+        "type": "string_filter",
+        "get": true
       },
       {
         "property": "another-property-name",
@@ -158,7 +159,8 @@ Looking for basketball shoes and shorts within a budget of $100
       },
       {
         "property": "category",
-        "type": "string_filter"
+        "type": "string_filter",
+        "get": true
       }
     ]
   },
@@ -170,7 +172,8 @@ Looking for basketball shoes and shorts within a budget of $100
       },
       {
         "property": "productCategory",
-        "type": "string_filter"
+        "type": "string_filter",
+        "get": true
       }
     ]
   }
@@ -180,6 +183,8 @@ Looking for basketball shoes and shorts within a budget of $100
 **Reasoning:**
 In this example, the user is looking for basketball shoes and shorts within a budget of $100. The selected properties include the `price` and `category`, since we can then filter by price and category in the search query.
 The `gender` property is not selected because it is not relevant to the user's query. The same applies to the Adidas products, where we select `fullPrice` and `productCategory` for the same reasons.
+
+For both `category` and `productCategory`, we set `get` to `true` because we don't know the exact category values stored in the database, and we want to retrieve them to match the user's query.
 
 Although we will use `title` and `product_name` for the search, they are not selected as properties because they are not used for filtering or range queries.
 
@@ -255,11 +260,13 @@ Checking the status of my order #918273 from amazon.com which whould have been d
     "selected_properties": [
       {
         "property": "order_id",
-        "type": "string_filter"
+        "type": "string_filter",
+        "get": false
       },
       {
         "property": "status",
-        "type": "string_filter"
+        "type": "string_filter",
+        "get": true
       },
       {
         "property": "delivery_date",
@@ -272,5 +279,7 @@ Checking the status of my order #918273 from amazon.com which whould have been d
 
 **Reasoning:**
 In this example, the user is checking the status of their order with a specific order ID. The selected properties include `order_id`, `status`, and `delivery_date`, which are relevant to the user's query. The other properties are not selected because they are not directly related to the user's request.
+
+Since the `order_id` property will contain a specific value (the order number), we set `get` to `false` for it, as we already know the order ID from the user's query. However, we set `get` to `true` for the `status` property because we need to retrieve the current status of the order, which is not specified in the query and cannot be deduced (do they call it `"COMPLETED"`? `"DONE"`? We don't know yet). The `delivery_date` is also selected as it is relevant to the user's request about delivery timing.
 
 Also the user specified that the order was made on amazon.com, so we only selected the properties from the `amazon-orders` index.

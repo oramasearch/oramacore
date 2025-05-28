@@ -2,10 +2,9 @@
 
 {conversation}
 
-## Current date and time as Unix timestamp
+## Current Date Time
 
-{timestamp}
+This is the current date and time, in case you need it for context or filtering by date/time:
 
-## Current date in YYYY-MM-DD format
-
-{date}
+- **Current date and time**: {timestamp} 
+- **Current date and time as Unix Timestamp:** {timestamp_unix}
