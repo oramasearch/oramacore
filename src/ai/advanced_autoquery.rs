@@ -1,14 +1,12 @@
 use anyhow::Result;
-use axum::extract::Query;
 use regex::Regex;
 use serde::Serialize;
 use serde::{self, Deserialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::llms::LLMService;
-use crate::types::{SearchOffset, SearchParams};
+use crate::types::{IndexId, SearchParams};
 use crate::{
     collection_manager::sides::CollectionStats,
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
@@ -31,7 +29,7 @@ struct PropertiesSelectorInput {
     pub indexes_stats: Vec<IndexesStats>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SelectedProperty {
     pub property: String,
     #[serde(rename = "type")]
@@ -56,7 +54,7 @@ struct CollectionProperties {
     selected_properties: Vec<SelectedProperty>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct CollectionSelectedProperties {
     pub selected_properties: Vec<SelectedProperty>,
 }
@@ -86,12 +84,14 @@ enum DeserializedStat {
     UncommittedStringFilter {
         key_count: usize,
         document_count: usize,
+        keys: Option<Vec<String>>,
     },
 
     #[serde(rename = "committed_string_filter")]
     CommittedStringFilter {
         key_count: usize,
         document_count: usize,
+        keys: Option<Vec<String>>,
     },
 
     #[serde(rename = "uncommitted_string")]
@@ -149,10 +149,11 @@ impl DeserializedStat {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct QueryAndProperties {
     pub query: String,
     pub properties: HashMap<String, CollectionSelectedProperties>,
+    pub filter_properties: HashMap<String, Vec<String>>,
 }
 
 pub enum AdvancedAutoQuerySteps {
@@ -201,15 +202,22 @@ impl AdvancedAutoQuery {
     ) -> Result<Vec<QueryAndProperties>> {
         let conversation_to_json = serde_json::to_string(&conversation)?;
         let optimized_queries = self.analyze_input(conversation_to_json).await?;
-        dbg!(&optimized_queries);
         let selected_properties = self.select_properties(optimized_queries.clone()).await?;
-        dbg!(&selected_properties);
+
+        dbg!(&self.collection_stats);
 
         let queries_and_properties: Vec<QueryAndProperties> = optimized_queries
             .into_iter()
             .zip(selected_properties)
-            .map(|(query, properties)| QueryAndProperties { query, properties })
+            .map(|(query, properties)| QueryAndProperties {
+                query,
+                properties,
+                filter_properties: HashMap::new(),
+            })
             .collect();
+
+        self.get_search_query(queries_and_properties.clone())
+            .await?;
 
         Ok(queries_and_properties)
     }
@@ -300,22 +308,127 @@ impl AdvancedAutoQuery {
         Ok(properties_list)
     }
 
-    // async fn get_search_query(
-    //     &mut self,
-    //     query_plan: Vec<QueryAndProperties>,
-    // ) -> Result<SearchParams> {
-    //     let mut results = Vec::new();
+    async fn get_search_query(
+        &mut self,
+        query_plan: Vec<QueryAndProperties>,
+    ) -> Result<SearchParams> {
+        let properties_by_collection = self.get_properties_values_to_retrieve(query_plan);
 
-    //     for SelectedProperties { query, properties } in query_plan.iter() {
-    //         let properties_values_to_retrieve: Vec<String> = properties
-    //             .iter()
-    //             .filter(|p| p.get)
-    //             .map(|p| p.property.clone())
-    //             .collect();
-    //     }
+        for (collection_name, properties) in &properties_by_collection {
+            let index_stats = self
+                .collection_stats
+                .indexes_stats
+                .iter()
+                .find(|index| index.id == IndexId::try_new(&collection_name).unwrap())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Collection {} not found in collection stats",
+                        collection_name
+                    )
+                })?;
 
-    //     unimplemented!()
-    // }
+            let matching_fields = index_stats
+                .fields_stats
+                .iter()
+                .filter(|field| properties.iter().any(|prop| *prop == field.field_path))
+                .collect::<Vec<_>>();
+
+            // Extract keys for each property
+            let mut field_keys: HashMap<String, Vec<String>> = HashMap::new();
+
+            for property in properties {
+                let mut keys_for_property: Vec<String> = Vec::new();
+
+                // Find all field stats for this specific property
+                let property_fields: Vec<_> = matching_fields
+                    .iter()
+                    .filter(|field| field.field_path == *property)
+                    .collect();
+
+                for field_stat in property_fields {
+                    // Serialize and deserialize the field stat to extract keys
+                    let field_stat_json = serde_json::to_string(&field_stat.stats)?;
+
+                    match serde_json::from_str::<DeserializedStat>(&field_stat_json) {
+                        Ok(deserialized_stat) => {
+                            match deserialized_stat {
+                                DeserializedStat::CommittedStringFilter {
+                                    keys: Some(keys),
+                                    ..
+                                } => {
+                                    keys_for_property.extend(keys);
+                                }
+                                DeserializedStat::UncommittedStringFilter {
+                                    keys: Some(keys),
+                                    ..
+                                } => {
+                                    keys_for_property.extend(keys);
+                                }
+                                _ => {} // Other stat types don't have keys we care about
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to deserialize stat for {}: {}", property, e);
+                        }
+                    }
+                }
+
+                // Remove duplicates and sort
+                keys_for_property.sort();
+                keys_for_property.dedup();
+
+                if !keys_for_property.is_empty() {
+                    field_keys.insert(property.clone(), keys_for_property);
+                }
+            }
+
+            // Print the result in your desired format
+            if !field_keys.is_empty() {
+                println!(
+                    "Collection {}: {}",
+                    collection_name,
+                    serde_json::to_string(&field_keys)?
+                );
+            }
+
+            dbg!(&field_keys);
+        }
+
+        unimplemented!(
+            "Need to construct SearchParams with properties: {:?}",
+            properties_by_collection
+        )
+    }
+
+    fn get_properties_values_to_retrieve(
+        &mut self,
+        query_plan: Vec<QueryAndProperties>,
+    ) -> HashMap<String, Vec<String>> {
+        let mut properties_to_retrieve: HashMap<String, Vec<String>> = HashMap::new();
+
+        for query_and_properties in query_plan.iter() {
+            for (collection_name, collection_props) in &query_and_properties.properties {
+                let properties: Vec<String> = collection_props
+                    .selected_properties
+                    .iter()
+                    .filter(|prop| prop.get)
+                    .map(|prop| prop.property.clone())
+                    .collect();
+
+                properties_to_retrieve
+                    .entry(collection_name.clone())
+                    .or_insert_with(Vec::new)
+                    .extend(properties);
+            }
+        }
+
+        for (_, properties) in properties_to_retrieve.iter_mut() {
+            properties.sort();
+            properties.dedup();
+        }
+
+        properties_to_retrieve
+    }
 
     fn format_collection_stats(&mut self) -> PropertiesSelectorInput {
         let prefix_re = Regex::new(r"^(committed|uncommitted)_").unwrap();
