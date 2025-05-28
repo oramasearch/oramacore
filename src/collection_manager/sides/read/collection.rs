@@ -302,7 +302,6 @@ impl CollectionReader {
     pub async fn nlp_search(
         &self,
         search_params: &NLPSearchRequest,
-        collection_id: CollectionId,
         collection_stats: CollectionStats,
     ) -> Result<Vec<SearchParams>> {
         let llm_service = self.llm_service.clone();
@@ -310,7 +309,7 @@ impl CollectionReader {
         let query = search_params.query.clone();
 
         let mut advanced_autoquery =
-            AdvancedAutoQuery::new(collection_id, collection_stats, llm_service, llm_config);
+            AdvancedAutoQuery::new(collection_stats, llm_service, llm_config);
         let conversation = vec![InteractionMessage {
             role: Role::User,
             content: query,

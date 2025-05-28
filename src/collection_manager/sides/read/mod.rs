@@ -439,7 +439,7 @@ impl ReadSide {
             .await?;
 
         let search_queries = collection
-            .nlp_search(&search_params, collection_id, collection_stats)
+            .nlp_search(&search_params, collection_stats)
             .await?;
 
         // Run all searches in parallel

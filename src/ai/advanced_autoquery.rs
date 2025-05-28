@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::llms::{KnownPrompts, LLMService};
 use crate::{
     collection_manager::sides::CollectionStats,
-    types::{CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams},
+    types::{IndexId, InteractionLLMConfig, InteractionMessage, SearchParams},
 };
 
 // ===== Data Models =====
