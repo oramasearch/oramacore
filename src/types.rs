@@ -159,13 +159,13 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub enum UpdateStrategy {
     #[serde(rename = "merge")]
     Merge,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateDocumentRequest {
     pub strategy: UpdateStrategy,
     pub documents: DocumentList,
