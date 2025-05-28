@@ -95,6 +95,7 @@ impl<Id: DocId> FilterResult<Id> {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn not(filter: FilterResult<Id>) -> Self {
         FilterResult::Not(Box::new(filter))
     }

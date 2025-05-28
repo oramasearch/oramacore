@@ -358,7 +358,7 @@ impl StringFilterField {
 
 pub enum IndexScoreField {
     String(StringScoreField),
-    Embedding(EmbeddingField),
+    Embedding(Box<EmbeddingField>),
 }
 
 impl GenericField for IndexScoreField {
@@ -432,7 +432,7 @@ impl IndexScoreField {
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
-        IndexScoreField::Embedding(EmbeddingField::new(
+        IndexScoreField::Embedding(Box::new(EmbeddingField::new(
             collection_id,
             index_id,
             field_id,
@@ -441,7 +441,7 @@ impl IndexScoreField {
             calculation,
             embedding_sender,
             automatic_embeddings_selector,
-        ))
+        )))
     }
 
     pub fn serialize(&self) -> SerializedScoreFieldType {

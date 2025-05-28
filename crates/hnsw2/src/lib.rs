@@ -76,8 +76,14 @@ impl<E: node::FloatElement, T: node::IdxType> HNSWIndex<E, T> {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self._n_items
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn into_data(self) -> impl Iterator<Item = (Vec<E>, T)> {
@@ -731,13 +737,13 @@ impl<'de, E: node::FloatElement + DeserializeOwned, T: node::IdxType + Deseriali
         let _id2neighbor = dump
             ._id2neighbor_tmp
             .into_iter()
-            .map(|x| x.into_iter().map(|y| RwLock::new(y)).collect::<Vec<_>>())
+            .map(|x| x.into_iter().map(RwLock::new).collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
         let _id2neighbor0 = dump
             ._id2neighbor0_tmp
             .into_iter()
-            .map(|x| RwLock::new(x))
+            .map(RwLock::new)
             .collect::<Vec<_>>();
 
         let _item2id = dump._item2id_tmp.into_iter().collect::<HashMap<_, _>>();
