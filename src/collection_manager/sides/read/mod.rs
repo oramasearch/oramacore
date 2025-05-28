@@ -35,7 +35,7 @@ use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, InteractionLLMConfig, InteractionMessage, NLPSearchRequest, SearchMode,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, SearchMode,
     SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
@@ -244,6 +244,7 @@ impl ReadSide {
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
+        req: CollectionStatsRequest,
     ) -> Result<CollectionStats> {
         let collection = self
             .collections
@@ -252,7 +253,7 @@ impl ReadSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
 
-        collection.stats().await
+        collection.stats(req).await
     }
 
     pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {

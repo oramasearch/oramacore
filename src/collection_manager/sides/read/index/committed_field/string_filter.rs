@@ -77,11 +77,19 @@ impl CommittedStringFilterField {
         }
     }
 
-    pub fn stats(&self) -> CommittedStringFilterFieldStats {
+    pub fn stats(&self, with_keys: bool) -> CommittedStringFilterFieldStats {
         let doc_count = self.inner.values().map(|v| v.len()).sum();
+
+        let keys = if with_keys {
+            Some(self.inner.keys().cloned().collect())
+        } else {
+            None
+        };
+
         CommittedStringFilterFieldStats {
             key_count: self.inner.len(),
             document_count: doc_count,
+            keys,
         }
     }
 
@@ -119,6 +127,7 @@ pub struct StringFilterFieldInfo {
 pub struct CommittedStringFilterFieldStats {
     pub key_count: usize,
     pub document_count: usize,
+    pub keys: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

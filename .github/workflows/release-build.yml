@@ -10,11 +10,11 @@ permissions:
 jobs:
   build-and-upload:
     name: Build and Upload Release Assets
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gpu, cuda]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Install Protocol Buffers Compiler
         run: |
           sudo apt-get update
@@ -24,7 +24,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.87.0
           override: true
 
       - name: Build Default Binary
