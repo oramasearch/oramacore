@@ -214,11 +214,11 @@ impl AdvancedAutoQuery {
             })
             .collect();
 
-        let x = self
+        let search_queries = self
             .get_search_query(queries_and_properties.clone())
             .await?;
 
-        dbg!(&x);
+        dbg!(&search_queries);
 
         Ok(queries_and_properties)
     }
@@ -273,7 +273,6 @@ impl AdvancedAutoQuery {
             .collect::<Vec<_>>();
 
         let results = futures::future::join_all(futures).await;
-        dbg!(&results);
 
         let mut properties_list = Vec::new();
 
@@ -312,7 +311,7 @@ impl AdvancedAutoQuery {
     async fn get_search_query(
         &mut self,
         query_plan: Vec<QueryAndProperties>,
-    ) -> Result<Vec<QueryAndProperties>> {
+    ) -> Result<Vec<SearchParams>> {
         let properties_by_collection = self.get_properties_values_to_retrieve(query_plan.clone());
 
         // Collect all filter properties from all collections
@@ -394,16 +393,43 @@ impl AdvancedAutoQuery {
             })
             .collect();
 
-        // Print the result to see the updated structure
-        for query_and_props in &updated_queries_and_properties {
-            println!(
-                "Updated QueryAndProperties: {}",
-                serde_json::to_string_pretty(query_and_props)?
-            );
+        let to_variables =
+            self.query_and_properties_to_llm_variables(&updated_queries_and_properties);
+
+        // Run LLM calls in parallel
+        let futures = to_variables
+            .into_iter()
+            .map(|variables| {
+                self.llm_service.run_known_prompt(
+                    super::llms::KnownPrompts::AdvancedAutoQueryQueryComposer,
+                    variables,
+                    self.llm_config.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let results = futures::future::join_all(futures).await;
+
+        // Process results and handle any errors
+        let mut processed_results = Vec::new();
+
+        for (index, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(response) => {
+                    let repaired = self.strip_markdown_wrapper(&response);
+                    let to_search_params = serde_json::from_str::<SearchParams>(&repaired)?;
+                    processed_results.push(to_search_params);
+                    // Do something with the repaired result if needed
+                }
+                Err(e) => {
+                    eprintln!("LLM call failed for query {}: {}", index, e);
+                    // Handle error case - you might want to return an error or continue
+                    return Err(e.into());
+                }
+            }
         }
 
-        // Return the updated queries and properties
-        Ok(updated_queries_and_properties)
+        Ok(processed_results)
     }
 
     fn get_properties_values_to_retrieve(
@@ -434,6 +460,41 @@ impl AdvancedAutoQuery {
         }
 
         properties_to_retrieve
+    }
+
+    fn query_and_properties_to_llm_variables(
+        &self,
+        queries_and_properties: &[QueryAndProperties],
+    ) -> Vec<Vec<(String, String)>> {
+        queries_and_properties
+            .iter()
+            .map(|query_and_props| {
+                let mut variables = Vec::new();
+
+                // Add the query
+                variables.push(("query".to_string(), query_and_props.query.clone()));
+
+                // Transform properties - flatten all collections into a single list
+                let mut all_properties = Vec::new();
+                for (_collection_name, collection_props) in &query_and_props.properties {
+                    all_properties.extend(collection_props.selected_properties.clone());
+                }
+
+                // Serialize the properties list
+                if let Ok(properties_json) = serde_json::to_string(&all_properties) {
+                    variables.push(("properties_list".to_string(), properties_json));
+                }
+
+                // Serialize the filter properties
+                if let Ok(filter_properties_json) =
+                    serde_json::to_string(&query_and_props.filter_properties)
+                {
+                    variables.push(("filter_properties".to_string(), filter_properties_json));
+                }
+
+                variables
+            })
+            .collect()
     }
 
     fn format_collection_stats(&mut self) -> PropertiesSelectorInput {
