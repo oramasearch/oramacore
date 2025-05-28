@@ -192,8 +192,6 @@ impl DocumentStorage {
             }
         }
 
-        println!("got {:?}", result);
-
         Ok(result)
     }
 

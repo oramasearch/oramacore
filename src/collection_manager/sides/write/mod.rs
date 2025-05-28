@@ -1490,12 +1490,12 @@ fn merge(old: &serde_json::value::Map<String, serde_json::Value>, delta: Documen
                 nested_doc = match (k, f) {
                     (None, _) => break None,
                     (Some(k), None) => break Some(k),
-                    (Some(k), _) => nested_doc
-                        .map(|v| v.get_mut(k).and_then(|v| v.as_object_mut()))
-                        .flatten(),
+                    (Some(k), _) => {
+                        nested_doc.and_then(|v| v.get_mut(k).and_then(|v| v.as_object_mut()))
+                    }
                 }
             };
-            if let Some(nested_doc) = nested_doc.as_deref_mut() {
+            if let Some(nested_doc) = nested_doc {
                 if let Some(k) = k {
                     if v.is_null() {
                         // Null removes the key from an object
@@ -1518,6 +1518,7 @@ fn merge(old: &serde_json::value::Map<String, serde_json::Value>, delta: Documen
     Document { inner: old }
 }
 
+#[allow(clippy::approx_constant)]
 #[cfg(test)]
 mod tests {
     use super::*;

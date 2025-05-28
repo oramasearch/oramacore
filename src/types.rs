@@ -159,7 +159,7 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum UpdateStrategy {
     #[serde(rename = "merge")]
     Merge,

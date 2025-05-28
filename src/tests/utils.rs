@@ -34,7 +34,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DescribeCollectionResponse,
         DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest,
-        SearchParams, SearchResult,
+        SearchParams, SearchResult, UpdateDocumentRequest, UpdateDocumentsResult,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -773,6 +773,15 @@ impl TestIndexClient {
         .await?;
 
         Ok(())
+    }
+
+    pub async fn update_documents(
+        &self,
+        req: UpdateDocumentRequest,
+    ) -> Result<UpdateDocumentsResult> {
+        self.writer
+            .update_documents(self.write_api_key, self.collection_id, self.index_id, req)
+            .await
     }
 
     pub async fn uncheck_delete_documents(&self, ids: Vec<String>) -> Result<()> {
