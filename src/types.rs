@@ -1222,6 +1222,12 @@ pub struct RelatedRequest {
     pub format: Option<RelatedQueriesFormat>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CollectionStatsRequest {
+    #[serde(default)]
+    pub with_keys: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy, ToSchema)]
 pub enum Role {
     #[serde(rename = "system")]
