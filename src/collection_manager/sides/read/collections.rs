@@ -30,7 +30,6 @@ use super::{collection::CollectionReader, IndexesConfig};
 /// The collection still exists in the `collections` map.
 /// NB: `get_collection` will return `None`.
 ///
-
 pub struct CollectionsReader {
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,

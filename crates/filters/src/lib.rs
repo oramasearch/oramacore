@@ -79,9 +79,9 @@ impl<Id: DocId> FilterResult<Id> {
         match (filter_1, filter_2) {
             (FilterResult::Filter(filter1), FilterResult::Filter(filter2)) => {
                 let output = filter1.and(&filter2);
-                return FilterResult::Filter(output);
+                FilterResult::Filter(output)
             }
-            (f1, f2) => return FilterResult::And(Box::new(f1), Box::new(f2)),
+            (f1, f2) => FilterResult::And(Box::new(f1), Box::new(f2)),
         }
     }
 
@@ -89,9 +89,9 @@ impl<Id: DocId> FilterResult<Id> {
         match (filter_1, filter_2) {
             (FilterResult::Filter(filter1), FilterResult::Filter(filter2)) => {
                 let output = filter1.or(&filter2);
-                return FilterResult::Filter(output);
+                FilterResult::Filter(output)
             }
-            (f1, f2) => return FilterResult::Or(Box::new(f1), Box::new(f2)),
+            (f1, f2) => FilterResult::Or(Box::new(f1), Box::new(f2)),
         }
     }
 

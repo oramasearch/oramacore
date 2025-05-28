@@ -665,7 +665,7 @@ impl DerefMut for IndexWriteLock<'_> {
     }
 }
 
-fn get_index_in_vector(vec: &Vec<Index>, wanted: IndexId) -> Option<usize> {
+fn get_index_in_vector(vec: &[Index], wanted: IndexId) -> Option<usize> {
     // fast path
     for (i, index) in vec.iter().enumerate() {
         if index.is_deleted() {
