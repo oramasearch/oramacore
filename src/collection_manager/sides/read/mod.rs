@@ -35,8 +35,8 @@ use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, SearchMode,
-    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, NLPSearchRequest,
+    SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
@@ -428,7 +428,13 @@ impl ReadSide {
             .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
         collection.check_read_api_key(read_api_key)?;
 
-        let collection_stats = self.collection_stats(read_api_key, collection_id).await?;
+        let collection_stats = self
+            .collection_stats(
+                read_api_key,
+                collection_id,
+                CollectionStatsRequest { with_keys: true },
+            )
+            .await?;
         let result = collection
             .nlp_search(&search_params, collection_id, collection_stats)
             .await?;

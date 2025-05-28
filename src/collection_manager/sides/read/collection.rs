@@ -21,8 +21,8 @@ use crate::{
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
-        ApiKey, CollectionId, DocumentId, FacetResult, FieldId, IndexId, InteractionMessage,
-        NLPSearchRequest, Role, SearchParams,
+        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
+        InteractionMessage, NLPSearchRequest, Role, SearchParams,
     },
 };
 
