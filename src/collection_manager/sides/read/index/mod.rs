@@ -890,7 +890,7 @@ impl Index {
         Ok(())
     }
 
-    pub async fn stats(&self, is_temp: bool) -> Result<IndexStats> {
+    pub async fn stats(&self, is_temp: bool, with_keys: bool) -> Result<IndexStats> {
         let mut fields_stats = Vec::new();
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -921,7 +921,7 @@ impl Index {
                     IndexFieldStats {
                         field_id: *k,
                         field_path: path,
-                        stats: IndexFieldStatsType::UncommittedStringFilter(v.stats()),
+                        stats: IndexFieldStatsType::UncommittedStringFilter(v.stats(with_keys)),
                     }
                 }),
         );
@@ -967,7 +967,7 @@ impl Index {
                     Some(IndexFieldStats {
                         field_id: *k,
                         field_path: path,
-                        stats: IndexFieldStatsType::CommittedStringFilter(v.stats()),
+                        stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
                     })
                 }),
         );

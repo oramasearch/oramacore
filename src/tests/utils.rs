@@ -32,9 +32,10 @@ use crate::{
         ReplaceIndexReason, WriteSide, WriteSideConfig,
     },
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DescribeCollectionResponse,
-        DocumentList, IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest,
-        SearchParams, SearchResult, UpdateDocumentRequest, UpdateDocumentsResult,
+        ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
+        DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
+        ReplaceIndexRequest, SearchParams, SearchResult, UpdateDocumentRequest,
+        UpdateDocumentsResult,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -351,7 +352,16 @@ impl TestContext {
 
         wait_for(self, |s| {
             let reader = s.reader.clone();
-            async move { reader.collection_stats(read_api_key, id).await }.boxed()
+            async move {
+                reader
+                    .collection_stats(
+                        read_api_key,
+                        id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await
+            }
+            .boxed()
         })
         .await?;
 
@@ -433,7 +443,13 @@ impl TestCollectionClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let stats = reader
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await?;
 
                 stats
                     .indexes_stats
@@ -548,7 +564,13 @@ impl TestCollectionClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let stats = reader
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await?;
                 let old_index = stats
                     .indexes_stats
                     .iter()
@@ -578,7 +600,11 @@ impl TestCollectionClient {
             let collection_id = s.collection_id;
             async move {
                 if reader
-                    .collection_stats(read_api_key, collection_id)
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
                     .await
                     .is_err()
                 {
@@ -595,7 +621,11 @@ impl TestCollectionClient {
 
     pub async fn reader_stats(&self) -> Result<CollectionStats> {
         self.reader
-            .collection_stats(self.read_api_key, self.collection_id)
+            .collection_stats(
+                self.read_api_key,
+                self.collection_id,
+                CollectionStatsRequest { with_keys: false },
+            )
             .await
     }
 
@@ -651,7 +681,11 @@ impl TestIndexClient {
     pub async fn insert_documents(&self, documents: DocumentList) -> Result<InsertDocumentsResult> {
         let stats = self
             .reader
-            .collection_stats(self.read_api_key, self.collection_id)
+            .collection_stats(
+                self.read_api_key,
+                self.collection_id,
+                CollectionStatsRequest { with_keys: false },
+            )
             .await?;
         let index_stats = stats
             .indexes_stats
@@ -676,7 +710,13 @@ impl TestIndexClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let stats = reader
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await?;
                 let index_stats = stats
                     .indexes_stats
                     .iter()
@@ -702,7 +742,11 @@ impl TestIndexClient {
     pub async fn delete_documents(&self, ids: Vec<String>) -> Result<()> {
         let stats = self
             .reader
-            .collection_stats(self.read_api_key, self.collection_id)
+            .collection_stats(
+                self.read_api_key,
+                self.collection_id,
+                CollectionStatsRequest { with_keys: false },
+            )
             .await?;
         let index_stats = stats
             .indexes_stats
@@ -721,7 +765,13 @@ impl TestIndexClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let stats = reader
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await?;
                 let index_stats = stats
                     .indexes_stats
                     .iter()
@@ -755,7 +805,13 @@ impl TestIndexClient {
             let read_api_key = s.read_api_key;
             let collection_id = s.collection_id;
             async move {
-                let stats = reader.collection_stats(read_api_key, collection_id).await?;
+                let stats = reader
+                    .collection_stats(
+                        read_api_key,
+                        collection_id,
+                        CollectionStatsRequest { with_keys: false },
+                    )
+                    .await?;
                 if stats
                     .indexes_stats
                     .iter()

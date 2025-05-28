@@ -15,53 +15,43 @@ env:
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gpu, cuda]
 
     steps:
-    - name: Free Disk Space (Ubuntu)
-      uses: jlumbroso/free-disk-space@v1.3.1
-    - uses: actions/checkout@v4
-    - name: apt-get update
-      run: sudo apt-get update
-    - name: apt-get install
-      run: |
-        sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
-    - name: Set up cargo cache
-      uses: actions/cache@v3
-      continue-on-error: false
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-          .custom_models/
-          .fastembed_cache/
-        key: cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: cargo-
-    - name: Install target
-      run: rustup target add x86_64-unknown-linux-gnu
-    - name: Environment
-      run: |
-        gcc --version
-        g++ --version
-        rustc --version
-        cargo --version
-    - name: Check & Fmt & Clippy
-      run: |
-        cargo check -p hnsw2 --target x86_64-unknown-linux-gnu
-        cargo check --all-features --target x86_64-unknown-linux-gnu
-        cargo fmt --all -- --check
-        cargo clippy --target x86_64-unknown-linux-gnu
-    - name: Test
-      run: |
-        bash download-test-model.sh
-        cargo test --all --target x86_64-unknown-linux-gnu
-    - name: Build
-      run: |
-        cargo build --target x86_64-unknown-linux-gnu
-        # Test the build is working with the reader and writer features
-        cargo build --target x86_64-unknown-linux-gnu --features reader --no-default-features
-        cargo build --target x86_64-unknown-linux-gnu --features writer --no-default-features
+      - uses: actions/checkout@v4
+      - name: apt-get update
+        run: sudo apt-get update
+      - name: apt-get install
+        run: |
+          sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          profile: minimal
+          override: true
+          components: clippy, rustfmt
+          toolchain: 1.87.0
+          target: x86_64-unknown-linux-gnu
+          rustflags: ""
+      - name: Environment
+        run: |
+          gcc --version
+          g++ --version
+          rustc --version
+          cargo --version
+      - name: Check & Fmt & Clippy
+        run: |
+          cargo check -p hnsw2 --target x86_64-unknown-linux-gnu
+          cargo check --all-features --target x86_64-unknown-linux-gnu
+          cargo fmt --all -- --check
+          cargo clippy --target x86_64-unknown-linux-gnu
+      - name: Test
+        run: |
+          bash download-test-model.sh
+          cargo test --all --target x86_64-unknown-linux-gnu
+      - name: Build
+        run: |
+          cargo build --target x86_64-unknown-linux-gnu
+          # Test the build is working with the reader and writer features
+          cargo build --target x86_64-unknown-linux-gnu --features reader --no-default-features
+          cargo build --target x86_64-unknown-linux-gnu --features writer --no-default-features

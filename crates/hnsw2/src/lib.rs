@@ -76,8 +76,14 @@ impl<E: node::FloatElement, T: node::IdxType> HNSWIndex<E, T> {
         }
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self._n_items
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn into_data(self) -> impl Iterator<Item = (Vec<E>, T)> {
@@ -250,16 +256,16 @@ impl<E: node::FloatElement, T: node::IdxType> HNSWIndex<E, T> {
     }
 
     fn get_distance_from_vec(&self, x: &node::Node<E, T>, y: &node::Node<E, T>) -> E {
-        return metrics::metric(x.vectors(), y.vectors(), self.mt).unwrap();
+        metrics::metric(x.vectors(), y.vectors(), self.mt).unwrap()
     }
 
     fn get_distance_from_id(&self, x: usize, y: usize) -> E {
-        return metrics::metric(
+        metrics::metric(
             self.get_data(x).vectors(),
             self.get_data(y).vectors(),
             self.mt,
         )
-        .unwrap();
+        .unwrap()
     }
 
     fn search_layer_with_candidate(
@@ -402,10 +408,7 @@ impl<E: node::FloatElement, T: node::IdxType> HNSWIndex<E, T> {
             let mut changed = true;
             while changed {
                 changed = false;
-                let cur_neighs = self
-                    .get_neighbor(cur_id, cur_level as usize)
-                    .read()
-                    .unwrap();
+                let cur_neighs = self.get_neighbor(cur_id, cur_level).read().unwrap();
                 for neigh in cur_neighs.iter() {
                     if *neigh > self._max_item {
                         return Err("cand error");
@@ -688,7 +691,7 @@ impl<E: node::FloatElement + DeserializeOwned, T: node::IdxType + DeserializeOwn
 
         let _nodes_tmp = self._nodes.iter().map(|x| *x.clone()).collect();
         let _item2id_tmp = self._item2id.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        let _delete_ids_tmp = self._delete_ids.iter().map(|x| *x).collect();
+        let _delete_ids_tmp = self._delete_ids.iter().copied().collect();
 
         let dump = HNSWIndexDump {
             _dimension: self._dimension,
@@ -704,7 +707,7 @@ impl<E: node::FloatElement + DeserializeOwned, T: node::IdxType + DeserializeOwn
             _has_removed: self._has_removed,
             _ef_build: self._ef_build,
             _ef_search: self._ef_search,
-            mt: self.mt.clone(),
+            mt: self.mt,
             _id2neighbor_tmp,
             _id2neighbor0_tmp,
             _nodes_tmp,
@@ -734,13 +737,13 @@ impl<'de, E: node::FloatElement + DeserializeOwned, T: node::IdxType + Deseriali
         let _id2neighbor = dump
             ._id2neighbor_tmp
             .into_iter()
-            .map(|x| x.into_iter().map(|y| RwLock::new(y)).collect::<Vec<_>>())
+            .map(|x| x.into_iter().map(RwLock::new).collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
         let _id2neighbor0 = dump
             ._id2neighbor0_tmp
             .into_iter()
-            .map(|x| RwLock::new(x))
+            .map(RwLock::new)
             .collect::<Vec<_>>();
 
         let _item2id = dump._item2id_tmp.into_iter().collect::<HashMap<_, _>>();

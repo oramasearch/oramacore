@@ -37,12 +37,12 @@ include four NVIDIA H100.
 
 Depending on your machine, you may want to use different Docker images.
 
-| Application   | CPU/GPU                              | Docker image                                                                                  |
-| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| **OramaCore** | X86_64                               | [`oramasearch/oramacore`](https://hub.docker.com/r/oramasearch/oramacore)                     |
-| **OramaCore** | ARM64 (Mac M series for example)     | [`oramasearch/oramacore-arm64`](https://hub.docker.com/r/oramasearch/oramacore-arm64)         |
-| **AI Server** | Any CPU architecture, no CUDA access | [`oramasearch/oramacore-ai-server`](https://hub.docker.com/r/oramasearch/oramacore-ai-server) |
-| **AI Server** | Any CPU architecture, CUDA available | `coming soon`                                                                                 |
+| Application   | CPU/GPU                              | Docker image                                                                                           |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| **OramaCore** | X86_64                               | [`oramasearch/oramacore`](https://hub.docker.com/r/oramasearch/oramacore)                              |
+| **OramaCore** | ARM64 (Mac M series for example)     | [`oramasearch/oramacore-arm64`](https://hub.docker.com/r/oramasearch/oramacore-arm64)                  |
+| **AI Server** | Any CPU architecture, no CUDA access | [`oramasearch/oramacore-ai-server`](https://hub.docker.com/r/oramasearch/oramacore-ai-server)          |
+| **AI Server** | Any CPU architecture, CUDA available | [`oramasearch/oramacore-ai-server-cuda`](https://hub.docker.com/r/oramasearch/oramacore-ai-server-cuda)|
 
 ## Using the JavaScript SDK
 

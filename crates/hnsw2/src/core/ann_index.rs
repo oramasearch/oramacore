@@ -21,7 +21,6 @@ use serde::de::DeserializeOwned;
 /// println!("{embedding {}'s nearest neighbor is {}}", 0, bf_idx.search(embs[0]);
 /// ```
 ///
-
 pub trait ANNIndex<E: node::FloatElement, T: node::IdxType>: Send + Sync {
     /// build up the ANN index
     ///
@@ -51,9 +50,7 @@ pub trait ANNIndex<E: node::FloatElement, T: node::IdxType>: Send + Sync {
         }
         for idx in 0..vss.len() {
             let n = node::Node::new_with_idx(vss[idx], indices[idx].clone());
-            if let Err(err) = self.add_node(&n) {
-                return Err(err);
-            }
+            self.add_node(&n)?;
         }
         Ok(())
     }

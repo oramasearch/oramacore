@@ -1,20 +1,15 @@
 use super::{calc::dot, node::FloatElement};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub enum Metric {
+    #[default]
     Unknown,
     Manhattan,
     DotProduct,
     Euclidean,
     CosineSimilarity,
     Angular,
-}
-
-impl Default for Metric {
-    fn default() -> Self {
-        Metric::Unknown
-    }
 }
 
 // TODO: make these func private
