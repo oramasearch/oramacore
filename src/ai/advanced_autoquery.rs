@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum::extract::Query;
 use regex::Regex;
 use serde::Serialize;
 use serde::{self, Deserialize};
@@ -7,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::llms::LLMService;
+use crate::types::{SearchOffset, SearchParams};
 use crate::{
     collection_manager::sides::CollectionStats,
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
@@ -27,6 +29,36 @@ struct IndexesStats {
 #[derive(Serialize)]
 struct PropertiesSelectorInput {
     pub indexes_stats: Vec<IndexesStats>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SelectedProperty {
+    pub property: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub get: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SelectedProperties {
+    pub query: String,
+    pub properties: Vec<SelectedProperty>,
+}
+
+#[derive(Deserialize, Debug)]
+struct LLMPropertiesResponse {
+    #[serde(flatten)]
+    collections: HashMap<String, CollectionProperties>,
+}
+
+#[derive(Deserialize, Debug)]
+struct CollectionProperties {
+    selected_properties: Vec<SelectedProperty>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CollectionSelectedProperties {
+    pub selected_properties: Vec<SelectedProperty>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -120,7 +152,7 @@ impl DeserializedStat {
 #[derive(Serialize, Debug)]
 pub struct QueryAndProperties {
     pub query: String,
-    pub properties: Value,
+    pub properties: HashMap<String, CollectionSelectedProperties>,
 }
 
 pub enum AdvancedAutoQuerySteps {
@@ -163,29 +195,30 @@ impl AdvancedAutoQuery {
         }
     }
 
-    pub async fn run(&mut self, conversation: Vec<InteractionMessage>) -> Result<Value> {
+    pub async fn run(
+        &mut self,
+        conversation: Vec<InteractionMessage>,
+    ) -> Result<Vec<QueryAndProperties>> {
         let conversation_to_json = serde_json::to_string(&conversation)?;
         let optimized_queries = self.analyze_input(conversation_to_json).await?;
+        dbg!(&optimized_queries);
         let selected_properties = self.select_properties(optimized_queries.clone()).await?;
+        dbg!(&selected_properties);
 
         let queries_and_properties: Vec<QueryAndProperties> = optimized_queries
             .into_iter()
             .zip(selected_properties)
-            .map(|(query, properties)| QueryAndProperties {
-                query,
-                properties: serde_json::to_value(properties).unwrap_or(Value::Null), // @todo: check if "null" is acceptable here
-            })
+            .map(|(query, properties)| QueryAndProperties { query, properties })
             .collect();
 
-        let result = serde_json::to_value(&queries_and_properties)?;
-        Ok(result)
+        Ok(queries_and_properties)
     }
 
     pub async fn analyze_input(&self, conversation_as_json: String) -> Result<Vec<String>> {
         let current_datetime = chrono::Utc::now().timestamp();
         let formatted_datetime =
             chrono::DateTime::<chrono::Utc>::from_timestamp(current_datetime, 0)
-                .unwrap() // This cannot fail as we are using a valid timestamp
+                .unwrap()
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string();
 
@@ -209,14 +242,17 @@ impl AdvancedAutoQuery {
         Ok(serde_json::from_str::<Vec<String>>(&repaired)?)
     }
 
-    pub async fn select_properties(&mut self, queries: Vec<String>) -> Result<Vec<Value>> {
+    pub async fn select_properties(
+        &mut self,
+        queries: Vec<String>,
+    ) -> Result<Vec<HashMap<String, CollectionSelectedProperties>>> {
         let selectable_props = serde_json::to_string(&self.format_collection_stats())?;
 
         let futures = queries
-            .into_iter()
+            .iter()
             .map(|query| {
                 let variables = vec![
-                    ("query".to_string(), query),
+                    ("query".to_string(), query.clone()),
                     ("properties_list".to_string(), selectable_props.clone()),
                 ];
                 self.llm_service.run_known_prompt(
@@ -228,17 +264,58 @@ impl AdvancedAutoQuery {
             .collect::<Vec<_>>();
 
         let results = futures::future::join_all(futures).await;
+        dbg!(&results);
 
-        let mut repaired_results = Vec::new();
+        let mut properties_list = Vec::new();
 
-        for result in results {
+        for (index, result) in results.into_iter().enumerate() {
             let repaired = self.strip_markdown_wrapper(&result?);
-            let to_value = serde_json::from_str::<Value>(&repaired)?;
-            repaired_results.push(to_value);
+
+            match serde_json::from_str::<LLMPropertiesResponse>(&repaired) {
+                Ok(llm_response) => {
+                    // Convert the LLM response to the expected output format
+                    let mut collection_properties = HashMap::new();
+
+                    for (collection_name, props) in llm_response.collections {
+                        collection_properties.insert(
+                            collection_name,
+                            CollectionSelectedProperties {
+                                selected_properties: props.selected_properties,
+                            },
+                        );
+                    }
+
+                    properties_list.push(collection_properties);
+                }
+                Err(e) => {
+                    eprintln!("Failed to parse LLM response at index {}: {}", index, e);
+                    eprintln!("Raw response: {}", repaired);
+
+                    // Create empty result as fallback
+                    properties_list.push(HashMap::new());
+                }
+            }
         }
 
-        Ok(repaired_results)
+        Ok(properties_list)
     }
+
+    // async fn get_search_query(
+    //     &mut self,
+    //     query_plan: Vec<QueryAndProperties>,
+    // ) -> Result<SearchParams> {
+    //     let mut results = Vec::new();
+
+    //     for SelectedProperties { query, properties } in query_plan.iter() {
+    //         let properties_values_to_retrieve: Vec<String> = properties
+    //             .iter()
+    //             .filter(|p| p.get)
+    //             .map(|p| p.property.clone())
+    //             .collect();
+    //     }
+
+    //     unimplemented!()
+    // }
 
     fn format_collection_stats(&mut self) -> PropertiesSelectorInput {
         let prefix_re = Regex::new(r"^(committed|uncommitted)_").unwrap();

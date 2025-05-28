@@ -16,7 +16,11 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
-    ai::{advanced_autoquery::AdvancedAutoQuery, llms::LLMService, AIService},
+    ai::{
+        advanced_autoquery::{AdvancedAutoQuery, QueryAndProperties},
+        llms::LLMService,
+        AIService,
+    },
     collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
@@ -300,7 +304,7 @@ impl CollectionReader {
         search_params: &NLPSearchRequest,
         collection_id: CollectionId,
         collection_stats: CollectionStats,
-    ) -> Result<Value> {
+    ) -> Result<Vec<QueryAndProperties>> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();

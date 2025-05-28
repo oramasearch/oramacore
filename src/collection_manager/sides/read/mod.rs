@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
+use crate::ai::advanced_autoquery::QueryAndProperties;
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
@@ -420,7 +421,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Value> {
+    ) -> Result<Vec<QueryAndProperties>> {
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -432,7 +433,7 @@ impl ReadSide {
             .collection_stats(
                 read_api_key,
                 collection_id,
-                CollectionStatsRequest { with_keys: false }, // We don't need keys at this point
+                CollectionStatsRequest { with_keys: true },
             )
             .await?;
         let result = collection

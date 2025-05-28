@@ -28,6 +28,7 @@ pub enum KnownPrompts {
     Autoquery,
     AdvancedAutoqueryQueryAnalyzer,
     AdvancedAutoQueryPropertiesSelector,
+    AdvancedAutoQueryQueryComposer,
     AutomaticEmbeddingsSelector,
     OptimizeQuery,
     PartyPlanner,
@@ -139,6 +140,12 @@ impl KnownPrompts {
                 )
                 .to_string(),
                 user: include_str!("../prompts/v1/advanced_autoquery/properties_selector/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::AdvancedAutoQueryQueryComposer => KnownPrompt {
+                system: include_str!("../prompts/v1/advanced_autoquery/query_composer/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/advanced_autoquery/query_composer/user.md")
                     .to_string(),
             },
         }
