@@ -4,6 +4,7 @@ mod document_storage;
 mod index;
 pub mod notify;
 
+use futures::future::join_all;
 pub use index::*;
 
 pub use collection::CollectionStats;
@@ -421,7 +422,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<QueryAndProperties>> {
+    ) -> Result<Vec<Result<SearchResult>>> {
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -436,11 +437,19 @@ impl ReadSide {
                 CollectionStatsRequest { with_keys: true },
             )
             .await?;
-        let result = collection
+
+        let search_queries = collection
             .nlp_search(&search_params, collection_id, collection_stats)
             .await?;
 
-        Ok(result)
+        // Run all searches in parallel
+        let search_futures = search_queries
+            .iter()
+            .map(|q| self.search(read_api_key.clone(), collection_id, q.clone()));
+
+        let results = join_all(search_futures).await;
+
+        Ok(results)
     }
 
     // This is wrong. We should not expose the ai service to the read side.

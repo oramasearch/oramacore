@@ -199,7 +199,7 @@ impl AdvancedAutoQuery {
     pub async fn run(
         &mut self,
         conversation: Vec<InteractionMessage>,
-    ) -> Result<Vec<QueryAndProperties>> {
+    ) -> Result<Vec<SearchParams>> {
         let conversation_to_json = serde_json::to_string(&conversation)?;
         let optimized_queries = self.analyze_input(conversation_to_json).await?;
         let selected_properties = self.select_properties(optimized_queries.clone()).await?;
@@ -218,9 +218,7 @@ impl AdvancedAutoQuery {
             .get_search_query(queries_and_properties.clone())
             .await?;
 
-        dbg!(&search_queries);
-
-        Ok(queries_and_properties)
+        Ok(search_queries)
     }
 
     pub async fn analyze_input(&self, conversation_as_json: String) -> Result<Vec<String>> {

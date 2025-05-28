@@ -13,7 +13,9 @@ use utoipa::IntoParams;
 
 use crate::{
     collection_manager::sides::ReadSide,
-    types::{ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams},
+    types::{
+        ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
+    },
     web_server::api::util::print_error,
 };
 
@@ -68,17 +70,23 @@ async fn nlp_search(
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<NLPSearchRequest>,
-) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+) -> Result<(StatusCode, Json<Vec<SearchResult>>), (StatusCode, Json<serde_json::Value>)> {
     let read_api_key = query.api_key;
 
-    let output = read_side
+    match read_side
         .nlp_search(read_api_key, collection_id, json)
-        .await;
+        .await
+    {
+        Ok(output) => {
+            let unwrapped = output
+                .into_iter()
+                .filter_map(|item| item.ok())
+                .collect::<Vec<_>>();
 
-    match output {
-        Ok(data) => Ok((StatusCode::OK, Json(data))),
+            Ok((StatusCode::OK, Json(unwrapped)))
+        }
         Err(e) => {
-            print_error(&e, "Error searching collection");
+            print_error(&e, "Error in NLP search");
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": e.to_string() })),

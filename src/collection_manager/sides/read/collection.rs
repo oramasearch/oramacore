@@ -304,7 +304,7 @@ impl CollectionReader {
         search_params: &NLPSearchRequest,
         collection_id: CollectionId,
         collection_stats: CollectionStats,
-    ) -> Result<Vec<QueryAndProperties>> {
+    ) -> Result<Vec<SearchParams>> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
