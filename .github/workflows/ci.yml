@@ -18,30 +18,21 @@ jobs:
     runs-on: [self-hosted, gpu, cuda]
 
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@v1.3.1
       - uses: actions/checkout@v4
       - name: apt-get update
         run: sudo apt-get update
       - name: apt-get install
         run: |
           sudo apt-get install -y libssl3 pkg-config libssl-dev g++ build-essential ca-certificates librocksdb-dev libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev libxml2-dev protobuf-compiler
-      - name: Set up cargo cache
-        uses: actions/cache@v3
-        continue-on-error: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-            .custom_models/
-            .fastembed_cache/
-          key: cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-
-      - name: Install target
-        run: rustup target add x86_64-unknown-linux-gnu
+          profile: minimal
+          override: true
+          components: clippy, rustfmt
+          toolchain: 1.87.0
+          target: x86_64-unknown-linux-gnu
+          rustflags: ""
       - name: Environment
         run: |
           gcc --version

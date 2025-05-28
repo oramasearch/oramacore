@@ -168,10 +168,7 @@ impl std::io::Write for WriteBufferedFile {
         if let Some(ref mut inner) = self.buf {
             inner.write(buf)
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Buffered file is closed",
-            ))
+            Err(std::io::Error::other("Buffered file is closed"))
         }
     }
 
@@ -183,10 +180,7 @@ impl std::io::Write for WriteBufferedFile {
             }
             Ok(())
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Buffered file is closed",
-            ))
+            Err(std::io::Error::other("Buffered file is closed"))
         }
     }
 
@@ -194,10 +188,7 @@ impl std::io::Write for WriteBufferedFile {
         if let Some(ref mut inner) = self.buf {
             inner.write_fmt(fmt)
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Buffered file is closed",
-            ))
+            Err(std::io::Error::other("Buffered file is closed"))
         }
     }
 
@@ -205,10 +196,7 @@ impl std::io::Write for WriteBufferedFile {
         if let Some(ref mut inner) = self.buf {
             inner.write_vectored(bufs)
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Buffered file is closed",
-            ))
+            Err(std::io::Error::other("Buffered file is closed"))
         }
     }
 
@@ -216,10 +204,7 @@ impl std::io::Write for WriteBufferedFile {
         if let Some(ref mut inner) = self.buf {
             inner.flush()
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Buffered file is closed",
-            ))
+            Err(std::io::Error::other("Buffered file is closed"))
         }
     }
 }

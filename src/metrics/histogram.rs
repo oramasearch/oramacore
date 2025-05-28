@@ -7,6 +7,7 @@ use tracing::error;
 #[macro_export]
 macro_rules! create_counter_histogram {
     ($name:ident, $key:expr, $type: ident) => {
+        #[allow(dead_code)]
         pub static $name: $crate::metrics::histogram::CounterHistogram<$type> =
             $crate::metrics::histogram::CounterHistogram {
                 key: $key,
