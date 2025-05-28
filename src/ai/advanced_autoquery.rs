@@ -182,7 +182,14 @@ impl AdvancedAutoQuery {
     }
 
     pub async fn analyze_input(&self, conversation_as_json: String) -> Result<Vec<String>> {
-        let variables = vec![("conversation".to_string(), conversation_as_json)];
+        let current_datetime = chrono::Utc::now().timestamp();
+        let current_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+        let variables = vec![
+            ("conversation".to_string(), conversation_as_json),
+            ("timestamp".to_string(), current_datetime.to_string()),
+            ("date".to_string(), current_date),
+        ];
 
         let result = self
             .llm_service
