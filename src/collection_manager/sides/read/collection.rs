@@ -11,13 +11,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
     ai::{
-        advanced_autoquery::{AdvancedAutoQuery, QueryAndProperties},
+        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryAndProperties},
         llms::LLMService,
         AIService,
     },
@@ -308,8 +307,7 @@ impl CollectionReader {
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
 
-        let mut advanced_autoquery =
-            AdvancedAutoQuery::new(collection_stats, llm_service, llm_config);
+        let advanced_autoquery = AdvancedAutoQuery::new(collection_stats, llm_service, llm_config);
         let conversation = vec![InteractionMessage {
             role: Role::User,
             content: query,
@@ -318,6 +316,24 @@ impl CollectionReader {
         let analyze_result = advanced_autoquery.run(conversation).await?;
 
         return Ok(analyze_result);
+    }
+
+    pub async fn nlp_search_stream(
+        &self,
+        search_params: &NLPSearchRequest,
+        collection_stats: CollectionStats,
+    ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+        let llm_service = self.llm_service.clone();
+        let llm_config = search_params.llm_config.clone();
+        let query = search_params.query.clone();
+
+        let advanced_autoquery = AdvancedAutoQuery::new(collection_stats, llm_service, llm_config);
+        let conversation = vec![InteractionMessage {
+            role: Role::User,
+            content: query,
+        }];
+
+        Ok(advanced_autoquery.run_stream(conversation).await)
     }
 
     pub async fn search(

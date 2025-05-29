@@ -11,7 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::llms::{KnownPrompts, LLMService};
 use crate::{
     collection_manager::sides::CollectionStats,
-    types::{IndexId, InteractionLLMConfig, InteractionMessage, SearchParams},
+    types::{IndexId, InteractionLLMConfig, InteractionMessage, SearchParams, SearchResult},
 };
 
 // ==== Macro Rules ====
@@ -219,6 +219,7 @@ pub enum AdvancedAutoQuerySteps {
     CombinedQueriesAndProperties(Vec<QueryAndProperties>),
     GeneratingQueries,
     GeneratedQueries(Vec<SearchParams>),
+    SearchResults(Vec<SearchResult>),
 }
 
 pub struct AdvancedAutoQueryStepResult {
