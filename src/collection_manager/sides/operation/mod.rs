@@ -76,6 +76,8 @@ impl OperationSender {
             }
         }
 
+        trace!("Operation sent");
+
         Ok(())
     }
 
