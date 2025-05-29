@@ -68,10 +68,7 @@ impl CommittedDiskDocumentStorage {
         let mut output: Vec<_> = output
             .into_iter()
             .map(|d| {
-                let doc = match ZeboDocument::from_bytes(d.1) {
-                    Ok(doc) => Some(doc),
-                    Err(_) => None,
-                };
+                let doc = ZeboDocument::from_bytes(d.1).ok();
                 (d.0, doc)
             })
             .collect();
@@ -160,8 +157,6 @@ impl DocumentStorage {
         &self,
         mut doc_ids: Vec<DocumentId>,
     ) -> Result<Vec<Option<Arc<RawJSONDocument>>>> {
-        println!("get_documents_by_ids: {doc_ids:?}");
-
         let uncommitted_document_deletions = self.uncommitted_document_deletions.read().await;
         doc_ids.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
 

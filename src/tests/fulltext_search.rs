@@ -884,3 +884,68 @@ async fn test_fulltext_exact_multi_terms() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_empty_term() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    let docs = vec![
+        json!({
+            "id": "1",
+            "text": "The pen is on the table",
+        }),
+        json!({
+            "id": "2",
+            "text": "the pen",
+            "text2": "is on the table",
+        }),
+        json!({
+            "id": "3",
+            "text": "the pen",
+        }),
+    ];
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    test_context.commit_all().await.unwrap();
+    let test_context = test_context.reload().await;
+
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 3);
+
+    drop(test_context);
+}
