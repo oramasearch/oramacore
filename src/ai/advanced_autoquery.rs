@@ -1,15 +1,29 @@
 use anyhow::{Context, Result};
+use futures::{Stream, StreamExt};
 use llm_json::repair_json;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::{
     collection_manager::sides::CollectionStats,
     types::{IndexId, InteractionLLMConfig, InteractionMessage, SearchParams},
 };
+
+// ==== Macro Rules ====
+
+// Macro to send a step result through the channel
+macro_rules! send_step {
+    ($tx:expr, $step:expr) => {
+        $tx.send(Ok($step))
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send step: {}", e))?
+    };
+}
 
 // ===== Data Models =====
 
@@ -193,13 +207,18 @@ impl FieldStatType {
 
 // ===== Query Processing Steps =====
 
+#[derive(Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AdvancedAutoQuerySteps {
     Init,
-    AnalyzeInput,
-    SelectProps,
-    GetPropValues,
-    GenerateQueries,
-    RunQueries,
+    OptimizingQuery,
+    QueryOptimized(Vec<String>),
+    SelectingProps,
+    SelectedProps(Vec<HashMap<String, CollectionSelectedProperties>>),
+    CombiningQueriesAndProperties,
+    CombinedQueriesAndProperties(Vec<QueryAndProperties>),
+    GeneratingQueries,
+    GeneratedQueries(Vec<SearchParams>),
 }
 
 pub struct AdvancedAutoQueryStepResult {
@@ -214,7 +233,6 @@ pub struct AdvancedAutoQuery {
     llm_service: Arc<LLMService>,
     llm_config: Option<InteractionLLMConfig>,
     collection_stats: CollectionStats,
-    step_results: Vec<AdvancedAutoQueryStepResult>,
 }
 
 impl AdvancedAutoQuery {
@@ -227,32 +245,91 @@ impl AdvancedAutoQuery {
         Self {
             llm_service,
             collection_stats,
-            step_results: Vec::new(),
             llm_config,
         }
     }
 
     /// Runs the complete auto-query pipeline
-    pub async fn run(
-        &mut self,
-        conversation: Vec<InteractionMessage>,
-    ) -> Result<Vec<SearchParams>> {
-        // Step 1: Analyze the conversation input
-        let conversation_json =
-            serde_json::to_string(&conversation).context("Failed to serialize conversation")?;
-        let optimized_queries = self.analyze_input(conversation_json).await?;
+    pub async fn run(self, conversation: Vec<InteractionMessage>) -> Result<Vec<SearchParams>> {
+        let mut stream = self.run_stream(conversation).await;
 
-        // Step 2: Select properties for each query
-        let selected_properties = self.select_properties(optimized_queries.clone()).await?;
+        let mut search_queries = Vec::new();
+        while let Some(step_result) = stream.next().await {
+            match step_result {
+                // We only return the last step, which contains the generated queries
+                Ok(AdvancedAutoQuerySteps::GeneratedQueries(queries)) => {
+                    search_queries.extend(queries);
+                    break;
+                }
+                Ok(_step) => {}
+                Err(e) => {
+                    eprintln!("Error during auto-query processing: {}", e);
+                    return Err(e);
+                }
+            }
+        }
 
-        // Step 3: Combine queries with properties
-        let queries_and_properties =
-            self.combine_queries_and_properties(optimized_queries, selected_properties);
-
-        // Step 4: Generate search queries
-        self.generate_search_queries(queries_and_properties).await
+        Ok(search_queries)
     }
 
+    /// Runs the auto-query pipeline as a stream of steps. Useful for real-time feedback in UIs.
+    pub async fn run_stream(
+        mut self,
+        conversation: Vec<InteractionMessage>,
+    ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
+        let (tx, rx) = mpsc::channel(100);
+
+        tokio::spawn(async move {
+            let result: Result<()> = async {
+                // Step 0: Initialize
+                send_step!(tx, AdvancedAutoQuerySteps::Init);
+
+                // Step 1: Convert conversation to JSON
+                let conversation_json = serde_json::to_string(&conversation)?;
+
+                // Step 2: Analyze input
+                send_step!(tx, AdvancedAutoQuerySteps::OptimizingQuery);
+                let optimized_queries = self.analyze_input(conversation_json).await?;
+                send_step!(
+                    tx,
+                    AdvancedAutoQuerySteps::QueryOptimized(optimized_queries.clone())
+                );
+
+                // Step 3: Select properties
+                send_step!(tx, AdvancedAutoQuerySteps::SelectingProps);
+                let selected_properties = self.select_properties(optimized_queries.clone()).await?;
+                send_step!(
+                    tx,
+                    AdvancedAutoQuerySteps::SelectedProps(selected_properties.clone())
+                );
+
+                // Step 4: Combine
+                send_step!(tx, AdvancedAutoQuerySteps::CombiningQueriesAndProperties);
+                let queries_and_properties =
+                    self.combine_queries_and_properties(optimized_queries, selected_properties);
+                send_step!(
+                    tx,
+                    AdvancedAutoQuerySteps::CombinedQueriesAndProperties(
+                        queries_and_properties.clone()
+                    )
+                );
+
+                // Step 5: Generate queries
+                send_step!(tx, AdvancedAutoQuerySteps::GeneratingQueries);
+                let search_queries = self.generate_search_queries(queries_and_properties).await?;
+                send_step!(tx, AdvancedAutoQuerySteps::GeneratedQueries(search_queries));
+
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                let _ = tx.send(Err(e)).await;
+            }
+        });
+
+        ReceiverStream::new(rx)
+    }
     /// Analyzes the input conversation to extract optimized queries
     async fn analyze_input(&self, conversation_json: String) -> Result<Vec<String>> {
         let current_datetime = chrono::Utc::now();
@@ -532,11 +609,6 @@ impl AdvancedAutoQuery {
                 });
             }
         }
-
-        self.step_results.push(AdvancedAutoQueryStepResult {
-            step: AdvancedAutoQuerySteps::SelectProps,
-            result: serde_json::to_string(&indexes_stats).unwrap_or_default(),
-        });
 
         PropertiesSelectorInput { indexes_stats }
     }
