@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use llm_json::repair_json;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -277,7 +278,7 @@ impl AdvancedAutoQuery {
             .await
             .context("Failed to run query analyzer prompt")?;
 
-        let cleaned = clean_json_response(&result);
+        let cleaned = repair_json(&result, &Default::default())?;
         serde_json::from_str::<Vec<String>>(&cleaned)
             .context("Failed to parse query analyzer response")
     }
@@ -306,24 +307,26 @@ impl AdvancedAutoQuery {
             .collect();
 
         let results = futures::future::join_all(futures).await;
+        let mut parsed_results = Vec::new();
 
-        Ok(results
-            .into_iter()
-            .enumerate()
-            .map(|(index, result)| match result {
+        for (index, result) in results.into_iter().enumerate() {
+            match result {
                 Ok(response) => {
-                    let cleaned = clean_json_response(&response);
-                    parse_properties_response(&cleaned).unwrap_or_else(|e| {
+                    let cleaned = repair_json(&response, &Default::default())?;
+                    let parsed = parse_properties_response(&cleaned).unwrap_or_else(|e| {
                         eprintln!("Failed to parse LLM response at index {}: {}", index, e);
                         HashMap::new()
-                    })
+                    });
+                    parsed_results.push(parsed);
                 }
                 Err(e) => {
                     eprintln!("LLM call failed at index {}: {}", index, e);
-                    HashMap::new()
+                    parsed_results.push(HashMap::new());
                 }
-            })
-            .collect::<Vec<_>>())
+            }
+        }
+
+        Ok(parsed_results)
     }
 
     /// Combines queries with their selected properties
@@ -379,7 +382,8 @@ impl AdvancedAutoQuery {
                 result
                     .with_context(|| format!("LLM call failed for query {}", index))
                     .and_then(|response| {
-                        let cleaned = clean_json_response(&response);
+                        let cleaned = repair_json(&response, &Default::default())
+                            .context("Failed to clean LLM response")?;
                         serde_json::from_str::<SearchParams>(&cleaned)
                             .context("Failed to parse search params")
                     })
@@ -578,24 +582,6 @@ impl AdvancedAutoQuery {
 }
 
 // ===== Helper Functions =====
-
-/// Removes markdown code block wrappers from JSON responses
-fn clean_json_response(input: &str) -> String {
-    let trimmed = input.trim();
-
-    if let Some(content) = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-    {
-        content
-            .trim_start_matches('\n')
-            .trim_end_matches("```")
-            .trim()
-            .to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
 
 /// Parses the LLM properties response into the expected format
 fn parse_properties_response(
