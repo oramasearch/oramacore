@@ -562,6 +562,7 @@ impl WriteSide {
         };
         let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
 
+        let mut docs_to_remove = Vec::with_capacity(document_count);
         let mut i = 0;
         for mut doc in document_list {
             i += 1;
@@ -648,7 +649,7 @@ impl WriteSide {
                 .context("Cannot process document")
             {
                 Ok(Some(old_doc_id)) => {
-                    self.document_storage.remove(vec![old_doc_id]).await;
+                    docs_to_remove.push(old_doc_id);
                     result.inserted += 1;
                 }
                 Ok(None) => {
@@ -667,6 +668,7 @@ impl WriteSide {
 
             debug!("Document inserted");
         }
+        self.document_storage.remove(docs_to_remove).await;
 
         info!("All documents are inserted");
 
@@ -766,6 +768,7 @@ impl WriteSide {
             failed: 0,
         };
 
+        let mut docs_to_remove = Vec::with_capacity(update_document_request.documents.0.len());
         let mut i = 0;
         for mut doc in update_document_request.documents {
             i += 1;
@@ -858,7 +861,7 @@ impl WriteSide {
                 .context("Cannot process document")
             {
                 Ok(Some(old_doc_id)) => {
-                    self.document_storage.remove(vec![old_doc_id]).await;
+                    docs_to_remove.push(old_doc_id);
                     result.updated += 1;
                 }
                 Ok(None) => {
@@ -877,6 +880,7 @@ impl WriteSide {
 
             debug!("Document inserted");
         }
+        self.document_storage.remove(docs_to_remove).await;
 
         info!("All documents are inserted");
 
