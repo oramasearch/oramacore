@@ -48,7 +48,7 @@ class OramaAIConfig:
     host: Optional[str] = "0.0.0.0"
     embeddings: Optional[EmbeddingsConfig] = field(default_factory=EmbeddingsConfig)
     total_threads: Optional[int] = 12
-    
+
     rust_server_host: Optional[str] = "0.0.0.0"
     rust_server_port: Optional[int] = 8080
 
