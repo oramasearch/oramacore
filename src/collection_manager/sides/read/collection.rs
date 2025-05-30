@@ -17,11 +17,11 @@ use tracing::{error, info, warn};
 
 use crate::{
     ai::{
-        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryAndProperties},
+        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps},
         llms::LLMService,
         AIService,
     },
-    collection_manager::sides::{collection, CollectionWriteOperation, Offset, ReplaceIndexReason},
+    collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{

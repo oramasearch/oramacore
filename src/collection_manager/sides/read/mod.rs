@@ -6,7 +6,6 @@ pub mod notify;
 
 use axum::extract::State;
 use futures::Stream;
-use futures::{future::join_all, StreamExt};
 pub use index::*;
 
 pub use collection::CollectionStats;
@@ -16,7 +15,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
-use tokio_stream::wrappers::ReceiverStream;
 
 use anyhow::{Context, Result};
 pub use collection::IndexFieldStatsType;
