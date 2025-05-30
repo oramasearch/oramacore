@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use futures::{Stream, StreamExt};
+use axum::extract::State;
+use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
@@ -10,8 +11,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::{
-    collection_manager::sides::CollectionStats,
-    types::{IndexId, InteractionLLMConfig, InteractionMessage, SearchParams, SearchResult},
+    collection_manager::sides::{CollectionStats, ReadSide},
+    types::{
+        ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
+        SearchResult,
+    },
 };
 
 // ==== Macro Rules ====
@@ -219,6 +223,7 @@ pub enum AdvancedAutoQuerySteps {
     CombinedQueriesAndProperties(Vec<QueryAndProperties>),
     GeneratingQueries,
     GeneratedQueries(Vec<SearchParams>),
+    Searching,
     SearchResults(Vec<SearchResult>),
 }
 
@@ -251,15 +256,23 @@ impl AdvancedAutoQuery {
     }
 
     /// Runs the complete auto-query pipeline
-    pub async fn run(self, conversation: Vec<InteractionMessage>) -> Result<Vec<SearchParams>> {
-        let mut stream = self.run_stream(conversation).await;
+    pub async fn run(
+        self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Vec<InteractionMessage>,
+    ) -> Result<Vec<SearchResult>> {
+        let mut stream = self
+            .run_stream(read_side.clone(), read_api_key, collection_id, conversation)
+            .await;
 
-        let mut search_queries = Vec::new();
+        let mut search_results = Vec::new();
         while let Some(step_result) = stream.next().await {
             match step_result {
                 // We only return the last step, which contains the generated queries
-                Ok(AdvancedAutoQuerySteps::GeneratedQueries(queries)) => {
-                    search_queries.extend(queries);
+                Ok(AdvancedAutoQuerySteps::SearchResults(results)) => {
+                    search_results.extend(results);
                     break;
                 }
                 Ok(_step) => {}
@@ -270,12 +283,15 @@ impl AdvancedAutoQuery {
             }
         }
 
-        Ok(search_queries)
+        Ok(search_results)
     }
 
     /// Runs the auto-query pipeline as a stream of steps. Useful for real-time feedback in UIs.
     pub async fn run_stream(
         mut self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
     ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
         let (tx, rx) = mpsc::channel(100);
@@ -318,7 +334,32 @@ impl AdvancedAutoQuery {
                 // Step 5: Generate queries
                 send_step!(tx, AdvancedAutoQuerySteps::GeneratingQueries);
                 let search_queries = self.generate_search_queries(queries_and_properties).await?;
-                send_step!(tx, AdvancedAutoQuerySteps::GeneratedQueries(search_queries));
+                send_step!(
+                    tx,
+                    AdvancedAutoQuerySteps::GeneratedQueries(search_queries.clone())
+                );
+
+                // Step 6: Execute search
+                send_step!(tx, AdvancedAutoQuerySteps::Searching);
+                let search_futures = search_queries.iter().map(|query| {
+                    let read_side = read_side.clone();
+                    let read_api_key = read_api_key.clone();
+                    let collection_id = collection_id.clone();
+                    async move {
+                        read_side
+                            .search(read_api_key, collection_id, query.clone())
+                            .await
+                            .context("Failed to execute search")
+                    }
+                });
+
+                let results = join_all(search_futures).await;
+                let unwrapped = results
+                    .into_iter()
+                    .filter_map(|item| item.ok())
+                    .collect::<Vec<_>>();
+
+                send_step!(tx, AdvancedAutoQuerySteps::SearchResults(unwrapped.clone()));
 
                 Ok(())
             }

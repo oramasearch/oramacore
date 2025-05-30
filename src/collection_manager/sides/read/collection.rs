@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use serde::{Deserialize, Serialize};
@@ -20,12 +21,12 @@ use crate::{
         llms::LLMService,
         AIService,
     },
-    collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
+    collection_manager::sides::{collection, CollectionWriteOperation, Offset, ReplaceIndexReason},
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, NLPSearchRequest, Role, SearchParams,
+        InteractionMessage, NLPSearchRequest, Role, SearchParams, SearchResult,
     },
 };
 
@@ -33,7 +34,7 @@ use super::{
     index::{Index, IndexStats},
     notify::Notifier,
     CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, ReadSide,
     UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
@@ -300,9 +301,12 @@ impl CollectionReader {
 
     pub async fn nlp_search(
         &self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
-    ) -> Result<Vec<SearchParams>> {
+    ) -> Result<Vec<SearchResult>> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
@@ -313,13 +317,18 @@ impl CollectionReader {
             content: query,
         }];
 
-        let analyze_result = advanced_autoquery.run(conversation).await?;
+        let search_results = advanced_autoquery
+            .run(read_side.clone(), read_api_key, collection_id, conversation)
+            .await?;
 
-        return Ok(analyze_result);
+        return Ok(search_results);
     }
 
     pub async fn nlp_search_stream(
         &self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
     ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>> {
@@ -333,7 +342,9 @@ impl CollectionReader {
             content: query,
         }];
 
-        Ok(advanced_autoquery.run_stream(conversation).await)
+        Ok(advanced_autoquery
+            .run_stream(read_side.clone(), read_api_key, collection_id, conversation)
+            .await)
     }
 
     pub async fn search(

@@ -4,6 +4,7 @@ mod document_storage;
 mod index;
 pub mod notify;
 
+use axum::extract::State;
 use futures::Stream;
 use futures::{future::join_all, StreamExt};
 pub use index::*;
@@ -420,10 +421,11 @@ impl ReadSide {
 
     pub async fn nlp_search(
         &self,
+        read_side: State<Arc<ReadSide>>,
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<Result<SearchResult>>> {
+    ) -> Result<Vec<SearchResult>> {
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -439,40 +441,32 @@ impl ReadSide {
             )
             .await?;
 
-        let search_queries = collection
-            .nlp_search(&search_params, collection_stats)
+        let search_results = collection
+            .nlp_search(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                &search_params,
+                collection_stats,
+            )
             .await?;
 
-        // Run all searches in parallel
-        let search_futures = search_queries
-            .iter()
-            .map(|q| self.search(read_api_key.clone(), collection_id, q.clone()));
-
-        let results = join_all(search_futures).await;
-
-        Ok(results)
+        Ok(search_results)
     }
 
     pub async fn nlp_search_stream(
         &self,
+        read_side: State<Arc<ReadSide>>,
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
-        {
-            let collection = self
-                .collections
-                .get_collection(collection_id)
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Collection not found"))
-                .context("Cannot get collection for NLP search")
-                .unwrap();
-
-            collection
-                .check_read_api_key(read_api_key)
-                .context("Cannot check read API key")
-                .unwrap();
-        }
+    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
 
         let collection_stats = self
             .collection_stats(
@@ -480,88 +474,27 @@ impl ReadSide {
                 collection_id,
                 CollectionStatsRequest { with_keys: true },
             )
+            .await?;
+
+        collection
+            .nlp_search_stream(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                &search_params,
+                collection_stats,
+            )
             .await
-            .context("Cannot get collection stats for NLP search")
-            .unwrap();
-
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
-
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))
-            .unwrap();
-
-        tokio::spawn(async move {
-            let mut steps = collection
-                .nlp_search_stream(&search_params, collection_stats)
-                .await
-                .context("Cannot start NLP search stream")
-                .unwrap();
-
-            while let Some(step) = steps.next().await {
-                match step {
-                    Ok(AdvancedAutoQuerySteps::GeneratedQueries(search_queries)) => {
-                        if tx
-                            .send(Ok(AdvancedAutoQuerySteps::GeneratedQueries(
-                                search_queries.clone(),
-                            )))
-                            .await
-                            .is_err()
-                        {
-                            warn!("Receiver dropped before all queries were sent");
-                            break;
-                        }
-
-                        // For each search, get a fresh collection reference
-                        let mut search_results = Vec::new();
-                        for query in &search_queries {
-                            if let Ok(result) = self
-                                .search(read_api_key, collection_id, query.clone())
-                                .await
-                            {
-                                search_results.push(result);
-                            }
-                        }
-
-                        if tx
-                            .send(Ok(AdvancedAutoQuerySteps::SearchResults(search_results)))
-                            .await
-                            .is_err()
-                        {
-                            warn!("Receiver dropped before all search results were sent");
-                            break;
-                        }
-                    }
-                    Ok(step) => {
-                        if tx.send(Ok(step)).await.is_err() {
-                            warn!("Receiver dropped before all steps were sent");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        error!(error = ?e, "Error in NLP search stream");
-                        if tx.send(Err(e)).await.is_err() {
-                            warn!("Receiver dropped before error was sent");
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        ReceiverStream::new(rx)
     }
 
     // This is wrong. We should not expose the ai service to the read side.
-    // TODO: Remove this method.
+    // @todo: Remove this method.
     pub fn get_ai_service(&self) -> Arc<AIService> {
         self.collections.get_ai_service()
     }
 
     // This is wrong. We should not expose the vllm service to the read side.
-    // TODO: Remove this method.
+    // @todo: Remove this method.
     pub fn get_llm_service(&self) -> Arc<LLMService> {
         self.llm_service.clone()
     }

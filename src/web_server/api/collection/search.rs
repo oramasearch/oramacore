@@ -74,17 +74,10 @@ async fn nlp_search(
     let read_api_key = query.api_key;
 
     match read_side
-        .nlp_search(read_api_key, collection_id, json)
+        .nlp_search(read_side.clone(), read_api_key, collection_id, json)
         .await
     {
-        Ok(output) => {
-            let unwrapped = output
-                .into_iter()
-                .filter_map(|item| item.ok())
-                .collect::<Vec<_>>();
-
-            Ok((StatusCode::OK, Json(unwrapped)))
-        }
+        Ok(output) => Ok((StatusCode::OK, Json(output))),
         Err(e) => {
             print_error(&e, "Error in NLP search");
             Err((
