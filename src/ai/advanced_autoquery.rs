@@ -122,35 +122,42 @@ enum FieldStatType {
     CommittedNumber { _min: f64, _max: f64 },
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter {
-        _key_count: usize,
+        #[allow(dead_code)]
+        key_count: usize,
         document_count: usize,
         keys: Option<Vec<String>>,
     },
     #[serde(rename = "committed_string_filter")]
     CommittedStringFilter {
-        _key_count: usize,
+        #[allow(dead_code)]
+        key_count: usize,
         document_count: usize,
         keys: Option<Vec<String>>,
     },
     #[serde(rename = "uncommitted_string")]
     UncommittedString {
-        _key_count: usize,
+        #[allow(dead_code)]
+        key_count: usize,
         global_info: GlobalInfo,
     },
     #[serde(rename = "committed_string")]
     CommittedString {
-        _key_count: usize,
+        #[allow(dead_code)]
+        key_count: usize,
         global_info: GlobalInfo,
     },
     #[serde(rename = "uncommitted_vector")]
     UncommittedVector {
         document_count: usize,
-        _vector_count: usize,
+        #[allow(dead_code)]
+        vector_count: usize,
     },
     #[serde(rename = "committed_vector")]
     CommittedVector {
-        _dimensions: usize,
-        _vector_count: usize,
+        #[allow(dead_code)]
+        dimensions: usize,
+        #[allow(dead_code)]
+        vector_count: usize,
     },
 }
 
@@ -638,6 +645,7 @@ impl AdvancedAutoQuery {
         let mut seen_fields = HashMap::new();
 
         for index in &self.collection_stats.indexes_stats {
+            // Skip temporary indexes
             if index.is_temp {
                 continue;
             }
@@ -662,25 +670,43 @@ impl AdvancedAutoQuery {
         prefix_regex: &Regex,
         seen_fields: &mut HashMap<String, bool>,
     ) -> Vec<FieldStats> {
-        index
+        let result: Vec<FieldStats> = index
             .fields_stats
             .iter()
-            .filter_map(|stat| {
+            .enumerate()
+            .filter_map(|(i, stat)| {
                 let field_path = prefix_regex.replace(&stat.field_path, "").to_string();
 
                 // Skip auto-generated and already seen fields
-                if field_path == "___orama_auto_embedding" || seen_fields.contains_key(&field_path)
-                {
+                if field_path == "___orama_auto_embedding" {
+                    return None;
+                }
+
+                if seen_fields.contains_key(&field_path) {
                     return None;
                 }
 
                 // Try to deserialize and validate the field
-                let stat_json = serde_json::to_string(&stat.stats).ok()?;
-                let field_stat_type = serde_json::from_str::<FieldStatType>(&stat_json).ok()?;
+                let stat_json = match serde_json::to_string(&stat.stats) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return None;
+                    }
+                };
+
+                let field_stat_type = match serde_json::from_str::<FieldStatType>(&stat_json) {
+                    Ok(stat_type) => stat_type,
+                    Err(e) => {
+                        return None;
+                    }
+                };
 
                 // Skip unfilterable strings and fields with no documents
-                if field_stat_type.is_unfilterable_string() || field_stat_type.document_count() == 0
-                {
+                if field_stat_type.is_unfilterable_string() {
+                    return None;
+                }
+
+                if field_stat_type.document_count() == 0 {
                     return None;
                 }
 
@@ -691,7 +717,9 @@ impl AdvancedAutoQuery {
                     field_type: field_stat_type.field_type_name().to_string(),
                 })
             })
-            .collect()
+            .collect();
+
+        result
     }
 }
 

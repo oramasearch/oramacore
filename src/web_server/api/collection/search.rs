@@ -11,7 +11,7 @@ use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 use crate::{
@@ -118,7 +118,7 @@ async fn nlp_search_streamed(
                         Ok(data) => {
                             let event = Event::default().data(json!(data).to_string());
                             if tx.send(Ok(event)).await.is_err() {
-                                break; // Channel closed
+                                break;
                             }
                         }
                         Err(e) => {
