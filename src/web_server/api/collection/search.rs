@@ -1,14 +1,17 @@
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc};
 
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{sse::Event, IntoResponse, Sse},
     Json, Router,
 };
 use axum_openapi3::{utoipa::ToSchema, *};
+use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use utoipa::IntoParams;
 
 use crate::{
@@ -23,6 +26,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .add(search())
         .add(nlp_search())
+        .add(nlp_search_streamed())
         .add(stats())
         .with_state(read_side)
 }
@@ -86,6 +90,55 @@ async fn nlp_search(
             ))
         }
     }
+}
+
+#[endpoint(
+    method = "GET",
+    path = "/v1/collections/{collection_id}/nlp_search_stream",
+    description = "Advanced NLP search endpoint powered by AI - streamed"
+)]
+async fn nlp_search_streamed(
+    collection_id: CollectionId,
+    read_side: State<Arc<ReadSide>>,
+    Query(query): Query<SearchQueryParams>,
+    Json(json): Json<NLPSearchRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let read_api_key = query.api_key;
+    let (tx, rx) = mpsc::channel(100);
+    let rx_stream = ReceiverStream::new(rx);
+
+    tokio::spawn(async move {
+        match read_side
+            .nlp_search_stream(read_side.clone(), read_api_key, collection_id, json)
+            .await
+        {
+            Ok(mut stream) => {
+                while let Some(result) = tokio_stream::StreamExt::next(&mut stream).await {
+                    match result {
+                        Ok(data) => {
+                            let event = Event::default().data(json!(data).to_string());
+                            if tx.send(Ok(event)).await.is_err() {
+                                break; // Channel closed
+                            }
+                        }
+                        Err(e) => {
+                            print_error(&e, "Error in NLP search stream");
+                            let _ = tx.send(Ok(Event::default()
+                                .data(json!({ "error": e.to_string() }).to_string())));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                print_error(&e, "Error in NLP search stream");
+                let _ = tx.send(Ok(
+                    Event::default().data(json!({ "error": e.to_string() }).to_string())
+                ));
+            }
+        }
+    });
+
+    Sse::new(rx_stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
 #[endpoint(
