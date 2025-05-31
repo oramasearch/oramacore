@@ -28,9 +28,10 @@ Additional Guidance:
 
 When performing search, you can use a number of parameters to customize the search results:
 
-| Parameter    | Description                                                                                                        | Default        |
+| Parameter    | Description                                                                                                         | Default        |
 | ------------ | ------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `term`       | The search term.                                                                                                    | -              |
+| `properties` | The properties to search in. Should be an array of strings (for example: `["title", "description", "author.name"]`) or `undefined` when searching on all properties.                                                                                 | -              |
 | `mode`       | The search mode. Can be `fulltext`, `vector`, or `hybrid`.                                                          | `fulltext`     |
 | `where`      | A filter to apply to the search results.                                                                            | -              |
 | `threshold`  | The percentage of matches required to return a document. Read more                                                  | `0`            |
@@ -209,11 +210,11 @@ Checking status of order 2327686 expected to arrive by 2025-05-27
 ```json
 [
   {
-    "property": "ec_order_number",
+    "property": "xx_order_number",
     "type": "string"
   },
   {
-    "property": "ec_status",
+    "property": "xx_status",
     "type": "string",
   }
 ]
@@ -223,25 +224,24 @@ Checking status of order 2327686 expected to arrive by 2025-05-27
 
 ```json
 {
-  "ec_status": ["PENDING", "SHIPPED", "DELIVERED", "CANCELLED"],
+  "xx_status": ["PENDING", "SHIPPED", "DELIVERED", "CANCELLED"],
 }
 ```
+
+**Reasoning behind the output**:
+Since the request is to retrieve the status of a specific order, the search term is the order number itself. Then, we set `properties` to `["xx_order_number"]` to ensure that the search is focused on the order number property. Finally, we set `exact` to `true` to ensure that we only get results that match the exact order number.
+Note that even though we have a property `xx_status`, we don't need to filter by it because the user is not asking for a specific status, just the status of the order, which we can assume is unknown at this point.
 
 **Expected Output**:
 
 ```json
 {
-  "term": "",
+  "term": "2327686",
   "mode": "fulltext",
-  "where": {
-    "ec_order_number": "2327686"
-  }
+  "exact": true,
+  "properties": ["xx_order_number"]
 }
 ```
-
-**Reasoning behind the output**:
-Since the request is to retrieve the status of a specific order, the search term is empty (no actual search term is needed), and the `where` filter is used to filter by the order number (`ec_order_number`).
-Note that even though we have a property `ec_status`, we don't need to filter by it because the user is not asking for a specific status, just the status of the order, which we can assume is unknown at this point.
 
 ## Example 2
 
@@ -278,6 +278,11 @@ Finding yoga mats built with eco-friendly materials under $50
 }
 ```
 
+**Reasoning behind the output**:
+In this case, the user is looking for yoga mats specifically, so we set the search term to "yoga mats". The `where` filter is used to ensure that the price is less than or equal to $50 and that the `sport_tag` is set to `"yoga"`.
+The `threshold` is set to `1` to ensure that only documents containing **all search terms** are returned.
+
+
 **Expected Output**:
 
 ```json
@@ -293,10 +298,6 @@ Finding yoga mats built with eco-friendly materials under $50
   }
 }
 ```
-
-**Reasoning behind the output**:
-In this case, the user is looking for yoga mats specifically, so we set the search term to "yoga mats". The `where` filter is used to ensure that the price is less than or equal to $50 and that the `sport_tag` is set to `"yoga"`.
-The `threshold` is set to `1` to ensure that only documents containing **all search terms** are returned.
 
 ## Example 3
 
@@ -328,6 +329,11 @@ Finding size 10 basketball shoes under $100 for men
 }
 ```
 
+**Reasoning:**
+In this example, the user is looking for basketball shoes specifically, so we set the search term to `"basketball shoes"`.
+The `where` filter is used to ensure that the price is less than or equal to $100 and that the `gender` is set to `"male"` to filter the results accordingly.
+
+
 **Expected Output:**
 
 ```json
@@ -344,6 +350,6 @@ Finding size 10 basketball shoes under $100 for men
 }
 ```
 
-**Reasoning:**
-In this example, the user is looking for basketball shoes specifically, so we set the search term to `"basketball shoes"`.
-The `where` filter is used to ensure that the price is less than or equal to $100 and that the `gender` is set to `"male"` to filter the results accordingly.
+## Absolutely Important Notes
+
+**ALWAYS** reply with a JSON object and nothing more. This is extremely important or you will be fired. Just pass the JSON object as a string without any additional text or formatting. Don't even include madkdown wrappers or code blocks.

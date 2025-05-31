@@ -229,7 +229,7 @@ pub enum AdvancedAutoQuerySteps {
     CombiningQueriesAndProperties,
     CombinedQueriesAndProperties(Vec<QueryAndProperties>),
     GeneratingQueries,
-    GeneratedQueries(Vec<SearchParams>),
+    GeneratedQueries(Vec<String>),
     Searching,
     SearchResults(Vec<SearchResult>),
 }
@@ -341,9 +341,13 @@ impl AdvancedAutoQuery {
                 // Step 5: Generate queries
                 send_step!(tx, AdvancedAutoQuerySteps::GeneratingQueries);
                 let search_queries = self.generate_search_queries(queries_and_properties).await?;
+                let raw_queries = search_queries
+                    .iter()
+                    .map(|(query, _)| query.clone())
+                    .collect::<Vec<_>>();
                 send_step!(
                     tx,
-                    AdvancedAutoQuerySteps::GeneratedQueries(search_queries.clone())
+                    AdvancedAutoQuerySteps::GeneratedQueries(raw_queries.clone())
                 );
 
                 // Step 6: Execute search
@@ -354,7 +358,7 @@ impl AdvancedAutoQuery {
                     let collection_id = collection_id.clone();
                     async move {
                         read_side
-                            .search(read_api_key, collection_id, query.clone())
+                            .search(read_api_key, collection_id, query.1.clone())
                             .await
                             .context("Failed to execute search")
                     }
@@ -476,7 +480,7 @@ impl AdvancedAutoQuery {
     async fn generate_search_queries(
         &mut self,
         mut query_plan: Vec<QueryAndProperties>,
-    ) -> Result<Vec<SearchParams>> {
+    ) -> Result<Vec<(String, SearchParams)>> {
         // Extract filter properties for all queries
         let filter_properties = self.extract_filter_properties(&query_plan)?;
 
@@ -510,8 +514,9 @@ impl AdvancedAutoQuery {
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .context("Failed to clean LLM response")?;
-                        serde_json::from_str::<SearchParams>(&cleaned)
-                            .context("Failed to parse search params")
+                        let serialized = serde_json::from_str::<SearchParams>(&cleaned)
+                            .context("Failed to parse search params")?;
+                        Ok((cleaned, serialized))
                     })
             })
             .collect()
@@ -674,7 +679,7 @@ impl AdvancedAutoQuery {
             .fields_stats
             .iter()
             .enumerate()
-            .filter_map(|(i, stat)| {
+            .filter_map(|(_i, stat)| {
                 let field_path = prefix_regex.replace(&stat.field_path, "").to_string();
 
                 // Skip auto-generated and already seen fields
@@ -689,14 +694,14 @@ impl AdvancedAutoQuery {
                 // Try to deserialize and validate the field
                 let stat_json = match serde_json::to_string(&stat.stats) {
                     Ok(json) => json,
-                    Err(e) => {
+                    Err(_e) => {
                         return None;
                     }
                 };
 
                 let field_stat_type = match serde_json::from_str::<FieldStatType>(&stat_json) {
                     Ok(stat_type) => stat_type,
-                    Err(e) => {
+                    Err(_e) => {
                         return None;
                     }
                 };

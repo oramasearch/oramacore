@@ -148,6 +148,14 @@ Looking for basketball shoes and shorts within a budget of $100
 }
 ```
 
+**Your reasoning should be:**
+In this example, the user is looking for basketball shoes and shorts within a budget of $100. The selected properties include the `price` and `category`, since we can then filter by price and category in the search query.
+The `gender` property is not selected because it is not relevant to the user's query. The same applies to the Adidas products, where we select `fullPrice` and `productCategory` for the same reasons.
+
+For both `category` and `productCategory`, we set `get` to `true` because we don't know the exact category values stored in the database, and we want to retrieve them to match the user's query.
+
+Although we will use `title` and `product_name` for the search, they are not selected as properties because they are not used for filtering or range queries.
+
 **Expected Output:**
 ```json
 {
@@ -179,14 +187,6 @@ Looking for basketball shoes and shorts within a budget of $100
   }
 }
 ```
-
-**Reasoning:**
-In this example, the user is looking for basketball shoes and shorts within a budget of $100. The selected properties include the `price` and `category`, since we can then filter by price and category in the search query.
-The `gender` property is not selected because it is not relevant to the user's query. The same applies to the Adidas products, where we select `fullPrice` and `productCategory` for the same reasons.
-
-For both `category` and `productCategory`, we set `get` to `true` because we don't know the exact category values stored in the database, and we want to retrieve them to match the user's query.
-
-Although we will use `title` and `product_name` for the search, they are not selected as properties because they are not used for filtering or range queries.
 
 ## Example 2
 
@@ -253,6 +253,13 @@ Checking the status of my order #918273 from amazon.com which whould have been d
 }
 ```
 
+**Your reasoning should be:**
+In this example, the user is checking the status of their order with a specific order ID. The selected properties include `order_id`, `status`, and `delivery_date`, which are relevant to the user's query. The other properties are not selected because they are not directly related to the user's request.
+
+Since the `order_id` property will contain a specific value (the order number), we set `get` to `false` for it, as we already know the order ID from the user's query. However, we set `get` to `true` for the `status` property because we need to retrieve the current status of the order, which is not specified in the query and cannot be deduced (do they call it `"COMPLETED"`? `"DONE"`? We don't know yet). The `delivery_date` is also selected as it is relevant to the user's request about delivery timing.
+
+Also the user specified that the order was made on amazon.com, so we only selected the properties from the `amazon-orders` index.
+
 **Expected Output:**
 ```json
 {
@@ -276,10 +283,3 @@ Checking the status of my order #918273 from amazon.com which whould have been d
   }
 }
 ```
-
-**Reasoning:**
-In this example, the user is checking the status of their order with a specific order ID. The selected properties include `order_id`, `status`, and `delivery_date`, which are relevant to the user's query. The other properties are not selected because they are not directly related to the user's request.
-
-Since the `order_id` property will contain a specific value (the order number), we set `get` to `false` for it, as we already know the order ID from the user's query. However, we set `get` to `true` for the `status` property because we need to retrieve the current status of the order, which is not specified in the query and cannot be deduced (do they call it `"COMPLETED"`? `"DONE"`? We don't know yet). The `delivery_date` is also selected as it is relevant to the user's request about delivery timing.
-
-Also the user specified that the order was made on amazon.com, so we only selected the properties from the `amazon-orders` index.
