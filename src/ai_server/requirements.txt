@@ -4,7 +4,7 @@ numpy==2.2.2
 
 grpcio-tools==1.69.0
 grpcio==1.69.0
-grpcio-reflection== 1.69.0
+grpcio-reflection==1.69.0
 
 torch==2.5.1+cu124
 --extra-index-url https://download.pytorch.org/whl/cu124

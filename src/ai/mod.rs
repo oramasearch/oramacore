@@ -19,6 +19,7 @@ use crate::metrics::{
 };
 use crate::types::InteractionLLMConfig;
 
+pub mod advanced_autoquery;
 pub mod automatic_embeddings_selector;
 pub mod context_evaluator;
 pub mod gpu;

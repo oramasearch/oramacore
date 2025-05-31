@@ -102,7 +102,6 @@ serde-big-array = "0.5.1"
 debug_panic = "0.2.1"
 dedent = "0.1.1"
 hnsw2 = { path = "./crates/hnsw2" }
-repair_json = "0.1.0"
 async-openai = "0.28.0"
 
 orama-js-pool = "0.1.1"
@@ -119,6 +118,7 @@ rustls = "0.23.26"
 filters = { path = "./crates/filters" }
 
 zebo = "0.1.2"
+llm_json = "1.0.2"
 
 [build-dependencies]
 cc = "1"
@@ -163,7 +163,4 @@ reader = []
 test-mem-alloc = []
 
 [workspace]
-members = [
-    "crates/hnsw2",
-    "crates/filters",
-]
+members = ["crates/hnsw2", "crates/filters"]
