@@ -1491,7 +1491,7 @@ impl Index {
         let committed_fields = self.committed_fields.read().await;
 
         let tokens = self.text_parser.tokenize_and_stem(term);
-        let tokens: Vec<_> = if exact {
+        let mut tokens: Vec<_> = if exact {
             tokens.into_iter().map(|e| e.0).collect()
         } else {
             tokens
@@ -1499,6 +1499,11 @@ impl Index {
                 .flat_map(|e| std::iter::once(e.0).chain(e.1.into_iter()))
                 .collect()
         };
+
+        if tokens.is_empty() {
+            // Ensure we have at least one token otherwise the result will be empty.
+            tokens.push(String::from(""));
+        }
 
         let mut scorer: BM25Scorer<DocumentId> = match threshold {
             Some(Threshold(threshold)) => {

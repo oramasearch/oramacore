@@ -4,6 +4,8 @@ mod document_storage;
 mod index;
 pub mod notify;
 
+use axum::extract::State;
+use futures::Stream;
 pub use index::*;
 
 pub use collection::CollectionStats;
@@ -23,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
+use crate::ai::advanced_autoquery::AdvancedAutoQuerySteps;
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
@@ -34,8 +37,8 @@ use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, SearchMode,
-    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, NLPSearchRequest,
+    SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
@@ -414,14 +417,82 @@ impl ReadSide {
         })
     }
 
+    pub async fn nlp_search(
+        &self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        search_params: NLPSearchRequest,
+    ) -> Result<Vec<SearchResult>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
+        let collection_stats = self
+            .collection_stats(
+                read_api_key,
+                collection_id,
+                CollectionStatsRequest { with_keys: true },
+            )
+            .await?;
+
+        let search_results = collection
+            .nlp_search(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                &search_params,
+                collection_stats,
+            )
+            .await?;
+
+        Ok(search_results)
+    }
+
+    pub async fn nlp_search_stream(
+        &self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        search_params: NLPSearchRequest,
+    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+        collection.check_read_api_key(read_api_key)?;
+
+        let collection_stats = self
+            .collection_stats(
+                read_api_key,
+                collection_id,
+                CollectionStatsRequest { with_keys: true },
+            )
+            .await?;
+
+        collection
+            .nlp_search_stream(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                &search_params,
+                collection_stats,
+            )
+            .await
+    }
+
     // This is wrong. We should not expose the ai service to the read side.
-    // TODO: Remove this method.
+    // @todo: Remove this method.
     pub fn get_ai_service(&self) -> Arc<AIService> {
         self.collections.get_ai_service()
     }
 
     // This is wrong. We should not expose the vllm service to the read side.
-    // TODO: Remove this method.
+    // @todo: Remove this method.
     pub fn get_llm_service(&self) -> Arc<LLMService> {
         self.llm_service.clone()
     }

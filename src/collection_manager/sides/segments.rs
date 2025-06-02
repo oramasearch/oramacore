@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use core::fmt;
+use llm_json::repair_json;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -127,7 +128,7 @@ impl SegmentInterface {
             )
             .await?;
 
-        let repaired = repair_json::repair(response)?;
+        let repaired = repair_json(&response, &Default::default())?;
 
         // @todo: improve this.
         if repaired == "{}" {

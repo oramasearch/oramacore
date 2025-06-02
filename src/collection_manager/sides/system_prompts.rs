@@ -9,6 +9,7 @@ use crate::{
 };
 
 use super::generic_kv::{format_key, KV};
+use llm_json::repair_json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPrompt {
@@ -66,7 +67,7 @@ impl SystemPromptInterface {
             .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables, llm_config)
             .await?;
 
-        let repaired = repair_json::repair(response)?;
+        let repaired = repair_json(&response, &Default::default())?;
         let deserialized: SystemPromptValidationResponse = serde_json::from_str(&repaired)?;
 
         Ok(deserialized)
