@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use async_openai::config::OpenAIConfig;
 use axum::extract::State;
 use futures::{Stream, StreamExt};
+use llm_json::repair_json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
@@ -234,7 +235,7 @@ impl PartyPlanner {
                         .unwrap();
 
                     let value = match step.returns_json {
-                        true => repair_json::repair(result.clone())
+                        true => repair_json(&result, &Default::default())
                             .context(format!(
                                 "Unable to repair JSON for step: {}.\nOriginal value:\n{}",
                                 step.name, result
@@ -328,7 +329,7 @@ impl PartyPlanner {
             )
             .await?;
 
-        let repaired = repair_json::repair(action_plan)?;
+        let repaired = repair_json(&action_plan, &Default::default())?;
         let action_plan_deser: ActionPlanResponse = serde_json::from_str(&repaired)?;
 
         let plan = match action_plan_deser {

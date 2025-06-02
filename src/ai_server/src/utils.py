@@ -1,5 +1,5 @@
+import os
 import yaml
-import json
 from pathlib import Path
 from typing import List, Optional
 from dataclasses import dataclass, field
@@ -51,14 +51,15 @@ class OramaAIConfig:
     
     rust_server_host: Optional[str] = "0.0.0.0"
     rust_server_port: Optional[int] = 8080
+    config_path = os.getenv('CONFIG_PATH', DEFAULT_CONFIG_PATH)
 
     def __post_init__(self):
-        if Path(DEFAULT_CONFIG_PATH).exists():
+        if Path(self.config_path).exists():
             self.update_from_yaml()
         elif Path("../../config.yml").exists():
             self.update_from_yaml("../../config.yml")
 
-    def update_from_yaml(self, path: str = DEFAULT_CONFIG_PATH):
+    def update_from_yaml(self, path: str = config_path):
         with open(path) as f:
             config = yaml.safe_load(f)
             config = config.get("ai_server")

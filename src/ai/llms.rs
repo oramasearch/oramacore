@@ -26,6 +26,9 @@ use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLL
 pub enum KnownPrompts {
     Answer,
     Autoquery,
+    AdvancedAutoqueryQueryAnalyzer,
+    AdvancedAutoQueryPropertiesSelector,
+    AdvancedAutoQueryQueryComposer,
     AutomaticEmbeddingsSelector,
     OptimizeQuery,
     PartyPlanner,
@@ -123,6 +126,26 @@ impl KnownPrompts {
                 system: include_str!("../prompts/v1/automatic_embeddings_selector/system.md")
                     .to_string(),
                 user: include_str!("../prompts/v1/automatic_embeddings_selector/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::AdvancedAutoqueryQueryAnalyzer => KnownPrompt {
+                system: include_str!("../prompts/v1/advanced_autoquery/query_analyzer/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/advanced_autoquery/query_analyzer/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::AdvancedAutoQueryPropertiesSelector => KnownPrompt {
+                system: include_str!(
+                    "../prompts/v1/advanced_autoquery/properties_selector/system.md"
+                )
+                .to_string(),
+                user: include_str!("../prompts/v1/advanced_autoquery/properties_selector/user.md")
+                    .to_string(),
+            },
+            KnownPrompts::AdvancedAutoQueryQueryComposer => KnownPrompt {
+                system: include_str!("../prompts/v1/advanced_autoquery/query_composer/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/advanced_autoquery/query_composer/user.md")
                     .to_string(),
             },
         }

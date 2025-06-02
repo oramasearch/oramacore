@@ -754,14 +754,14 @@ pub enum FacetDefinition {
     String(StringFacetDefinition),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FulltextMode {
     pub term: String,
     pub threshold: Option<Threshold>,
     pub exact: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -773,7 +773,7 @@ pub struct VectorMode {
     pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Threshold(pub f32);
 
 impl<'de> Deserialize<'de> for Threshold {
@@ -792,7 +792,7 @@ impl<'de> Deserialize<'de> for Threshold {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct Similarity(pub f32);
 
 impl Default for Similarity {
@@ -817,7 +817,7 @@ impl<'de> Deserialize<'de> for Similarity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
@@ -835,7 +835,7 @@ pub struct SearchModeResult {
     pub mode: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum SearchMode {
     FullText(FulltextMode),
     Vector(VectorMode),
@@ -948,7 +948,7 @@ impl SearchMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Properties {
     None,
     Star,
@@ -968,7 +968,7 @@ pub struct FilterOnField {
     pub filter: Filter,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct WhereFilter {
     pub filter_on_fields: Vec<(String, Filter)>,
     pub and: Option<Vec<WhereFilter>>,
@@ -1097,7 +1097,13 @@ impl WhereFilter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NLPSearchRequest {
+    pub query: String,
+    pub llm_config: Option<InteractionLLMConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchParams {
     #[serde(flatten)]
     pub mode: SearchMode,
@@ -1275,6 +1281,13 @@ impl InteractionMessage {
                 .unwrap()
                 .into(),
         }
+    }
+
+    pub fn into_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "role": self.role,
+            "content": self.content,
+        })
     }
 }
 
