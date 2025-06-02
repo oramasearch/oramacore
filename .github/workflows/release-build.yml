@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Install Protocol Buffers Compiler
         run: |
           sudo apt-get update
@@ -62,15 +63,73 @@ jobs:
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
+      # Docker Setup and Build Steps
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from release tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build and push OramaCore x86_64
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile-oramacore-x86
+          platforms: linux/amd64
+          push: true
+          tags: |
+            oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
+            oramasearch/oramacore:latest
+
+      - name: Build and push OramaCore ARM64
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile-oramacore-arm64
+          platforms: linux/arm64
+          push: true
+          tags: |
+            oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
+            oramasearch/oramacore-arm64:latest
+
+      - name: Build and push AI Server (CPU)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/ai_server
+          file: ./docker/Dockerfile-ai-server
+          platforms: linux/amd64
+          push: true
+          tags: |
+            oramasearch/oramacore-ai-server:${{ steps.get_version.outputs.VERSION }}
+            oramasearch/oramacore-ai-server:latest
+
+      - name: Build and push AI Server (CUDA)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./src/ai_server
+          file: ./docker/Dockerfile-ai-server-cuda
+          platforms: linux/amd64
+          push: true
+          tags: |
+            oramasearch/oramacore-ai-server-cuda:${{ steps.get_version.outputs.VERSION }}
+            oramasearch/oramacore-ai-server-cuda:latest
+
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-      
+
       - name: Authenticate with GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY_B64 }}
-    
+
       - name: Trigger Cloud Build
         run: |
           gcloud builds triggers run deploy-orama-core \
@@ -78,4 +137,3 @@ jobs:
             --branch=${{ secrets.GCP_BRANCH }} \
             --region=${{ secrets.GCP_REGION }} \
             --quiet > /dev/null 2>&1
-
