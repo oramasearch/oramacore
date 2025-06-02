@@ -385,6 +385,35 @@ impl LLMService {
                             ),
                         );
                     }
+                    RemoteLLMProvider::GoogleVertex => {
+                        info!("Found Google Vertex remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for Google Vertex provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models.insert(
+                                    RemoteLLMProvider::GoogleVertex,
+                                    conf.default_model.clone(),
+                                );
+                            }
+                        }
+
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::GoogleVertex,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
+                                        "https://generativelanguage.googleapis.com/v1beta/openai"
+                                            .to_string()
+                                    })),
+                            ),
+                        );
+                    }
                     #[allow(unreachable_patterns)]
                     _ => {
                         return Err(anyhow::Error::msg(format!(

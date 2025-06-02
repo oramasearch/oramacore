@@ -57,6 +57,7 @@ pub enum RemoteLLMProvider {
     OpenAI,
     Fireworks,
     Together,
+    GoogleVertex,
 }
 
 impl FromStr for RemoteLLMProvider {
@@ -65,6 +66,10 @@ impl FromStr for RemoteLLMProvider {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "openai" => Ok(RemoteLLMProvider::OpenAI),
+            "google" => Ok(RemoteLLMProvider::GoogleVertex),
+            "google_vertex" => Ok(RemoteLLMProvider::GoogleVertex),
+            "googlevertex" => Ok(RemoteLLMProvider::GoogleVertex),
+            "vertex" => Ok(RemoteLLMProvider::GoogleVertex),
             _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
         }
     }
