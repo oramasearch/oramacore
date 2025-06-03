@@ -17,7 +17,7 @@ async fn test_bug_1() {
     let collection_client = test_context.create_collection().await.unwrap();
     let coll_id = collection_client.collection_id;
     let write_api_key = collection_client.write_api_key;
-    let read_api_key = collection_client.read_api_key.clone();
+    let read_api_key = collection_client.read_api_key;
     let index_client = collection_client.create_index().await.unwrap();
 
     let docs = r#" [
@@ -26,20 +26,16 @@ async fn test_bug_1() {
     let docs = serde_json::from_str::<Vec<Document>>(docs).unwrap();
 
     index_client
-        .insert_documents(
-            DocumentList(docs),
-        )
+        .insert_documents(DocumentList(docs))
         .await
         .unwrap();
 
     test_context.commit_all().await.unwrap();
     let test_context = test_context.reload().await;
 
-    let collection_client = test_context.get_test_collection_client(
-        coll_id,
-        write_api_key,
-        read_api_key,
-    ).unwrap();
+    let collection_client = test_context
+        .get_test_collection_client(coll_id, write_api_key, read_api_key)
+        .unwrap();
 
     let output = collection_client
         .search(

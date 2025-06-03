@@ -1245,9 +1245,10 @@ impl Index {
 
                         let committed_field = committed_fields.bool_fields.get(&field_id);
                         if let Some(committed_field) = committed_field {
-                            let committed_docs = committed_field.filter(*filter_bool).with_context(|| {
-                                format!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
+                            let committed_docs =
+                                committed_field.filter(*filter_bool).with_context(|| {
+                                    format!("Cannot filter by \"{}\": unknown field", &k)
+                                })?;
 
                             filtered = FilterResult::or(
                                 filtered,
@@ -1276,9 +1277,10 @@ impl Index {
 
                         let committed_field = committed_fields.number_fields.get(&field_id);
                         if let Some(committed_field) = committed_field {
-                            let committed_docs = committed_field.filter(filter_number).with_context(|| {
-                                format!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
+                            let committed_docs =
+                                committed_field.filter(filter_number).with_context(|| {
+                                    format!("Cannot filter by \"{}\": unknown field", &k)
+                                })?;
 
                             filtered = FilterResult::or(
                                 filtered,
