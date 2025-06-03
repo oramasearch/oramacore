@@ -326,13 +326,8 @@ impl Index {
     ) -> Result<()> {
         // The document is already:
         // - indexed (but in another index)
-        // - added to the document storage (and shared among all indexes)
+        // - added to the document storage
         // So, we just need to reindex it and stop.
-
-        // Inspect the doc and create the fields if needed
-        // self.add_fields_if_needed(&doc, index_operation_batch)
-        //     .await
-        //     .context("Cannot add fields")?;
 
         self.process_document(doc_id, doc, index_operation_batch)
             .await
