@@ -2,6 +2,8 @@ mod doc_id_storage;
 mod fields;
 
 use std::{
+    borrow::Cow,
+    collections::HashMap,
     ops::Deref,
     path::PathBuf,
     sync::{atomic::AtomicU16, Arc},
@@ -29,7 +31,7 @@ use crate::{
     file_utils::BufferedFile,
     nlp::{locales::Locale, TextParser},
     types::{
-        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, FieldId,
+        CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId,
     },
 };
@@ -316,18 +318,23 @@ impl Index {
         doc_id_storage.get_document_ids().collect()
     }
 
-    pub async fn reindex_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
+    pub async fn reindex_document(
+        &self,
+        doc_id: DocumentId,
+        doc: Document,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) -> Result<()> {
         // The document is already:
         // - indexed (but in another index)
         // - added to the document storage (and shared among all indexes)
         // So, we just need to reindex it and stop.
 
         // Inspect the doc and create the fields if needed
-        self.add_fields_if_needed(&doc)
-            .await
-            .context("Cannot add fields")?;
+        // self.add_fields_if_needed(&doc, index_operation_batch)
+        //     .await
+        //     .context("Cannot add fields")?;
 
-        self.process_document(doc_id, doc)
+        self.process_document(doc_id, doc, index_operation_batch)
             .await
             .context("Cannot process document")?;
 
@@ -344,6 +351,7 @@ impl Index {
         &self,
         doc_id: DocumentId,
         doc: Document,
+        index_operation_batch: &mut Vec<WriteOperation>,
     ) -> Result<Option<DocumentId>> {
         let mut old_document_id = None;
 
@@ -361,48 +369,40 @@ impl Index {
         let mut doc_id_storage = self.doc_id_storage.write().await;
         if let Some(old_doc_id) = doc_id_storage.insert_document_id(doc_id_str.to_string(), doc_id)
         {
-            info!("Document already indexed, replacing it.");
+            trace!("Document already indexed, replacing it.");
             old_document_id = Some(old_doc_id);
 
             // Remove the old document
-            self.op_sender
-                .send(WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::DeleteDocuments {
+            index_operation_batch.push(WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::DeleteDocuments {
+                    doc_ids: vec![old_doc_id],
+                },
+            ));
+            index_operation_batch.push(WriteOperation::Collection(
+                self.collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    self.index_id,
+                    IndexWriteOperation::DeleteDocuments {
                         doc_ids: vec![old_doc_id],
                     },
-                ))
-                .await
-                .context("Cannot send operation")?;
-            self.op_sender
-                .send(WriteOperation::Collection(
-                    self.collection_id,
-                    CollectionWriteOperation::IndexWriteOperation(
-                        self.index_id,
-                        IndexWriteOperation::DeleteDocuments {
-                            doc_ids: vec![old_doc_id],
-                        },
-                    ),
-                ))
-                .await
-                .context("Cannot send operation")?;
+                ),
+            ));
         }
         drop(doc_id_storage);
 
-        // Inspect the doc and create the fields if needed
-        self.add_fields_if_needed(&doc)
-            .await
-            .context("Cannot add fields")?;
-
-        self.process_document(doc_id, doc)
+        self.process_document(doc_id, doc, index_operation_batch)
             .await
             .context("Cannot process document")?;
-
-        trace!("Document processed");
 
         Ok(old_document_id)
     }
 
-    async fn process_document(&self, doc_id: DocumentId, doc: Document) -> Result<()> {
+    async fn process_document(
+        &self,
+        doc_id: DocumentId,
+        doc: Document,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) -> Result<()> {
         let mut doc_indexed_values: Vec<IndexedValue> = vec![];
 
         let filter_fields = self.filter_fields.read().await;
@@ -430,19 +430,16 @@ impl Index {
         // This case is odd because it means that the document has no fields (just the "id" field)
         // Should we warn about it?
         if !doc_indexed_values.is_empty() {
-            self.op_sender
-                .send(WriteOperation::Collection(
-                    self.collection_id,
-                    CollectionWriteOperation::IndexWriteOperation(
-                        self.index_id,
-                        IndexWriteOperation::Index {
-                            doc_id,
-                            indexed_values: doc_indexed_values,
-                        },
-                    ),
-                ))
-                .await
-                .context("Cannot send operation")?;
+            index_operation_batch.push(WriteOperation::Collection(
+                self.collection_id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    self.index_id,
+                    IndexWriteOperation::Index {
+                        doc_id,
+                        indexed_values: doc_indexed_values,
+                    },
+                ),
+            ));
         }
 
         Ok(())
@@ -520,132 +517,168 @@ impl Index {
         }
     }
 
-    #[instrument(skip(self, doc))]
-    async fn add_fields_if_needed(&self, doc: &Document) -> Result<()> {
-        let flatten = calculate_fields_from_doc(&doc.inner);
+    pub async fn add_fields_if_needed(&self, docs: &DocumentList) -> Result<()> {
+        let mut index_operation_batch = Vec::with_capacity(10);
+
+        #[derive(Debug)]
+        enum F {
+            AlreadyInserted,
+            Bool(Value),
+            Number(Value),
+            String(Value),
+            Array(Value),
+        }
+
+        fn recursive_object_inspection<'s>(
+            obj: &'s Map<String, Value>,
+            fields: &mut HashMap<Box<[Cow<'s, String>]>, F>,
+            stack: Vec<Cow<'s, String>>,
+        ) {
+            for (key, value) in obj {
+                let f = match value {
+                    Value::Null => continue,
+                    Value::Array(arr) => {
+                        if arr.is_empty() {
+                            continue;
+                        }
+                        let first_non_null_value = arr.iter().find(|v| !matches!(v, Value::Null));
+                        let Some(first_non_null_value) = first_non_null_value else {
+                            // If all values are null, we don't know which type to use
+                            // So we just return
+                            continue;
+                        };
+                        
+                        match first_non_null_value {
+                            Value::Bool(_) => F::Array(Value::Array(arr.clone())),
+                            Value::Number(_) => F::Array(Value::Array(arr.clone())),
+                            Value::String(_) => F::Array(Value::Array(arr.clone())),
+                            Value::Array(_) | Value::Object(_) | Value::Null => {
+                                // We don't support nested arrays or objects
+                                // So we just return
+                                continue;
+                            }
+                        }
+                    }
+                    Value::Object(obj) => {
+                        let mut path = stack.clone();
+                        path.push(Cow::Borrowed(key));
+                        recursive_object_inspection(obj, fields, path);
+                        continue;
+                    }
+                    Value::Bool(v) => F::Bool(Value::Bool(*v)),
+                    Value::Number(v) => F::Number(Value::Number(v.clone())),
+                    Value::String(v) => F::String(Value::String(v.clone())),
+                };
+
+                let mut path = stack.clone();
+                path.push(Cow::Borrowed(key));
+                let key = path.into_boxed_slice();
+                fields.entry(key).or_insert(f);
+            }
+        }
 
         let score_fields = self.score_fields.read().await;
         let filter_fields = self.filter_fields.read().await;
 
-        let mut fields_to_add: (Vec<IndexFilterField>, Vec<IndexScoreField>) = Default::default();
+        let mut current_fields = score_fields
+            .iter()
+            .map(|f| {
+                let a: Vec<_> = f
+                    .field_path()
+                    .iter()
+                    .map(|s| Cow::Owned(s.to_string()))
+                    .collect();
+                (a.into_boxed_slice(), F::AlreadyInserted)
+            })
+            .chain(filter_fields.iter().map(|f| {
+                let a: Vec<_> = f
+                    .field_path()
+                    .iter()
+                    .map(|s| Cow::Owned(s.to_string()))
+                    .collect();
+                (a.into_boxed_slice(), F::AlreadyInserted)
+            }))
+            .collect::<HashMap<_, _>>();
+        drop(score_fields);
+        drop(filter_fields);
 
-        // For every field path, we need to check if it is already indexed
-        // If not, we need to create it
-        for field_path in &flatten.0 {
-            // We don't index the "id" field at all.
-            if field_path == &["id"] {
-                continue;
-            }
+        // `id` field is always present in the documents
+        current_fields.insert(Box::new([Cow::Owned("id".to_string())]), F::AlreadyInserted);
 
-            if get_field_by_path(field_path, &*score_fields).is_some() {
-                continue;
-            }
-            if get_field_by_path(field_path, &*filter_fields).is_some() {
-                continue;
-            }
+        for doc in &docs.0 {
+            recursive_object_inspection(&doc.inner, &mut current_fields, vec![])
+        }
 
-            let value = get_value(&doc.inner, field_path);
-            let value = if let Some(value) = value {
-                if value.is_null() {
-                    continue;
+        current_fields.retain(|_, f| !matches!(f, F::AlreadyInserted));
+
+        if current_fields.is_empty() {
+            // No new fields to add
+            // Avoid locking the index fields
+            return Ok(());
+        }
+
+        let mut score_fields = self.score_fields.write().await;
+        let mut filter_fields = self.filter_fields.write().await;
+        for (k, f) in current_fields {
+            let (filter, score) = match f {
+                F::AlreadyInserted => continue,
+                F::Bool(v) | F::Number(v) | F::String(v) | F::Array(v) => {
+                    calculate_fields_for(&k, &v, &self.text_parser, &self.field_id_generator)
                 }
-                value
-            } else {
-                continue;
             };
 
-            let (filter_field, score_field) = calculate_fields_for(
-                field_path,
-                value,
-                &self.text_parser,
-                &self.field_id_generator,
-            );
-            if let Some(filter_field) = filter_field {
-                self.op_sender
-                    .send(WriteOperation::Collection(
-                        self.collection_id,
-                        CollectionWriteOperation::IndexWriteOperation(
-                            self.index_id,
-                            IndexWriteOperation::CreateField2 {
-                                field_id: filter_field.field_id(),
-                                field_path: filter_field.field_path().to_vec().into_boxed_slice(),
-                                is_array: filter_field.is_array(),
-                                field_type: match &filter_field {
-                                    IndexFilterField::Bool(_) => IndexWriteOperationFieldType::Bool,
-                                    IndexFilterField::Number(_) => {
-                                        IndexWriteOperationFieldType::Number
-                                    }
-                                    IndexFilterField::String(_) => {
-                                        IndexWriteOperationFieldType::StringFilter
-                                    }
-                                },
+            if let Some(filter) = filter {
+                index_operation_batch.push(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::CreateField2 {
+                            field_id: filter.field_id(),
+                            field_path: filter.field_path().to_vec().into_boxed_slice(),
+                            is_array: filter.is_array(),
+                            field_type: match &filter {
+                                IndexFilterField::Bool(_) => IndexWriteOperationFieldType::Bool,
+                                IndexFilterField::Number(_) => IndexWriteOperationFieldType::Number,
+                                IndexFilterField::String(_) => {
+                                    IndexWriteOperationFieldType::StringFilter
+                                }
                             },
-                        ),
-                    ))
-                    .await
-                    .context("Cannot send operation")?;
-                fields_to_add.0.push(filter_field);
-            }
-            if let Some(score_field) = score_field {
-                self.op_sender
-                    .send(WriteOperation::Collection(
-                        self.collection_id,
-                        CollectionWriteOperation::IndexWriteOperation(
-                            self.index_id,
-                            IndexWriteOperation::CreateField2 {
-                                field_id: score_field.field_id(),
-                                field_path: score_field.field_path().to_vec().into_boxed_slice(),
-                                is_array: score_field.is_array(),
-                                field_type: match &score_field {
-                                    IndexScoreField::String(_) => {
-                                        IndexWriteOperationFieldType::String
-                                    }
-                                    IndexScoreField::Embedding(f) => {
-                                        IndexWriteOperationFieldType::Embedding(
-                                            OramaModelSerializable(f.get_model()),
-                                        )
-                                    }
-                                },
-                            },
-                        ),
-                    ))
-                    .await
-                    .context("Cannot send operation")?;
+                        },
+                    ),
+                ));
 
-                fields_to_add.1.push(score_field);
+                filter_fields.push(filter);
+            }
+            if let Some(score) = score {
+                index_operation_batch.push(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::CreateField2 {
+                            field_id: score.field_id(),
+                            field_path: score.field_path().to_vec().into_boxed_slice(),
+                            is_array: score.is_array(),
+                            field_type: match &score {
+                                IndexScoreField::String(_) => IndexWriteOperationFieldType::String,
+                                IndexScoreField::Embedding(f) => {
+                                    IndexWriteOperationFieldType::Embedding(OramaModelSerializable(
+                                        f.get_model(),
+                                    ))
+                                }
+                            },
+                        },
+                    ),
+                ));
+                score_fields.push(score);
             }
         }
         drop(score_fields);
         drop(filter_fields);
 
-        if !fields_to_add.0.is_empty() {
-            let mut filter_fields = self.filter_fields.write().await;
-            for field in fields_to_add.0 {
-                // We calculate concurrently the fields to add
-                // But we need to check if the field is already indexed
-                // before adding it to the index
-                // Here is the right place to do it because we have the write lock
-                if get_field_by_path(field.field_path(), &*filter_fields).is_some() {
-                    continue;
-                }
-                filter_fields.push(field);
-            }
-            drop(filter_fields);
-        }
-        if !fields_to_add.1.is_empty() {
-            let mut score_fields = self.score_fields.write().await;
-            for field in fields_to_add.1 {
-                // We calculate concurrently the fields to add
-                // But we need to check if the field is already indexed
-                // before adding it to the index
-                // Here is the right place to do it because we have the write lock
-                if get_field_by_path(field.field_path(), &*score_fields).is_some() {
-                    continue;
-                }
-                score_fields.push(field);
-            }
-            drop(score_fields);
-        }
+        self.op_sender
+            .send_batch(index_operation_batch)
+            .await
+            .context("Cannot send add fields operation")?;
 
         Ok(())
     }
@@ -664,7 +697,7 @@ impl Index {
 }
 
 fn calculate_fields_for(
-    field_path: &[&str],
+    field_path: &[Cow<String>],
     value: &Value,
     text_parser: &Arc<TextParser>,
     field_id_generator: &AtomicU16,
@@ -799,38 +832,6 @@ fn get_value<'doc, X: AsRef<str>>(
 
     recursive_object_inspection(doc, field_path, 0)
 }
-
-fn calculate_fields_from_doc(obj: &Map<String, Value>) -> FlattenFields<'_> {
-    fn recursive_object_inspection<'s>(
-        obj: &'s Map<String, Value>,
-        fields: &mut Vec<Vec<&'s str>>,
-        stack: Vec<&'s str>,
-    ) {
-        for (key, value) in obj {
-            match value {
-                Value::Null => continue,
-                Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => {
-                    let mut path = stack.clone();
-                    path.push(key);
-                    fields.push(path);
-                }
-                Value::Object(obj) => {
-                    let mut path = stack.clone();
-                    path.push(key);
-                    recursive_object_inspection(obj, fields, path);
-                }
-            }
-        }
-    }
-
-    let mut fields = Vec::new();
-    recursive_object_inspection(obj, &mut fields, vec![]);
-
-    FlattenFields(fields)
-}
-
-#[derive(Debug, Clone)]
-struct FlattenFields<'field>(Vec<Vec<&'field str>>);
 
 #[derive(Debug, Serialize, Deserialize)]
 enum IndexDump {

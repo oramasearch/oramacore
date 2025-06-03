@@ -202,22 +202,16 @@ impl DocumentStorage {
         let mut lock = self.uncommitted.write().await;
         let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
 
-        println!("Moving...");
-
         let doc_to_delete: Vec<_> = uncommitted_document_deletions.drain().collect();
 
         let mut uncommitted: Vec<_> = lock.drain().collect();
         uncommitted.sort_by_key(|(doc_id, _)| *doc_id);
-
-        println!("Moving {uncommitted:?}");
 
         self.committed
             .add(uncommitted)
             .await
             .context("Cannot commit documents")?;
         let mut zebo = self.committed.zebo.write().await;
-
-        println!("Deleting: {doc_to_delete:?}");
 
         zebo.remove_documents(doc_to_delete, false)
             .context("Cannot remove documents")?;
