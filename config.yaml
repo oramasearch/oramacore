@@ -16,7 +16,7 @@ writer_side:
         type: in-memory
         # type: rabbitmq
         # host: localhost
-        # port: 5672
+        # port: 5552
         # user: guest
         # password: guest
         # v_host: /
@@ -57,7 +57,7 @@ reader_side:
         type: in-memory
         # type: rabbitmq
         # host: localhost
-        # port: 5672
+        # port: 5552
         # user: guest
         # password: guest
         # v_host: /

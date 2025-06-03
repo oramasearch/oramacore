@@ -77,10 +77,8 @@ impl DocumentStorage {
 
         let zebo = self.zebo.clone();
         tokio::spawn(async move {
-            println!("stream_documents");
             let zebo = zebo.read().await;
 
-            println!("get_documents {:?}", ids);
             let docs_iter = match zebo.get_documents(ids) {
                 Ok(a) => a,
                 Err(e) => {
@@ -90,7 +88,6 @@ impl DocumentStorage {
             };
 
             for doc in docs_iter {
-                println!("doc {:?}", doc);
                 let (doc_id, data) = match doc {
                     Ok(doc) => doc,
                     Err(e) => {

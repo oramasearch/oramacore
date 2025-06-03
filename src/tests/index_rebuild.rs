@@ -45,6 +45,8 @@ async fn test_change_language_without_commit() {
         .await
         .unwrap();
 
+    sleep(Duration::from_secs(1)).await;
+
     println!("waiting...\n\n---\n\n--");
 
     wait_for(&test_context, |test_context| {
