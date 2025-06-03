@@ -1513,7 +1513,6 @@ fn merge(mut old: serde_json::value::Map<String, serde_json::Value>, delta: Docu
             let k = loop {
                 let k = path.next();
                 let f = path.peek();
-                println!("k {k:?}, f {f:?}");
                 nested_doc = match (k, f) {
                     (None, _) => break None,
                     (Some(k), None) => break Some(k),
