@@ -542,7 +542,7 @@ impl Index {
                             // So we just return
                             continue;
                         };
-                        
+
                         match first_non_null_value {
                             Value::Bool(_) => F::Array(Value::Array(arr.clone())),
                             Value::Number(_) => F::Array(Value::Array(arr.clone())),
