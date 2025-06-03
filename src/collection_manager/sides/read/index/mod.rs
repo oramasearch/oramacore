@@ -1198,7 +1198,7 @@ impl Index {
             return Ok(None);
         }
 
-        trace!("Calculating filtered doc ids",);
+        trace!("Calculating filtered doc ids");
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
         let committed_fields = self.committed_fields.read().await;
@@ -1211,6 +1211,7 @@ impl Index {
             committed_fields: &CommittedFields,
         ) -> Result<FilterResult<DocumentId>> {
             let mut results = Vec::new();
+
             for (k, filter) in &where_filter.filter_on_fields {
                 let (field_id, field_type) = match path_to_index_id_map.get_filter_field(k) {
                     None => {
@@ -1244,15 +1245,16 @@ impl Index {
 
                         let committed_field = committed_fields.bool_fields.get(&field_id);
                         if let Some(committed_field) = committed_field {
-                            let a = committed_field.filter(*filter_bool).with_context(|| {
-                                format!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
+                            let committed_docs =
+                                committed_field.filter(*filter_bool).with_context(|| {
+                                    format!("Cannot filter by \"{}\": unknown field", &k)
+                                })?;
 
-                            filtered = FilterResult::and(
+                            filtered = FilterResult::or(
                                 filtered,
                                 FilterResult::Filter(PlainFilterResult::from_iter(
                                     document_count_estimate,
-                                    a,
+                                    committed_docs,
                                 )),
                             );
                         }
@@ -1275,15 +1277,16 @@ impl Index {
 
                         let committed_field = committed_fields.number_fields.get(&field_id);
                         if let Some(committed_field) = committed_field {
-                            let a = committed_field.filter(filter_number).with_context(|| {
-                                format!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
+                            let committed_docs =
+                                committed_field.filter(filter_number).with_context(|| {
+                                    format!("Cannot filter by \"{}\": unknown field", &k)
+                                })?;
 
-                            filtered = FilterResult::and(
+                            filtered = FilterResult::or(
                                 filtered,
                                 FilterResult::Filter(PlainFilterResult::from_iter(
                                     document_count_estimate,
-                                    a,
+                                    committed_docs,
                                 )),
                             );
                         }
@@ -1306,13 +1309,13 @@ impl Index {
 
                         let committed_field = committed_fields.string_filter_fields.get(&field_id);
                         if let Some(committed_field) = committed_field {
-                            let a = committed_field.filter(filter_string);
+                            let committed_docs = committed_field.filter(filter_string);
 
-                            filtered = FilterResult::and(
+                            filtered = FilterResult::or(
                                 filtered,
                                 FilterResult::Filter(PlainFilterResult::from_iter(
                                     document_count_estimate,
-                                    a,
+                                    committed_docs,
                                 )),
                             );
                         }

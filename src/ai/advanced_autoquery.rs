@@ -354,8 +354,8 @@ impl AdvancedAutoQuery {
                 send_step!(tx, AdvancedAutoQuerySteps::Searching);
                 let search_futures = search_queries.iter().map(|query| {
                     let read_side = read_side.clone();
-                    let read_api_key = read_api_key.clone();
-                    let collection_id = collection_id.clone();
+                    let read_api_key = read_api_key;
+                    let collection_id = collection_id;
                     async move {
                         read_side
                             .search(read_api_key, collection_id, query.1.clone())
@@ -678,8 +678,7 @@ impl AdvancedAutoQuery {
         let result: Vec<FieldStats> = index
             .fields_stats
             .iter()
-            .enumerate()
-            .filter_map(|(_i, stat)| {
+            .filter_map(|stat| {
                 let field_path = prefix_regex.replace(&stat.field_path, "").to_string();
 
                 // Skip auto-generated and already seen fields
