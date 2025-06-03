@@ -321,7 +321,7 @@ impl CollectionReader {
             .run(read_side.clone(), read_api_key, collection_id, conversation)
             .await?;
 
-        return Ok(search_results);
+        Ok(search_results)
     }
 
     pub async fn nlp_search_stream(

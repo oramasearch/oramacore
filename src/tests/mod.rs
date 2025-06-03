@@ -1,5 +1,6 @@
 // mod old;
 
+mod bugs;
 mod commit;
 mod delete_doc;
 mod doc_migration;
