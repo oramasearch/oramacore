@@ -111,6 +111,105 @@ pub fn merge_number_field(
     }
 }
 
+pub fn merge_date_field(
+    uncommitted: Option<&UncommittedDateFilterField>,
+    committed: Option<&CommittedDateField>,
+    data_dir: PathBuf,
+    uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
+) -> Result<Option<CommittedDateField>> {
+    match (uncommitted, committed) {
+        (None, None) => {
+            bail!("Both uncommitted and committed number fields are None. Never should happen");
+        }
+        (None, Some(_)) => {
+            bail!("Both uncommitted field is None. Never should happen");
+        }
+        (Some(uncommitted), None) => {
+            let iter = uncommitted
+                .iter()
+                // .map(|(n, v)| (SerializableNumber(n), v))
+                .map(|(k, mut d)| {
+                    d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                    (k, d)
+                });
+            Ok(Some(CommittedDateField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
+            )?))
+        }
+        (Some(uncommitted), Some(committed)) => {
+            if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedDateField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
+
+                return Ok(None);
+            }
+
+            let uncommitted_iter = uncommitted.iter(); // .map(|(n, v)| (SerializableNumber(n), v));
+            let committed_iter = committed.iter();
+
+            let iter = MergedIterator::new(
+                committed_iter,
+                uncommitted_iter,
+                |_, v| v,
+                |_, mut v1, v2| {
+                    v1.extend(v2);
+                    v1
+                },
+            )
+            .map(|(k, mut d)| {
+                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
+                (k, d)
+            });
+
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            Ok(Some(CommittedDateField::from_iter(
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                iter,
+                data_dir,
+            )?))
+        }
+    }
+}
+
 pub fn merge_string_filter_field(
     uncommitted: Option<&UncommittedStringFilterField>,
     committed: Option<&CommittedStringFilterField>,

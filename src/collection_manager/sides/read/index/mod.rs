@@ -19,7 +19,17 @@ use uncommitted_field::*;
 
 use crate::{
     ai::{llms, AIService},
-    collection_manager::{bm25::BM25Scorer, global_info::GlobalInfo, sides::Offset},
+    collection_manager::{
+        bm25::BM25Scorer,
+        global_info::GlobalInfo,
+        sides::{
+            read::index::{
+                committed_field::{CommittedDateField, DateFieldInfo},
+                merge::merge_date_field,
+            },
+            Offset,
+        },
+    },
     file_utils::{create_if_not_exists, BufferedFile},
     metrics::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
@@ -59,12 +69,12 @@ use crate::{
 };
 
 pub use committed_field::{
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedNumberFieldStats,
+    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
 };
 pub use uncommitted_field::{
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
-    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedNumberFieldStats,
+    UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +89,7 @@ struct UncommittedFields {
     bool_fields: HashMap<FieldId, UncommittedBoolField>,
     number_fields: HashMap<FieldId, UncommittedNumberField>,
     string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
+    date_fields: HashMap<FieldId, UncommittedDateFilterField>,
     string_fields: HashMap<FieldId, UncommittedStringField>,
     vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
@@ -88,6 +99,7 @@ struct CommittedFields {
     bool_fields: HashMap<FieldId, CommittedBoolField>,
     number_fields: HashMap<FieldId, CommittedNumberField>,
     string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
+    date_fields: HashMap<FieldId, CommittedDateField>,
     string_fields: HashMap<FieldId, CommittedStringField>,
     vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
@@ -198,6 +210,16 @@ impl Index {
             let field = CommittedNumberField::try_load(info).context("Cannot load number field")?;
             committed_fields.number_fields.insert(field_id, field);
         }
+        for (field_id, info) in dump.date_field_ids {
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
+
+            uncommitted_fields.date_fields.insert(
+                field_id,
+                UncommittedDateFilterField::empty(info.field_path.clone()),
+            );
+            let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
+            committed_fields.date_fields.insert(field_id, field);
+        }
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
@@ -286,6 +308,10 @@ impl Index {
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
+                .date_fields
+                .iter()
+                .any(|(_, field)| !field.is_empty())
+            || uncommitted_fields
                 .string_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
@@ -361,6 +387,32 @@ impl Index {
                 merged_numbers.insert(field_id, MergeResult::Changed(merged));
             } else {
                 merged_numbers.insert(field_id, MergeResult::Unchanged);
+            }
+        }
+
+        let mut merged_dates = HashMap::new();
+        let date_indexes: HashSet<_> = uncommitted_fields
+            .date_fields
+            .keys()
+            .chain(committed_fields.date_fields.keys())
+            .copied()
+            .collect();
+        for field_id in date_indexes {
+            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
+            let uncommitted = uncommitted_fields.date_fields.get(&field_id);
+            let committed = committed_fields.date_fields.get(&field_id);
+            if let Some(merged) = merge_date_field(
+                uncommitted,
+                committed,
+                data_dir,
+                &self.uncommitted_deleted_documents,
+                is_promoted,
+            )
+            .context("Cannot merge date field")?
+            {
+                merged_dates.insert(field_id, MergeResult::Changed(merged));
+            } else {
+                merged_dates.insert(field_id, MergeResult::Unchanged);
             }
         }
 
@@ -480,6 +532,17 @@ impl Index {
                 uncommitted.clear();
             }
         }
+        for (field_id, merged) in merged_dates {
+            match merged {
+                MergeResult::Changed(merged) => {
+                    committed_fields.date_fields.insert(field_id, merged);
+                }
+                MergeResult::Unchanged => {}
+            }
+            if let Some(uncommitted) = uncommitted_fields.date_fields.get_mut(&field_id) {
+                uncommitted.clear();
+            }
+        }
         for (field_id, merged) in merged_string_filters {
             match merged {
                 MergeResult::Changed(merged) => {
@@ -528,6 +591,11 @@ impl Index {
                 .collect(),
             number_field_ids: committed_fields
                 .number_fields
+                .iter()
+                .map(|(k, v)| (*k, v.get_field_info()))
+                .collect(),
+            date_field_ids: committed_fields
+                .date_fields
                 .iter()
                 .map(|(k, v)| (*k, v.get_field_info()))
                 .collect(),
@@ -644,6 +712,16 @@ impl Index {
                             .string_filter_fields
                             .insert(field_id, UncommittedStringFilterField::empty(field_path));
                     }
+                    IndexWriteOperationFieldType::Date => {
+                        self.path_to_index_id_map.insert_filter_field(
+                            field_path.clone(),
+                            field_id,
+                            FieldType::Date,
+                        );
+                        uncommitted_fields
+                            .date_fields
+                            .insert(field_id, UncommittedDateFilterField::empty(field_path));
+                    }
                     IndexWriteOperationFieldType::String => {
                         self.path_to_index_id_map.insert_score_field(
                             field_path.clone(),
@@ -701,6 +779,13 @@ impl Index {
                             if let Some(field) = uncommitted_fields.string_fields.get_mut(&field_id)
                             {
                                 field.insert(doc_id, len, values);
+                            } else {
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                            }
+                        }
+                        IndexedValue::FilterDate(field_id, timestamp) => {
+                            if let Some(field) = uncommitted_fields.date_fields.get_mut(&field_id) {
+                                field.insert(doc_id, timestamp);
                             } else {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
@@ -912,6 +997,14 @@ impl Index {
                 stats: IndexFieldStatsType::UncommittedNumber(v.stats()),
             }
         }));
+        fields_stats.extend(uncommitted_fields.date_fields.iter().map(|(k, v)| {
+            let path = v.field_path().join(".");
+            IndexFieldStats {
+                field_id: *k,
+                field_path: path,
+                stats: IndexFieldStatsType::UncommittedDate(v.stats()),
+            }
+        }));
         fields_stats.extend(
             uncommitted_fields
                 .string_filter_fields
@@ -956,6 +1049,14 @@ impl Index {
                 field_id: *k,
                 field_path: path,
                 stats: IndexFieldStatsType::CommittedNumber(v.stats().ok()?),
+            })
+        }));
+        fields_stats.extend(committed_fields.date_fields.iter().filter_map(|(k, v)| {
+            let path = v.field_path().join(".");
+            Some(IndexFieldStats {
+                field_id: *k,
+                field_path: path,
+                stats: IndexFieldStatsType::CommittedDate(v.stats().ok()?),
             })
         }));
         fields_stats.extend(
@@ -1247,6 +1348,38 @@ impl Index {
                         if let Some(committed_field) = committed_field {
                             let committed_docs =
                                 committed_field.filter(*filter_bool).with_context(|| {
+                                    format!("Cannot filter by \"{}\": unknown field", &k)
+                                })?;
+
+                            filtered = FilterResult::or(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    committed_docs,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
+                    (FieldType::Date, Filter::Date(filter_date)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .date_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                            })?;
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(filter_date),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.date_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let committed_docs =
+                                committed_field.filter(filter_date).with_context(|| {
                                     format!("Cannot filter by \"{}\": unknown field", &k)
                                 })?;
 
@@ -1634,6 +1767,7 @@ enum FieldType {
     Bool,
     Number,
     StringFilter,
+    Date,
     String,
     Vector,
 }
@@ -1646,6 +1780,8 @@ struct DumpV1 {
     aliases: Vec<IndexId>,
     bool_field_ids: Vec<(FieldId, BoolFieldInfo)>,
     number_field_ids: Vec<(FieldId, NumberFieldInfo)>,
+    #[serde(default)]
+    date_field_ids: Vec<(FieldId, DateFieldInfo)>,
     string_filter_field_ids: Vec<(FieldId, StringFilterFieldInfo)>,
     string_field_ids: Vec<(FieldId, StringFieldInfo)>,
     vector_field_ids: Vec<(FieldId, VectorFieldInfo)>,

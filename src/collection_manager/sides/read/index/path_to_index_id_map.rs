@@ -4,6 +4,7 @@ use crate::{collection_manager::sides::field_name_to_path, types::FieldId};
 
 use super::FieldType;
 
+#[derive(Debug)]
 pub struct PathToIndexId {
     filter_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,
     score_fields: HashMap<Box<[String]>, (FieldId, FieldType)>,

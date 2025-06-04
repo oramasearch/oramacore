@@ -32,7 +32,7 @@ use crate::{
     nlp::{locales::Locale, TextParser},
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
-        IndexEmbeddingsCalculation, IndexFieldType, IndexId,
+        IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
     },
 };
 
@@ -637,6 +637,7 @@ impl Index {
                                 IndexFilterField::String(_) => {
                                     IndexWriteOperationFieldType::StringFilter
                                 }
+                                IndexFilterField::Date(_) => IndexWriteOperationFieldType::Date,
                             },
                         },
                     ),
@@ -720,9 +721,14 @@ fn calculate_fields_for(
             let field = IndexFilterField::new_number(generate_id(), field_path);
             filter_field = Some(field);
         }
-        Value::String(_) => {
-            let field = IndexFilterField::new_string(generate_id(), field_path.clone());
-            filter_field = Some(field);
+        Value::String(s) => {
+            if OramaDate::try_from(s).is_ok() {
+                let field = IndexFilterField::new_date(generate_id(), field_path.clone());
+                filter_field = Some(field);
+            } else {
+                let field = IndexFilterField::new_string(generate_id(), field_path.clone());
+                filter_field = Some(field);
+            }
 
             let field = IndexScoreField::new_string(generate_id(), field_path, text_parser.clone());
             score_field = Some(field);

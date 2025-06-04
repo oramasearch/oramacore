@@ -119,6 +119,7 @@ pub enum IndexWriteOperationFieldType {
     Number,
     Bool,
     StringFilter,
+    Date,
     String,
     Embedding(OramaModelSerializable),
 }
