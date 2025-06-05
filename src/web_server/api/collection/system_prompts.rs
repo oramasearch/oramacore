@@ -12,7 +12,7 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::{system_prompts::SystemPrompt, ReadSide, WriteSide},
+    collection_manager::sides::{system_prompts::SystemPrompt, read::ReadSide, write::WriteSide},
     types::{
         ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
         InteractionLLMConfig, UpdateSystemPromptParams,

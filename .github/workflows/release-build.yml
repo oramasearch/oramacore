@@ -62,6 +62,7 @@ jobs:
             ./target/release/oramacore-compact
             ./target/release/oramacore-reader
             ./target/release/oramacore-writer
+            ./target/release/debug-dump
           token: ${{ secrets.GITHUB_TOKEN }}
 
   build-docker-OramaCore-x86_64:
@@ -70,6 +71,9 @@ jobs:
     runs-on: [self-hosted, gpu, cuda]
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       # Docker Setup and Build Steps
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -101,6 +105,9 @@ jobs:
     runs-on: [self-hosted, gpu, cuda]
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       # Docker Setup and Build Steps
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -132,6 +139,9 @@ jobs:
     runs-on: [self-hosted, gpu, cuda]
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       # Docker Setup and Build Steps
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -163,6 +173,9 @@ jobs:
     runs-on: [self-hosted, gpu, cuda]
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       # Docker Setup and Build Steps
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

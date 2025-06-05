@@ -11,7 +11,7 @@ use crate::{
     ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
-        DocumentStorageWriteOperation, OperationSender, OramaModelSerializable, ReplaceIndexReason,
+        DocumentStorageWriteOperation, OperationSender, write::OramaModelSerializable, ReplaceIndexReason,
         WriteOperation,
     },
     file_utils::BufferedFile,

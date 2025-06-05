@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::ReadSide,
+    collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, ExecuteActionPayload, SearchParams},
     web_server::api::util::print_error,
 };

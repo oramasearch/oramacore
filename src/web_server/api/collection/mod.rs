@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use crate::collection_manager::sides::{ReadSide, WriteSide};
+use crate::collection_manager::sides::{read::ReadSide, write::WriteSide};
 
 mod actions;
 mod admin;

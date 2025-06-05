@@ -3,7 +3,7 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::collection_manager::sides::hooks::HookName;
-use crate::collection_manager::sides::IndexFieldStatsType;
+use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 

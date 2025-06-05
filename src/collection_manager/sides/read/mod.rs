@@ -1,6 +1,6 @@
 mod collection;
 mod collections;
-mod document_storage;
+pub mod document_storage;
 mod index;
 pub mod notify;
 

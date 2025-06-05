@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
-use crate::collection_manager::sides::{ReadSide, WriteSide};
+use crate::collection_manager::sides::{read::ReadSide, write::WriteSide};
 
 mod api;
 

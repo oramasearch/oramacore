@@ -6,7 +6,7 @@ use serde_json::json;
 use tracing::info;
 
 use crate::{
-    collection_manager::sides::{ReplaceIndexReason, WriteSide},
+    collection_manager::sides::{ReplaceIndexReason, write::WriteSide},
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
         DeleteDocuments, DeleteIndex, DescribeCollectionResponse, DocumentList, IndexId,

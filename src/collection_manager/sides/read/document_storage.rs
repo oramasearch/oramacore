@@ -8,7 +8,7 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
-use zebo::Zebo;
+use zebo::{Zebo, ZeboInfo};
 
 use anyhow::{Context, Result};
 
@@ -150,6 +150,12 @@ impl DocumentStorage {
         uncommitted_document_deletions.extend(doc_ids);
 
         Ok(())
+    }
+
+    pub async fn get_zebo_info(&self) -> Result<ZeboInfo> {
+        let zebo = self.committed.zebo.read().await;
+        zebo.get_info()
+            .context("Cannot get zebo info")
     }
 
     #[tracing::instrument(skip(self, doc_ids))]

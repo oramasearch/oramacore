@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::ai::OramaModel;
-use crate::collection_manager::sides::OramaModelSerializable;
+use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;

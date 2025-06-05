@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::{
     ai::tools::Tool,
-    collection_manager::sides::{ReadSide, WriteSide},
+    collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{
         ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams,
     },

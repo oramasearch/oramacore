@@ -13,7 +13,7 @@ use serde_json::json;
 use crate::{
     collection_manager::sides::{
         triggers::{parse_trigger_id, Trigger},
-        ReadSide, WriteSide,
+        read::ReadSide, write::WriteSide,
     },
     types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
     web_server::api::util::print_error,

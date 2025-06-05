@@ -6,8 +6,8 @@ use ai::{
 };
 use anyhow::{Context, Result};
 use collection_manager::sides::{
-    channel_creator, InputSideChannelType, OutputSideChannelType, ReadSide, ReadSideConfig,
-    WriteSide, WriteSideConfig,
+    channel_creator, InputSideChannelType, OutputSideChannelType, read::{ReadSide, ReadSideConfig},
+    write::{WriteSide, WriteSideConfig},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use nlp::NLPService;
