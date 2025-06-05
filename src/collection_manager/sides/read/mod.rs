@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
 
-use crate::ai::advanced_autoquery::AdvancedAutoQuerySteps;
+use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
@@ -423,7 +423,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<SearchResult>> {
+    ) -> Result<Vec<QueryMappedSearchResult>> {
         let collection = self
             .collections
             .get_collection(collection_id)

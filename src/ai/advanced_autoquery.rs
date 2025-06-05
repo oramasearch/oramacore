@@ -29,7 +29,34 @@ macro_rules! send_step {
     };
 }
 
-// ===== Data Models =====
+// ===== Modified Data Models =====
+
+/// Enhanced search result that includes the originating query information
+#[derive(Serialize, Debug, Clone)]
+pub struct QueryMappedSearchResult {
+    pub original_query: String,
+    pub generated_query: String,
+    pub search_params: SearchParams,
+    pub results: Vec<SearchResult>,
+    pub query_index: usize,
+}
+
+impl QueryMappedSearchResult {
+    /// Extract just the search results for legacy compatibility
+    pub fn into_search_results(self) -> Vec<SearchResult> {
+        self.results
+    }
+
+    /// Get a reference to the search results
+    pub fn search_results(&self) -> &[SearchResult] {
+        &self.results
+    }
+
+    /// Get the number of results
+    pub fn result_count(&self) -> usize {
+        self.results.len()
+    }
+}
 
 /// Statistics for a single field in an index
 #[derive(Serialize, Debug)]
@@ -79,6 +106,15 @@ pub struct QueryAndProperties {
     pub query: String,
     pub properties: HashMap<String, CollectionSelectedProperties>,
     pub filter_properties: HashMap<String, Vec<String>>,
+}
+
+/// Enhanced structure that tracks the query generation pipeline
+#[derive(Serialize, Debug, Clone)]
+pub struct TrackedQuery {
+    pub index: usize,
+    pub original_query: String,
+    pub generated_query_text: String,
+    pub search_params: SearchParams,
 }
 
 // ===== LLM Response Types =====
@@ -229,9 +265,9 @@ pub enum AdvancedAutoQuerySteps {
     CombiningQueriesAndProperties,
     CombinedQueriesAndProperties(Vec<QueryAndProperties>),
     GeneratingQueries,
-    GeneratedQueries(Vec<String>),
+    GeneratedQueries(Vec<TrackedQuery>), // Modified to include tracked queries
     Searching,
-    SearchResults(Vec<SearchResult>),
+    SearchResults(Vec<QueryMappedSearchResult>), // Modified to include query mapping
 }
 
 pub struct AdvancedAutoQueryStepResult {
@@ -262,6 +298,25 @@ impl AdvancedAutoQuery {
         }
     }
 
+    /// Runs the complete auto-query pipeline and returns just the search results (legacy compatibility)
+    pub async fn run_legacy(
+        self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        conversation: Vec<InteractionMessage>,
+    ) -> Result<Vec<SearchResult>> {
+        let mapped_results = self
+            .run(read_side, read_api_key, collection_id, conversation)
+            .await?;
+
+        // Flatten all results into a single Vec<SearchResult>
+        Ok(mapped_results
+            .into_iter()
+            .flat_map(|mapped_result| mapped_result.results)
+            .collect())
+    }
+
     /// Runs the complete auto-query pipeline
     pub async fn run(
         self,
@@ -269,17 +324,17 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
-    ) -> Result<Vec<SearchResult>> {
+    ) -> Result<Vec<QueryMappedSearchResult>> {
         let mut stream = self
             .run_stream(read_side.clone(), read_api_key, collection_id, conversation)
             .await;
 
-        let mut search_results = Vec::new();
+        let mut query_mapped_results = Vec::new();
         while let Some(step_result) = stream.next().await {
             match step_result {
-                // We only return the last step, which contains the generated queries
+                // We only return the last step, which contains the mapped results
                 Ok(AdvancedAutoQuerySteps::SearchResults(results)) => {
-                    search_results.extend(results);
+                    query_mapped_results.extend(results);
                     break;
                 }
                 Ok(_step) => {}
@@ -290,7 +345,7 @@ impl AdvancedAutoQuery {
             }
         }
 
-        Ok(search_results)
+        Ok(query_mapped_results)
     }
 
     /// Runs the auto-query pipeline as a stream of steps. Useful for real-time feedback in UIs.
@@ -338,39 +393,28 @@ impl AdvancedAutoQuery {
                     )
                 );
 
-                // Step 5: Generate queries
+                // Step 5: Generate queries with tracking
                 send_step!(tx, AdvancedAutoQuerySteps::GeneratingQueries);
-                let search_queries = self.generate_search_queries(queries_and_properties).await?;
-                let raw_queries = search_queries
-                    .iter()
-                    .map(|(query, _)| query.clone())
-                    .collect::<Vec<_>>();
+                let tracked_queries = self
+                    .generate_tracked_search_queries(queries_and_properties)
+                    .await?;
                 send_step!(
                     tx,
-                    AdvancedAutoQuerySteps::GeneratedQueries(raw_queries.clone())
+                    AdvancedAutoQuerySteps::GeneratedQueries(tracked_queries.clone())
                 );
 
-                // Step 6: Execute search
+                // Step 6: Execute search with mapping
                 send_step!(tx, AdvancedAutoQuerySteps::Searching);
-                let search_futures = search_queries.iter().map(|query| {
-                    let read_side = read_side.clone();
-                    let read_api_key = read_api_key;
-                    let collection_id = collection_id;
-                    async move {
-                        read_side
-                            .search(read_api_key, collection_id, query.1.clone())
-                            .await
-                            .context("Failed to execute search")
-                    }
-                });
+                let mapped_results = self
+                    .execute_mapped_searches(
+                        read_side,
+                        read_api_key,
+                        collection_id,
+                        tracked_queries,
+                    )
+                    .await?;
 
-                let results = join_all(search_futures).await;
-                let unwrapped = results
-                    .into_iter()
-                    .filter_map(|item| item.ok())
-                    .collect::<Vec<_>>();
-
-                send_step!(tx, AdvancedAutoQuerySteps::SearchResults(unwrapped.clone()));
+                send_step!(tx, AdvancedAutoQuerySteps::SearchResults(mapped_results));
 
                 Ok(())
             }
@@ -383,6 +427,7 @@ impl AdvancedAutoQuery {
 
         ReceiverStream::new(rx)
     }
+
     /// Analyzes the input conversation to extract optimized queries
     async fn analyze_input(&self, conversation_json: String) -> Result<Vec<String>> {
         let current_datetime = chrono::Utc::now();
@@ -476,11 +521,11 @@ impl AdvancedAutoQuery {
             .collect()
     }
 
-    /// Generates search queries from the query plan
-    async fn generate_search_queries(
+    /// Generates search queries with tracking information
+    async fn generate_tracked_search_queries(
         &mut self,
         mut query_plan: Vec<QueryAndProperties>,
-    ) -> Result<Vec<(String, SearchParams)>> {
+    ) -> Result<Vec<TrackedQuery>> {
         // Extract filter properties for all queries
         let filter_properties = self.extract_filter_properties(&query_plan)?;
 
@@ -504,8 +549,8 @@ impl AdvancedAutoQuery {
 
         let results = futures::future::join_all(futures).await;
 
-        // Process results
-        results
+        // Process results with tracking
+        let tracked_queries: Result<Vec<TrackedQuery>> = results
             .into_iter()
             .enumerate()
             .map(|(index, result)| {
@@ -514,12 +559,69 @@ impl AdvancedAutoQuery {
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .context("Failed to clean LLM response")?;
-                        let serialized = serde_json::from_str::<SearchParams>(&cleaned)
+                        let search_params = serde_json::from_str::<SearchParams>(&cleaned)
                             .context("Failed to parse search params")?;
-                        Ok((cleaned, serialized))
+
+                        Ok(TrackedQuery {
+                            index,
+                            original_query: query_plan[index].query.clone(),
+                            generated_query_text: cleaned,
+                            search_params,
+                        })
                     })
             })
-            .collect()
+            .collect();
+
+        tracked_queries
+    }
+
+    /// Executes searches and maps results back to their originating queries
+    async fn execute_mapped_searches(
+        &self,
+        read_side: State<Arc<ReadSide>>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+        tracked_queries: Vec<TrackedQuery>,
+    ) -> Result<Vec<QueryMappedSearchResult>> {
+        let search_futures = tracked_queries.iter().map(|tracked_query| {
+            let read_side = read_side.clone();
+            let read_api_key = read_api_key;
+            let collection_id = collection_id;
+            let tracked_query = tracked_query.clone();
+
+            async move {
+                let search_result = read_side
+                    .search(
+                        read_api_key,
+                        collection_id,
+                        tracked_query.search_params.clone(),
+                    )
+                    .await
+                    .context("Failed to execute search")?;
+
+                Ok::<QueryMappedSearchResult, anyhow::Error>(QueryMappedSearchResult {
+                    original_query: tracked_query.original_query,
+                    generated_query: tracked_query.generated_query_text,
+                    search_params: tracked_query.search_params,
+                    results: vec![search_result],
+                    query_index: tracked_query.index,
+                })
+            }
+        });
+
+        let results = join_all(search_futures).await;
+        let mapped_results: Vec<QueryMappedSearchResult> = results
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(mapped_result) => Some(mapped_result),
+                Err(e) => {
+                    eprintln!("Search execution failed: {}", e);
+                    None
+                }
+            })
+            .collect();
+
+        Ok(mapped_results)
     }
 
     /// Extracts filter properties from the query plan
@@ -728,6 +830,14 @@ impl AdvancedAutoQuery {
 }
 
 // ===== Helper Functions =====
+
+/// Flattens QueryMappedSearchResults into a simple Vec<SearchResult> for legacy compatibility
+pub fn flatten_mapped_results(mapped_results: Vec<QueryMappedSearchResult>) -> Vec<SearchResult> {
+    mapped_results
+        .into_iter()
+        .flat_map(|mapped_result| mapped_result.results)
+        .collect()
+}
 
 /// Parses the LLM properties response into the expected format
 fn parse_properties_response(
