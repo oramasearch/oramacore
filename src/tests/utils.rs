@@ -25,8 +25,11 @@ use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig}, read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig}, triggers::Trigger, write::{CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig}, InputSideChannelType, OutputSideChannelType, ReplaceIndexReason
-        
+        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
+        read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
+        triggers::Trigger,
+        write::{CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig},
+        InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,

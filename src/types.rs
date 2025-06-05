@@ -5,9 +5,7 @@ use crate::ai::automatic_embeddings_selector::ChosenProperties;
 use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::write::index::FieldType;
 use crate::collection_manager::sides::write::OramaModelSerializable;
-use crate::collection_manager::sides::{
-    deserialize_api_key, serialize_api_key, 
-};
+use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use crate::nlp::locales::Locale;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;

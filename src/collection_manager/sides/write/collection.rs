@@ -10,9 +10,9 @@ use crate::{
     ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector,
     ai::OramaModel,
     collection_manager::sides::{
-        field_name_to_path, hooks::HooksRuntime, CollectionWriteOperation,
-        DocumentStorageWriteOperation, OperationSender, write::OramaModelSerializable, ReplaceIndexReason,
-        WriteOperation,
+        field_name_to_path, hooks::HooksRuntime, write::OramaModelSerializable,
+        CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
+        ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService, TextParser},

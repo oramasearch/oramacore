@@ -154,8 +154,7 @@ impl DocumentStorage {
 
     pub async fn get_zebo_info(&self) -> Result<ZeboInfo> {
         let zebo = self.committed.zebo.read().await;
-        zebo.get_info()
-            .context("Cannot get zebo info")
+        zebo.get_info().context("Cannot get zebo info")
     }
 
     #[tracing::instrument(skip(self, doc_ids))]

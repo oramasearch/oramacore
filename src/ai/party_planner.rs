@@ -11,7 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     collection_manager::sides::{
-        segments::Segment, system_prompts::SystemPrompt, triggers::Trigger, read::ReadSide,
+        read::ReadSide, segments::Segment, system_prompts::SystemPrompt, triggers::Trigger,
     },
     types::{
         ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,

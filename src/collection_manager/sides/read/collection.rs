@@ -22,7 +22,9 @@ use crate::{
         AIService,
     },
     collection_manager::sides::{
-        read::{CommittedDateFieldStats, UncommittedDateFieldStats}, CollectionWriteOperation, Offset, ReplaceIndexReason    },
+        read::{CommittedDateFieldStats, UncommittedDateFieldStats},
+        CollectionWriteOperation, Offset, ReplaceIndexReason,
+    },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{

@@ -4,7 +4,10 @@ use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::sides::{hooks::HookName, write::{index::IndexedValue, OramaModelSerializable}},
+    collection_manager::sides::{
+        hooks::HookName,
+        write::{index::IndexedValue, OramaModelSerializable},
+    },
     nlp::locales::Locale,
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
