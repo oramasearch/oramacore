@@ -15,10 +15,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 use crate::{
+    ai::advanced_autoquery::QueryMappedSearchResult,
     collection_manager::sides::read::ReadSide,
-    types::{
-        ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
-    },
+    types::{ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams},
     web_server::api::util::print_error,
 };
 
@@ -74,7 +73,8 @@ async fn nlp_search(
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<NLPSearchRequest>,
-) -> Result<(StatusCode, Json<Vec<SearchResult>>), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(StatusCode, Json<Vec<QueryMappedSearchResult>>), (StatusCode, Json<serde_json::Value>)>
+{
     let read_api_key = query.api_key;
 
     match read_side
