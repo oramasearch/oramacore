@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ai::OramaModel,
-    collection_manager::sides::OramaModelSerializable,
+    collection_manager::sides::write::OramaModelSerializable,
     file_utils::{create_if_not_exists, BufferedFile},
     indexes::hnsw2::HNSW2Index,
     types::DocumentId,

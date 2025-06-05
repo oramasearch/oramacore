@@ -15,7 +15,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 use crate::{
-    collection_manager::sides::ReadSide,
+    collection_manager::sides::read::ReadSide,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
     },

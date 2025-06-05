@@ -22,8 +22,8 @@ use crate::{
         AIService,
     },
     collection_manager::sides::{
-        CollectionWriteOperation, CommittedDateFieldStats, Offset, ReplaceIndexReason,
-        UncommittedDateFieldStats,
+        read::{CommittedDateFieldStats, UncommittedDateFieldStats},
+        CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},

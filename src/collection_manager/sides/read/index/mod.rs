@@ -63,7 +63,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::{
     collection_manager::sides::{
-        index::IndexedValue, IndexWriteOperation, IndexWriteOperationFieldType,
+        write::index::IndexedValue, IndexWriteOperation, IndexWriteOperationFieldType,
     },
     types::FieldId,
 };
@@ -277,6 +277,26 @@ impl Index {
             created_at: dump.created_at,
             updated_at: dump.updated_at,
         })
+    }
+
+    pub async fn get_all_document_ids(&self) -> Result<Vec<DocumentId>> {
+        let properties = Properties::default();
+        let properties = self.calculate_string_properties(&properties).await?;
+        let output = self
+            .search_full_text(
+                "",
+                None,
+                false,
+                properties,
+                Default::default(),
+                None,
+                &Default::default(),
+            )
+            .await
+            .expect("Failed to get all documents");
+        let document_ids: Vec<_> = output.keys().copied().collect();
+
+        Ok(document_ids)
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {

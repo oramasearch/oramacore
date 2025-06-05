@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::collection_manager::sides::IndexFieldStatsType;
+use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::create_oramacore_config;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;

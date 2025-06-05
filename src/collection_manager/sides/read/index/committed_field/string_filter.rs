@@ -51,7 +51,6 @@ impl CommittedStringFilterField {
     pub fn try_load(info: StringFilterFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let dump_file_path = data_dir.join("data.bin");
-
         let inner: StringFilterFieldDump = BufferedFile::open(dump_file_path)
             .context("Cannot open data.bin")?
             .read_bincode_data()

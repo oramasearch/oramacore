@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::{segments::Segment, ReadSide, WriteSide},
+    collection_manager::sides::{read::ReadSide, segments::Segment, write::WriteSide},
     types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
     web_server::api::util::print_error,
 };
