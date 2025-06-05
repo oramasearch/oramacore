@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  build-and-upload:
+  build-and-patch-release:
     name: Build and Upload Release Assets
     runs-on: [self-hosted, gpu, cuda]
 
@@ -64,6 +64,12 @@ jobs:
             ./target/release/oramacore-writer
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  build-docker-OramaCore-x86_64:
+    needs: [build-and-patch-release]
+    name: Build and Upload Docker Images
+    runs-on: [self-hosted, gpu, cuda]
+
+    steps:
       # Docker Setup and Build Steps
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -89,6 +95,26 @@ jobs:
             oramasearch/oramacore:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore:latest
 
+  build-docker-OramaCore-arm64:
+    needs: [build-and-patch-release]
+    name: Build and Upload Docker Images
+    runs-on: [self-hosted, gpu, cuda]
+
+    steps:
+      # Docker Setup and Build Steps
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from release tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
       - name: Build and push OramaCore ARM64
         uses: docker/build-push-action@v5
         with:
@@ -99,6 +125,26 @@ jobs:
           tags: |
             oramasearch/oramacore-arm64:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore-arm64:latest
+
+  build-docker-OramaCore-AI-server-cpu:
+    needs: [build-and-patch-release]
+    name: Build and Upload Docker Images
+    runs-on: [self-hosted, gpu, cuda]
+
+    steps:
+      # Docker Setup and Build Steps
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from release tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Build and push AI Server (CPU)
         uses: docker/build-push-action@v5
@@ -111,6 +157,26 @@ jobs:
             oramasearch/oramacore-ai-server:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore-ai-server:latest
 
+  build-docker-OramaCore-AI-server-cuda:
+    needs: [build-and-patch-release]
+    name: Build and Upload Docker Images
+    runs-on: [self-hosted, gpu, cuda]
+
+    steps:
+      # Docker Setup and Build Steps
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from release tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
       - name: Build and push AI Server (CUDA)
         uses: docker/build-push-action@v5
         with:
@@ -121,19 +187,3 @@ jobs:
           tags: |
             oramasearch/oramacore-ai-server-cuda:${{ steps.get_version.outputs.VERSION }}
             oramasearch/oramacore-ai-server-cuda:latest
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Authenticate with GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_B64 }}
-
-      - name: Trigger Cloud Build
-        run: |
-          gcloud builds triggers run deploy-orama-core \
-            --project=${{ secrets.GCP_PROJECT }} \
-            --branch=${{ secrets.GCP_BRANCH }} \
-            --region=${{ secrets.GCP_REGION }} \
-            --quiet > /dev/null 2>&1
