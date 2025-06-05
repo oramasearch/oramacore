@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     ai::{
-        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps},
+        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
         llms::LLMService,
         AIService,
     },
@@ -29,7 +29,7 @@ use crate::{
     nlp::{locales::Locale, NLPService},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, NLPSearchRequest, Role, SearchParams, SearchResult,
+        InteractionMessage, NLPSearchRequest, Role, SearchParams,
     },
 };
 
@@ -309,7 +309,7 @@ impl CollectionReader {
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
-    ) -> Result<Vec<SearchResult>> {
+    ) -> Result<Vec<QueryMappedSearchResult>> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
