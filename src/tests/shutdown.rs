@@ -2,7 +2,7 @@ use anyhow::bail;
 use futures::FutureExt;
 use serde_json::json;
 
-use crate::collection_manager::sides::IndexFieldStatsType;
+use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::init_log;
 use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;

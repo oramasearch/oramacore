@@ -10,7 +10,7 @@ use http::StatusCode;
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::WriteSide,
+    collection_manager::sides::write::WriteSide,
     types::{
         ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, IndexId, NewHookPostParams,
     },

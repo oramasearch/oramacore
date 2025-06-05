@@ -11,7 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::{
-    collection_manager::sides::{CollectionStats, ReadSide},
+    collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
         ApiKey, CollectionId, IndexId, InteractionLLMConfig, InteractionMessage, SearchParams,
         SearchResult,
@@ -557,7 +557,7 @@ impl AdvancedAutoQuery {
     /// Extracts keys for a specific property from index statistics
     fn extract_property_keys(
         &self,
-        index_stats: &crate::collection_manager::sides::IndexStats,
+        index_stats: &crate::collection_manager::sides::read::IndexStats,
         property: &str,
     ) -> Result<Vec<String>> {
         let mut keys = Vec::new();
@@ -671,7 +671,7 @@ impl AdvancedAutoQuery {
     /// Extracts valid fields from index statistics
     fn extract_valid_fields(
         &self,
-        index: &crate::collection_manager::sides::IndexStats,
+        index: &crate::collection_manager::sides::read::IndexStats,
         prefix_regex: &Regex,
         seen_fields: &mut HashMap<String, bool>,
     ) -> Vec<FieldStats> {

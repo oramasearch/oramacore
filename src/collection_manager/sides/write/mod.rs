@@ -48,7 +48,7 @@ use crate::{
         AIService, OramaModel, RemoteLLMProvider,
     },
     collection_manager::sides::{
-        collection::IndexReadLock, DocumentStorageWriteOperation, DocumentToInsert,
+        write::collection::IndexReadLock, DocumentStorageWriteOperation, DocumentToInsert,
         ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,

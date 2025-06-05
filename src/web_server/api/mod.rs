@@ -17,7 +17,7 @@ use tracing::{info, info_span};
 
 use crate::{
     build_info::get_build_version,
-    collection_manager::sides::{ReadSide, WriteSide},
+    collection_manager::sides::{read::ReadSide, write::WriteSide},
 };
 mod collection;
 mod util;
