@@ -41,7 +41,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --no-default-features --release --features reader
+          args: --no-default-features --release --features reader --bin oramacore
 
       - name: Save Reader Binary
         run: cp ./target/release/oramacore ./target/release/oramacore-reader
@@ -50,7 +50,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --no-default-features --release --features writer
+          args: --no-default-features --release --features writer --bin oramacore
 
       - name: Save Writer Binary
         run: cp ./target/release/oramacore ./target/release/oramacore-writer
