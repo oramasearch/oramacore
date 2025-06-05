@@ -558,7 +558,8 @@ impl PartialSchema for OramaModelSerializable {
             .item(OramaModel::BgeLarge.as_str_name())
             .item(OramaModel::MultilingualE5Small.as_str_name())
             .item(OramaModel::MultilingualE5Base.as_str_name())
-            .item(OramaModel::MultilingualE5Large.as_str_name());
+            .item(OramaModel::MultilingualE5Large.as_str_name())
+            .item(OramaModel::JinaEmbeddingsV2BaseCode.as_str_name());
         axum_openapi3::utoipa::openapi::RefOr::T(b.into())
     }
 }
@@ -633,7 +634,6 @@ pub struct CreateCollection {
 pub struct ReindexConfig {
     pub language: LanguageDTO,
     pub embedding_model: OramaModelSerializable,
-
     pub reference: Option<String>,
 }
 
@@ -690,6 +690,7 @@ pub struct SearchOffset(pub usize);
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
 pub enum Filter {
+    Date(DateFilter),
     Number(NumberFilter),
     Bool(bool),
     String(String),
@@ -2015,6 +2016,18 @@ mod test {
                 Filter::String("my-phone-3".to_string())
             )
         );
+
+        let j = json!({
+            "date": { "eq": "2023-01-01T00:00:00Z" },
+        });
+        let p = serde_json::from_value::<WhereFilter>(j);
+        assert!(p.is_ok());
+
+        let j = json!({
+            "date": { "eq": "2023-01-01" },
+        });
+        let p = serde_json::from_value::<WhereFilter>(j);
+        assert!(p.is_ok());
     }
 
     #[test]
@@ -2252,6 +2265,64 @@ pub enum NumberFilter {
     LessThanOrEqual(Number),
     #[serde(rename = "between")]
     Between((Number, Number)),
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct OramaDate(DateTime<Utc>);
+
+impl OramaDate {
+    pub fn try_from_i64(millisec_timestamp: i64) -> Option<Self> {
+        chrono::DateTime::from_timestamp_millis(millisec_timestamp).map(OramaDate)
+    }
+    pub fn as_i64(&self) -> i64 {
+        self.0.timestamp_millis()
+    }
+}
+
+impl<'de> Deserialize<'de> for OramaDate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        OramaDate::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<String> for OramaDate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&String> for OramaDate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        use dateparser::parse_with_timezone;
+
+        parse_with_timezone(value.as_str(), &Utc).map(OramaDate)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum DateFilter {
+    #[serde(rename = "eq")]
+    Equal(OramaDate),
+    #[serde(rename = "gt")]
+    GreaterThan(OramaDate),
+    #[serde(rename = "gte")]
+    GreaterThanOrEqual(OramaDate),
+    #[serde(rename = "lt")]
+    LessThan(OramaDate),
+    #[serde(rename = "lte")]
+    LessThanOrEqual(OramaDate),
+    #[serde(rename = "between")]
+    Between((OramaDate, OramaDate)),
 }
 
 #[cfg(test)]
