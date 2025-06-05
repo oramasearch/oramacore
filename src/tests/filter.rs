@@ -1,6 +1,9 @@
 use serde_json::json;
 
-use crate::tests::utils::{init_log, TestContext};
+use crate::{
+    tests::utils::{init_log, TestContext},
+    types::SearchParams,
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_search_on_unknown_field() {
@@ -450,6 +453,249 @@ async fn test_filter_and_or_not() {
         .await
         .unwrap();
     assert_eq!(output.count, 50);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_date() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let result = index_client
+        .insert_documents(
+            json!([
+                {
+                    "id": "1",
+                    "text": "test",
+                    "date": "2023-01-01T00:00:00Z"
+                },
+                {
+                    "id": "2",
+                    "text": "test",
+                    "date": "2023-01-02T00:00:00Z"
+                },
+                {
+                    "id": "3",
+                    "text": "test",
+                    "date": "2023-01-03T00:00:00Z"
+                }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.inserted, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gt": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lt": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gte": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lte": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "between": ["2023-01-01T00:00:01Z", "2023-01-02T23:59:59Z"]
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 1);
+
+    test_context.commit_all().await.unwrap();
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gt": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lt": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gte": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lte": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "between": ["2023-01-01T00:00:01Z", "2023-01-02T23:59:59Z"]
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 1);
+
+    let test_context = test_context.reload().await;
+    let collection_client = test_context
+        .get_test_collection_client(
+            collection_client.collection_id,
+            collection_client.write_api_key,
+            collection_client.read_api_key,
+        )
+        .unwrap();
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gt": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lt": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 2);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "gte": "2023-01-01T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "lte": "2023-01-03T00:00:00Z"
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 3);
+
+    let search_params: SearchParams = json!({
+        "term": "",
+        "where": {
+            "date": {
+                "between": ["2023-01-01T00:00:01Z", "2023-01-02T23:59:59Z"]
+            }
+        }
+    })
+    .try_into()
+    .unwrap();
+    let output = collection_client.search(search_params).await.unwrap();
+    assert_eq!(output.count, 1);
 
     drop(test_context);
 }

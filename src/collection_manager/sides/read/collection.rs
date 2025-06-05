@@ -21,7 +21,10 @@ use crate::{
         llms::LLMService,
         AIService,
     },
-    collection_manager::sides::{CollectionWriteOperation, Offset, ReplaceIndexReason},
+    collection_manager::sides::{
+        CollectionWriteOperation, CommittedDateFieldStats, Offset, ReplaceIndexReason,
+        UncommittedDateFieldStats,
+    },
     file_utils::BufferedFile,
     nlp::{locales::Locale, NLPService},
     types::{
@@ -625,6 +628,11 @@ pub enum IndexFieldStatsType {
     UncommittedNumber(UncommittedNumberFieldStats),
     #[serde(rename = "committed_number")]
     CommittedNumber(CommittedNumberFieldStats),
+
+    #[serde(rename = "uncommitted_date")]
+    UncommittedDate(UncommittedDateFieldStats),
+    #[serde(rename = "committed_date")]
+    CommittedDate(CommittedDateFieldStats),
 
     #[serde(rename = "uncommitted_string_filter")]
     UncommittedStringFilter(UncommittedStringFilterFieldStats),

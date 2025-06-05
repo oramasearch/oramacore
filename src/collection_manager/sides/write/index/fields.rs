@@ -24,7 +24,7 @@ use crate::{
         locales::Locale,
         TextParser,
     },
-    types::{CollectionId, DocumentId, FieldId, IndexId, Number, SerializableNumber},
+    types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
 use super::{get_value, EmbeddingStringCalculation};
@@ -45,6 +45,8 @@ pub enum FilterFieldType {
     Bool,
     #[serde(rename = "filter_string")]
     String,
+    #[serde(rename = "date")]
+    Date,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,7 @@ pub enum SerializedFilterFieldType {
     Number(SerializedFilterFieldIndexer),
     Bool(SerializedFilterFieldIndexer),
     String(SerializedFilterFieldIndexer),
+    Date(SerializedFilterFieldIndexer),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,6 +108,7 @@ pub enum IndexFilterField {
     Number(NumberFilterField),
     Bool(BoolFilterField),
     String(StringFilterField),
+    Date(DateFilterField),
 }
 
 impl GenericField for IndexFilterField {
@@ -113,6 +117,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Number(field) => field.field_id,
             IndexFilterField::Bool(field) => field.field_id,
             IndexFilterField::String(field) => field.field_id,
+            IndexFilterField::Date(field) => field.field_id,
         }
     }
 
@@ -121,6 +126,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Number(field) => &field.field_path,
             IndexFilterField::Bool(field) => &field.field_path,
             IndexFilterField::String(field) => &field.field_path,
+            IndexFilterField::Date(field) => &field.field_path,
         }
     }
 
@@ -129,6 +135,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Number(field) => field.is_array,
             IndexFilterField::Bool(field) => field.is_array,
             IndexFilterField::String(field) => field.is_array,
+            IndexFilterField::Date(field) => field.is_array,
         }
     }
 
@@ -137,6 +144,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Number(_) => FieldType::Filter(FilterFieldType::Number),
             IndexFilterField::Bool(_) => FieldType::Filter(FilterFieldType::Bool),
             IndexFilterField::String(_) => FieldType::Filter(FilterFieldType::String),
+            IndexFilterField::Date(_) => FieldType::Filter(FilterFieldType::Date),
         }
     }
 
@@ -152,6 +160,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Number(field) => field.index_value(value),
             IndexFilterField::Bool(field) => field.index_value(value),
             IndexFilterField::String(field) => field.index_value(value),
+            IndexFilterField::Date(field) => field.index_value(value),
         }
     }
 }
@@ -174,6 +183,9 @@ impl IndexFilterField {
     }
     pub fn new_string_arr(field_id: FieldId, field_path: Box<[String]>) -> Self {
         IndexFilterField::String(StringFilterField::new(field_id, field_path, true))
+    }
+    pub fn new_date(field_id: FieldId, field_path: Box<[String]>) -> Self {
+        IndexFilterField::Date(DateFilterField::new(field_id, field_path, false))
     }
 
     pub fn serialize(&self) -> SerializedFilterFieldType {
@@ -202,6 +214,14 @@ impl IndexFilterField {
                     field_type: FilterFieldType::String,
                 })
             }
+            IndexFilterField::Date(_) => {
+                SerializedFilterFieldType::Date(SerializedFilterFieldIndexer {
+                    field_id: self.field_id(),
+                    field_path: self.field_path().to_vec().into_boxed_slice(),
+                    is_array: self.is_array(),
+                    field_type: FilterFieldType::Date,
+                })
+            }
         }
     }
 
@@ -218,6 +238,11 @@ impl IndexFilterField {
             SerializedFilterFieldType::String(field) => IndexFilterField::String(
                 StringFilterField::new(field.field_id, field.field_path, field.is_array),
             ),
+            SerializedFilterFieldType::Date(field) => IndexFilterField::Date(DateFilterField::new(
+                field.field_id,
+                field.field_path,
+                field.is_array,
+            )),
         }
     }
 }
@@ -350,6 +375,52 @@ impl StringFilterField {
             // TODO: put this "25" in the collection config
             .filter(|s| !s.is_empty() && s.len() < 25)
             .map(|s| IndexedValue::FilterString(self.field_id, s))
+            .collect();
+
+        Ok(data)
+    }
+}
+
+pub struct DateFilterField {
+    field_id: FieldId,
+    field_path: Box<[String]>,
+    is_array: bool,
+}
+
+impl DateFilterField {
+    pub fn new(field_id: FieldId, field_path: Box<[String]>, is_array: bool) -> Self {
+        Self {
+            field_id,
+            field_path,
+            is_array,
+        }
+    }
+
+    pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
+        let data: Vec<OramaDate> = match value {
+            Value::String(s) => {
+                if let Ok(d) = s.try_into() {
+                    vec![d]
+                } else {
+                    return Ok(vec![]);
+                }
+            }
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| {
+                    if let Value::String(s) = v {
+                        s.try_into().ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            _ => vec![],
+        };
+
+        let data = data
+            .into_iter()
+            .map(|t| IndexedValue::FilterDate(self.field_id, t.as_i64()))
             .collect();
 
         Ok(data)
@@ -922,6 +993,7 @@ pub enum IndexedValue {
     FilterNumber(FieldId, SerializableNumber),
     FilterBool(FieldId, bool),
     FilterString(FieldId, String),
+    FilterDate(FieldId, i64),
     ScoreString(FieldId, u16, HashMap<Term, TermStringField>),
 }
 
