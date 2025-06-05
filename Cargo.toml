@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "1.1.42"
+version = "1.1.43"
 edition = "2021"
 
 [dependencies]
@@ -117,7 +117,7 @@ rustls = "0.23.26"
 
 filters = { path = "./crates/filters" }
 
-zebo = "0.1.2"
+zebo = "0.2.1"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
