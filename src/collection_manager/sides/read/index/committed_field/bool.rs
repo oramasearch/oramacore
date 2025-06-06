@@ -70,11 +70,8 @@ impl CommittedBoolField {
     pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
-            Ok(file) => {
-                let map = bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
-                    .context("Failed to deserialize bool_map.bin")?;
-                map
-            }
+            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                .context("Failed to deserialize bool_map.bin")?,
             Err(_) => {
                 use crate::indexes::ordered_key::OrderedKeyIndex;
                 let inner = OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())?;

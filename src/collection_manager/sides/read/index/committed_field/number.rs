@@ -39,12 +39,8 @@ impl CommittedNumberField {
         let data_dir = info.data_dir;
         let vec = match std::fs::File::open(data_dir.join("number_vec.bin")) {
             Ok(file) => {
-                let vec = bincode::deserialize_from::<
-                    _,
-                    Vec<(SerializableNumber, HashSet<DocumentId>)>,
-                >(file)
-                .context("Failed to deserialize number_vec.bin")?;
-                vec
+                bincode::deserialize_from::<_, Vec<(SerializableNumber, HashSet<DocumentId>)>>(file)
+                    .context("Failed to deserialize number_vec.bin")?
             }
             Err(_) => {
                 use crate::indexes::ordered_key::OrderedKeyIndex;
@@ -211,8 +207,7 @@ pub fn get_iter<'s, K: Ord + Eq>(
 
     vec[min_index..max_index]
         .iter()
-        .map(move |(_, ids)| ids.iter().cloned())
-        .flatten()
+        .flat_map(move |(_, ids)| ids.iter().cloned())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

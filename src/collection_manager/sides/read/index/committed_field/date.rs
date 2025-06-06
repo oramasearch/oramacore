@@ -38,11 +38,8 @@ impl CommittedDateField {
     pub fn try_load(info: DateFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
         let vec = match std::fs::File::open(data_dir.join("date_vec.bin")) {
-            Ok(file) => {
-                let vec = bincode::deserialize_from::<_, Vec<(i64, HashSet<DocumentId>)>>(file)
-                    .context("Failed to deserialize date_vec.bin")?;
-                vec
-            }
+            Ok(file) => bincode::deserialize_from::<_, Vec<(i64, HashSet<DocumentId>)>>(file)
+                .context("Failed to deserialize date_vec.bin")?,
             Err(_) => {
                 use crate::indexes::ordered_key::OrderedKeyIndex;
                 let inner = OrderedKeyIndex::<i64, DocumentId>::load(data_dir.clone())?;

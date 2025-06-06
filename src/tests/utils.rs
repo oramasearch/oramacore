@@ -126,7 +126,8 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
 
     let text_embedding = CELL.get_or_init(|| {
-        let mut cwd = std::env::current_dir().unwrap()
+        let mut cwd = std::env::current_dir()
+            .unwrap()
             // This join is needed for the blow loop.
             .join("foo");
 
