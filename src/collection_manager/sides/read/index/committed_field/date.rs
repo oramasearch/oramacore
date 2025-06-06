@@ -4,14 +4,16 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    indexes::ordered_key::{BoundedValue, OrderedKeyIndex},
+    collection_manager::sides::read::index::committed_field::number::get_iter,
+    file_utils::create_if_not_exists,
+    indexes::ordered_key::BoundedValue,
     types::{DateFilter, DocumentId, OramaDate},
 };
 
 #[derive(Debug)]
 pub struct CommittedDateField {
     field_path: Box<[String]>,
-    inner: OrderedKeyIndex<i64, DocumentId>,
+    vec: Vec<(i64, HashSet<DocumentId>)>,
     data_dir: PathBuf,
 }
 
@@ -20,22 +22,62 @@ impl CommittedDateField {
     where
         I: Iterator<Item = (i64, HashSet<DocumentId>)>,
     {
-        let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
-        Ok(Self {
+        let vec: Vec<_> = iter.collect();
+        let s = Self {
             field_path,
-            inner,
+            vec,
             data_dir,
-        })
+        };
+
+        s.commit().context("Failed to commit number field")?;
+
+        Ok(s)
     }
 
+    #[allow(deprecated)]
     pub fn try_load(info: DateFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
-        let inner = OrderedKeyIndex::load(data_dir.clone())?;
-        Ok(Self {
-            inner,
+        let vec = match std::fs::File::open(data_dir.join("date_vec.bin")) {
+            Ok(file) => {
+                let vec = bincode::deserialize_from::<_, Vec<(i64, HashSet<DocumentId>)>>(file)
+                    .context("Failed to deserialize date_vec.bin")?;
+                vec
+            }
+            Err(_) => {
+                use crate::indexes::ordered_key::OrderedKeyIndex;
+                let inner = OrderedKeyIndex::<i64, DocumentId>::load(data_dir.clone())?;
+
+                let items = inner
+                    .get_items((true, i64::MIN), (true, i64::MAX))
+                    .context("Cannot get items for bool field")?;
+
+                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
+                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
+                vec.sort_by_key(|(key, _)| *key);
+                vec
+            }
+        };
+
+        let s = Self {
             field_path: info.field_path,
+            vec,
             data_dir,
-        })
+        };
+
+        s.commit().context("Failed to commit bool field")?;
+
+        Ok(s)
+    }
+
+    fn commit(&self) -> Result<()> {
+        // Ensure the data directory exists
+        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
+
+        let file_path = self.data_dir.join("date_vec.bin");
+        let file = std::fs::File::create(&file_path).context("Failed to create date_vec.bin")?;
+        bincode::serialize_into(file, &self.vec).context("Failed to serialize number vec")?;
+
+        Ok(())
     }
 
     pub fn get_field_info(&self) -> DateFieldInfo {
@@ -50,11 +92,10 @@ impl CommittedDateField {
     }
 
     pub fn stats(&self) -> Result<CommittedDateFieldStats> {
-        let s = self
-            .inner
-            .min_max()
-            .context("Cannot get min and max key for date index")?;
-        let Some((min, max)) = s else {
+        let min = self.vec.first().map(|(num, _)| *num);
+        let max = self.vec.last().map(|(num, _)| *num);
+
+        let (Some(min), Some(max)) = (min, max) else {
             return Ok(CommittedDateFieldStats {
                 min: None,
                 max: None,
@@ -74,25 +115,30 @@ impl CommittedDateField {
     where
         's: 'iter,
     {
-        let (min, max) = match filter_date {
-            DateFilter::Equal(value) => ((true, value.as_i64()), (true, value.as_i64())),
-            DateFilter::Between((min, max)) => ((true, min.as_i64()), (true, max.as_i64())),
-            DateFilter::GreaterThan(min) => ((false, min.as_i64()), (true, i64::MAX)),
-            DateFilter::GreaterThanOrEqual(min) => ((true, min.as_i64()), (true, i64::MAX)),
-            DateFilter::LessThan(max) => ((true, i64::MIN), (false, max.as_i64())),
-            DateFilter::LessThanOrEqual(max) => ((true, i64::MIN), (true, max.as_i64())),
-        };
-
-        let items = self
-            .inner
-            .get_items(min, max)
-            .context("Cannot get items for date index")?;
-
-        Ok(items.flat_map(|item| item.values))
+        Ok(match filter_date {
+            DateFilter::Equal(value) => {
+                get_iter(&self.vec, (true, value.as_i64()), (true, value.as_i64()))
+            }
+            DateFilter::Between((min, max)) => {
+                get_iter(&self.vec, (true, min.as_i64()), (true, max.as_i64()))
+            }
+            DateFilter::GreaterThan(min) => {
+                get_iter(&self.vec, (false, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::GreaterThanOrEqual(min) => {
+                get_iter(&self.vec, (true, min.as_i64()), (false, i64::MAX))
+            }
+            DateFilter::LessThan(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (false, max.as_i64()))
+            }
+            DateFilter::LessThanOrEqual(max) => {
+                get_iter(&self.vec, (false, i64::MIN), (true, max.as_i64()))
+            }
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (i64, HashSet<DocumentId>)> + '_ {
-        self.inner.iter()
+        self.vec.iter().cloned()
     }
 }
 

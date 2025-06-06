@@ -126,7 +126,26 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
     let model = EmbeddingModel::BGESmallENV15;
 
     let text_embedding = CELL.get_or_init(|| {
-        let cwd = std::env::current_dir().unwrap();
+        let mut cwd = std::env::current_dir().unwrap()
+            // This join is needed for the blow loop.
+            .join("foo");
+
+        let cwd = loop {
+            let Some(parent) = cwd.parent() else {
+                break None;
+            };
+            if std::fs::exists(parent.join(".custom_models")).unwrap_or(false) {
+                break Some(parent.to_path_buf());
+            }
+            cwd = parent.to_path_buf();
+        };
+
+        let Some(cwd) = cwd else {
+            return Err(anyhow::anyhow!(
+                "Cache not found. Run 'download-test-model.sh' to create the cache locally"
+            ));
+        };
+
         let cache_dir = cwd.join(".custom_models");
         std::fs::create_dir_all(&cache_dir).expect("Cannot create cache dir");
 
