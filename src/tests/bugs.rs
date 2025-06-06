@@ -4,7 +4,8 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    tests::utils::{create_oramacore_config, init_log, TestContext}, types::{Document, DocumentList}
+    tests::utils::{create_oramacore_config, init_log, TestContext},
+    types::{Document, DocumentList},
 };
 
 #[tokio::test(flavor = "multi_thread")]

@@ -241,9 +241,22 @@ async fn test_index_replacement_3() {
         .await
         .unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "1");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "1"
+    );
 
-    let temp_coll_client = collection_client.create_temp_index(index_client.index_id).await.unwrap();
+    let temp_coll_client = collection_client
+        .create_temp_index(index_client.index_id)
+        .await
+        .unwrap();
 
     let stats = test_context.get_writer_collections().await;
     assert_eq!(stats.len(), 1);
@@ -252,7 +265,8 @@ async fn test_index_replacement_3() {
     assert_eq!(stats[0].indexes[0].id, index_client.index_id);
     assert_eq!(stats[0].indexes[1].id, temp_coll_client.index_id);
 
-    temp_coll_client.insert_documents(
+    temp_coll_client
+        .insert_documents(
             json!([
                 {"id": "2", "name": "Michele"},
             ])
@@ -280,19 +294,32 @@ async fn test_index_replacement_3() {
         .await
         .unwrap();
     assert_eq!(output.count, 1); // not yet replaced, so we see only the original document
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "1");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "1"
+    );
 
     let stats = collection_client.reader_stats().await.unwrap();
     assert_eq!(stats.document_count, 2);
     assert_eq!(stats.indexes_stats.len(), 2);
     assert_eq!(stats.indexes_stats[0].id, index_client.index_id);
-    assert_eq!(stats.indexes_stats[0].is_temp, false);
+    assert!(!stats.indexes_stats[0].is_temp);
     assert_eq!(stats.indexes_stats[0].document_count, 1);
     assert_eq!(stats.indexes_stats[1].id, temp_coll_client.index_id);
-    assert_eq!(stats.indexes_stats[1].is_temp, true);
+    assert!(stats.indexes_stats[1].is_temp);
     assert_eq!(stats.indexes_stats[1].document_count, 1);
 
-    collection_client.replace_index(index_client.index_id, temp_coll_client.index_id).await.unwrap();
+    collection_client
+        .replace_index(index_client.index_id, temp_coll_client.index_id)
+        .await
+        .unwrap();
 
     let stats = test_context.get_writer_collections().await;
     assert_eq!(stats.len(), 1);
@@ -311,7 +338,17 @@ async fn test_index_replacement_3() {
         .await
         .unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "2");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "2"
+    );
 
     index_client
         .insert_documents(
@@ -340,7 +377,7 @@ async fn test_index_replacement_3() {
     assert_eq!(stats.document_count, 2);
     assert_eq!(stats.indexes_stats.len(), 1);
     assert_eq!(stats.indexes_stats[0].id, index_client.index_id);
-    assert_eq!(stats.indexes_stats[0].is_temp, false);
+    assert!(!stats.indexes_stats[0].is_temp);
     assert_eq!(stats.indexes_stats[0].document_count, 2);
 
     drop(test_context);
@@ -380,9 +417,22 @@ async fn test_index_replacement_3_with_commit() {
         .await
         .unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "1");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "1"
+    );
 
-    let temp_coll_client = collection_client.create_temp_index(index_client.index_id).await.unwrap();
+    let temp_coll_client = collection_client
+        .create_temp_index(index_client.index_id)
+        .await
+        .unwrap();
 
     let stats = test_context.get_writer_collections().await;
     assert_eq!(stats.len(), 1);
@@ -391,7 +441,8 @@ async fn test_index_replacement_3_with_commit() {
     assert_eq!(stats[0].indexes[0].id, index_client.index_id);
     assert_eq!(stats[0].indexes[1].id, temp_coll_client.index_id);
 
-    temp_coll_client.insert_documents(
+    temp_coll_client
+        .insert_documents(
             json!([
                 {"id": "2", "name": "Michele"},
             ])
@@ -421,19 +472,32 @@ async fn test_index_replacement_3_with_commit() {
         .await
         .unwrap();
     assert_eq!(output.count, 1); // not yet replaced, so we see only the original document
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "1");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "1"
+    );
 
     let stats = collection_client.reader_stats().await.unwrap();
     assert_eq!(stats.document_count, 2);
     assert_eq!(stats.indexes_stats.len(), 2);
     assert_eq!(stats.indexes_stats[0].id, index_client.index_id);
-    assert_eq!(stats.indexes_stats[0].is_temp, false);
+    assert!(!stats.indexes_stats[0].is_temp);
     assert_eq!(stats.indexes_stats[0].document_count, 1);
     assert_eq!(stats.indexes_stats[1].id, temp_coll_client.index_id);
-    assert_eq!(stats.indexes_stats[1].is_temp, true);
+    assert!(stats.indexes_stats[1].is_temp);
     assert_eq!(stats.indexes_stats[1].document_count, 1);
 
-    collection_client.replace_index(index_client.index_id, temp_coll_client.index_id).await.unwrap();
+    collection_client
+        .replace_index(index_client.index_id, temp_coll_client.index_id)
+        .await
+        .unwrap();
 
     let stats = test_context.get_writer_collections().await;
     assert_eq!(stats.len(), 1);
@@ -452,7 +516,17 @@ async fn test_index_replacement_3_with_commit() {
         .await
         .unwrap();
     assert_eq!(output.count, 1);
-    assert_eq!(output.hits[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "2");
+    assert_eq!(
+        output.hits[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "2"
+    );
 
     index_client
         .insert_documents(
@@ -481,7 +555,7 @@ async fn test_index_replacement_3_with_commit() {
     assert_eq!(stats.document_count, 2);
     assert_eq!(stats.indexes_stats.len(), 1);
     assert_eq!(stats.indexes_stats[0].id, index_client.index_id);
-    assert_eq!(stats.indexes_stats[0].is_temp, false);
+    assert!(!stats.indexes_stats[0].is_temp);
     assert_eq!(stats.indexes_stats[0].document_count, 2);
 
     test_context.commit_all().await.unwrap();

@@ -573,11 +573,10 @@ impl LLMService {
             .build()
             .context("Unable to build KnownPrompt LLM request body")?;
 
-        let mut response_stream = llm_client
-            .chat()
-            .create_stream(request)
-            .await
-            .context("An error occurred while initializing the stream from remote LLM instance")?;
+        let mut response_stream =
+            llm_client.chat().create_stream(request).await.context(
+                "An error occurred while initializing the stream from remote LLM instance",
+            )?;
 
         let (tx, rx) = mpsc::channel(100);
 

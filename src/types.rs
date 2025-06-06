@@ -85,7 +85,7 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
 impl RawJSONDocument {
     pub fn get(&self, key: &str) -> Option<Value> {
         let value: Value = serde_json::from_str(self.inner.get()).ok()?;
-        value.get(key).map(|v| v.clone())
+        value.get(key).cloned()
     }
 }
 
