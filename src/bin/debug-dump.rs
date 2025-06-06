@@ -154,10 +154,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 OpenReadDocumentStorage::GetDocuments { document_ids } => {
-                    let document_ids = document_ids
-                        .into_iter()
-                        .map(|id| DocumentId(id))
-                        .collect::<Vec<_>>();
+                    let document_ids = document_ids.into_iter().map(DocumentId).collect::<Vec<_>>();
                     let output = document_storage
                         .get_documents_by_ids(document_ids.clone())
                         .await

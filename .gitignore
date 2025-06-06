@@ -22,5 +22,6 @@ log.log
 .DS_Store
 
 src/tests/dump-test
+!src/tests/dump-test/before-remove-odered-key/.data
 config-dev.yaml
 *.html

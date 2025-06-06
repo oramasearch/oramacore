@@ -4187,6 +4187,7 @@ dependencies = [
  "fs_extra",
  "fst",
  "futures",
+ "glob",
  "hnsw2",
  "http",
  "http-body-util",
