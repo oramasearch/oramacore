@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{collections::HashSet, fmt::Debug, hash::Hash, path::PathBuf};
 
 use anyhow::{Context, Result};
@@ -161,6 +163,7 @@ pub trait BoundedValue {
     fn min_value() -> Self;
 }
 
+#[deprecated]
 pub struct OrderedKeyIndex<Key, Value: Eq + Hash> {
     pages: Vec<Page<Key, Value>>,
     bounds: Vec<(Key, Key)>,
@@ -398,102 +401,3 @@ And this should not happen. Return the first page."#);
             .flat_map(|items| items.into_iter().map(|item| (item.key, item.values)))
     }
 }
-/*
-#[cfg(test)]
-mod tests {
-    use core::f32;
-
-    use crate::{
-        tests::utils::generate_new_path,
-        types::{DocumentId, Number, SerializableNumber},
-    };
-
-    use super::*;
-
-    #[test]
-    fn test_indexes_pages_data() -> Result<()> {
-        let data = vec![
-            (
-                SerializableNumber(Number::I32(-1)),
-                HashSet::from([DocumentId(1), DocumentId(2), DocumentId(3)]),
-            ),
-            (
-                SerializableNumber(Number::I32(1)),
-                HashSet::from([DocumentId(4), DocumentId(5), DocumentId(6)]),
-            ),
-            (
-                SerializableNumber(Number::I32(2)),
-                HashSet::from([DocumentId(1), DocumentId(3), DocumentId(5)]),
-            ),
-        ];
-        let data_dir = generate_new_path();
-        let paged_index = OrderedKeyIndex::from_iter(data.into_iter(), data_dir.clone())?;
-        test(&paged_index)?;
-        let paged_index = OrderedKeyIndex::load(data_dir)?;
-        test(&paged_index)?;
-
-        fn test(paged_index: &OrderedKeyIndex<SerializableNumber, DocumentId>) -> Result<()> {
-            let output = paged_index.get_items(
-                SerializableNumber(Number::I32(1)),
-                SerializableNumber(Number::I32(1)),
-            )?;
-            let output: HashSet<_> = output.flat_map(|item| item.values.into_iter()).collect();
-            assert_eq!(
-                output,
-                HashSet::from([DocumentId(4), DocumentId(5), DocumentId(6)])
-            );
-
-            let output = paged_index.get_items(
-                SerializableNumber(Number::I32(-10)),
-                SerializableNumber(Number::I32(-8)),
-            )?;
-            let output: HashSet<_> = output.flat_map(|item| item.values.into_iter()).collect();
-            assert_eq!(output, HashSet::from([]));
-
-            let output = paged_index.get_items(
-                SerializableNumber(Number::I32(-10)),
-                SerializableNumber(Number::I32(10)),
-            )?;
-            let output: HashSet<_> = output.flat_map(|item| item.values.into_iter()).collect();
-            assert_eq!(
-                output,
-                HashSet::from([
-                    DocumentId(1),
-                    DocumentId(2),
-                    DocumentId(3),
-                    DocumentId(4),
-                    DocumentId(5),
-                    DocumentId(6)
-                ])
-            );
-
-            Ok(())
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_not_panic() {
-        let data_dir = generate_new_path();
-
-        let mut set = HashSet::new();
-        for i in 0..(MAX_NUMBER_PER_PAGE + 1) {
-            set.insert(i);
-        }
-
-        let key = SerializableNumber(Number::I32(1));
-        let input = vec![(key, set)].into_iter();
-
-        let index = OrderedKeyIndex::from_iter(input, data_dir).unwrap();
-
-        assert_eq!(
-            index.bounds,
-            vec![(
-                SerializableNumber(Number::F32(f32::NEG_INFINITY)),
-                SerializableNumber(Number::I32(1))
-            )]
-        );
-    }
-}
-*/

@@ -102,7 +102,7 @@ jobs:
   build-docker-OramaCore-arm64:
     needs: [build-and-patch-release]
     name: Build and Upload Docker Images
-    runs-on: [self-hosted, gpu, cuda]
+    runs-on: [self-hosted, arm64]
 
     steps:
       - name: Checkout code

@@ -1,17 +1,19 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    indexes::ordered_key::{BoundedValue, OrderedKeyIndex},
-    types::DocumentId,
+    file_utils::create_if_not_exists, indexes::ordered_key::BoundedValue, types::DocumentId,
 };
 
 #[derive(Debug)]
 pub struct CommittedBoolField {
     field_path: Box<[String]>,
-    inner: OrderedKeyIndex<BoolWrapper, DocumentId>,
+    map: HashMap<bool, HashSet<DocumentId>>,
     data_dir: PathBuf,
 }
 
@@ -22,18 +24,13 @@ impl CommittedBoolField {
         false_docs: HashSet<DocumentId>,
         data_dir: PathBuf,
     ) -> Result<Self> {
-        let inner = OrderedKeyIndex::from_iter(
-            [
-                (BoolWrapper::False, false_docs),
-                (BoolWrapper::True, true_docs),
-            ]
-            .into_iter(),
-            data_dir.clone(),
-        )?;
+        let mut map = HashMap::with_capacity(2);
+        map.insert(false, false_docs);
+        map.insert(true, true_docs);
 
         Ok(Self {
             field_path,
-            inner,
+            map,
             data_dir,
         })
     }
@@ -42,22 +39,94 @@ impl CommittedBoolField {
     where
         I: Iterator<Item = (BoolWrapper, HashSet<DocumentId>)>,
     {
-        let inner = OrderedKeyIndex::from_iter(iter, data_dir.clone())?;
-        Ok(Self {
+        let mut map = HashMap::with_capacity(2);
+        map.insert(false, HashSet::new());
+        map.insert(true, HashSet::new());
+
+        for (key, values) in iter {
+            match key {
+                BoolWrapper::False => {
+                    map.insert(false, values);
+                }
+                BoolWrapper::True => {
+                    map.insert(true, values);
+                }
+                _ => continue, // Ignore Min and Max
+            }
+        }
+
+        let s = Self {
             field_path,
-            inner,
+            map,
             data_dir,
-        })
+        };
+
+        s.commit().context("Failed to commit bool field")?;
+
+        Ok(s)
     }
 
+    #[allow(deprecated)]
     pub fn try_load(info: BoolFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
-        let inner = OrderedKeyIndex::load(data_dir.clone())?;
-        Ok(Self {
+        let map = match std::fs::File::open(data_dir.join("bool_map.bin")) {
+            Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
+                .context("Failed to deserialize bool_map.bin")?,
+            Err(_) => {
+                use crate::indexes::ordered_key::OrderedKeyIndex;
+                let inner = OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())?;
+
+                let false_count = inner
+                    .count(BoolWrapper::False)
+                    .context("Cannot count false values")?;
+                let true_count = inner
+                    .count(BoolWrapper::True)
+                    .context("Cannot count true values")?;
+
+                let items = inner
+                    .get_items((true, BoolWrapper::Min), (true, BoolWrapper::Max))
+                    .context("Cannot get items for bool field")?;
+                let mut map: HashMap<bool, HashSet<DocumentId>> = HashMap::with_capacity(2);
+                for item in items {
+                    for doc_id in item.values {
+                        let key = match item.key {
+                            BoolWrapper::False => false,
+                            BoolWrapper::True => true,
+                            _ => continue, // Ignore Min and Max
+                        };
+                        map.entry(key)
+                            .or_insert_with(|| {
+                                let capacity = if key { true_count } else { false_count };
+                                HashSet::with_capacity(capacity)
+                            })
+                            .insert(doc_id);
+                    }
+                }
+
+                map
+            }
+        };
+
+        let s = Self {
             field_path: info.field_path,
-            inner,
+            map,
             data_dir,
-        })
+        };
+
+        s.commit().context("Failed to commit bool field")?;
+
+        Ok(s)
+    }
+
+    fn commit(&self) -> Result<()> {
+        // Ensure the data directory exists
+        create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
+
+        let file_path = self.data_dir.join("bool_map.bin");
+        let file = std::fs::File::create(&file_path).context("Failed to create bool_map.bin")?;
+        bincode::serialize_into(file, &self.map).context("Failed to serialize bool map")?;
+
+        Ok(())
     }
 
     pub fn get_field_info(&self) -> BoolFieldInfo {
@@ -72,14 +141,9 @@ impl CommittedBoolField {
     }
 
     pub fn stats(&self) -> Result<CommittedBoolFieldStats> {
-        let false_count = self
-            .inner
-            .count(BoolWrapper::False)
-            .context("Cannot count false values")?;
-        let true_count = self
-            .inner
-            .count(BoolWrapper::True)
-            .context("Cannot count true values")?;
+        let false_count = self.map.get(&false).map_or(0, |set| set.len());
+        let true_count = self.map.get(&true).map_or(0, |set| set.len());
+
         Ok(CommittedBoolFieldStats {
             false_count,
             true_count,
@@ -93,25 +157,14 @@ impl CommittedBoolField {
     where
         's: 'iter,
     {
-        let w = value.into();
-        Ok(self
-            .inner
-            .get_items((true, w), (true, w))
-            .context("Cannot get items for bool field")?
-            .flat_map(|item| item.values))
+        let docs = self.map.get(&value).unwrap();
+
+        Ok(docs.iter().copied())
     }
 
     pub fn clone_inner(&self) -> Result<(HashSet<DocumentId>, HashSet<DocumentId>)> {
-        let false_docs: HashSet<_> = self
-            .inner
-            .get_items((true, BoolWrapper::False), (true, BoolWrapper::False))?
-            .flat_map(|item| item.values)
-            .collect();
-        let true_docs: HashSet<_> = self
-            .inner
-            .get_items((true, BoolWrapper::True), (true, BoolWrapper::True))?
-            .flat_map(|item| item.values)
-            .collect();
+        let false_docs: HashSet<_> = self.map.get(&false).unwrap().clone();
+        let true_docs: HashSet<_> = self.map.get(&true).unwrap().clone();
 
         Ok((true_docs, false_docs))
     }

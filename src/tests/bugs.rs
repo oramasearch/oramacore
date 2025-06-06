@@ -4,7 +4,7 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::{
-    tests::utils::{init_log, TestContext},
+    tests::utils::{create_oramacore_config, init_log, TestContext},
     types::{Document, DocumentList},
 };
 
@@ -66,6 +66,34 @@ async fn test_bug_1() {
         .await
         .unwrap();
     assert_eq!(output.count, 1);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_bug_2() {
+    init_log();
+
+    let mut config = create_oramacore_config();
+    config.reader_side.config.insert_batch_commit_size = 1;
+    let test_context = TestContext::new_with_config(config).await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                {"number": 55},
+                {"number": 42},
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    sleep(Duration::from_secs(1)).await;
 
     drop(test_context);
 }

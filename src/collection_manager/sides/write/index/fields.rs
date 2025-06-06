@@ -808,7 +808,11 @@ impl EmbeddingField {
                     obj: &'doc Map<String, Value>,
                     result: &mut Vec<&'doc String>,
                 ) {
-                    for (_, value) in obj.iter() {
+                    for (k, value) in obj.iter() {
+                        if k == "id" {
+                            // Skip the id field
+                            continue;
+                        }
                         match value {
                             Value::String(s) => {
                                 result.push(s);
@@ -998,6 +1002,9 @@ pub enum IndexedValue {
 }
 
 fn join_vec_strings(v: &[&String]) -> String {
+    if v.is_empty() {
+        return String::new();
+    }
     let total_capacity = v.iter().map(|s| s.len()).sum::<usize>() + v.len() - 1;
 
     let mut final_str = String::with_capacity(total_capacity);
