@@ -198,6 +198,36 @@ async fn test_ordered_key_index() -> Result<()> {
     assert_eq!(number_field.min, Number::I32(42));
     assert_eq!(number_field.max, Number::I32(42));
 
+    let res = collection_client
+        .search(
+            json!({
+                "term": "",
+                "where": {
+                    "number": { "eq": 42 }
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.count, 1);
+
+    let res = collection_client
+        .search(
+            json!({
+                "term": "",
+                "where": {
+                    "numbers": { "eq": 42 }
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.count, 1);
+
     let date_field = index
         .fields_stats
         .iter()
@@ -216,6 +246,21 @@ async fn test_ordered_key_index() -> Result<()> {
         date_field.max,
         Some("2025-06-06T08:57:14.543Z".to_string().try_into().unwrap())
     );
+
+    let res = collection_client
+        .search(
+            json!({
+                "term": "",
+                "where": {
+                    "date": { "gt": "2025-01-01" }
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.count, 1);
 
     Ok(())
 }
