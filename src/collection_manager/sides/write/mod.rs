@@ -453,6 +453,9 @@ impl WriteSide {
                 temp_index_id: new_index_id,
                 reference: reference.clone(),
             };
+
+            drop(new_index);
+
             self.replace_index(
                 write_api_key,
                 collection_id,

@@ -431,6 +431,14 @@ impl CollectionWriter {
         }
         drop(indexes);
 
+        let temp_indexs = self.temp_indexes.read().await;
+        for index in temp_indexs.values() {
+            let index_desc = index.describe().await;
+            document_count += index_desc.document_count;
+            indexes_desc.push(index_desc);
+        }
+        drop(temp_indexs);
+
         DescribeCollectionResponse {
             id: self.id,
             description: self.description.clone(),
@@ -478,6 +486,31 @@ impl CollectionWriter {
         reason: ReplaceIndexReason,
         reference: Option<String>,
     ) -> Result<()> {
+        let indexes_lock = self.indexes.read().await;
+        if !indexes_lock.contains_key(&runtime_index_id) {
+            bail!("Index with id {} not found", runtime_index_id);
+        }
+        drop(indexes_lock);
+
+        info!(coll_id= ?self.id, "Replacing index {} with temporary index {}", runtime_index_id, temp_index_id);
+
+        let mut temp_indexes_lock = self.temp_indexes.write().await;
+        let mut temp_index = match temp_indexes_lock.remove(&temp_index_id) {
+            Some(index) => index,
+            None => bail!("Temporary index with id {} not found", temp_index_id),
+        };
+        temp_index.set_index_id(runtime_index_id);
+        let mut indexes_lock = self.indexes.write().await;
+        match indexes_lock.insert(runtime_index_id, temp_index) {
+            Some(_) => {
+                info!(coll_id= ?self.id, "Index {} replaced with temporary index {}", runtime_index_id, temp_index_id);
+            }
+            None => {
+                warn!(coll_id= ?self.id, "Index {} replaced with temporary index {} but before it was not found. This is just a warning", runtime_index_id, temp_index_id);
+            }
+        }
+        drop(temp_indexes_lock);
+
         self.op_sender
             .send(WriteOperation::Collection(
                 self.id,

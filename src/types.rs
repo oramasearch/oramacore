@@ -81,6 +81,14 @@ impl<'de> Deserialize<'de> for RawJSONDocument {
     }
 }
 
+#[cfg(test)]
+impl RawJSONDocument {
+    pub fn get(&self, key: &str) -> Option<Value> {
+        let value: Value = serde_json::from_str(self.inner.get()).ok()?;
+        value.get(key).cloned()
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
 pub struct CollectionId(StackString<128>);
 impl CollectionId {

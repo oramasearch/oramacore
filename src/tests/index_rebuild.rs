@@ -30,15 +30,11 @@ async fn test_change_language_without_commit() {
         .await
         .unwrap();
 
-    println!("Inserted document------\n\n---\n\n--");
-
     let output = collection_client
         .search(json!({ "term": "avvocato" }).try_into().unwrap())
         .await
         .unwrap();
     assert_eq!(output.count, 0);
-
-    println!("Rebuild ------\n\n---\n\n--");
 
     collection_client
         .rebuild_index(LanguageDTO::Italian)
@@ -46,8 +42,6 @@ async fn test_change_language_without_commit() {
         .unwrap();
 
     sleep(Duration::from_secs(1)).await;
-
-    println!("waiting...\n\n---\n\n--");
 
     wait_for(&test_context, |test_context| {
         let collection_client = test_context
