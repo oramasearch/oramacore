@@ -497,7 +497,8 @@ impl LLMService {
         let mut acc = String::new();
         let mut stream = self
             .run_known_prompt_stream(prompt, variables, None, llm_config)
-            .await;
+            .await
+            .context("An error occurred while initializing the stream from remote LLM instance")?;
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -519,7 +520,7 @@ impl LLMService {
         variables: Vec<(String, String)>,
         custom_system_prompt: Option<SystemPrompt>,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> impl Stream<Item = Result<String>> {
+    ) -> Result<impl Stream<Item = Result<String>>> {
         let mut prompts = prompt.get_prompts();
         let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
 
@@ -537,8 +538,7 @@ impl LLMService {
                 prompts.user += "### Persona\n\n";
                 prompts.user += variables_map
                     .get("segment")
-                    .context("Unable to retrieve segment from variable map")
-                    .unwrap();
+                    .context("Unable to retrieve segment from variable map")?;
                 prompts.user += "\n\n";
             }
 
@@ -546,8 +546,7 @@ impl LLMService {
                 prompts.user += "### Instructions\n\n";
                 prompts.user += variables_map
                     .get("trigger")
-                    .context("Unable to retrieve trigger from variable map")
-                    .unwrap();
+                    .context("Unable to retrieve trigger from variable map")?;
                 prompts.user += "\n\n";
             }
         }
@@ -572,15 +571,13 @@ impl LLMService {
                     .into(),
             ])
             .build()
-            .context("Unable to build KnownPrompt LLM request body")
-            .unwrap();
+            .context("Unable to build KnownPrompt LLM request body")?;
 
         let mut response_stream = llm_client
             .chat()
             .create_stream(request)
             .await
-            .context("An error occurred while initializing the stream from remote LLM instance")
-            .unwrap();
+            .context("An error occurred while initializing the stream from remote LLM instance")?;
 
         let (tx, rx) = mpsc::channel(100);
 
@@ -609,7 +606,7 @@ impl LLMService {
             }
         });
 
-        ReceiverStream::new(rx)
+        Ok(ReceiverStream::new(rx))
     }
 
     pub async fn run_party_planner_prompt_stream(

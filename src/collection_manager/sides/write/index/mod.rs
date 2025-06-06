@@ -183,6 +183,10 @@ impl Index {
         })
     }
 
+    pub fn set_index_id(&mut self, index_id: IndexId) {
+        self.index_id = index_id;
+    }
+
     pub fn get_locale(&self) -> Locale {
         self.locale
     }
