@@ -248,7 +248,7 @@ async fn planned_answer_v1(
             related_queries_params.push(("context".to_string(), "{}".to_string())); // @todo: check if we can retrieve additional context
             related_queries_params.push(("query".to_string(), query.clone()));
 
-            let mut related_questions_stream = llm_service
+            let related_questions_stream = llm_service
                 .run_known_prompt_stream(
                     llms::KnownPrompts::GenerateRelatedQueries,
                     related_queries_params,
@@ -256,6 +256,22 @@ async fn planned_answer_v1(
                     interaction.llm_config,
                 )
                 .await;
+
+            let mut related_questions_stream = match related_questions_stream {
+                Ok(s) => s,
+                Err(e) => {
+                    print_error(&e, "Failed to run related questions stream");
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Error {
+                                message: format!("Failed to run related questions stream: {}", e),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                    return;
+                }
+            };
 
             while let Some(resp) = related_questions_stream.next().await {
                 match resp {
@@ -559,7 +575,7 @@ async fn answer_v1(
             variables.push(("trigger".to_string(), full_trigger.response));
         }
 
-        let mut answer_stream = llm_service
+        let answer_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::Answer,
                 variables,
@@ -567,6 +583,21 @@ async fn answer_v1(
                 interaction.llm_config.clone(),
             )
             .await;
+        let mut answer_stream = match answer_stream {
+            Ok(s) => s,
+            Err(e) => {
+                print_error(&e, "Failed to run answer stream");
+                let _ = tx
+                    .send(Ok(Event::default().data(
+                        serde_json::to_string(&SseMessage::Error {
+                            message: format!("Failed to run answer stream: {}", e),
+                        })
+                        .unwrap(),
+                    )))
+                    .await;
+                return;
+            }
+        };
 
         while let Some(resp) = answer_stream.next().await {
             match resp {
@@ -599,7 +630,7 @@ async fn answer_v1(
             related_queries_params.push(("context".to_string(), search_result_str.clone()));
             related_queries_params.push(("query".to_string(), query.clone()));
 
-            let mut related_questions_stream = llm_service
+            let related_questions_stream = llm_service
                 .run_known_prompt_stream(
                     llms::KnownPrompts::GenerateRelatedQueries,
                     related_queries_params,
@@ -607,6 +638,21 @@ async fn answer_v1(
                     interaction.llm_config,
                 )
                 .await;
+            let mut related_questions_stream = match related_questions_stream {
+                Ok(s) => s,
+                Err(e) => {
+                    print_error(&e, "Failed to run related questions stream");
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            serde_json::to_string(&SseMessage::Error {
+                                message: format!("Failed to run related questions stream: {}", e),
+                            })
+                            .unwrap(),
+                        )))
+                        .await;
+                    return;
+                }
+            };
 
             while let Some(resp) = related_questions_stream.next().await {
                 match resp {
