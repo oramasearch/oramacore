@@ -347,23 +347,21 @@ impl CollectionWriter {
         };
         drop(indexes);
 
-        self.op_sender
-            .send(WriteOperation::Collection(
-                self.id,
-                CollectionWriteOperation::DeleteIndex2 { index_id },
-            ))
-            .await
-            .context("Cannot send delete index operation")?;
-
         let doc_ids = index.get_document_ids().await;
         self.op_sender
-            .send(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids: doc_ids.clone(),
-                },
-            ))
+            .send_batch(vec![
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DeleteIndex2 { index_id },
+                ),
+                WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments {
+                        doc_ids: doc_ids.clone(),
+                    },
+                )
+            ])
             .await
-            .context("Cannot send delete documents operation")?;
+            .context("Cannot send delete index operation")?;
 
         Ok(doc_ids)
     }
