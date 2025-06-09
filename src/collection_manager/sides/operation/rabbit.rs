@@ -1,18 +1,123 @@
-use std::{pin::Pin, task::Poll};
+use std::{
+    pin::Pin,
+    sync::{atomic::AtomicBool, Arc},
+    task::Poll,
+};
 
 use anyhow::{Context, Result};
 use futures::{Stream, StreamExt};
 use rabbitmq_stream_client::{
-    error::StreamCreateError,
+    error::{ProducerPublishError, StreamCreateError},
     types::{ByteCapacity, Message, OffsetSpecification, ResponseCode},
-    ClientOptions, Consumer, Environment, NoDedup, Producer,
+    ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
 use serde::Deserialize;
+use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info};
 
 use crate::types::CollectionId;
 
 use super::{Offset, WriteOperation};
+
+struct MyHAProducerInner {
+    environment: Box<Environment>,
+    stream: String,
+    producer: RwLock<Producer<NoDedup>>,
+    notify: Notify,
+    is_opened: AtomicBool,
+}
+
+#[derive(Clone)]
+struct MyHAProducer(Arc<MyHAProducerInner>);
+
+#[async_trait::async_trait]
+impl OnClosed for MyHAProducer {
+    async fn on_closed(&self, unconfirmed: Vec<Message>) {
+        info!("Producer is closed. Creating new one");
+
+        self.0
+            .is_opened
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let mut producer = self.0.producer.write().await;
+
+        let new_producer = self
+            .0
+            .environment
+            .producer()
+            .build(&self.0.stream)
+            .await
+            .unwrap();
+
+        new_producer.set_on_closed(Box::new(self.clone())).await;
+
+        if !unconfirmed.is_empty() {
+            info!("Resending {} unconfirmed messages.", unconfirmed.len());
+            if let Err(e) = producer.batch_send_with_confirm(unconfirmed).await {
+                eprintln!("Error resending unconfirmed messages: {:?}", e);
+            }
+        }
+
+        *producer = new_producer;
+
+        self.0
+            .is_opened
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.0.notify.notify_waiters();
+    }
+}
+
+impl MyHAProducer {
+    async fn new(
+        environment: Box<Environment>,
+        producer_name: &str,
+        stream_name: &str,
+    ) -> Result<Self> {
+        let producer = environment
+            .producer()
+            .client_provided_name(producer_name)
+            .build(stream_name)
+            .await
+            .context("Failed to create rabbit producer")?;
+
+        let inner = MyHAProducerInner {
+            environment,
+            stream: stream_name.to_string(),
+            producer: RwLock::new(producer),
+            notify: Notify::new(),
+            is_opened: AtomicBool::new(true),
+        };
+        let s = Self(Arc::new(inner));
+
+        let p = s.0.producer.write().await;
+        p.set_on_closed(Box::new(s.clone())).await;
+        drop(p);
+
+        Ok(s)
+    }
+
+    async fn batch_send(&self, messages: Vec<Message>) -> Result<(), ProducerPublishError> {
+        if !self.0.is_opened.load(std::sync::atomic::Ordering::SeqCst) {
+            self.0.notify.notified().await;
+        }
+
+        let producer = self.0.producer.read().await;
+        let err = producer.batch_send(messages.clone(), async |_| {}).await;
+
+        if let Err(e) = err {
+            if matches!(
+                e,
+                ProducerPublishError::Timeout | ProducerPublishError::Closed
+            ) {
+                return Box::pin(self.batch_send(messages)).await;
+            } else {
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+}
 
 pub struct RabbitOperationReceiverCreator {
     environment: Box<Environment>,
@@ -69,7 +174,7 @@ impl RabbitOperationSenderCreator {
     }
 
     pub async fn create(self, _: Offset) -> Result<RabbitOperationSender> {
-        let producer = create_producer(&self.environment, self.producer_config)
+        let producer = create_producer(self.environment.clone(), self.producer_config)
             .await
             .context("Cannot create producer")?;
 
@@ -79,10 +184,10 @@ impl RabbitOperationSenderCreator {
 
 #[derive(Clone)]
 pub struct RabbitOperationSender {
-    producer: Producer<NoDedup>,
+    producer: MyHAProducer,
 }
 impl RabbitOperationSender {
-    pub fn new(producer: Producer<NoDedup>) -> Self {
+    fn new(producer: MyHAProducer) -> Self {
         Self { producer }
     }
 
@@ -125,7 +230,7 @@ impl RabbitOperationSender {
         // Same problem as in `send`
         // TODO: think about a better solution
         self.producer
-            .batch_send(messages, |_| async {})
+            .batch_send(messages)
             .await
             .context("Cannot send messages")?;
 
@@ -169,7 +274,7 @@ impl RabbitOperationSender {
         // We should propose a better solution in the future
         // TODO: think about a better solution
         self.producer
-            .send(message, |_| async {})
+            .batch_send(vec![message])
             .await
             .context("Cannot send message")?;
 
@@ -280,15 +385,16 @@ async fn create_environment(client_options: ClientOptions) -> Result<Environment
 }
 
 async fn create_producer(
-    environment: &Environment,
+    environment: Box<Environment>,
     producer_config: RabbitMQProducerConfig,
-) -> Result<Producer<NoDedup>> {
-    environment
-        .producer()
-        .client_provided_name(&producer_config.producer_name)
-        .build(&producer_config.stream_name)
-        .await
-        .context("Failed to create rabbit producer")
+) -> Result<MyHAProducer> {
+    MyHAProducer::new(
+        environment,
+        &producer_config.producer_name,
+        &producer_config.stream_name,
+    )
+    .await
+    .context("Failed to create HA producer")
 }
 
 async fn create_consumer(

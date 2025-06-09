@@ -75,24 +75,27 @@ where
             }
         }
 
-        for ((collection_id, index_id), data) in res {
-            let op = WriteOperation::Collection(
-                collection_id,
-                CollectionWriteOperation::IndexWriteOperation(
-                    index_id,
-                    IndexWriteOperation::IndexEmbedding {
-                        data: data
-                            .into_iter()
-                            .map(|(field_id, data)| {
-                                let data: Vec<_> = data.into_iter().collect();
-                                (field_id, data)
-                            })
-                            .collect(),
-                    },
-                ),
-            );
-            op_sender.send(op).await.unwrap();
-        }
+        let ops = res
+            .into_iter()
+            .map(|((collection_id, index_id), data)| {
+                WriteOperation::Collection(
+                    collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        index_id,
+                        IndexWriteOperation::IndexEmbedding {
+                            data: data
+                                .into_iter()
+                                .map(|(field_id, data)| {
+                                    let data: Vec<_> = data.into_iter().collect();
+                                    (field_id, data)
+                                })
+                                .collect(),
+                        },
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        op_sender.send_batch(ops).await.unwrap();
     }
 
     info!("Embedding batch processed");

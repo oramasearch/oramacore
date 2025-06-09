@@ -52,7 +52,7 @@ impl CommittedNumberField {
                         (true, SerializableNumber::min_value()),
                         (true, SerializableNumber::max_value()),
                     )
-                    .context("Cannot get items for bool field")?;
+                    .context("Cannot get items for number field")?;
 
                 let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
                 // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
@@ -67,7 +67,7 @@ impl CommittedNumberField {
             data_dir,
         };
 
-        s.commit().context("Failed to commit bool field")?;
+        s.commit().context("Failed to commit number field")?;
 
         Ok(s)
     }

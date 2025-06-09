@@ -29,7 +29,7 @@ impl CommittedDateField {
             data_dir,
         };
 
-        s.commit().context("Failed to commit number field")?;
+        s.commit().context("Failed to commit date field")?;
 
         Ok(s)
     }
@@ -46,7 +46,7 @@ impl CommittedDateField {
 
                 let items = inner
                     .get_items((true, i64::MIN), (true, i64::MAX))
-                    .context("Cannot get items for bool field")?;
+                    .context("Cannot get items for date field")?;
 
                 let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
                 // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
@@ -61,7 +61,7 @@ impl CommittedDateField {
             data_dir,
         };
 
-        s.commit().context("Failed to commit bool field")?;
+        s.commit().context("Failed to commit date field")?;
 
         Ok(s)
     }
@@ -72,7 +72,7 @@ impl CommittedDateField {
 
         let file_path = self.data_dir.join("date_vec.bin");
         let file = std::fs::File::create(&file_path).context("Failed to create date_vec.bin")?;
-        bincode::serialize_into(file, &self.vec).context("Failed to serialize number vec")?;
+        bincode::serialize_into(file, &self.vec).context("Failed to serialize date vec")?;
 
         Ok(())
     }
