@@ -75,7 +75,8 @@ where
             }
         }
 
-        let ops = res.into_iter()
+        let ops = res
+            .into_iter()
             .map(|((collection_id, index_id), data)| {
                 WriteOperation::Collection(
                     collection_id,

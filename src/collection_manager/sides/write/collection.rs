@@ -354,11 +354,9 @@ impl CollectionWriter {
                     self.id,
                     CollectionWriteOperation::DeleteIndex2 { index_id },
                 ),
-                WriteOperation::DocumentStorage(
-                    DocumentStorageWriteOperation::DeleteDocuments {
-                        doc_ids: doc_ids.clone(),
-                    },
-                )
+                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
+                    doc_ids: doc_ids.clone(),
+                }),
             ])
             .await
             .context("Cannot send delete index operation")?;
