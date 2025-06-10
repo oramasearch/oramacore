@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{FromRequestParts, Path},
+    response::{IntoResponse, Response},
     Json,
 };
 use axum_extra::{
@@ -12,7 +13,10 @@ use http::{request::Parts, StatusCode};
 use serde_json::json;
 use tracing::error;
 
-use crate::types::{ApiKey, CollectionId, IndexId};
+use crate::{
+    collection_manager::sides::write::WriteError,
+    types::{ApiKey, CollectionId, IndexId},
+};
 
 impl<S> FromRequestParts<S> for ApiKey
 where
@@ -131,4 +135,54 @@ pub fn print_error(e: &anyhow::Error, msg: &'static str) {
     e.chain()
         .skip(1)
         .for_each(|cause| println!("because: {:?}", cause));
+}
+
+impl IntoResponse for WriteError {
+    fn into_response(self) -> Response {
+        match self {
+            WriteError::Generic(e) => {
+                print_error(&e, "Unhandled error in write side");
+                error!(error = ?e, "Generic write error");
+                let body = format!("Cannot process the request: {:?}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            WriteError::InvalidMasterApiKey => {
+                let body = "Invalid master API key".to_string();
+                (StatusCode::UNAUTHORIZED, body).into_response()
+            }
+            WriteError::CollectionAlreadyExists(collection_id) => {
+                let body = format!("Collection with id {} already exists", collection_id);
+                (StatusCode::CONFLICT, body).into_response()
+            }
+            WriteError::InvalidWriteApiKey(collection_id) => {
+                let body = format!("Collection with id {} not found", collection_id);
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+            WriteError::CollectionNotFound(collection_id) => {
+                let body = format!("Collection with id {} not found", collection_id);
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+            WriteError::IndexAlreadyExists(collection_id, index_id) => {
+                let body = format!(
+                    "Index with id {} already exists in collection {}",
+                    index_id, collection_id
+                );
+                (StatusCode::CONFLICT, body).into_response()
+            }
+            WriteError::IndexNotFound(collection_id, index_id) => {
+                let body = format!(
+                    "Index {} not found in collection {}",
+                    index_id, collection_id
+                );
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+            WriteError::TempIndexNotFound(collection_id, index_id) => {
+                let body = format!(
+                    "Temporary index {} not found in collection {}",
+                    index_id, collection_id
+                );
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+        }
+    }
 }

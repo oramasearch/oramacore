@@ -39,19 +39,10 @@ async fn add_hook_v0(
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
     let NewHookPostParams { name, code } = params;
-    match write_side
+    write_side
         .insert_javascript_hook(write_api_key, collection_id, index_id, name, code)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error adding hook");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
 #[endpoint(

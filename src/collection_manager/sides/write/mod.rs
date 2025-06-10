@@ -4,6 +4,7 @@ pub mod document_storage;
 mod embedding;
 pub mod index;
 pub use index::OramaModelSerializable;
+use thiserror::Error;
 
 use std::{
     collections::HashMap,
@@ -61,6 +62,26 @@ use crate::{
         UpdateDocumentRequest, UpdateDocumentsResult,
     },
 };
+
+#[derive(Error, Debug)]
+pub enum WriteError {
+    #[error("Invalid master API key")]
+    InvalidMasterApiKey,
+    #[error("Cannot create collection: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Collection already exists: {0}")]
+    CollectionAlreadyExists(CollectionId),
+    #[error("Invalid write api key for: {0}")]
+    InvalidWriteApiKey(CollectionId),
+    #[error("Collection not found: {0}")]
+    CollectionNotFound(CollectionId),
+    #[error("Index {1} already exists in collection {0}")]
+    IndexAlreadyExists(CollectionId, IndexId),
+    #[error("Index {1} doesn't exist in collection {0}")]
+    IndexNotFound(CollectionId, IndexId),
+    #[error("Temp index {1} doesn't exist in collection {0}")]
+    TempIndexNotFound(CollectionId, IndexId),
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
@@ -290,7 +311,7 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         option: CreateCollection,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_master_api_key(master_api_key)?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
@@ -310,12 +331,12 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         req: CreateIndexRequest,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let CreateIndexRequest {
@@ -342,12 +363,12 @@ impl WriteSide {
         language: LanguageDTO,
         model: OramaModel,
         reference: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let mut collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         collection
@@ -363,10 +384,13 @@ impl WriteSide {
         let index_ids = collection.get_index_ids().await;
         for copy_from in index_ids {
             info!("Reindexing index {}", copy_from);
-            let copy_from_index = collection
-                .get_index(copy_from)
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            let copy_from_index = collection.get_index(copy_from).await.ok_or_else(|| {
+                // The data doesn't come from the user:
+                // `copy_from` is an index id that we already have
+                // If this happen, we have a bug in the code but the user cannot do anything
+                // No typed error
+                anyhow::anyhow!("Index not found")
+            })?;
 
             let new_index_id = cuid2::create_id();
             let new_index_id = IndexId::try_new(new_index_id)
@@ -477,12 +501,12 @@ impl WriteSide {
         collection_id: CollectionId,
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         collection
@@ -503,12 +527,12 @@ impl WriteSide {
         collection_id: CollectionId,
         copy_from: IndexId,
         req: CreateIndexRequest,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let CreateIndexRequest {
@@ -528,12 +552,12 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
@@ -549,7 +573,7 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         mut document_list: DocumentList,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
@@ -557,14 +581,13 @@ impl WriteSide {
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let index = collection
             .get_index(index_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
         // The doc_id_str is the composition of index_id + document_id
         // Anyway, for temp indexes, instead of using the temp index id,
@@ -575,7 +598,7 @@ impl WriteSide {
 
         debug!("Inserting documents {}", document_count);
         let doc_ids = self
-            .inner_insert_documents(&mut document_list, target_index_id)
+            .add_documents_to_storage(&mut document_list, target_index_id)
             .await
             .context("Cannot insert documents into document storage")?;
         debug!("Document inserted");
@@ -621,17 +644,18 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .context("Collection not found")?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
         let index = collection
             .get_index(index_id)
             .await
-            .context("Cannot get index")?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
         let doc_ids = index.delete_documents(document_ids_to_delete).await?;
 
         self.document_storage.remove(doc_ids).await;
@@ -645,17 +669,17 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
-    ) -> Result<UpdateDocumentsResult> {
+    ) -> Result<UpdateDocumentsResult, WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .context("Collection not found")?;
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
         let index = collection
             .get_index(index_id)
             .await
-            .context("Cannot get index")?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let document_count = update_document_request.documents.0.len();
@@ -781,7 +805,7 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_master_api_key(master_api_key)?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
@@ -813,13 +837,12 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Vec<Document>> {
+    ) -> Result<Vec<Document>, WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let document_ids = collection.get_document_ids().await;
@@ -851,19 +874,18 @@ impl WriteSide {
         index_id: IndexId,
         name: HookName,
         code: String,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
         collection.check_write_api_key(write_api_key)?;
 
         let index = collection
             .get_index(index_id)
             .await
-            .context("Cannot get index")?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
         index
             .switch_to_embedding_hook(self.hook_runtime.clone())
             .await
@@ -880,7 +902,7 @@ impl WriteSide {
     pub async fn list_collections(
         &self,
         master_api_key: ApiKey,
-    ) -> Result<Vec<DescribeCollectionResponse>> {
+    ) -> Result<Vec<DescribeCollectionResponse>, WriteError> {
         self.check_master_api_key(master_api_key)?;
 
         Ok(self.collections.list().await)
@@ -890,13 +912,13 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Option<DescribeCollectionResponse>> {
+    ) -> Result<DescribeCollectionResponse, WriteError> {
         self.check_master_api_key(master_api_key)?;
         let collection = match self.collections.get_collection(collection_id).await {
             Some(collection) => collection,
-            None => return Ok(None),
+            None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
-        Ok(Some(collection.as_dto().await))
+        Ok(collection.as_dto().await)
     }
 
     pub async fn get_javascript_hook(
@@ -974,9 +996,9 @@ impl WriteSide {
         Ok(())
     }
 
-    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
         if self.master_api_key != master_api_key {
-            return Err(anyhow::anyhow!("Invalid master api key"));
+            return Err(WriteError::InvalidMasterApiKey);
         }
 
         Ok(())
@@ -1300,7 +1322,7 @@ impl WriteSide {
         }
     }
 
-    async fn inner_insert_documents(
+    async fn add_documents_to_storage(
         self: &WriteSide,
         document_list: &mut DocumentList,
         target_index_id: IndexId,

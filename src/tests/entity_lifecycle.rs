@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::ai::OramaModel;
 use crate::collection_manager::sides::write::OramaModelSerializable;
+use crate::collection_manager::sides::write::WriteError;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
@@ -30,13 +31,10 @@ async fn test_collection_id_already_exists() {
         )
         .await;
 
-    assert_eq!(
-        format!("{}", output.err().unwrap()),
-        format!(
-            "Collection \"{}\" already exists",
-            collection_client.collection_id
-        ),
-    );
+    assert!(matches!(
+        output,
+        Err(WriteError::CollectionAlreadyExists(_))
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]
