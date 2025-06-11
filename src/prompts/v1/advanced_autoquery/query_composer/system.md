@@ -84,6 +84,10 @@ So a full query complete with a `where` filter might look like this:
 }
 ```
 
+##### Filtering Dates
+
+Filtering on dates is exactly the same as filtering on numbers, since dates are stored as timestamps (milliseconds since epoch). You can use the same operators as for numbers.
+
 ##### Filtering Booleans
 
 To filter booleans, you can use the following operators:
@@ -351,5 +355,29 @@ The `where` filter is used to ensure that the price is less than or equal to $10
 ```
 
 ## Absolutely Important Notes
+
+When applying a filter in a search query, **NEVER** add the filter value in the search term.
+
+For example, this is **INCORRECT**:
+
+```json
+{
+  "term": "12345",
+  "where": {
+    "order_id": "12345"
+  }
+}
+```
+
+And this is **CORRECT**:
+
+```json
+{
+  "term": "",
+  "where": {
+    "order_id": "12345"
+  }
+}
+```
 
 **ALWAYS** reply with a JSON object and nothing more. This is extremely important or you will be fired. Just pass the JSON object as a string without any additional text or formatting. Don't even include madkdown wrappers or code blocks.
