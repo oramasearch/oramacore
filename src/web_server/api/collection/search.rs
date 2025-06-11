@@ -64,7 +64,7 @@ async fn search(
 }
 
 #[endpoint(
-    method = "GET",
+    method = "POST",
     path = "/v1/collections/{collection_id}/nlp_search",
     description = "Advanced NLP search endpoint powered by AI"
 )]
@@ -93,7 +93,7 @@ async fn nlp_search(
 }
 
 #[endpoint(
-    method = "GET",
+    method = "POST",
     path = "/v1/collections/{collection_id}/nlp_search_stream",
     description = "Advanced NLP search endpoint powered by AI - streamed"
 )]

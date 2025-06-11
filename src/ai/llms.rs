@@ -463,7 +463,7 @@ impl LLMService {
             .collect();
 
         let request = CreateChatCompletionRequestArgs::default()
-            .max_tokens(1024u32)
+            .max_tokens(2048u32)
             .temperature(0.0)
             .model(chosen_model)
             .messages(messages)
