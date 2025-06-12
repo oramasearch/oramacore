@@ -19,7 +19,7 @@ use crate::{
     ai::{
         advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
         llms::LLMService,
-        AIService,
+        AIService, OramaModel,
     },
     collection_manager::sides::{
         read::{CommittedDateFieldStats, UncommittedDateFieldStats},
@@ -570,10 +570,24 @@ impl CollectionReader {
     pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats> {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
+        let mut embedding_model: Option<String> = None;
+
         for i in indexes_lock.iter() {
             if i.is_deleted() {
                 continue;
             }
+
+            // This should only happen on the first iteration
+            if embedding_model.is_none() {
+                match i.get_model().await {
+                    Some(model) => {
+                        let serializable_model = model.as_str_name();
+                        embedding_model = Some(serializable_model.to_string());
+                    }
+                    None => {}
+                }
+            }
+
             indexes_stats.push(i.stats(false, req.with_keys).await?);
         }
         drop(indexes_lock);
@@ -594,6 +608,7 @@ impl CollectionReader {
                 .sum::<usize>(),
             description: self.description.clone(),
             default_locale: self.default_locale,
+            embedding_model,
             indexes_stats,
             created_at: self.created_at,
             updated_at: *self.updated_at.read().await,
@@ -664,6 +679,7 @@ pub struct CollectionStats {
     pub document_count: usize,
     pub description: Option<String>,
     pub default_locale: Locale,
+    pub embedding_model: Option<String>,
     pub indexes_stats: Vec<IndexStats>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
