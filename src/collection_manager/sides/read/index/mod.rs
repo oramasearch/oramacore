@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace};
 use uncommitted_field::*;
 
 use crate::{
-    ai::{llms, AIService},
+    ai::{llms, AIService, OramaModel},
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
@@ -838,6 +838,17 @@ impl Index {
 
     pub fn has_field(&self, field_name: &str) -> bool {
         self.path_to_index_id_map.get(field_name).is_some()
+    }
+
+    // Since we only have one embedding model for all indexes in a collection,
+    // we can get the first index model and return it early.
+    pub async fn get_model(&self) -> Option<OramaModel> {
+        let uncommitted_fields = self.uncommitted_fields.read().await;
+        uncommitted_fields
+            .vector_fields
+            .values()
+            .next()
+            .map(|f| f.get_model())
     }
 
     pub async fn search(
