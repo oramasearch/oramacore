@@ -28,7 +28,7 @@ use tracing::{error, info, trace, warn};
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
-use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
+use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
@@ -38,8 +38,8 @@ use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, NLPSearchRequest,
-    SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, NLPSearchRequest, SearchMode,
+    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
@@ -54,6 +54,7 @@ use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
 pub use collections::CollectionReadLock;
+use thiserror::Error;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -69,6 +70,14 @@ pub struct IndexesConfig {
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
     pub notifier: Option<NotifierConfig>,
+}
+
+#[derive(Error, Debug)]
+pub enum ReadError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Not found {0}")]
+    NotFound(CollectionId),
 }
 
 pub struct ReadSide {
@@ -597,12 +606,12 @@ impl ReadSide {
         &self,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<()> {
+    ) -> Result<(), ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
         collection.check_read_api_key(read_api_key)
     }
@@ -639,37 +648,17 @@ impl ReadSide {
         (RemoteLLMProvider::OramaCore, self.llm_service.model.clone())
     }
 
-    pub async fn get_tool(
+    pub async fn get_tools_interface(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        tool_id: String,
-    ) -> Result<Option<Tool>> {
+    ) -> Result<CollectionToolsRuntime, ToolError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools.get(collection_id, tool_id).await
-    }
 
-    pub async fn get_all_tools_by_collection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<Vec<Tool>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools.list_by_collection(collection_id).await
-    }
-
-    pub async fn execute_tools(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        messages: Vec<InteractionMessage>,
-        tool_ids: Option<Vec<String>>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<Vec<ToolExecutionReturnType>>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools
-            .execute_tools(collection_id, messages, tool_ids, llm_config)
-            .await
+        Ok(CollectionToolsRuntime::new(
+            self.tools.clone(),
+            collection_id,
+        ))
     }
 }
 

@@ -45,7 +45,7 @@ use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
         llms::LLMService,
-        tools::{Tool, ToolsRuntime},
+        tools::{CollectionToolsRuntime, ToolsRuntime},
         AIService, OramaModel,
     },
     collection_manager::sides::{
@@ -1060,55 +1060,17 @@ impl WriteSide {
         ))
     }
 
-    //////////
-    /// TOOLS
-    /////////
-
-    pub async fn insert_tool(
+    pub async fn get_tools_manager(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<(), WriteError> {
+    ) -> Result<CollectionToolsRuntime, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
-
-        self.tools
-            .insert(collection_id, tool.clone())
-            .await
-            .context("Cannot insert tool")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool_id: String,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.tools
-            .delete(collection_id, tool_id.clone())
-            .await
-            .context("Cannot delete tool")?;
-
-        Ok(())
-    }
-
-    pub async fn update_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<(), WriteError> {
-        self.delete_tool(write_api_key, collection_id, tool.id.clone())
-            .await?;
-        self.insert_tool(write_api_key, collection_id, tool).await?;
-
-        Ok(())
+        Ok(CollectionToolsRuntime::new(
+            self.tools.clone(),
+            collection_id,
+        ))
     }
 
     pub async fn get_segments_manager(

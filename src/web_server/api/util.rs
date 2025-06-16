@@ -14,8 +14,9 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
+    ai::tools::ToolError,
     collection_manager::sides::{
-        segments::SegmentError, triggers::TriggerError, write::WriteError,
+        read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
     },
     types::{ApiKey, CollectionId, IndexId},
 };
@@ -248,6 +249,92 @@ impl IntoResponse for TriggerError {
             TriggerError::DeserializationError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Invalid JSON format: {:?}", e),
+            )
+                .into_response(),
+        }
+    }
+}
+
+impl IntoResponse for ToolError {
+    fn into_response(self) -> Response {
+        match self {
+            ToolError::Generic(e) => {
+                print_error(&e, "Unhandled error in tool side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {:?}", e),
+                )
+                    .into_response()
+            }
+            ToolError::WriteError(e) => e.into_response(),
+            ToolError::ReadError(e) => e.into_response(),
+            ToolError::ValidationError(tool_id, msg) => (
+                StatusCode::BAD_REQUEST,
+                format!("Tool {} contains invalid code: {}", tool_id, msg),
+            )
+                .into_response(),
+            ToolError::CompilationError(tool_id, msg) => (
+                StatusCode::BAD_REQUEST,
+                format!("Tool {} doesn't compile: {}", tool_id, msg),
+            )
+                .into_response(),
+            ToolError::Duplicate(tool_id) => (
+                StatusCode::CONFLICT,
+                format!("Tool {} already exists", tool_id),
+            )
+                .into_response(),
+            ToolError::NotFound(tool_id, collection_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Tool {} not found in collection {}", tool_id, collection_id),
+            )
+                .into_response(),
+            ToolError::NoTools(collection_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Collection {} doesn't have any tool", collection_id),
+            )
+                .into_response(),
+            ToolError::ExecutionSerializationError(collection_id, tool_id, e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Tool {} from collection {} returns an JSON error: {:?}",
+                    tool_id, collection_id, e
+                ),
+            )
+                .into_response(),
+            ToolError::ExecutionTimeout(collection_id, tool_id) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Tool {} from collection {} goes in timeout",
+                    tool_id, collection_id
+                ),
+            )
+                .into_response(),
+            ToolError::ExecutionError(collection_id, tool_id, e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Tool {} from collection {} exited with this error: {:?}",
+                    tool_id, collection_id, e
+                ),
+            )
+                .into_response(),
+        }
+    }
+}
+
+impl IntoResponse for ReadError {
+    fn into_response(self) -> Response {
+        match self {
+            ReadError::Generic(e) => {
+                print_error(&e, "Unhandled error in read side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {:?}", e),
+                )
+                    .into_response()
+            }
+            ReadError::NotFound(collection_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Collection {} not found", collection_id),
             )
                 .into_response(),
         }

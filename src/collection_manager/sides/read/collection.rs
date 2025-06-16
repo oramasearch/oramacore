@@ -22,7 +22,7 @@ use crate::{
         AIService,
     },
     collection_manager::sides::{
-        read::{CommittedDateFieldStats, UncommittedDateFieldStats},
+        read::{CommittedDateFieldStats, ReadError, UncommittedDateFieldStats},
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     file_utils::BufferedFile,
@@ -290,10 +290,11 @@ impl CollectionReader {
     }
 
     #[inline]
-    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
+    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<(), ReadError> {
         if api_key != self.read_api_key {
-            return Err(anyhow!("Invalid read api key"));
+            return Err(ReadError::Generic(anyhow!("Invalid read api key")));
         }
+
         Ok(())
     }
 
