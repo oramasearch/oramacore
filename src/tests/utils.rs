@@ -382,6 +382,7 @@ impl TestContext {
                         CollectionStatsRequest { with_keys: false },
                     )
                     .await
+                    .context("")
             }
             .boxed()
         })
@@ -653,12 +654,14 @@ impl TestCollectionClient {
                 CollectionStatsRequest { with_keys: false },
             )
             .await
+            .context("")
     }
 
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
             .search(self.read_api_key, self.collection_id, search_params)
             .await
+            .context("")
     }
 
     pub async fn rebuild_index(&self, language: LanguageDTO) -> Result<()> {

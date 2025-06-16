@@ -60,7 +60,7 @@ async fn get_hook_v0(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     params: Query<GetHookQueryParams>,
-) -> Result<Json<serde_json::Value>, impl IntoResponse> {
+) -> impl IntoResponse {
     let GetHookQueryParams { name } = params.0;
 
     let hooks_runtime = write_side

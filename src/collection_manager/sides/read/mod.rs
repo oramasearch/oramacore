@@ -257,12 +257,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         req: CollectionStatsRequest,
-    ) -> Result<CollectionStats> {
+    ) -> Result<CollectionStats, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         collection.stats(req).await
@@ -352,7 +352,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: SearchParams,
-    ) -> Result<SearchResult> {
+    ) -> Result<SearchResult, ReadError> {
         let limit = search_params.limit;
         let offset = search_params.offset;
 
@@ -363,7 +363,7 @@ impl ReadSide {
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
@@ -433,12 +433,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<QueryMappedSearchResult>> {
+    ) -> Result<Vec<QueryMappedSearchResult>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let collection_stats = self
@@ -468,12 +468,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let collection_stats = self
@@ -569,14 +569,14 @@ impl ReadSide {
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<ReadCollectionTriggerInterface> {
+    ) -> Result<ReadCollectionTriggerInterface, ReadError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
         Ok(ReadCollectionTriggerInterface::new(
             self.triggers.clone(),

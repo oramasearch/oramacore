@@ -335,7 +335,7 @@ impl CollectionReader {
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
-    ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+    ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
@@ -568,7 +568,7 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats> {
+    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         for i in indexes_lock.iter() {

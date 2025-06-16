@@ -65,7 +65,7 @@ async fn get_tool_v1(
         .get_tools_interface(read_api_key, collection_id)
         .await?;
 
-    let j: Json<serde_json::Value> = match tool_interface.get_tool(tool_id).await? {
+    let j = match tool_interface.get_tool(tool_id).await? {
         None => Json(json!({ "tool": null })),
         Some(tool) => Json(json!({ "tool": tool })),
     };

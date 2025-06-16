@@ -1334,8 +1334,14 @@ pub struct DeleteHookParams {
 }
 
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
+pub enum ExecuteActionPayloadName {
+    #[serde(rename = "search")]
+    Search,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub struct ExecuteActionPayload {
-    pub name: String, // we're not using an enum here since users will be able to define their own actions
+    pub name: ExecuteActionPayloadName,
     pub context: String,
 }
 

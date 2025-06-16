@@ -2,7 +2,7 @@ use super::generic_kv::{format_key, KV};
 use crate::{
     ai::llms::{self, LLMService},
     collection_manager::sides::{
-        read::CollectionReadLock as ReadCollectionReadLock,
+        read::{CollectionReadLock as ReadCollectionReadLock, ReadError},
         write::{CollectionReadLock as WriteCollectionReadLock, WriteError},
     },
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
@@ -21,6 +21,8 @@ pub enum TriggerError {
     NotFound(CollectionId, String),
     #[error("write error: {0}")]
     WriteError(#[from] WriteError),
+    #[error("read error: {0}")]
+    ReadError(#[from] ReadError),
     #[error("Invalid trigger id: {0}")]
     InvalidTriggerId(String),
     #[error("Cannot repair error: {0}")]

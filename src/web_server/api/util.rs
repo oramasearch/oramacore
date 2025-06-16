@@ -228,6 +228,7 @@ impl IntoResponse for TriggerError {
                     .into_response()
             }
             TriggerError::WriteError(e) => e.into_response(),
+            TriggerError::ReadError(e) => e.into_response(),
             TriggerError::NotFound(collection_id, trigger_id) => (
                 StatusCode::BAD_REQUEST,
                 format!(
