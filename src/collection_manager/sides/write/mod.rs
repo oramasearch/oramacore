@@ -25,7 +25,7 @@ use super::{
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
@@ -49,8 +49,8 @@ use crate::{
         AIService, OramaModel, RemoteLLMProvider,
     },
     collection_manager::sides::{
-        write::collection::IndexReadLock, DocumentStorageWriteOperation, DocumentToInsert,
-        ReplaceIndexReason, WriteOperation,
+        write::{collection::IndexReadLock, collections::CollectionReadLock},
+        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -333,11 +333,8 @@ impl WriteSide {
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let CreateIndexRequest {
             index_id,
@@ -365,11 +362,8 @@ impl WriteSide {
         reference: Option<String>,
     ) -> Result<(), WriteError> {
         let mut collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         collection
             .change_runtime_config(language.into(), model)
@@ -432,10 +426,8 @@ impl WriteSide {
                     }
 
                     collection = self
-                        .collections
-                        .get_collection(collection_id)
-                        .await
-                        .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+                        .get_collection_with_write_key(collection_id, write_api_key)
+                        .await?;
                     new_index = collection
                         .get_index(new_index_id)
                         .await
@@ -503,11 +495,8 @@ impl WriteSide {
         reason: ReplaceIndexReason,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         collection
             .replace_index(
@@ -529,11 +518,8 @@ impl WriteSide {
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let CreateIndexRequest {
             index_id: new_index_id,
@@ -554,11 +540,8 @@ impl WriteSide {
         index_id: IndexId,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
@@ -578,11 +561,8 @@ impl WriteSide {
         info!(?document_count, "Inserting batch of documents");
 
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let index = collection
             .get_index(index_id)
@@ -646,11 +626,8 @@ impl WriteSide {
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
         let index = collection
             .get_index(index_id)
             .await
@@ -671,11 +648,8 @@ impl WriteSide {
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
         let index = collection
             .get_index(index_id)
             .await
@@ -839,11 +813,8 @@ impl WriteSide {
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let document_ids = collection.get_document_ids().await;
 
@@ -876,11 +847,8 @@ impl WriteSide {
         code: String,
     ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let index = collection
             .get_index(index_id)
@@ -927,13 +895,9 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         name: HookName,
-    ) -> Result<Option<String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+    ) -> Result<Option<String>, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
 
         Ok(self
             .hook_runtime
@@ -947,28 +911,20 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         _name: HookName,
-    ) -> Result<Option<String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+    ) -> Result<Option<String>, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
 
-        bail!("Not implemented yet.") // @todo: implement delete hook in HooksRuntime and CollectionsWriter
+        Err(WriteError::Generic(anyhow::anyhow!("Not implemented yet."))) // @todo: implement delete hook in HooksRuntime and CollectionsWriter
     }
 
     pub async fn list_javascript_hooks(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<HashMap<HookName, String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+    ) -> Result<HashMap<HookName, String>, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
 
         Ok(self
             .hook_runtime
@@ -980,43 +936,22 @@ impl WriteSide {
             .collect())
     }
 
-    async fn check_write_api_key(
-        &self,
-        collection_id: CollectionId,
-        write_api_key: ApiKey,
-    ) -> Result<()> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
-
-        Ok(())
-    }
-
-    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
-        if self.master_api_key != master_api_key {
-            return Err(WriteError::InvalidMasterApiKey);
-        }
-
-        Ok(())
-    }
-
     pub async fn validate_system_prompt(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<SystemPromptValidationResponse> {
+    ) -> Result<SystemPromptValidationResponse, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.system_prompts
+        let r = self
+            .system_prompts
             .validate_prompt(system_prompt, llm_config)
-            .await
+            .await?;
+
+        Ok(r)
     }
 
     pub async fn insert_system_prompt(
@@ -1024,7 +959,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1041,14 +976,16 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt_id: String,
-    ) -> Result<Option<SystemPrompt>> {
+    ) -> Result<Option<SystemPrompt>, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.system_prompts
+        let r = self
+            .system_prompts
             .delete(collection_id, system_prompt_id.clone())
             .await
-            .context("Cannot delete system prompt")
+            .context("Cannot delete system prompt")?;
+        Ok(r)
     }
 
     pub async fn update_system_prompt(
@@ -1056,7 +993,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1077,7 +1014,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         segment: Segment,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1094,14 +1031,16 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         segment_id: String,
-    ) -> Result<Option<Segment>> {
+    ) -> Result<Option<Segment>, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.segments
+        let r = self
+            .segments
             .delete(collection_id, segment_id.clone())
             .await
-            .context("Cannot delete segment")
+            .context("Cannot delete segment")?;
+        Ok(r)
     }
 
     pub async fn update_segment(
@@ -1109,7 +1048,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         segment: Segment,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1131,7 +1070,7 @@ impl WriteSide {
         collection_id: CollectionId,
         trigger: Trigger,
         trigger_id: Option<String>,
-    ) -> Result<Trigger> {
+    ) -> Result<Trigger, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1172,7 +1111,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger_id: String,
-    ) -> Result<Trigger> {
+    ) -> Result<Trigger, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1183,7 +1122,7 @@ impl WriteSide {
             .context("Cannot insert trigger")?;
         let trigger = match trigger {
             Some(trigger) => trigger,
-            None => bail!("Trigger not found"),
+            None => return Err(WriteError::Generic(anyhow::anyhow!("Trigger not found"))),
         };
 
         Ok(trigger)
@@ -1194,14 +1133,16 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger_id: String,
-    ) -> Result<Option<Trigger>> {
+    ) -> Result<Option<Trigger>, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        self.triggers
+        let r = self
+            .triggers
             .delete(collection_id, trigger_id)
             .await
-            .context("Cannot delete trigger")
+            .context("Cannot delete trigger")?;
+        Ok(r)
     }
 
     pub async fn update_trigger(
@@ -1209,7 +1150,10 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         trigger: Trigger,
-    ) -> Result<Option<Trigger>> {
+    ) -> Result<Option<Trigger>, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
         let trigger_key = get_trigger_key(
             collection_id,
             trigger.id.clone(),
@@ -1238,12 +1182,14 @@ impl WriteSide {
                         id: key_content.trigger_id,
                         ..trigger
                     })),
-                    None => bail!("Cannot get updated trigger"),
+                    None => Err(WriteError::Generic(anyhow::anyhow!(
+                        "Cannot get updated trigger"
+                    ))),
                 }
             }
-            None => {
-                bail!("Cannot parse trigger id")
-            }
+            None => Err(WriteError::Generic(anyhow::anyhow!(
+                "Cannot parse trigger id"
+            ))),
         }
     }
 
@@ -1252,7 +1198,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         tool: Tool,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1269,7 +1215,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         tool_id: String,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
@@ -1286,7 +1232,7 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         tool: Tool,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.delete_tool(write_api_key, collection_id, tool.id.clone())
             .await?;
         self.insert_tool(write_api_key, collection_id, tool).await?;
@@ -1457,6 +1403,40 @@ impl WriteSide {
         self.document_storage.remove(docs_to_remove).await;
 
         Ok(result)
+    }
+
+    async fn get_collection_with_write_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<CollectionReadLock, WriteError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(collection)
+    }
+
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
+        if self.master_api_key != master_api_key {
+            return Err(WriteError::InvalidMasterApiKey);
+        }
+
+        Ok(())
+    }
+
+    async fn check_write_api_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<()> {
+        self.get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(())
     }
 }
 

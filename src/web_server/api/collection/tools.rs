@@ -123,22 +123,15 @@ async fn insert_tool_v1(
         code: params.code,
     };
 
-    match write_side
+    write_side
         .insert_tool(write_api_key, collection_id, tool.clone())
         .await
-    {
-        Ok(_) => Ok((
-            StatusCode::CREATED,
-            Json(json!({ "success": true, "id": tool.id, "tool": tool })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error inserting tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| {
+            (
+                StatusCode::CREATED,
+                Json(json!({ "success": true, "id": tool.id, "tool": tool })),
+            )
+        })
 }
 
 #[endpoint(
@@ -152,19 +145,10 @@ async fn delete_tool_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteToolParams>,
 ) -> impl IntoResponse {
-    match write_side
+    write_side
         .delete_tool(write_api_key, collection_id, params.id)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error deleting tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
 #[endpoint(
@@ -185,19 +169,10 @@ async fn update_tool_v1(
         code: params.code,
     };
 
-    match write_side
+    write_side
         .update_tool(write_api_key, collection_id, tool)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error updating tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
 // #[axum::debug_handler]

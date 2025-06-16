@@ -14,7 +14,6 @@ use crate::{
     types::{
         ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, IndexId, NewHookPostParams,
     },
-    web_server::api::util::print_error,
 };
 
 pub fn apis(write_side: Arc<WriteSide>) -> Router {
@@ -56,22 +55,15 @@ async fn get_hook_v0(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     params: Query<GetHookQueryParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, impl IntoResponse)> {
+) -> Result<Json<serde_json::Value>, impl IntoResponse> {
     let GetHookQueryParams { name } = params.0;
-    match write_side
+    write_side
         .get_javascript_hook(write_api_key, collection_id, index_id, name)
         .await
-    {
-        Ok(Some(full_hook)) => Ok(Json(json!({ "hook": full_hook.to_string() }))),
-        Ok(None) => Ok(Json(json!({ "hook": null }))),
-        Err(e) => {
-            print_error(&e, "Error getting hook");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|r| match r {
+            Some(full_hook) => Json(json!({ "hook": full_hook.to_string() })),
+            None => Json(json!({ "hook": null })),
+        })
 }
 
 #[endpoint(
@@ -87,23 +79,10 @@ async fn delete_hook_v0(
 ) -> impl IntoResponse {
     let name = params.name;
 
-    match write_side
+    write_side
         .delete_javascript_hook(write_api_key, collection_id, name)
         .await
-    {
-        Ok(Some(_)) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Ok(None) => Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "Unable to find hook to delete" })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error deleting hook");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| Json(json!({ "success": true })))
 }
 
 #[endpoint(
@@ -116,17 +95,8 @@ async fn list_hooks_v0(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
 ) -> impl IntoResponse {
-    match write_side
+    write_side
         .list_javascript_hooks(write_api_key, collection_id)
         .await
-    {
-        Ok(hooks) => Ok((StatusCode::OK, Json(json!(hooks)))),
-        Err(e) => {
-            print_error(&e, "Error listing hooks");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|hooks| Json(json!(hooks)))
 }

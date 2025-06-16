@@ -119,22 +119,10 @@ async fn insert_segment_v1(
         goal: params.goal.clone(),
     };
 
-    match write_side
+    write_side
         .insert_segment(write_api_key, collection_id, segment.clone())
         .await
-    {
-        Ok(_) => Ok((
-            StatusCode::CREATED,
-            Json(json!({ "success": true, "id": segment.id, "segment": segment })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error inserting segment");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|r| Json(json!({ "success": true, "id": segment.id, "segment": segment })))
 }
 
 #[endpoint(
@@ -148,19 +136,10 @@ async fn delete_segment_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
-    match write_side
+    write_side
         .delete_segment(write_api_key, collection_id, params.id)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error deleting segment");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|r| Json(json!({ "success": true })))
 }
 
 #[endpoint(
@@ -181,17 +160,8 @@ async fn update_segment_v1(
         goal: params.goal.clone(),
     };
 
-    match write_side
+    write_side
         .update_segment(write_api_key, collection_id, segment)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error updating segment");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|r| Json(json!({ "success": true })))
 }

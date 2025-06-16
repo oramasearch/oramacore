@@ -154,12 +154,12 @@ impl IntoResponse for WriteError {
                 let body = format!("Collection with id {} already exists", collection_id);
                 (StatusCode::CONFLICT, body).into_response()
             }
-            WriteError::InvalidWriteApiKey(collection_id) => {
-                let body = format!("Collection with id {} not found", collection_id);
-                (StatusCode::NOT_FOUND, body).into_response()
-            }
-            WriteError::CollectionNotFound(collection_id) => {
-                let body = format!("Collection with id {} not found", collection_id);
+            WriteError::InvalidWriteApiKey(collection_id)
+            | WriteError::CollectionNotFound(collection_id) => {
+                let body = format!(
+                    "Collection with id {} not found or invalid write api key",
+                    collection_id
+                );
                 (StatusCode::NOT_FOUND, body).into_response()
             }
             WriteError::IndexAlreadyExists(collection_id, index_id) => {
