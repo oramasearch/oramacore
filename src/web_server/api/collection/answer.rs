@@ -741,6 +741,11 @@ async fn select_triggers_and_segments(
             .await
             .expect("Failed to choose a segment.");
 
+        let trigger_interface = read_side
+            .get_triggers_manager(read_api_key, collection_id)
+            .await
+            .expect("Failed to get triggers manager");
+
         match chosen_segment {
             None => {
                 tx.send(AudienceManagementResult::Segment(None))
@@ -761,12 +766,8 @@ async fn select_triggers_and_segments(
                     .await
                     .unwrap();
 
-                let all_segments_triggers = read_side
-                    .get_all_triggers_by_segment(
-                        read_api_key,
-                        collection_id,
-                        full_segment.unwrap().id.clone(),
-                    )
+                let all_segments_triggers = trigger_interface
+                    .get_all_triggers_by_segment(full_segment.unwrap().id.clone())
                     .await
                     .expect("Failed to get triggers for the segment");
 
@@ -777,10 +778,8 @@ async fn select_triggers_and_segments(
                     return;
                 }
 
-                let chosen_trigger = read_side
+                let chosen_trigger = trigger_interface
                     .perform_trigger_selection(
-                        read_api_key,
-                        collection_id,
                         conversation,
                         all_segments_triggers,
                         llm_config.clone(),
@@ -798,8 +797,8 @@ async fn select_triggers_and_segments(
                             .unwrap();
                     }
                     Some(chosen_trigger) => {
-                        let full_trigger = read_side
-                            .get_trigger(read_api_key, collection_id, chosen_trigger.id.clone())
+                        let full_trigger = trigger_interface
+                            .get_trigger(chosen_trigger.id.clone())
                             .await
                             .expect("Failed to get full trigger");
 

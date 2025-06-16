@@ -14,7 +14,9 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    collection_manager::sides::{segments::SegmentError, write::WriteError},
+    collection_manager::sides::{
+        segments::SegmentError, triggers::TriggerError, write::WriteError,
+    },
     types::{ApiKey, CollectionId, IndexId},
 };
 
@@ -160,7 +162,7 @@ impl IntoResponse for WriteError {
                     "Collection with id {} not found or invalid write api key",
                     collection_id
                 );
-                (StatusCode::NOT_FOUND, body).into_response()
+                (StatusCode::BAD_REQUEST, body).into_response()
             }
             WriteError::IndexAlreadyExists(collection_id, index_id) => {
                 let body = format!(
@@ -174,14 +176,14 @@ impl IntoResponse for WriteError {
                     "Index {} not found in collection {}",
                     index_id, collection_id
                 );
-                (StatusCode::NOT_FOUND, body).into_response()
+                (StatusCode::BAD_REQUEST, body).into_response()
             }
             WriteError::TempIndexNotFound(collection_id, index_id) => {
                 let body = format!(
                     "Temporary index {} not found in collection {}",
                     index_id, collection_id
                 );
-                (StatusCode::NOT_FOUND, body).into_response()
+                (StatusCode::BAD_REQUEST, body).into_response()
             }
         }
     }
@@ -205,6 +207,45 @@ impl IntoResponse for SegmentError {
             )
                 .into_response(),
             SegmentError::DeserializationError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid JSON format: {:?}", e),
+            )
+                .into_response(),
+        }
+    }
+}
+
+impl IntoResponse for TriggerError {
+    fn into_response(self) -> Response {
+        match self {
+            TriggerError::Generic(e) => {
+                print_error(&e, "Unhandled error in trigger side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {:?}", e),
+                )
+                    .into_response()
+            }
+            TriggerError::WriteError(e) => e.into_response(),
+            TriggerError::NotFound(collection_id, trigger_id) => (
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Trigger {} not found in collection {}",
+                    trigger_id, collection_id
+                ),
+            )
+                .into_response(),
+            TriggerError::InvalidTriggerId(id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid trigger id: {}", id),
+            )
+                .into_response(),
+            TriggerError::RepairError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Cannot repair JSON: {:?}", e),
+            )
+                .into_response(),
+            TriggerError::DeserializationError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Invalid JSON format: {:?}", e),
             )

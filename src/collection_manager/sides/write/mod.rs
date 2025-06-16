@@ -21,7 +21,7 @@ use super::{
     hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
     segments::{CollectionSegmentInterface, SegmentInterface},
     system_prompts::SystemPromptInterface,
-    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
+    triggers::TriggerInterface,
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -49,7 +49,8 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::sides::{
-        system_prompts::CollectionSystemPromptsInterface, write::collection::IndexReadLock,
+        system_prompts::CollectionSystemPromptsInterface,
+        triggers::WriteCollectionTriggerInterface, write::collection::IndexReadLock,
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
@@ -1059,139 +1060,6 @@ impl WriteSide {
         ))
     }
 
-    //////
-    /// TRIGGER
-    //////
-
-    pub async fn insert_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-        trigger_id: Option<String>,
-    ) -> Result<Trigger, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let final_trigger_id = match trigger_id {
-            Some(mut id) => {
-                let required_prefix = format!("{}:trigger:", collection_id.as_str());
-
-                if !id.starts_with(&required_prefix) {
-                    id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
-                }
-
-                id
-            }
-            None => {
-                let cuid = cuid2::create_id();
-                get_trigger_key(collection_id, cuid, trigger.segment_id.clone())
-            }
-        };
-
-        let trigger = Trigger {
-            id: final_trigger_id,
-            name: trigger.name,
-            description: trigger.description,
-            response: trigger.response,
-            segment_id: trigger.segment_id,
-        };
-
-        self.triggers
-            .insert(trigger.clone())
-            .await
-            .context("Cannot insert trigger")?;
-
-        Ok(trigger)
-    }
-
-    pub async fn get_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Trigger, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let trigger = self
-            .triggers
-            .get(collection_id, trigger_id)
-            .await
-            .context("Cannot insert trigger")?;
-        let trigger = match trigger {
-            Some(trigger) => trigger,
-            None => return Err(WriteError::Generic(anyhow::anyhow!("Trigger not found"))),
-        };
-
-        Ok(trigger)
-    }
-
-    pub async fn delete_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .triggers
-            .delete(collection_id, trigger_id)
-            .await
-            .context("Cannot delete trigger")?;
-        Ok(r)
-    }
-
-    pub async fn update_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-    ) -> Result<Option<Trigger>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let trigger_key = get_trigger_key(
-            collection_id,
-            trigger.id.clone(),
-            trigger.segment_id.clone(),
-        );
-
-        let new_trigger = Trigger {
-            id: trigger_key.clone(),
-            ..trigger
-        };
-
-        self.insert_trigger(write_api_key, collection_id, new_trigger, Some(trigger.id))
-            .await
-            .context("Cannot insert updated trigger")?;
-
-        match parse_trigger_id(trigger_key.clone()) {
-            Some(key_content) => {
-                let updated_trigger = self
-                    .triggers
-                    .get(collection_id, key_content.trigger_id.clone())
-                    .await
-                    .context("Cannot get updated trigger")?;
-
-                match updated_trigger {
-                    Some(trigger) => Ok(Some(Trigger {
-                        id: key_content.trigger_id,
-                        ..trigger
-                    })),
-                    None => Err(WriteError::Generic(anyhow::anyhow!(
-                        "Cannot get updated trigger"
-                    ))),
-                }
-            }
-            None => Err(WriteError::Generic(anyhow::anyhow!(
-                "Cannot parse trigger id"
-            ))),
-        }
-    }
-
     //////////
     /// TOOLS
     /////////
@@ -1253,6 +1121,20 @@ impl WriteSide {
         Ok(CollectionSegmentInterface::new(
             self.segments.clone(),
             collection_id,
+        ))
+    }
+
+    pub async fn get_triggers_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<WriteCollectionTriggerInterface, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(WriteCollectionTriggerInterface::new(
+            self.triggers.clone(),
+            collection,
         ))
     }
 }

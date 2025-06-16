@@ -523,14 +523,13 @@ impl TestCollectionClient {
         trigger: Trigger,
         trigger_id: Option<String>,
     ) -> Result<Trigger> {
-        let trigger = self
+        let trigger_interface = self
             .writer
-            .insert_trigger(
-                self.write_api_key,
-                self.collection_id,
-                trigger,
-                trigger_id.clone(),
-            )
+            .get_triggers_manager(self.write_api_key, self.collection_id)
+            .await?;
+
+        let trigger = trigger_interface
+            .insert_trigger(trigger, trigger_id.clone())
             .await?;
 
         wait_for(self, |coll| {
@@ -539,9 +538,11 @@ impl TestCollectionClient {
             let collection_id = coll.collection_id;
             let trigger_id = trigger_id.clone();
             async move {
-                let trigger = reader
-                    .get_trigger(read_api_key, collection_id, trigger_id.unwrap())
+                let trigger_interface = reader
+                    .get_triggers_manager(read_api_key, collection_id)
                     .await?;
+
+                let trigger = trigger_interface.get_trigger(trigger_id.unwrap()).await?;
 
                 if trigger.is_none() {
                     bail!("Trigger not found");
@@ -557,9 +558,12 @@ impl TestCollectionClient {
     }
 
     pub async fn get_trigger(&self, trigger_id: String) -> Result<Option<Trigger>> {
-        self.reader
-            .get_trigger(self.read_api_key, self.collection_id, trigger_id)
-            .await
+        let trigger_interface = self
+            .reader
+            .get_triggers_manager(self.read_api_key, self.collection_id)
+            .await?;
+
+        trigger_interface.get_trigger(trigger_id).await.context("")
     }
 
     pub async fn replace_index(

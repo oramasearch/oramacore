@@ -32,6 +32,7 @@ use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
+use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
@@ -48,10 +49,11 @@ use crate::{
 };
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
-use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
+use super::triggers::TriggerInterface;
 use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
+pub use collections::CollectionReadLock;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -554,51 +556,23 @@ impl ReadSide {
         ))
     }
 
-    pub async fn perform_trigger_selection(
+    pub async fn get_triggers_manager(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        conversation: Option<Vec<InteractionMessage>>,
-        triggers: Vec<Trigger>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<SelectedTrigger>> {
+    ) -> Result<ReadCollectionTriggerInterface> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
-        self.triggers
-            .perform_trigger_selection(collection_id, conversation, triggers, llm_config)
+        let collection = self
+            .collections
+            .get_collection(collection_id)
             .await
-    }
+            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
 
-    pub async fn get_all_triggers_by_segment(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.triggers
-            .list_by_segment(collection_id, segment_id)
-            .await
-    }
-
-    pub async fn get_trigger(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.triggers.get(collection_id, trigger_id).await
-    }
-
-    pub async fn get_all_triggers_by_collection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-
-        self.triggers.list_by_collection(collection_id).await
+        Ok(ReadCollectionTriggerInterface::new(
+            self.triggers.clone(),
+            collection,
+        ))
     }
 
     pub async fn get_search_mode(

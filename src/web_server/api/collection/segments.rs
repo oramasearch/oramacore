@@ -11,11 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::{
-        read::ReadSide,
-        segments::Segment,
-        write::WriteSide,
-    },
+    collection_manager::sides::{read::ReadSide, segments::Segment, write::WriteSide},
     types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
 };
 
@@ -65,13 +61,10 @@ async fn get_segment_v1(
         .get_segments_manager(read_api_key, collection_id)
         .await?;
 
-    segment_interface
-        .get(segment_id)
-        .await
-        .map(|r| match r {
-            Some(segment) => Json(json!({ "segment": segment })),
-            None => Json(json!({ "segment": null })),
-        })
+    segment_interface.get(segment_id).await.map(|r| match r {
+        Some(segment) => Json(json!({ "segment": segment })),
+        None => Json(json!({ "segment": null })),
+    })
 }
 
 #[endpoint(
@@ -91,7 +84,8 @@ async fn get_all_segments_v1(
 
     segment_interface
         .list()
-        .await.map(|segments| (StatusCode::OK, Json(json!({ "segments": segments }))))
+        .await
+        .map(|segments| (StatusCode::OK, Json(json!({ "segments": segments }))))
 }
 
 #[endpoint(
