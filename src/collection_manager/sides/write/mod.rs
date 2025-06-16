@@ -19,7 +19,7 @@ use std::{
 use super::{
     generic_kv::{KVConfig, KV},
     hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
-    segments::{Segment, SegmentInterface},
+    segments::{CollectionSegmentInterface, SegmentInterface},
     system_prompts::SystemPromptInterface,
     triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
@@ -67,7 +67,7 @@ use crate::{
 pub enum WriteError {
     #[error("Invalid master API key")]
     InvalidMasterApiKey,
-    #[error("Cannot create collection: {0}")]
+    #[error("Generic error: {0}")]
     Generic(#[from] anyhow::Error),
     #[error("Collection already exists: {0}")]
     CollectionAlreadyExists(CollectionId),
@@ -857,60 +857,211 @@ impl WriteSide {
         Ok(collection.as_dto().await)
     }
 
-    pub async fn insert_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
+    async fn add_documents_to_storage(
+        self: &WriteSide,
+        document_list: &mut DocumentList,
+        target_index_id: IndexId,
+    ) -> Result<Vec<DocumentId>> {
+        let document_count = document_list.len();
 
-        self.segments
-            .insert(collection_id, segment.clone())
+        let mut insert_document_batch = Vec::with_capacity(document_count);
+        let mut doc_ids = Vec::with_capacity(document_count);
+        for (index, doc) in document_list.0.iter_mut().enumerate() {
+            if index % 100 == 0 {
+                trace!("Processing document {}/{}", index, document_count);
+            }
+
+            let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
+
+            // We try to guess the document id from the document
+            // Eventually, we generate a new one
+            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
+            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
+                if doc_id_str.is_empty() {
+                    cuid2::create_id()
+                } else {
+                    doc_id_str.to_string()
+                }
+            } else {
+                cuid2::create_id()
+            };
+            // Ensure the document contains a valid id
+            // NB: this overwrite the previous id if it is not a string
+            // TODO: is it correct?
+            doc.inner.insert(
+                "id".to_string(),
+                serde_json::Value::String(doc_id_str.clone()),
+            );
+
+            let doc_id = DocumentId(doc_id);
+            doc_ids.push(doc_id);
+
+            self.document_storage
+                .insert(doc_id, doc_id_str.clone(), doc.clone())
+                .await
+                .context("Cannot inser document into document storage")?;
+
+            insert_document_batch.push(WriteOperation::DocumentStorage(
+                DocumentStorageWriteOperation::InsertDocument {
+                    doc_id,
+                    doc: DocumentToInsert(
+                        doc.clone()
+                            .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                            .expect("Cannot get raw document"),
+                    ),
+                },
+            ));
+        }
+
+        trace!("Sending documents");
+        self.op_sender
+            .send_batch(insert_document_batch)
             .await
-            .context("Cannot insert segment")?;
+            .context("Cannot send document storage operation")?;
+        trace!("Documents sent");
+
+        Ok(doc_ids)
+    }
+
+    async fn inner_process_documents<'s>(
+        &'s self,
+        document_list: DocumentList,
+        doc_ids: Vec<DocumentId>,
+        index: IndexReadLock<'s>,
+    ) -> Result<InsertDocumentsResult> {
+        let mut result = InsertDocumentsResult {
+            inserted: 0,
+            replaced: 0,
+            failed: 0,
+        };
+
+        let document_count = document_list.len();
+
+        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
+        let mut docs_to_remove = Vec::with_capacity(document_count);
+        for (i, doc) in document_list.0.into_iter().enumerate() {
+            if i % 100 == 0 {
+                trace!("Processing document {}/{}", i, document_count);
+            }
+
+            let doc_id = doc_ids[i];
+            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                trace!("Sending operations");
+                self.op_sender
+                    .send_batch(index_operation_batch)
+                    .await
+                    .context("Cannot send index operation")?;
+                trace!("Operations sent");
+                index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
+            match index
+                .process_new_document(doc_id, doc, &mut index_operation_batch)
+                .await
+                .context("Cannot process document")
+            {
+                Ok(Some(old_doc_id)) => {
+                    docs_to_remove.push(old_doc_id);
+                    result.inserted += 1;
+                }
+                Ok(None) => {
+                    result.inserted += 1;
+                }
+                Err(e) => {
+                    // If the document cannot be processed, we should remove it from the document storage
+                    // and from the read side
+                    // NB: check if the error handling is correct
+                    self.document_storage.remove(vec![doc_id]).await;
+
+                    tracing::error!(error = ?e, "Cannot process document");
+                    result.failed += 1;
+                }
+            };
+        }
+        debug!("All documents processed {}", document_count);
+
+        if !index_operation_batch.is_empty() {
+            trace!("Sending operations");
+            self.op_sender
+                .send_batch(index_operation_batch)
+                .await
+                .context("Cannot send index operation")?;
+            trace!("Operations sent");
+        }
+
+        self.document_storage.remove(docs_to_remove).await;
+
+        Ok(result)
+    }
+
+    async fn get_collection_with_write_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<CollectionReadLock, WriteError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(collection)
+    }
+
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
+        if self.master_api_key != master_api_key {
+            return Err(WriteError::InvalidMasterApiKey);
+        }
 
         Ok(())
     }
 
-    pub async fn delete_segment(
+    async fn check_write_api_key(
         &self,
-        write_api_key: ApiKey,
         collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Option<Segment>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .segments
-            .delete(collection_id, segment_id.clone())
-            .await
-            .context("Cannot delete segment")?;
-        Ok(r)
-    }
-
-    pub async fn update_segment(
-        &self,
         write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
+    ) -> Result<()> {
+        self.get_collection_with_write_key(collection_id, write_api_key)
             .await?;
-
-        self.segments
-            .delete(collection_id, segment.id.clone())
-            .await
-            .context("Cannot delete segment")?;
-        self.segments
-            .insert(collection_id, segment)
-            .await
-            .context("Cannot insert segment")?;
-
         Ok(())
     }
+
+    pub fn llm_service(&self) -> &LLMService {
+        &self.llm_service
+    }
+
+    pub async fn get_system_prompts_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSystemPromptsInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSystemPromptsInterface::new(
+            self.system_prompts.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_hooks_runtime(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionHooksRuntime, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionHooksRuntime::new(
+            self.hook_runtime.clone(),
+            collection,
+        ))
+    }
+
+    //////
+    /// TRIGGER
+    //////
 
     pub async fn insert_trigger(
         &self,
@@ -1041,6 +1192,10 @@ impl WriteSide {
         }
     }
 
+    //////////
+    /// TOOLS
+    /////////
+
     pub async fn insert_tool(
         &self,
         write_api_key: ApiKey,
@@ -1088,206 +1243,17 @@ impl WriteSide {
         Ok(())
     }
 
-    async fn add_documents_to_storage(
-        self: &WriteSide,
-        document_list: &mut DocumentList,
-        target_index_id: IndexId,
-    ) -> Result<Vec<DocumentId>> {
-        let document_count = document_list.len();
-
-        let mut insert_document_batch = Vec::with_capacity(document_count);
-        let mut doc_ids = Vec::with_capacity(document_count);
-        for (index, doc) in document_list.0.iter_mut().enumerate() {
-            if index % 100 == 0 {
-                trace!("Processing document {}/{}", index, document_count);
-            }
-
-            let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
-
-            // We try to guess the document id from the document
-            // Eventually, we generate a new one
-            let doc_id_str = doc.get("id").and_then(|v| v.as_str());
-            let doc_id_str = if let Some(doc_id_str) = doc_id_str {
-                if doc_id_str.is_empty() {
-                    cuid2::create_id()
-                } else {
-                    doc_id_str.to_string()
-                }
-            } else {
-                cuid2::create_id()
-            };
-            // Ensure the document contains a valid id
-            // NB: this overwrite the previous id if it is not a string
-            // TODO: is it correct?
-            doc.inner.insert(
-                "id".to_string(),
-                serde_json::Value::String(doc_id_str.clone()),
-            );
-
-            let doc_id = DocumentId(doc_id);
-            doc_ids.push(doc_id);
-
-            self.document_storage
-                .insert(doc_id, doc_id_str.clone(), doc.clone())
-                .await
-                .context("Cannot inser document into document storage")?;
-
-            insert_document_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::InsertDocument {
-                    doc_id,
-                    doc: DocumentToInsert(
-                        doc.clone()
-                            .into_raw(format!("{}:{}", target_index_id, doc_id_str))
-                            .expect("Cannot get raw document"),
-                    ),
-                },
-            ));
-        }
-
-        trace!("Sending documents");
-        self.op_sender
-            .send_batch(insert_document_batch)
-            .await
-            .context("Cannot send document storage operation")?;
-        trace!("Documents sent");
-
-        Ok(doc_ids)
-    }
-
-    pub fn llm_service(&self) -> &LLMService {
-        &self.llm_service
-    }
-
-    pub async fn get_system_prompts_manager(
+    pub async fn get_segments_manager(
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<CollectionSystemPromptsInterface, WriteError> {
+    ) -> Result<CollectionSegmentInterface, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
-        Ok(CollectionSystemPromptsInterface::new(
-            self.system_prompts.clone(),
+        Ok(CollectionSegmentInterface::new(
+            self.segments.clone(),
             collection_id,
         ))
-    }
-
-    pub async fn get_hooks_runtime(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<CollectionHooksRuntime, WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
-        Ok(CollectionHooksRuntime::new(
-            self.hook_runtime.clone(),
-            collection,
-        ))
-    }
-
-    async fn inner_process_documents<'s>(
-        &'s self,
-        document_list: DocumentList,
-        doc_ids: Vec<DocumentId>,
-        index: IndexReadLock<'s>,
-    ) -> Result<InsertDocumentsResult> {
-        let mut result = InsertDocumentsResult {
-            inserted: 0,
-            replaced: 0,
-            failed: 0,
-        };
-
-        let document_count = document_list.len();
-
-        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
-        let mut docs_to_remove = Vec::with_capacity(document_count);
-        for (i, doc) in document_list.0.into_iter().enumerate() {
-            if i % 100 == 0 {
-                trace!("Processing document {}/{}", i, document_count);
-            }
-
-            let doc_id = doc_ids[i];
-            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
-                trace!("Sending operations");
-                self.op_sender
-                    .send_batch(index_operation_batch)
-                    .await
-                    .context("Cannot send index operation")?;
-                trace!("Operations sent");
-                index_operation_batch = Vec::with_capacity(document_count * 10);
-            }
-
-            match index
-                .process_new_document(doc_id, doc, &mut index_operation_batch)
-                .await
-                .context("Cannot process document")
-            {
-                Ok(Some(old_doc_id)) => {
-                    docs_to_remove.push(old_doc_id);
-                    result.inserted += 1;
-                }
-                Ok(None) => {
-                    result.inserted += 1;
-                }
-                Err(e) => {
-                    // If the document cannot be processed, we should remove it from the document storage
-                    // and from the read side
-                    // NB: check if the error handling is correct
-                    self.document_storage.remove(vec![doc_id]).await;
-
-                    tracing::error!(error = ?e, "Cannot process document");
-                    result.failed += 1;
-                }
-            };
-        }
-        debug!("All documents processed {}", document_count);
-
-        if !index_operation_batch.is_empty() {
-            trace!("Sending operations");
-            self.op_sender
-                .send_batch(index_operation_batch)
-                .await
-                .context("Cannot send index operation")?;
-            trace!("Operations sent");
-        }
-
-        self.document_storage.remove(docs_to_remove).await;
-
-        Ok(result)
-    }
-
-    async fn get_collection_with_write_key(
-        &self,
-        collection_id: CollectionId,
-        write_api_key: ApiKey,
-    ) -> Result<CollectionReadLock, WriteError> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
-
-        collection.check_write_api_key(write_api_key)?;
-
-        Ok(collection)
-    }
-
-    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
-        if self.master_api_key != master_api_key {
-            return Err(WriteError::InvalidMasterApiKey);
-        }
-
-        Ok(())
-    }
-
-    async fn check_write_api_key(
-        &self,
-        collection_id: CollectionId,
-        write_api_key: ApiKey,
-    ) -> Result<()> {
-        self.get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
-        Ok(())
     }
 }
 

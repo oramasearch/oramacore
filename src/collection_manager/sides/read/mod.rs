@@ -31,7 +31,7 @@ use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
-use crate::collection_manager::sides::segments::SegmentInterface;
+use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
@@ -47,7 +47,6 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::segments::{Segment, SelectedSegment};
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
 use super::{
@@ -542,37 +541,17 @@ impl ReadSide {
         self.system_prompts.list_by_collection(collection_id).await
     }
 
-    pub async fn get_segment(
+    pub async fn get_segments_manager(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Option<Segment>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.segments.get(collection_id, segment_id).await
-    }
-
-    pub async fn get_all_segments_by_collection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<Vec<Segment>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.segments.list_by_collection(collection_id).await
-    }
-
-    pub async fn perform_segment_selection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        conversation: Option<Vec<InteractionMessage>>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<SelectedSegment>> {
+    ) -> Result<CollectionSegmentInterface> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
-        self.segments
-            .perform_segment_selection(collection_id, conversation, llm_config)
-            .await
+        Ok(CollectionSegmentInterface::new(
+            self.segments.clone(),
+            collection_id,
+        ))
     }
 
     pub async fn perform_trigger_selection(

@@ -14,7 +14,7 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    collection_manager::sides::write::WriteError,
+    collection_manager::sides::{segments::SegmentError, write::WriteError},
     types::{ApiKey, CollectionId, IndexId},
 };
 
@@ -183,6 +183,32 @@ impl IntoResponse for WriteError {
                 );
                 (StatusCode::NOT_FOUND, body).into_response()
             }
+        }
+    }
+}
+
+impl IntoResponse for SegmentError {
+    fn into_response(self) -> Response {
+        match self {
+            SegmentError::Generic(e) => {
+                print_error(&e, "Unhandled error in segment side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {:?}", e),
+                )
+                    .into_response()
+            }
+            SegmentError::WriteError(e) => e.into_response(),
+            SegmentError::RepairError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Cannot repair JSON: {:?}", e),
+            )
+                .into_response(),
+            SegmentError::DeserializationError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid JSON format: {:?}", e),
+            )
+                .into_response(),
         }
     }
 }

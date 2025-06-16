@@ -11,9 +11,12 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    collection_manager::sides::{read::ReadSide, segments::Segment, write::WriteSide},
+    collection_manager::sides::{
+        read::ReadSide,
+        segments::Segment,
+        write::WriteSide,
+    },
     types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
-    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]
@@ -58,20 +61,17 @@ async fn get_segment_v1(
     let segment_id = query.segment_id;
     let read_api_key = query.api_key;
 
-    match read_side
-        .get_segment(read_api_key, collection_id, segment_id)
+    let segment_interface = read_side
+        .get_segments_manager(read_api_key, collection_id)
+        .await?;
+
+    segment_interface
+        .get(segment_id)
         .await
-    {
-        Ok(Some(segment)) => Ok((StatusCode::OK, Json(json!({ "segment": segment })))),
-        Ok(None) => Ok((StatusCode::OK, Json(json!({ "segment": null })))),
-        Err(e) => {
-            print_error(&e, "Error getting segment");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|r| match r {
+            Some(segment) => Json(json!({ "segment": segment })),
+            None => Json(json!({ "segment": null })),
+        })
 }
 
 #[endpoint(
@@ -85,20 +85,13 @@ async fn get_all_segments_v1(
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
     let read_api_key = query.api_key;
+    let segment_interface = read_side
+        .get_segments_manager(read_api_key, collection_id)
+        .await?;
 
-    match read_side
-        .get_all_segments_by_collection(read_api_key, collection_id)
-        .await
-    {
-        Ok(segments) => Ok((StatusCode::OK, Json(json!({ "segments": segments })))),
-        Err(e) => {
-            print_error(&e, "Error getting all segments");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+    segment_interface
+        .list()
+        .await.map(|segments| (StatusCode::OK, Json(json!({ "segments": segments }))))
 }
 
 #[endpoint(
@@ -119,8 +112,12 @@ async fn insert_segment_v1(
         goal: params.goal.clone(),
     };
 
-    write_side
-        .insert_segment(write_api_key, collection_id, segment.clone())
+    let segment_interface = write_side
+        .get_segments_manager(write_api_key, collection_id)
+        .await?;
+
+    segment_interface
+        .insert(segment.clone())
         .await
         .map(|_| Json(json!({ "success": true, "id": segment.id, "segment": segment })))
 }
@@ -136,8 +133,11 @@ async fn delete_segment_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
-    write_side
-        .delete_segment(write_api_key, collection_id, params.id)
+    let segment_interface = write_side
+        .get_segments_manager(write_api_key, collection_id)
+        .await?;
+    segment_interface
+        .delete(params.id)
         .await
         .map(|_| Json(json!({ "success": true })))
 }
@@ -160,8 +160,12 @@ async fn update_segment_v1(
         goal: params.goal.clone(),
     };
 
-    write_side
-        .update_segment(write_api_key, collection_id, segment)
+    let segment_interface = write_side
+        .get_segments_manager(write_api_key, collection_id)
+        .await?;
+
+    segment_interface
+        .update(segment)
         .await
         .map(|_| Json(json!({ "success": true })))
 }

@@ -705,8 +705,12 @@ async fn select_triggers_and_segments(
     conversation: Option<Vec<InteractionMessage>>,
     mut llm_config: Option<InteractionLLMConfig>,
 ) -> impl Stream<Item = AudienceManagementResult> {
-    let all_segments = read_side
-        .get_all_segments_by_collection(read_api_key, collection_id)
+    let segment_interface = read_side
+        .get_segments_manager(read_api_key, collection_id)
+        .await
+        .expect("Failed to get segments for the collection");
+    let all_segments = segment_interface
+        .list()
         .await
         .expect("Failed to get segments for the collection");
 
@@ -732,13 +736,8 @@ async fn select_triggers_and_segments(
             return;
         };
 
-        let chosen_segment = read_side
-            .perform_segment_selection(
-                read_api_key,
-                collection_id,
-                conversation.clone(),
-                llm_config.clone(),
-            )
+        let chosen_segment = segment_interface
+            .perform_segment_selection(conversation.clone(), llm_config.clone())
             .await
             .expect("Failed to choose a segment.");
 
@@ -753,8 +752,8 @@ async fn select_triggers_and_segments(
                     .unwrap();
             }
             Some(segment) => {
-                let full_segment = read_side
-                    .get_segment(read_api_key, collection_id, segment.clone().id.clone())
+                let full_segment = segment_interface
+                    .get(segment.clone().id.clone())
                     .await
                     .expect("Failed to get full segment");
 
