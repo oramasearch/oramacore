@@ -46,7 +46,7 @@ use crate::{
         gpu::LocalGPUManager,
         llms::LLMService,
         tools::{Tool, ToolsRuntime},
-        AIService, OramaModel, RemoteLLMProvider,
+        AIService, OramaModel,
     },
     collection_manager::sides::{
         write::{collection::IndexReadLock, collections::CollectionReadLock},
@@ -121,24 +121,12 @@ pub struct WriteSide {
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
-    local_gpu_manager: Arc<LocalGPUManager>,
-    master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+    master_api_key: ApiKey,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
 
-    // This counter is incremented each time we need to
-    // change the collections hashmap:
-    // - when we create a new collection
-    // - when we delete a collection
-    // After the operation, we decrement the counter
-    // DUring the documents insertion, we can use this counter
-    // to know if there're any changes that require to have
-    // write lock on collections hashmap
-    // In that case, we can pause the insertion for a while,
-    // allowing other operations to obtain the write lock,
-    // and then we can continue the insertion.
     write_operation_counter: AtomicU32,
 }
 
@@ -149,7 +137,6 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
-        local_gpu_manager: Arc<LocalGPUManager>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
@@ -233,7 +220,6 @@ impl WriteSide {
             system_prompts,
             tools,
             kv,
-            local_gpu_manager,
             llm_service,
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
@@ -1240,34 +1226,6 @@ impl WriteSide {
         Ok(())
     }
 
-    pub fn is_gpu_overloaded(&self) -> bool {
-        match self.local_gpu_manager.is_overloaded() {
-            Ok(overloaded) => overloaded,
-            Err(e) => {
-                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
-                true
-            }
-        }
-    }
-
-    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
-        self.llm_service.default_remote_models.clone()
-    }
-
-    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
-        match self.get_available_remote_llm_services() {
-            Some(services) => {
-                let mut rng = rand::rng();
-                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
-                services.into_iter().nth(random_index)
-            }
-            None => {
-                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
-                None
-            }
-        }
-    }
-
     async fn add_documents_to_storage(
         self: &WriteSide,
         document_list: &mut DocumentList,
@@ -1332,6 +1290,10 @@ impl WriteSide {
         trace!("Documents sent");
 
         Ok(doc_ids)
+    }
+
+    pub fn llm_service(&self) -> &LLMService {
+        &self.llm_service
     }
 
     async fn inner_process_documents<'s>(

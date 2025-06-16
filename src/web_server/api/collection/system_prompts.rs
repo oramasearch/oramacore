@@ -123,8 +123,9 @@ async fn validate_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(mut params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    if write_side.is_gpu_overloaded() {
-        match write_side.select_random_remote_llm_service() {
+    let llm_service = write_side.llm_service();
+    if llm_service.is_gpu_overloaded() {
+        match llm_service.select_random_remote_llm_service() {
             Some((provider, model)) => {
                 info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
                 params.llm_config = Some(InteractionLLMConfig { model, provider });

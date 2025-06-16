@@ -134,8 +134,14 @@ pub async fn build_orama(
 
     let ai_service = Arc::new(ai_service);
 
+    let local_gpu_manager = Arc::new(LocalGPUManager::new());
+
+    if !local_gpu_manager.has_nvidia_gpu()? && config.ai_server.remote_llms.clone().is_none() {
+        warn!("No local NVIDIA GPU detected. Also, no remote LLMs configured. All inference sessions will be disabled. Expect errors.");
+    }
+
     let llm_service =
-        match LLMService::try_new(config.ai_server.llm, config.ai_server.remote_llms.clone()) {
+        match LLMService::try_new(config.ai_server.llm, config.ai_server.remote_llms.clone(), local_gpu_manager.clone()) {
             Ok(service) => Arc::new(service),
             Err(err) => {
                 anyhow::bail!(
@@ -145,12 +151,7 @@ pub async fn build_orama(
             }
         };
 
-    let local_gpu_manager = Arc::new(LocalGPUManager::new());
-
-    if !local_gpu_manager.has_nvidia_gpu()? && config.ai_server.remote_llms.clone().is_none() {
-        warn!("No local NVIDIA GPU detected. Also, no remote LLMs configured. All inference sessions will be disabled. Expect errors.");
-    }
-
+    
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());
@@ -186,7 +187,6 @@ pub async fn build_orama(
             ai_service.clone(),
             nlp_service.clone(),
             llm_service.clone(),
-            local_gpu_manager.clone(),
             automatic_embeddings_selector,
         )
         .await

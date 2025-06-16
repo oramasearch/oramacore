@@ -12,7 +12,8 @@ use futures::{Stream, StreamExt};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::info;
+use tracing::{error, info};
+use std::sync::Arc;
 
 use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest};
 use crate::{
@@ -21,6 +22,7 @@ use crate::{
 };
 
 use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
+use crate::ai::gpu::LocalGPUManager;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownPrompts {
@@ -281,12 +283,14 @@ pub struct LLMService {
     pub remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
     pub model: String,
     pub default_remote_models: Option<HashMap<RemoteLLMProvider, String>>,
+    pub local_gpu_manager: Arc<LocalGPUManager>,
 }
 
 impl LLMService {
     pub fn try_new(
         local_vllm_config: AIServiceLLMConfig,
         remote_llm_config: Option<Vec<RemoteLLMsConfig>>,
+        local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Self> {
         let local_vllm_provider_url = format!(
             "http://{}:{}/v1",
@@ -442,6 +446,7 @@ impl LLMService {
             default_remote_models,
             remote_clients,
             model: local_vllm_config.model,
+            local_gpu_manager,
         })
     }
 
@@ -794,5 +799,33 @@ impl LLMService {
         }
 
         Vec::new()
+    }
+
+    pub fn is_gpu_overloaded(&self) -> bool {
+        match self.local_gpu_manager.is_overloaded() {
+            Ok(overloaded) => overloaded,
+            Err(e) => {
+                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
+                true
+            }
+        }
+    }
+
+    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
+        self.default_remote_models.clone()
+    }
+
+    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
+        match self.get_available_remote_llm_services() {
+            Some(services) => {
+                let mut rng = rand::rng();
+                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
+                services.into_iter().nth(random_index)
+            }
+            None => {
+                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
+                None
+            }
+        }
     }
 }
