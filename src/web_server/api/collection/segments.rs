@@ -122,7 +122,7 @@ async fn insert_segment_v1(
     write_side
         .insert_segment(write_api_key, collection_id, segment.clone())
         .await
-        .map(|r| Json(json!({ "success": true, "id": segment.id, "segment": segment })))
+        .map(|_| Json(json!({ "success": true, "id": segment.id, "segment": segment })))
 }
 
 #[endpoint(
@@ -163,5 +163,5 @@ async fn update_segment_v1(
     write_side
         .update_segment(write_api_key, collection_id, segment)
         .await
-        .map(|r| Json(json!({ "success": true })))
+        .map(|_| Json(json!({ "success": true })))
 }

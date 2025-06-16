@@ -20,7 +20,7 @@ use super::{
     generic_kv::{KVConfig, KV},
     hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
-    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
+    system_prompts::SystemPromptInterface,
     triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
@@ -48,6 +48,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::sides::{
+        system_prompts::CollectionSystemPromptsInterface,
         write::{collection::IndexReadLock, collections::CollectionReadLock},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
@@ -57,8 +58,8 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
-        UpdateDocumentRequest, UpdateDocumentsResult,
+        IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest, UpdateDocumentRequest,
+        UpdateDocumentsResult,
     },
 };
 
@@ -126,6 +127,17 @@ pub struct WriteSide {
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
 
+    // This counter is incremented each time we need to
+    // change the collections hashmap:
+    // - when we create a new collection
+    // - when we delete a collection
+    // After the operation, we decrement the counter
+    // DUring the documents insertion, we can use this counter
+    // to know if there're any changes that require to have
+    // write lock on collections hashmap
+    // In that case, we can pause the insertion for a while,
+    // allowing other operations to obtain the write lock,
+    // and then we can continue the insertion.
     write_operation_counter: AtomicU32,
 }
 
@@ -921,79 +933,6 @@ impl WriteSide {
             .collect())
     }
 
-    pub async fn validate_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<SystemPromptValidationResponse, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .system_prompts
-            .validate_prompt(system_prompt, llm_config)
-            .await?;
-
-        Ok(r)
-    }
-
-    pub async fn insert_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .insert(collection_id, system_prompt.clone())
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt_id: String,
-    ) -> Result<Option<SystemPrompt>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .system_prompts
-            .delete(collection_id, system_prompt_id.clone())
-            .await
-            .context("Cannot delete system prompt")?;
-        Ok(r)
-    }
-
-    pub async fn update_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .delete(collection_id, system_prompt.id.clone())
-            .await
-            .context("Cannot delete system prompt")?;
-        self.system_prompts
-            .insert(collection_id, system_prompt)
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
     pub async fn insert_segment(
         &self,
         write_api_key: ApiKey,
@@ -1293,6 +1232,19 @@ impl WriteSide {
 
     pub fn llm_service(&self) -> &LLMService {
         &self.llm_service
+    }
+
+    pub async fn get_system_prompts_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSystemPromptsInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSystemPromptsInterface::new(
+            self.system_prompts.clone(),
+            collection_id,
+        ))
     }
 
     async fn inner_process_documents<'s>(

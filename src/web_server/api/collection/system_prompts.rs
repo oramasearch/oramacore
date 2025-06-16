@@ -143,13 +143,11 @@ async fn validate_system_prompt_v1(
         usage_mode: params.usage_mode.clone(),
     };
 
-    write_side
-        .validate_system_prompt(
-            write_api_key,
-            collection_id,
-            system_prompt,
-            params.llm_config,
-        )
+    let system_prompts_manager = write_side
+        .get_system_prompts_manager(write_api_key, collection_id)
+        .await?;
+    system_prompts_manager
+        .validate_system_prompt(system_prompt, params.llm_config)
         .await
         .map(|result| Json(json!({ "result": result })))
 }
@@ -174,8 +172,11 @@ async fn insert_system_prompt_v1(
         usage_mode: params.usage_mode.clone(),
     };
 
-    write_side
-        .insert_system_prompt(write_api_key, collection_id, system_prompt.clone())
+    let system_prompts_manager = write_side
+        .get_system_prompts_manager(write_api_key, collection_id)
+        .await?;
+    system_prompts_manager
+        .insert_system_prompt(system_prompt.clone())
         .await
         .map(|_| {
             Json(json!({ "success": true, "id": system_prompt.id, "system_prompt": system_prompt }))
@@ -193,8 +194,12 @@ async fn delete_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSystemPromptParams>,
 ) -> impl IntoResponse {
-    write_side
-        .delete_system_prompt(write_api_key, collection_id, params.id)
+    let system_prompts_manager = write_side
+        .get_system_prompts_manager(write_api_key, collection_id)
+        .await?;
+
+    system_prompts_manager
+        .delete_system_prompt(params.id)
         .await
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
@@ -217,8 +222,12 @@ async fn update_system_prompt_v1(
         usage_mode: params.usage_mode.clone(),
     };
 
-    write_side
-        .update_system_prompt(write_api_key, collection_id, system_prompt)
+    let system_prompts_manager = write_side
+        .get_system_prompts_manager(write_api_key, collection_id)
+        .await?;
+
+    system_prompts_manager
+        .update_system_prompt(system_prompt)
         .await
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
