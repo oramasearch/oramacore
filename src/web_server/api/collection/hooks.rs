@@ -38,8 +38,13 @@ async fn add_hook_v0(
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
     let NewHookPostParams { name, code } = params;
-    write_side
-        .insert_javascript_hook(write_api_key, collection_id, index_id, name, code)
+
+    let hooks_runtime = write_side
+        .get_hooks_runtime(write_api_key, collection_id)
+        .await?;
+
+    hooks_runtime
+        .insert_javascript_hook(index_id, name, code)
         .await
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
@@ -57,8 +62,13 @@ async fn get_hook_v0(
     params: Query<GetHookQueryParams>,
 ) -> Result<Json<serde_json::Value>, impl IntoResponse> {
     let GetHookQueryParams { name } = params.0;
-    write_side
-        .get_javascript_hook(write_api_key, collection_id, index_id, name)
+
+    let hooks_runtime = write_side
+        .get_hooks_runtime(write_api_key, collection_id)
+        .await?;
+
+    hooks_runtime
+        .get_javascript_hook(index_id, name)
         .await
         .map(|r| match r {
             Some(full_hook) => Json(json!({ "hook": full_hook.to_string() })),
@@ -79,8 +89,12 @@ async fn delete_hook_v0(
 ) -> impl IntoResponse {
     let name = params.name;
 
-    write_side
-        .delete_javascript_hook(write_api_key, collection_id, name)
+    let hooks_runtime = write_side
+        .get_hooks_runtime(write_api_key, collection_id)
+        .await?;
+
+    hooks_runtime
+        .delete_javascript_hook(name)
         .await
         .map(|_| Json(json!({ "success": true })))
 }
@@ -95,8 +109,12 @@ async fn list_hooks_v0(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
 ) -> impl IntoResponse {
-    write_side
-        .list_javascript_hooks(write_api_key, collection_id)
+    let hooks_runtime = write_side
+        .get_hooks_runtime(write_api_key, collection_id)
+        .await?;
+
+    hooks_runtime
+        .list_javascript_hooks()
         .await
         .map(|hooks| Json(json!(hooks)))
 }

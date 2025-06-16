@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::warn;
 
+use crate::collection_manager::sides::write::{CollectionReadLock, WriteError};
 use crate::metrics::js::JS_CALCULATION_TIME;
 use crate::metrics::JSOperationLabels;
 use crate::types::{CollectionId, IndexId};
@@ -265,4 +266,72 @@ impl Debug for HooksRuntime {
 pub enum SelectEmbeddingPropertiesReturnType {
     Properties(Vec<String>),
     Text(String),
+}
+
+pub struct CollectionHooksRuntime<'w> {
+    hooks_runtime: Arc<HooksRuntime>,
+    lock: CollectionReadLock<'w>,
+}
+
+impl<'w> CollectionHooksRuntime<'w> {
+    pub fn new(hooks_runtime: Arc<HooksRuntime>, lock: CollectionReadLock<'w>) -> Self {
+        Self {
+            hooks_runtime,
+            lock,
+        }
+    }
+
+    pub async fn insert_javascript_hook(
+        &self,
+        index_id: IndexId,
+        name: HookName,
+        code: String,
+    ) -> Result<(), WriteError> {
+        let index = self
+            .lock
+            .get_index(index_id)
+            .await
+            .ok_or_else(|| WriteError::IndexNotFound(self.lock.id, index_id))?;
+        index
+            .switch_to_embedding_hook(self.hooks_runtime.clone())
+            .await
+            .context("Cannot set embedding hook")?;
+
+        self.hooks_runtime
+            .insert_hook(self.lock.id, index_id, name.clone(), code)
+            .await
+            .context("Cannot insert hook")?;
+
+        Ok(())
+    }
+
+    pub async fn get_javascript_hook(
+        &self,
+        index_id: IndexId,
+        name: HookName,
+    ) -> Result<Option<String>, WriteError> {
+        Ok(self
+            .hooks_runtime
+            .get_hook(self.lock.id, index_id, name)
+            .await
+            .map(|hook| hook.code))
+    }
+
+    pub async fn delete_javascript_hook(
+        &self,
+        _name: HookName,
+    ) -> Result<Option<String>, WriteError> {
+        Err(WriteError::Generic(anyhow::anyhow!("Not implemented yet."))) // @todo: implement delete hook in HooksRuntime and CollectionsWriter
+    }
+
+    pub async fn list_javascript_hooks(&self) -> Result<HashMap<HookName, String>, WriteError> {
+        Ok(self
+            .hooks_runtime
+            .list_hooks(self.lock.id)
+            .await
+            .context("Cannot list hooks")?
+            .into_iter()
+            .map(|(name, hook)| (name, hook.code))
+            .collect())
+    }
 }

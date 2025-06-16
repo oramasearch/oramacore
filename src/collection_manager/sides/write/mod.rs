@@ -18,7 +18,7 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
+    hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
     segments::{Segment, SegmentInterface},
     system_prompts::SystemPromptInterface,
     triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
@@ -37,6 +37,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
 
+pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
@@ -48,8 +49,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::sides::{
-        system_prompts::CollectionSystemPromptsInterface,
-        write::{collection::IndexReadLock, collections::CollectionReadLock},
+        system_prompts::CollectionSystemPromptsInterface, write::collection::IndexReadLock,
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
@@ -835,35 +835,6 @@ impl WriteSide {
         Ok(docs)
     }
 
-    pub async fn insert_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-        code: String,
-    ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
-
-        let index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-        index
-            .switch_to_embedding_hook(self.hook_runtime.clone())
-            .await
-            .context("Cannot set embedding hook")?;
-
-        self.hook_runtime
-            .insert_hook(collection_id, index_id, name.clone(), code)
-            .await
-            .context("Cannot insert hook")?;
-
-        Ok(())
-    }
-
     pub async fn list_collections(
         &self,
         master_api_key: ApiKey,
@@ -884,53 +855,6 @@ impl WriteSide {
             None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
         Ok(collection.as_dto().await)
-    }
-
-    pub async fn get_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-    ) -> Result<Option<String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Ok(self
-            .hook_runtime
-            .get_hook(collection_id, index_id, name)
-            .await
-            .map(|hook| hook.code))
-    }
-
-    pub async fn delete_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        _name: HookName,
-    ) -> Result<Option<String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Err(WriteError::Generic(anyhow::anyhow!("Not implemented yet."))) // @todo: implement delete hook in HooksRuntime and CollectionsWriter
-    }
-
-    pub async fn list_javascript_hooks(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HashMap<HookName, String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Ok(self
-            .hook_runtime
-            .list_hooks(collection_id)
-            .await
-            .context("Cannot list hooks")?
-            .into_iter()
-            .map(|(name, hook)| (name, hook.code))
-            .collect())
     }
 
     pub async fn insert_segment(
@@ -1244,6 +1168,20 @@ impl WriteSide {
         Ok(CollectionSystemPromptsInterface::new(
             self.system_prompts.clone(),
             collection_id,
+        ))
+    }
+
+    pub async fn get_hooks_runtime(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionHooksRuntime, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionHooksRuntime::new(
+            self.hook_runtime.clone(),
+            collection,
         ))
     }
 

@@ -139,7 +139,7 @@ async fn delete_segment_v1(
     write_side
         .delete_segment(write_api_key, collection_id, params.id)
         .await
-        .map(|r| Json(json!({ "success": true })))
+        .map(|_| Json(json!({ "success": true })))
 }
 
 #[endpoint(

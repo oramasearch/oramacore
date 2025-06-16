@@ -222,9 +222,13 @@ export default {
 
     test_context
         .writer
-        .insert_javascript_hook(
+        .get_hooks_runtime(
             collection_client.write_api_key,
             collection_client.collection_id,
+        )
+        .await
+        .unwrap()
+        .insert_javascript_hook(
             index_client.index_id,
             HookName::SelectEmbeddingsProperties,
             code.to_string(),
