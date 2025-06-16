@@ -1,16 +1,17 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
 use crate::{
-    ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector,
-    ai::OramaModel,
+    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
-        field_name_to_path, hooks::HooksRuntime, write::OramaModelSerializable,
+        field_name_to_path,
+        hooks::HooksRuntime,
+        write::{OramaModelSerializable, WriteError},
         CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
         ReplaceIndexReason, WriteOperation,
     },
@@ -213,10 +214,10 @@ impl CollectionWriter {
         &self,
         index_id: IndexId,
         embedding: IndexEmbeddingsCalculation,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let mut indexes = self.indexes.write().await;
         if indexes.contains_key(&index_id) {
-            bail!("Index with id {} already exists", index_id);
+            return Err(WriteError::IndexAlreadyExists(self.id, index_id));
         }
 
         let runtime_config = self.runtime_config.read().await;
@@ -277,13 +278,13 @@ impl CollectionWriter {
         copy_from: IndexId,
         new_index_id: IndexId,
         embedding: Option<IndexEmbeddingsCalculation>,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let indexes_lock = self.indexes.write().await;
         let Some(copy_from_index) = indexes_lock.get(&copy_from) else {
-            bail!("Index with id {} not found", copy_from);
+            return Err(WriteError::IndexNotFound(self.id, copy_from));
         };
         if indexes_lock.contains_key(&new_index_id) {
-            bail!("Index with id {} already exists", new_index_id);
+            return Err(WriteError::IndexAlreadyExists(self.id, new_index_id));
         }
 
         // Use "copy_from" index embedding calculation as default
@@ -336,7 +337,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>> {
+    pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>, WriteError> {
         let mut indexes = self.indexes.write().await;
         let index = match indexes.remove(&index_id) {
             Some(index) => index,
@@ -408,12 +409,11 @@ impl CollectionWriter {
         doc_id
     }
 
-    pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<()> {
-        if self.write_api_key == api_key {
-            Ok(())
-        } else {
-            Err(anyhow!("Invalid write api key"))
+    pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<(), WriteError> {
+        if self.write_api_key != api_key {
+            return Err(WriteError::InvalidWriteApiKey(self.id));
         }
+        Ok(())
     }
 
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
@@ -481,10 +481,10 @@ impl CollectionWriter {
         temp_index_id: IndexId,
         reason: ReplaceIndexReason,
         reference: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let indexes_lock = self.indexes.read().await;
         if !indexes_lock.contains_key(&runtime_index_id) {
-            bail!("Index with id {} not found", runtime_index_id);
+            return Err(WriteError::IndexNotFound(self.id, runtime_index_id));
         }
         drop(indexes_lock);
 
@@ -493,7 +493,7 @@ impl CollectionWriter {
         let mut temp_indexes_lock = self.temp_indexes.write().await;
         let mut temp_index = match temp_indexes_lock.remove(&temp_index_id) {
             Some(index) => index,
-            None => bail!("Temporary index with id {} not found", temp_index_id),
+            None => return Err(WriteError::TempIndexNotFound(self.id, temp_index_id)),
         };
         temp_index.set_index_id(runtime_index_id);
         let mut indexes_lock = self.indexes.write().await;

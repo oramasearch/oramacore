@@ -28,7 +28,9 @@ use crate::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
         triggers::Trigger,
-        write::{CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig},
+        write::{
+            CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
+        },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     types::{
@@ -687,7 +689,7 @@ impl TestIndexClient {
     pub async fn unchecked_insert_documents(
         &self,
         documents: DocumentList,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         self.writer
             .insert_documents(
                 self.write_api_key,
@@ -854,7 +856,7 @@ impl TestIndexClient {
     pub async fn update_documents(
         &self,
         req: UpdateDocumentRequest,
-    ) -> Result<UpdateDocumentsResult> {
+    ) -> Result<UpdateDocumentsResult, WriteError> {
         self.writer
             .update_documents(self.write_api_key, self.collection_id, self.index_id, req)
             .await

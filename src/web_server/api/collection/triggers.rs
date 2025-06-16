@@ -156,7 +156,7 @@ async fn insert_trigger_v1(
         segment_id: params.segment_id.clone(),
     };
 
-    match write_side
+    write_side
         .insert_trigger(
             write_api_key,
             collection_id,
@@ -164,30 +164,23 @@ async fn insert_trigger_v1(
             Some(trigger.id),
         )
         .await
-    {
-        Ok(new_trigger) => match parse_trigger_id(new_trigger.id.clone()) {
-            Some(parsed_trigger_id) => Ok((
-                StatusCode::CREATED,
-                Json(
-                    json!({ "success": true, "id": parsed_trigger_id.trigger_id, "trigger": Trigger {
-                        id: parsed_trigger_id.trigger_id,
-                        ..new_trigger
-                    } }),
-                ),
-            )),
-            None => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "Failed to parse trigger ID" })),
-            )),
-        },
-        Err(e) => {
-            print_error(&e, "Error inserting trigger");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|new_trigger| {
+            match parse_trigger_id(new_trigger.id.clone()) {
+                Some(parsed_trigger_id) => Ok((
+                    StatusCode::CREATED,
+                    Json(
+                        json!({ "success": true, "id": parsed_trigger_id.trigger_id, "trigger": Trigger {
+                            id: parsed_trigger_id.trigger_id,
+                            ..new_trigger
+                        } }),
+                    ),
+                )),
+                None => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to parse trigger ID" })),
+                )),
+            }
+        })
 }
 
 #[endpoint(
@@ -201,19 +194,10 @@ async fn delete_trigger_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteTriggerParams>,
 ) -> impl IntoResponse {
-    match write_side
+    write_side
         .delete_trigger(write_api_key, collection_id, params.id)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error deleting trigger");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| Json(json!({ "success": true })))
 }
 
 #[endpoint(
@@ -282,21 +266,15 @@ async fn update_trigger_v1(
                         Json(json!({ "error": "Unable to get the trigger after updating it." })),
                     )),
                 },
-                Err(e) => {
-                    print_error(&e, "Error updating trigger");
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": e.to_string() })),
-                    ))
-                }
+                Err(e) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )),
             }
         }
-        Err(e) => {
-            print_error(&e, "Error getting trigger");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )),
     }
 }
