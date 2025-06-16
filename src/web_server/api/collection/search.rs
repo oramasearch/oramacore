@@ -2,7 +2,6 @@ use std::{convert::Infallible, sync::Arc};
 
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
     response::{sse::Event, IntoResponse, Sse},
     Json, Router,
 };
@@ -15,7 +14,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
 use crate::{
-    ai::advanced_autoquery::QueryMappedSearchResult,
     collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams},
     web_server::api::util::print_error,
@@ -46,21 +44,13 @@ async fn search(
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<SearchParams>,
-) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
-    let output = read_side.search(read_api_key, collection_id, json).await;
-
-    match output {
-        Ok(data) => Ok((StatusCode::OK, Json(data))),
-        Err(e) => {
-            print_error(&e, "Error searching collection");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+    read_side
+        .search(read_api_key, collection_id, json)
+        .await
+        .map(Json)
 }
 
 #[endpoint(
@@ -73,23 +63,13 @@ async fn nlp_search(
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<NLPSearchRequest>,
-) -> Result<(StatusCode, Json<Vec<QueryMappedSearchResult>>), (StatusCode, Json<serde_json::Value>)>
-{
+) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
-    match read_side
+    read_side
         .nlp_search(read_side.clone(), read_api_key, collection_id, json)
         .await
-    {
-        Ok(output) => Ok((StatusCode::OK, Json(output))),
-        Err(e) => {
-            print_error(&e, "Error in NLP search");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(Json)
 }
 
 #[endpoint(
@@ -130,7 +110,6 @@ async fn nlp_search_streamed(
                 }
             }
             Err(e) => {
-                print_error(&e, "Error in NLP search stream");
                 let _ = tx.send(Ok(
                     Event::default().data(json!({ "error": e.to_string() }).to_string())
                 ));
@@ -150,26 +129,17 @@ async fn stats(
     collection_id: CollectionId,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
-) -> Result<impl IntoResponse, (StatusCode, impl IntoResponse)> {
+) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
     // We don't want to expose the variants on HTTP API, so we force `with_keys: false`
     // Anyway, if requested, we could add it on this enpoint in the future.
-    match read_side
+    read_side
         .collection_stats(
             read_api_key,
             collection_id,
             CollectionStatsRequest { with_keys: false },
         )
         .await
-    {
-        Ok(data) => Ok(Json(data)),
-        Err(e) => {
-            print_error(&e, "Error getting collection stats");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(Json)
 }

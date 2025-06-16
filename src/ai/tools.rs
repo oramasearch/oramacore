@@ -5,11 +5,12 @@ use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, Function
 use orama_js_pool::{JSExecutor, JSExecutorConfig, JSExecutorError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 use tokio::{runtime::Builder, task::LocalSet};
 
 use crate::{
     code_parser::tool_parser::validate_js_exports,
-    collection_manager::sides::generic_kv::KV,
+    collection_manager::sides::{generic_kv::KV, read::ReadError, write::WriteError},
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 
@@ -27,6 +28,32 @@ pub enum ToolExecutionReturnType {
     FunctionParameters(ToolExecutionResult),
     #[serde(rename = "functionResult")]
     FunctionResult(ToolExecutionResult),
+}
+
+#[derive(Debug, Error)]
+pub enum ToolError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("write error: {0}")]
+    WriteError(#[from] WriteError),
+    #[error("read error: {0}")]
+    ReadError(#[from] ReadError),
+    #[error("tool {0} contains invalid code: {1}")]
+    ValidationError(String, String),
+    #[error("tool {0} doesn't compile: {1}")]
+    CompilationError(String, String),
+    #[error("tool {0} already exists")]
+    Duplicate(String),
+    #[error("tool {0} not found in collection {1}")]
+    NotFound(String, CollectionId),
+    #[error("collection {0} doesn't have any tool")]
+    NoTools(CollectionId),
+    #[error("Tool {1} from collection {1} returns an JSON error: {2:?}")]
+    ExecutionSerializationError(CollectionId, String, serde_json::Error),
+    #[error("Tool {1} from collection {1} goes in timeout")]
+    ExecutionTimeout(CollectionId, String),
+    #[error("Tool {1} from collection {1} exited with this error: {2:?}")]
+    ExecutionError(CollectionId, String, JSExecutorError),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -62,6 +89,7 @@ impl Tool {
     }
 }
 
+#[derive(Clone)]
 pub struct ToolsRuntime {
     pub kv: Arc<KV>,
     pub llm_service: Arc<LLMService>,
@@ -72,7 +100,7 @@ impl ToolsRuntime {
         ToolsRuntime { kv, llm_service }
     }
 
-    pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<()> {
+    pub async fn insert(&self, collection_id: CollectionId, tool: Tool) -> Result<(), ToolError> {
         // Validate the tool code if it exists
         // It must follow the expected format:
         // 1. Use `export default` to export a value
@@ -84,19 +112,18 @@ impl ToolsRuntime {
             match validate_js_exports(code) {
                 Ok(validation) => {
                     if !validation.is_valid {
-                        anyhow::bail!(
-                            "Tool {} contains invalid code: {}",
+                        return Err(ToolError::ValidationError(
                             tool.id,
                             validation
                                 .error_reason
-                                .unwrap_or("Unknown error".to_string())
-                        );
+                                .unwrap_or("Unknown error".to_string()),
+                        ));
                     };
 
                     validation.function_name
                 }
                 Err(e) => {
-                    anyhow::bail!("Tool {} contains invalid code: {}", tool.id, e);
+                    return Err(ToolError::CompilationError(tool.id, e));
                 }
             }
         } else {
@@ -108,7 +135,7 @@ impl ToolsRuntime {
         // Since we use function names as keys, it may be easier to unintentionally overwrite a tool.
         // Users should delete the tool first and then insert it again (or update an existing one).
         if let Some(_existing_tool) = self.get(collection_id, tool.id.clone()).await? {
-            anyhow::bail!("Tool with id {} already exists", tool.id);
+            return Err(ToolError::Duplicate(tool.id));
         }
 
         self.kv.insert(key, tool).await?;
@@ -116,17 +143,25 @@ impl ToolsRuntime {
         Ok(())
     }
 
-    pub async fn get(&self, collection_id: CollectionId, tool_id: String) -> Result<Option<Tool>> {
+    pub async fn get(
+        &self,
+        collection_id: CollectionId,
+        tool_id: String,
+    ) -> Result<Option<Tool>, ToolError> {
         let key = self.format_key(collection_id, &tool_id);
 
         match self.kv.get::<Tool>(&key).await {
             None => Ok(None),
-            Some(Err(e)) => Err(e),
+            Some(Err(e)) => Err(e.into()),
             Some(Ok(tool)) => Ok(Some(tool)),
         }
     }
 
-    pub async fn delete(&self, collection_id: CollectionId, tool_id: String) -> Result<()> {
+    pub async fn delete(
+        &self,
+        collection_id: CollectionId,
+        tool_id: String,
+    ) -> Result<(), ToolError> {
         let key = self.format_key(collection_id, &tool_id);
 
         self.kv.remove(&key).await?;
@@ -134,13 +169,16 @@ impl ToolsRuntime {
         Ok(())
     }
 
-    pub async fn has_tools(&self, collection_id: CollectionId) -> Result<bool> {
+    pub async fn has_tools(&self, collection_id: CollectionId) -> Result<bool, ToolError> {
         let tools = self.list_by_collection(collection_id).await?;
 
         Ok(!tools.is_empty())
     }
 
-    pub async fn list_by_collection(&self, collection_id: CollectionId) -> Result<Vec<Tool>> {
+    pub async fn list_by_collection(
+        &self,
+        collection_id: CollectionId,
+    ) -> Result<Vec<Tool>, ToolError> {
         let prefix = format!("{}:tool:", collection_id.as_str());
 
         let segments = self.kv.prefix_scan(&prefix).await.context(format!(
@@ -157,14 +195,16 @@ impl ToolsRuntime {
         messages: Vec<InteractionMessage>,
         tool_ids: Option<Vec<String>>,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<Vec<ToolExecutionReturnType>>> {
+    ) -> Result<Option<Vec<ToolExecutionReturnType>>, ToolError> {
         let tools = match tool_ids {
             Some(tool_ids) => {
                 let mut tools = Vec::new();
                 for tool_id in tool_ids {
                     match self.get(collection_id, tool_id.clone()).await? {
                         Some(tool) => tools.push(tool),
-                        None => anyhow::bail!("Tool with id {} not found", tool_id),
+                        None => {
+                            return Err(ToolError::NotFound(tool_id, collection_id));
+                        }
                     }
                 }
                 tools
@@ -173,7 +213,7 @@ impl ToolsRuntime {
                 let all_tools = self.list_by_collection(collection_id).await?;
 
                 if all_tools.is_empty() {
-                    anyhow::bail!("No tools found for collection {}", collection_id.as_str());
+                    return Err(ToolError::NoTools(collection_id));
                 }
 
                 all_tools
@@ -215,7 +255,9 @@ impl ToolsRuntime {
                     // But I don't trust myself enough to use `unwrap` here. Tommaso you should be proud.
                     let full_tool = match full_tool {
                         Some(tool) => tool,
-                        None => anyhow::bail!("Tool with id {} not found", tool.name),
+                        None => {
+                            return Err(ToolError::NotFound(tool.name.clone(), collection_id));
+                        }
                     };
 
                     // As said before, some tools may have some code to execute, while others may just have parameters.
@@ -225,10 +267,13 @@ impl ToolsRuntime {
                         // But as a general rule, I'd prefer to use something like `json-repair` to ensure the JSON integrity.
                         // @todo: check if we want to use json-repair here
                         let arguments_as_json_value: Value = serde_json::from_str(&tool.arguments)
-                            .context(format!(
-                                "Cannot deserialize arguments for tool {}. Not a valid JSON.",
-                                &tool.name
-                            ))?;
+                            .map_err(|e| {
+                                ToolError::ExecutionSerializationError(
+                                    collection_id,
+                                    tool.name.clone(),
+                                    e,
+                                )
+                            })?;
 
                         // Deno is not thread-safe, so we need to spawn a new thread for each tool execution.
                         // We need to use a oneshot channel to send the result back to the main thread.
@@ -279,27 +324,29 @@ impl ToolsRuntime {
                         });
 
                         // We need to wait for the function call to finish and get the result.
-                        let function_call = rx.await.context(format!(
-                            "Failed to execute tool {}. Timeout.",
-                            &full_tool.id
-                        ))?;
+                        let function_call = rx.await.map_err(|e| {
+                            ToolError::ExecutionTimeout(collection_id, full_tool.id)
+                        })?;
 
                         // If the function call was successful, we push the result to the results vector.
                         // For now, we'll bail if the function call fails.
                         // @todo: handle this error more gracefully.
-                        if let Ok(result) = function_call {
-                            results.push(ToolExecutionReturnType::FunctionResult(
-                                ToolExecutionResult {
-                                    tool_id: tool.name.clone(),
-                                    result: result.to_string(),
-                                },
-                            ));
-                        } else {
-                            anyhow::bail!(
-                                "Error executing tool {}: {}",
-                                &tool.name,
-                                function_call.unwrap_err()
-                            );
+                        match function_call {
+                            Ok(result) => {
+                                results.push(ToolExecutionReturnType::FunctionResult(
+                                    ToolExecutionResult {
+                                        tool_id: tool.name.clone(),
+                                        result: result.to_string(),
+                                    },
+                                ));
+                            }
+                            Err(e) => {
+                                return Err(ToolError::ExecutionError(
+                                    collection_id,
+                                    tool.name.clone(),
+                                    e,
+                                ))
+                            }
                         }
                     } else {
                         // Case when we just need to return the parameters.
@@ -319,5 +366,63 @@ impl ToolsRuntime {
 
     fn format_key(&self, collection_id: CollectionId, tool_id: &str) -> String {
         format!("{}:tool:{}", collection_id, tool_id)
+    }
+}
+
+pub struct CollectionToolsRuntime {
+    tools: ToolsRuntime,
+    collection_id: CollectionId,
+}
+
+impl CollectionToolsRuntime {
+    pub fn new(tools: ToolsRuntime, collection_id: CollectionId) -> Self {
+        CollectionToolsRuntime {
+            tools,
+            collection_id,
+        }
+    }
+
+    pub async fn insert_tool(&self, tool: Tool) -> Result<(), ToolError> {
+        self.tools
+            .insert(self.collection_id, tool.clone())
+            .await
+            .context("Cannot insert tool")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_tool(&self, tool_id: String) -> Result<(), ToolError> {
+        self.tools
+            .delete(self.collection_id, tool_id.clone())
+            .await
+            .context("Cannot delete tool")?;
+
+        Ok(())
+    }
+
+    pub async fn update_tool(&self, tool: Tool) -> Result<(), ToolError> {
+        self.delete_tool(tool.id.clone()).await?;
+        self.insert_tool(tool).await?;
+
+        Ok(())
+    }
+
+    pub async fn get_tool(&self, tool_id: String) -> Result<Option<Tool>, ToolError> {
+        self.tools.get(self.collection_id, tool_id).await
+    }
+
+    pub async fn get_all_tools_by_collection(&self) -> Result<Vec<Tool>, ToolError> {
+        self.tools.list_by_collection(self.collection_id).await
+    }
+
+    pub async fn execute_tools(
+        &self,
+        messages: Vec<InteractionMessage>,
+        tool_ids: Option<Vec<String>>,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<Option<Vec<ToolExecutionReturnType>>, ToolError> {
+        self.tools
+            .execute_tools(self.collection_id, messages, tool_ids, llm_config)
+            .await
     }
 }

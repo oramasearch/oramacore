@@ -259,7 +259,7 @@ impl CollectionsWriter {
 
 pub struct CollectionReadLock<'guard> {
     lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
-    id: CollectionId,
+    pub id: CollectionId,
 }
 
 impl<'guard> CollectionReadLock<'guard> {

@@ -18,10 +18,10 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
-    segments::{Segment, SegmentInterface},
-    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
-    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
+    hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
+    segments::{CollectionSegmentInterface, SegmentInterface},
+    system_prompts::SystemPromptInterface,
+    triggers::TriggerInterface,
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -37,19 +37,20 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{debug, error, info, trace};
 
+pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
-        gpu::LocalGPUManager,
         llms::LLMService,
-        tools::{Tool, ToolsRuntime},
-        AIService, OramaModel, RemoteLLMProvider,
+        tools::{CollectionToolsRuntime, ToolsRuntime},
+        AIService, OramaModel,
     },
     collection_manager::sides::{
-        write::{collection::IndexReadLock, collections::CollectionReadLock},
+        system_prompts::CollectionSystemPromptsInterface,
+        triggers::WriteCollectionTriggerInterface, write::collection::IndexReadLock,
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
@@ -58,8 +59,8 @@ use crate::{
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
         DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
-        UpdateDocumentRequest, UpdateDocumentsResult,
+        IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest, UpdateDocumentRequest,
+        UpdateDocumentsResult,
     },
 };
 
@@ -67,7 +68,7 @@ use crate::{
 pub enum WriteError {
     #[error("Invalid master API key")]
     InvalidMasterApiKey,
-    #[error("Cannot create collection: {0}")]
+    #[error("Generic error: {0}")]
     Generic(#[from] anyhow::Error),
     #[error("Collection already exists: {0}")]
     CollectionAlreadyExists(CollectionId),
@@ -121,9 +122,8 @@ pub struct WriteSide {
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
-    local_gpu_manager: Arc<LocalGPUManager>,
-    master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+    master_api_key: ApiKey,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
@@ -149,7 +149,6 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
-        local_gpu_manager: Arc<LocalGPUManager>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
@@ -233,7 +232,6 @@ impl WriteSide {
             system_prompts,
             tools,
             kv,
-            local_gpu_manager,
             llm_service,
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
@@ -838,35 +836,6 @@ impl WriteSide {
         Ok(docs)
     }
 
-    pub async fn insert_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-        code: String,
-    ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
-
-        let index = collection
-            .get_index(index_id)
-            .await
-            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-        index
-            .switch_to_embedding_hook(self.hook_runtime.clone())
-            .await
-            .context("Cannot set embedding hook")?;
-
-        self.hook_runtime
-            .insert_hook(collection_id, index_id, name.clone(), code)
-            .await
-            .context("Cannot insert hook")?;
-
-        Ok(())
-    }
-
     pub async fn list_collections(
         &self,
         master_api_key: ApiKey,
@@ -887,385 +856,6 @@ impl WriteSide {
             None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
         Ok(collection.as_dto().await)
-    }
-
-    pub async fn get_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-    ) -> Result<Option<String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Ok(self
-            .hook_runtime
-            .get_hook(collection_id, index_id, name)
-            .await
-            .map(|hook| hook.code))
-    }
-
-    pub async fn delete_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        _name: HookName,
-    ) -> Result<Option<String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Err(WriteError::Generic(anyhow::anyhow!("Not implemented yet."))) // @todo: implement delete hook in HooksRuntime and CollectionsWriter
-    }
-
-    pub async fn list_javascript_hooks(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HashMap<HookName, String>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        Ok(self
-            .hook_runtime
-            .list_hooks(collection_id)
-            .await
-            .context("Cannot list hooks")?
-            .into_iter()
-            .map(|(name, hook)| (name, hook.code))
-            .collect())
-    }
-
-    pub async fn validate_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<SystemPromptValidationResponse, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .system_prompts
-            .validate_prompt(system_prompt, llm_config)
-            .await?;
-
-        Ok(r)
-    }
-
-    pub async fn insert_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .insert(collection_id, system_prompt.clone())
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt_id: String,
-    ) -> Result<Option<SystemPrompt>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .system_prompts
-            .delete(collection_id, system_prompt_id.clone())
-            .await
-            .context("Cannot delete system prompt")?;
-        Ok(r)
-    }
-
-    pub async fn update_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .delete(collection_id, system_prompt.id.clone())
-            .await
-            .context("Cannot delete system prompt")?;
-        self.system_prompts
-            .insert(collection_id, system_prompt)
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
-    pub async fn insert_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.segments
-            .insert(collection_id, segment.clone())
-            .await
-            .context("Cannot insert segment")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Option<Segment>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .segments
-            .delete(collection_id, segment_id.clone())
-            .await
-            .context("Cannot delete segment")?;
-        Ok(r)
-    }
-
-    pub async fn update_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.segments
-            .delete(collection_id, segment.id.clone())
-            .await
-            .context("Cannot delete segment")?;
-        self.segments
-            .insert(collection_id, segment)
-            .await
-            .context("Cannot insert segment")?;
-
-        Ok(())
-    }
-
-    pub async fn insert_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-        trigger_id: Option<String>,
-    ) -> Result<Trigger, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let final_trigger_id = match trigger_id {
-            Some(mut id) => {
-                let required_prefix = format!("{}:trigger:", collection_id.as_str());
-
-                if !id.starts_with(&required_prefix) {
-                    id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
-                }
-
-                id
-            }
-            None => {
-                let cuid = cuid2::create_id();
-                get_trigger_key(collection_id, cuid, trigger.segment_id.clone())
-            }
-        };
-
-        let trigger = Trigger {
-            id: final_trigger_id,
-            name: trigger.name,
-            description: trigger.description,
-            response: trigger.response,
-            segment_id: trigger.segment_id,
-        };
-
-        self.triggers
-            .insert(trigger.clone())
-            .await
-            .context("Cannot insert trigger")?;
-
-        Ok(trigger)
-    }
-
-    pub async fn get_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Trigger, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let trigger = self
-            .triggers
-            .get(collection_id, trigger_id)
-            .await
-            .context("Cannot insert trigger")?;
-        let trigger = match trigger {
-            Some(trigger) => trigger,
-            None => return Err(WriteError::Generic(anyhow::anyhow!("Trigger not found"))),
-        };
-
-        Ok(trigger)
-    }
-
-    pub async fn delete_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let r = self
-            .triggers
-            .delete(collection_id, trigger_id)
-            .await
-            .context("Cannot delete trigger")?;
-        Ok(r)
-    }
-
-    pub async fn update_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-    ) -> Result<Option<Trigger>, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let trigger_key = get_trigger_key(
-            collection_id,
-            trigger.id.clone(),
-            trigger.segment_id.clone(),
-        );
-
-        let new_trigger = Trigger {
-            id: trigger_key.clone(),
-            ..trigger
-        };
-
-        self.insert_trigger(write_api_key, collection_id, new_trigger, Some(trigger.id))
-            .await
-            .context("Cannot insert updated trigger")?;
-
-        match parse_trigger_id(trigger_key.clone()) {
-            Some(key_content) => {
-                let updated_trigger = self
-                    .triggers
-                    .get(collection_id, key_content.trigger_id.clone())
-                    .await
-                    .context("Cannot get updated trigger")?;
-
-                match updated_trigger {
-                    Some(trigger) => Ok(Some(Trigger {
-                        id: key_content.trigger_id,
-                        ..trigger
-                    })),
-                    None => Err(WriteError::Generic(anyhow::anyhow!(
-                        "Cannot get updated trigger"
-                    ))),
-                }
-            }
-            None => Err(WriteError::Generic(anyhow::anyhow!(
-                "Cannot parse trigger id"
-            ))),
-        }
-    }
-
-    pub async fn insert_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.tools
-            .insert(collection_id, tool.clone())
-            .await
-            .context("Cannot insert tool")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool_id: String,
-    ) -> Result<(), WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.tools
-            .delete(collection_id, tool_id.clone())
-            .await
-            .context("Cannot delete tool")?;
-
-        Ok(())
-    }
-
-    pub async fn update_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<(), WriteError> {
-        self.delete_tool(write_api_key, collection_id, tool.id.clone())
-            .await?;
-        self.insert_tool(write_api_key, collection_id, tool).await?;
-
-        Ok(())
-    }
-
-    pub fn is_gpu_overloaded(&self) -> bool {
-        match self.local_gpu_manager.is_overloaded() {
-            Ok(overloaded) => overloaded,
-            Err(e) => {
-                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
-                true
-            }
-        }
-    }
-
-    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
-        self.llm_service.default_remote_models.clone()
-    }
-
-    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
-        match self.get_available_remote_llm_services() {
-            Some(services) => {
-                let mut rng = rand::rng();
-                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
-                services.into_iter().nth(random_index)
-            }
-            None => {
-                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
-                None
-            }
-        }
     }
 
     async fn add_documents_to_storage(
@@ -1437,6 +1027,77 @@ impl WriteSide {
         self.get_collection_with_write_key(collection_id, write_api_key)
             .await?;
         Ok(())
+    }
+
+    pub fn llm_service(&self) -> &LLMService {
+        &self.llm_service
+    }
+
+    pub async fn get_system_prompts_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSystemPromptsInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSystemPromptsInterface::new(
+            self.system_prompts.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_hooks_runtime(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionHooksRuntime, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionHooksRuntime::new(
+            self.hook_runtime.clone(),
+            collection,
+        ))
+    }
+
+    pub async fn get_tools_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionToolsRuntime, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionToolsRuntime::new(
+            self.tools.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_segments_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSegmentInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSegmentInterface::new(
+            self.segments.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_triggers_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<WriteCollectionTriggerInterface, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(WriteCollectionTriggerInterface::new(
+            self.triggers.clone(),
+            collection,
+        ))
     }
 }
 

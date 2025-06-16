@@ -33,10 +33,8 @@ async fn test_search_on_unknown_field() {
     println!("result: {:?}", result);
 
     assert!(result.is_err());
-    assert_eq!(
-        format!("{}", result.unwrap_err()),
-        "Cannot filter by \"unknown_field\": unknown field".to_string(),
-    );
+    assert!(format!("{:?}", result.unwrap_err())
+        .contains("Cannot filter by \"unknown_field\": unknown field",));
 
     drop(test_context);
 }

@@ -290,7 +290,7 @@ impl CollectionsReader {
 
 pub struct CollectionReadLock<'guard> {
     lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionReader>>,
-    id: CollectionId,
+    pub id: CollectionId,
 }
 
 impl<'guard> CollectionReadLock<'guard> {

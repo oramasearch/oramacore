@@ -9,8 +9,8 @@ use crate::{
     collection_manager::sides::{write::WriteSide, ReplaceIndexReason},
     types::{
         ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteCollection,
-        DeleteDocuments, DeleteIndex, DescribeCollectionResponse, DocumentList, IndexId,
-        ListDocumentInCollectionRequest, ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest,
+        DeleteDocuments, DeleteIndex, DocumentList, IndexId, ListDocumentInCollectionRequest,
+        ReindexConfig, ReplaceIndexRequest, UpdateDocumentRequest,
     },
 };
 
@@ -39,7 +39,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
 async fn get_collections(
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<Vec<DescribeCollectionResponse>>, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side.list_collections(master_api_key).await.map(Json)
 }
 
@@ -52,7 +52,7 @@ async fn get_collection_by_id(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
-) -> Result<Json<DescribeCollectionResponse>, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .get_collection_dto(master_api_key, collection_id)
         .await
@@ -68,7 +68,7 @@ async fn create_collection(
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
     Json(json): Json<CreateCollection>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side.create_collection(master_api_key, json).await
 }
 
@@ -81,7 +81,7 @@ async fn delete_collection(
     write_side: State<Arc<WriteSide>>,
     master_api_key: ApiKey,
     Json(json): Json<DeleteCollection>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     let collection_id = json.id;
     write_side
         .delete_collection(master_api_key, collection_id)
@@ -97,7 +97,7 @@ async fn list_document_in_collection(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<ListDocumentInCollectionRequest>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     let collection_id = json.id;
     write_side
         .list_document(write_api_key, collection_id)
@@ -115,7 +115,7 @@ async fn create_index(
     write_api_key: ApiKey,
     collection_id: CollectionId,
     Json(json): Json<CreateIndexRequest>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .create_index(write_api_key, collection_id, json)
         .await
@@ -131,7 +131,7 @@ async fn delete_index(
     write_api_key: ApiKey,
     collection_id: CollectionId,
     Json(json): Json<DeleteIndex>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .delete_index(write_api_key, collection_id, json.id)
         .await
@@ -148,7 +148,7 @@ async fn add_documents(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DocumentList>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     info!("Adding documents to collection {:?}", collection_id);
     write_side
         .insert_documents(write_api_key, collection_id, index_id, json)
@@ -167,7 +167,7 @@ async fn update_documents(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<UpdateDocumentRequest>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     info!("Update documents to collection {:?}", collection_id);
     write_side
         .update_documents(write_api_key, collection_id, index_id, json)
@@ -186,7 +186,7 @@ async fn delete_documents(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<DeleteDocuments>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     info!("Delete documents to collection {:?}", collection_id);
     write_side
         .delete_documents(write_api_key, collection_id, index_id, json)
@@ -203,7 +203,7 @@ async fn reindex(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<ReindexConfig>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .reindex(
             write_api_key,
@@ -226,7 +226,7 @@ async fn create_temp_index(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<CreateIndexRequest>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .create_temp_index(write_api_key, collection_id, index_id, json)
         .await
@@ -248,7 +248,7 @@ async fn replace_index(
     write_side: State<Arc<WriteSide>>,
     write_api_key: ApiKey,
     Json(json): Json<ReplaceIndexRequest>,
-) -> Result<impl IntoResponse, impl IntoResponse> {
+) -> impl IntoResponse {
     write_side
         .replace_index(
             write_api_key,

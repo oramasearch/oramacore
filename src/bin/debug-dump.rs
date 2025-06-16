@@ -4,7 +4,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use config::Config;
 use oramacore::{
-    ai::{llms::LLMService, AIService},
+    ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
     collection_manager::sides::read::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index,
@@ -77,9 +77,12 @@ async fn main() -> anyhow::Result<()> {
             let ai_service = AIService::new(config.ai_server.clone());
             let ai_service = Arc::new(ai_service);
 
+            let local_gpu_manager = Arc::new(LocalGPUManager::new());
+
             let llm_service = match LLMService::try_new(
                 config.ai_server.llm,
                 config.ai_server.remote_llms.clone(),
+                local_gpu_manager,
             ) {
                 Ok(service) => Arc::new(service),
                 Err(err) => {
