@@ -43,7 +43,6 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
-        gpu::LocalGPUManager,
         llms::LLMService,
         tools::{Tool, ToolsRuntime},
         AIService, OramaModel,

@@ -140,18 +140,20 @@ pub async fn build_orama(
         warn!("No local NVIDIA GPU detected. Also, no remote LLMs configured. All inference sessions will be disabled. Expect errors.");
     }
 
-    let llm_service =
-        match LLMService::try_new(config.ai_server.llm, config.ai_server.remote_llms.clone(), local_gpu_manager.clone()) {
-            Ok(service) => Arc::new(service),
-            Err(err) => {
-                anyhow::bail!(
-                    "Failed to create LLMService: {}. Please check your configuration.",
-                    err
-                );
-            }
-        };
+    let llm_service = match LLMService::try_new(
+        config.ai_server.llm,
+        config.ai_server.remote_llms.clone(),
+        local_gpu_manager.clone(),
+    ) {
+        Ok(service) => Arc::new(service),
+        Err(err) => {
+            anyhow::bail!(
+                "Failed to create LLMService: {}. Please check your configuration.",
+                err
+            );
+        }
+    };
 
-    
     #[cfg(feature = "writer")]
     let writer_sender_config: Option<OutputSideChannelType> =
         Some(config.writer_side.output.clone());

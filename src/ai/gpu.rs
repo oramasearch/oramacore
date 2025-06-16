@@ -24,7 +24,10 @@ impl std::fmt::Debug for LocalGPUManager {
         f.debug_struct("LocalGPUManager")
             .field("device_count", &self.device_count)
             .field("has_nvidia_gpu", &self.has_nvidia_gpu().unwrap_or(false))
-            .field("utilization", &self.get_gpu_utilization().unwrap_or_default())
+            .field(
+                "utilization",
+                &self.get_gpu_utilization().unwrap_or_default(),
+            )
             .finish()
     }
 }

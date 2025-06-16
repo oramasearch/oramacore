@@ -10,10 +10,10 @@ use async_openai::{
 };
 use futures::{Stream, StreamExt};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
-use std::sync::Arc;
 
 use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest};
 use crate::{
