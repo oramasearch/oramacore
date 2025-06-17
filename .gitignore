@@ -16,6 +16,7 @@ flamegraph.svg
 .direnv/
 .envrc
 
+.venv
 .env
 
 log.log
