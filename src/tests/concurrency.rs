@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::Utc;
 use serde_json::json;
-use tokio::{runtime::Builder, sync::Barrier, task::LocalSet, time::sleep};
+use tokio::{runtime::Builder, task::LocalSet, time::sleep};
 
 use crate::{
     tests::utils::{init_log, TestContext},
@@ -40,21 +40,15 @@ async fn test_insert_create_collection_concurrency() {
         .collect();
     let docs: DocumentList = docs.try_into().unwrap();
 
-    let barrier = Arc::new(Barrier::new(3)); // 2 threads + main
-
-    let barrier1 = Arc::clone(&barrier);
     let events1 = events.clone();
     let mut receiver1 = sender.subscribe();
     let insert_document_handler = std::thread::spawn(move || {
         let local = LocalSet::new();
         local.spawn_local(async move {
-            println!("barrier1.wait().await");
-            barrier1.wait().await;
             receiver1.recv().await.unwrap();
-            println!("barrier1.wait().await DONE");
+
             let start = Utc::now();
             index_client.insert_documents(docs).await.unwrap();
-
             events1.lock().unwrap().push(LogType::InsertDocument {
                 start,
                 end: Utc::now(),
@@ -69,13 +63,11 @@ async fn test_insert_create_collection_concurrency() {
             .block_on(local)
     });
 
-    let barrier2 = Arc::clone(&barrier);
     let events2 = events.clone();
     let mut receiver2 = sender.subscribe();
     let insert_collections_handler = std::thread::spawn(move || {
         let local = LocalSet::new();
         local.spawn_local(async move {
-            barrier2.wait().await;
             receiver2.recv().await.unwrap();
 
             for _ in 0..30 {
@@ -103,15 +95,10 @@ async fn test_insert_create_collection_concurrency() {
     // Let's the threads start...
     sleep(Duration::from_millis(100)).await;
 
-    println!("barrier.wait().await");
-    barrier.wait().await; // start both at same time
     sender.send(()).unwrap();
-    println!("barrier.wait().await DONE");
 
-    println!("insert_document_handler.join().unwrap()");
     insert_document_handler.join().unwrap();
     insert_collections_handler.join().unwrap();
-    println!("insert_document_handler.join().unwrap() DONE");
 
     let events = events.lock().unwrap();
     let (insert_doc_start, insert_doc_end) = events
@@ -133,6 +120,5 @@ async fn test_insert_create_collection_concurrency() {
         })
         .collect();
 
-    println!("--- {}", create_collection_during_insertion.len());
     assert!(!create_collection_during_insertion.is_empty());
 }
