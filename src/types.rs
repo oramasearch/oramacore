@@ -637,6 +637,11 @@ pub struct CreateCollection {
     pub embeddings_model: Option<OramaModelSerializable>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct CollectionCreated {
+    pub collection_id: CollectionId,
+}
+
 #[derive(Debug, Deserialize, Clone, ToSchema)]
 pub struct ReindexConfig {
     pub language: LanguageDTO,

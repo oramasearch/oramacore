@@ -69,7 +69,10 @@ async fn create_collection(
     master_api_key: ApiKey,
     Json(json): Json<CreateCollection>,
 ) -> impl IntoResponse {
-    write_side.create_collection(master_api_key, json).await
+    write_side
+        .create_collection(master_api_key, json)
+        .await
+        .map(Json)
 }
 
 #[endpoint(

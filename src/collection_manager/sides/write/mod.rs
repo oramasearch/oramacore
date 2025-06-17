@@ -57,10 +57,10 @@ use crate::{
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
-        DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, LanguageDTO, ReplaceIndexRequest, UpdateDocumentRequest,
-        UpdateDocumentsResult,
+        ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
+        DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
+        IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
+        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult,
     },
 };
 
@@ -309,8 +309,10 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         option: CreateCollection,
-    ) -> Result<(), WriteError> {
+    ) -> Result<CollectionCreated, WriteError> {
         self.check_master_api_key(master_api_key)?;
+
+        let collection_id = option.id;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let res = self
@@ -321,7 +323,7 @@ impl WriteSide {
 
         res?;
 
-        Ok(())
+        Ok(CollectionCreated { collection_id })
     }
 
     pub async fn create_index(
