@@ -2,6 +2,7 @@
 
 mod bugs;
 mod commit;
+mod concurrency;
 mod delete_doc;
 mod entity_lifecycle;
 mod facets;

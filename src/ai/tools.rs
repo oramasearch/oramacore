@@ -324,7 +324,7 @@ impl ToolsRuntime {
                         });
 
                         // We need to wait for the function call to finish and get the result.
-                        let function_call = rx.await.map_err(|e| {
+                        let function_call = rx.await.map_err(|_| {
                             ToolError::ExecutionTimeout(collection_id, full_tool.id)
                         })?;
 

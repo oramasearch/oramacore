@@ -45,8 +45,12 @@ use crate::{
 use anyhow::Context;
 
 pub fn init_log() {
-    if std::env::var("LOG").is_ok() {
-        std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+    if let Ok(a) = std::env::var("LOG") {
+        if a == "info" {
+            std::env::set_var("RUST_LOG", "oramacore=info,warn");
+        } else {
+            std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+        }
     }
     let _ = tracing_subscriber::fmt::try_init();
 }

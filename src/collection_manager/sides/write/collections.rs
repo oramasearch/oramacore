@@ -153,7 +153,9 @@ impl CollectionsWriter {
             self.automatic_embeddings_selector.clone(),
         );
 
+        println!("Acquiring write lock on collections");
         let mut collections = self.collections.write().await;
+        println!("Acquired write lock on collections");
 
         if collections.contains_key(&id) {
             return Err(WriteError::CollectionAlreadyExists(id));
