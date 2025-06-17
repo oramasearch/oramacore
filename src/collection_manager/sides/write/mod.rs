@@ -658,6 +658,7 @@ impl WriteSide {
 
         let document_count = update_document_request.documents.0.len();
 
+        // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
         let document_ids_map: HashMap<_, _> = update_document_request
             .documents
@@ -672,6 +673,7 @@ impl WriteSide {
         let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
         drop(document_id_storage);
 
+        // Prepare documents with IDs
         let mut documents: HashMap<String, Document> = update_document_request
             .documents
             .into_iter()
@@ -704,10 +706,28 @@ impl WriteSide {
             failed: 0,
         };
 
+        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
         let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut processed_count = -1;
+
         while let Some((doc_id, doc)) = doc_stream.next().await {
+            processed_count += 1;
+            if processed_count % 100 == 0 {
+                trace!("Processing document {}/{}", processed_count, document_count);
+            }
+
+            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                trace!("Sending operations");
+                self.op_sender
+                    .send_batch(index_operation_batch)
+                    .await
+                    .context("Cannot send index operation")?;
+                trace!("Operations sent");
+                index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
@@ -719,7 +739,7 @@ impl WriteSide {
                         self.document_storage
                             .insert(doc_id, doc_id_str.clone(), new_document.clone())
                             .await
-                            .context("Cannot inser document into document storage")?;
+                            .context("Cannot insert document into document storage")?;
 
                         self.op_sender
                             .send(WriteOperation::DocumentStorage(
@@ -736,9 +756,8 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        let mut batch = Vec::new();
                         match index
-                            .process_new_document(doc_id, new_document, &mut batch)
+                            .process_new_document(doc_id, new_document, &mut index_operation_batch)
                             .await
                             .context("Cannot process document")
                         {
@@ -759,18 +778,23 @@ impl WriteSide {
                                 result.failed += 1;
                             }
                         };
-
-                        self.op_sender
-                            .send_batch(batch)
-                            .await
-                            .context("Cannot send batch of operations")?;
                     }
                 }
             }
         }
+
+        if !index_operation_batch.is_empty() {
+            trace!("Sending operations");
+            self.op_sender
+                .send_batch(index_operation_batch)
+                .await
+                .context("Cannot send index operation")?;
+            trace!("Operations sent");
+        }
+
         self.document_storage.remove(docs_to_remove).await;
 
-        info!("All documents are updated");
+        debug!("All documents");
 
         Ok(result)
     }
