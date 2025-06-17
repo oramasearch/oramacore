@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Router};
+use axum::{extract::State, response::IntoResponse, Json, Router};
 use axum_openapi3::*;
 use serde_json::json;
 use tracing::info;
@@ -89,6 +89,7 @@ async fn delete_collection(
     write_side
         .delete_collection(master_api_key, collection_id)
         .await
+        .map(|_| Json(json!({})))
 }
 
 #[endpoint(
@@ -122,6 +123,7 @@ async fn create_index(
     write_side
         .create_index(write_api_key, collection_id, json)
         .await
+        .map(|_| Json(json!({})))
 }
 
 #[endpoint(
@@ -138,6 +140,7 @@ async fn delete_index(
     write_side
         .delete_index(write_api_key, collection_id, json.id)
         .await
+        .map(|_| Json(json!({})))
 }
 
 #[endpoint(
@@ -194,6 +197,7 @@ async fn delete_documents(
     write_side
         .delete_documents(write_api_key, collection_id, index_id, json)
         .await
+        .map(|_| Json(json!({ "message": "documents deleted" })))
 }
 
 #[endpoint(
@@ -216,6 +220,7 @@ async fn reindex(
             json.reference,
         )
         .await
+        .map(|_| Json(json!({ "message": "collection reindexed" })))
 }
 
 #[endpoint(
@@ -233,12 +238,7 @@ async fn create_temp_index(
     write_side
         .create_temp_index(write_api_key, collection_id, index_id, json)
         .await
-        .map(|_| {
-            (
-                StatusCode::OK,
-                Json(json!({ "message": "temp collection created" })),
-            )
-        })
+        .map(|_| Json(json!({ "message": "temp collection created" })))
 }
 
 #[endpoint(
@@ -260,4 +260,5 @@ async fn replace_index(
             ReplaceIndexReason::IndexResynced,
         )
         .await
+        .map(|_| Json(json!({ "message": "Index replaced" })))
 }

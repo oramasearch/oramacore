@@ -19,7 +19,7 @@ use crate::{
     ai::{
         advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
         llms::LLMService,
-        AIService, OramaModel,
+        AIService,
     },
     collection_manager::sides::{
         read::{CommittedDateFieldStats, ReadError, UncommittedDateFieldStats},
@@ -580,12 +580,9 @@ impl CollectionReader {
 
             // This should only happen on the first iteration
             if embedding_model.is_none() {
-                match i.get_model().await {
-                    Some(model) => {
-                        let serializable_model = model.as_str_name();
-                        embedding_model = Some(serializable_model.to_string());
-                    }
-                    None => {}
+                if let Some(model) = i.get_model().await {
+                    let serializable_model = model.as_str_name();
+                    embedding_model = Some(serializable_model.to_string());
                 }
             }
 
