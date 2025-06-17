@@ -29,7 +29,7 @@ pub enum AnswerError {
     #[error("segment error: {0}")]
     SegmentError(#[from] SegmentError),
     #[error("channel is closed: {0}")]
-    ChannelClosed(#[from] SendError<PlannedAnswerEvent>),
+    ChannelClosed(#[from] SendError<AnswerEvent>),
 }
 
 pub struct Answer {
@@ -58,7 +58,7 @@ impl Answer {
     pub async fn planned_answer(
         self,
         mut interaction: Interaction,
-        sender: tokio::sync::mpsc::UnboundedSender<PlannedAnswerEvent>,
+        sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
     ) -> Result<(), AnswerError> {
         if self.read_side.is_gpu_overloaded() {
             match self.read_side.select_random_remote_llm_service() {
@@ -74,7 +74,7 @@ impl Answer {
 
         let llm_service = self.read_side.get_llm_service();
 
-        sender.send(PlannedAnswerEvent::Acknowledged)?;
+        sender.send(AnswerEvent::Acknowledged)?;
 
         let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
             let (provider, model) = self.read_side.get_default_llm_config();
@@ -82,7 +82,7 @@ impl Answer {
             InteractionLLMConfig { model, provider }
         });
 
-        sender.send(PlannedAnswerEvent::SelectedLLM(llm_config.clone()))?;
+        sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
 
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
@@ -139,17 +139,17 @@ impl Answer {
                 AudienceManagementResult::Segment(s) => {
                     segment = s.clone();
 
-                    sender.send(PlannedAnswerEvent::GetSegment(s))?;
+                    sender.send(AnswerEvent::GetSegment(s))?;
                 }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t.clone();
 
-                    sender.send(PlannedAnswerEvent::GetTrigger(t))?;
+                    sender.send(AnswerEvent::GetTrigger(t))?;
                 }
             }
         }
 
-        let party_planner = PartyPlanner::new2(self.read_side.clone(), Some(llm_config.clone()));
+        let party_planner = PartyPlanner::new(self.read_side.clone(), Some(llm_config.clone()));
 
         let mut party_planner_stream = party_planner.run(
             self.read_side.clone(),
@@ -163,7 +163,7 @@ impl Answer {
         );
 
         while let Some(message) = party_planner_stream.next().await {
-            sender.send(PlannedAnswerEvent::ResultAction {
+            sender.send(AnswerEvent::ResultAction {
                 action: message.action,
                 result: message.result,
             })?;
@@ -192,7 +192,7 @@ impl Answer {
         let mut related_questions_stream = match related_questions_stream {
             Ok(s) => s,
             Err(e) => {
-                sender.send(PlannedAnswerEvent::FailedToRunRelatedQuestion(e))?;
+                sender.send(AnswerEvent::FailedToRunRelatedQuestion(e))?;
                 return Ok(());
             }
         };
@@ -200,10 +200,10 @@ impl Answer {
         while let Some(resp) = related_questions_stream.next().await {
             match resp {
                 Ok(chunk) => {
-                    sender.send(PlannedAnswerEvent::RelatedQueries(chunk))?;
+                    sender.send(AnswerEvent::RelatedQueries(chunk))?;
                 }
                 Err(e) => {
-                    sender.send(PlannedAnswerEvent::FailedToFetchRelatedQuestion(e))?;
+                    sender.send(AnswerEvent::FailedToFetchRelatedQuestion(e))?;
                 }
             }
         }
@@ -214,7 +214,7 @@ impl Answer {
     pub async fn answer(
         self,
         mut interaction: Interaction,
-        sender: tokio::sync::mpsc::UnboundedSender<PlannedAnswerEvent>,
+        sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
     ) -> Result<(), AnswerError> {
         if self.read_side.is_gpu_overloaded() {
             match self.read_side.select_random_remote_llm_service() {
@@ -236,8 +236,8 @@ impl Answer {
             InteractionLLMConfig { model, provider }
         });
 
-        sender.send(PlannedAnswerEvent::SelectedLLM(llm_config.clone()))?;
-        sender.send(PlannedAnswerEvent::Acknowledged)?;
+        sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
+        sender.send(AnswerEvent::Acknowledged)?;
 
         let mut trigger: Option<Trigger> = None;
         let mut segment: Option<Segment> = None;
@@ -302,7 +302,7 @@ impl Answer {
             }
         }
 
-        sender.send(PlannedAnswerEvent::GetSegment(segment.clone()))?;
+        sender.send(AnswerEvent::GetSegment(segment.clone()))?;
 
         let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
         let optimized_query = llm_service
@@ -314,9 +314,7 @@ impl Answer {
             .await
             .unwrap_or_else(|_| interaction.query.clone()); // fallback to the original query if the optimization fails
 
-        sender.send(PlannedAnswerEvent::OptimizeingQuery(
-            optimized_query.clone(),
-        ))?;
+        sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
         let search_results = self
             .read_side
@@ -339,7 +337,7 @@ impl Answer {
             .await?;
 
         let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
-        sender.send(PlannedAnswerEvent::SearchResults(search_results.hits))?;
+        sender.send(AnswerEvent::SearchResults(search_results.hits))?;
 
         let mut variables = vec![
             ("question".to_string(), interaction.query.clone()),
@@ -363,7 +361,7 @@ impl Answer {
         let mut answer_stream = match answer_stream {
             Ok(s) => s,
             Err(e) => {
-                sender.send(PlannedAnswerEvent::FailedToRunPrompt(e))?;
+                sender.send(AnswerEvent::FailedToRunPrompt(e))?;
                 return Ok(());
             }
         };
@@ -371,10 +369,10 @@ impl Answer {
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
-                    sender.send(PlannedAnswerEvent::AnswerResponse(chunk))?;
+                    sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
-                    sender.send(PlannedAnswerEvent::FailedToFetchAnswer(e))?;
+                    sender.send(AnswerEvent::FailedToFetchAnswer(e))?;
                 }
             }
         }
@@ -383,7 +381,7 @@ impl Answer {
             llm_service.get_related_questions_params(interaction.related);
 
         if related_queries_params.is_empty() {
-            sender.send(PlannedAnswerEvent::AnswerResponse("".to_string()))?;
+            sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
             return Ok(());
         }
         related_queries_params.push(("context".to_string(), search_result_str.clone()));
@@ -400,7 +398,7 @@ impl Answer {
         let mut related_questions_stream = match related_questions_stream {
             Ok(s) => s,
             Err(e) => {
-                sender.send(PlannedAnswerEvent::FailedToRunRelatedQuestion(e))?;
+                sender.send(AnswerEvent::FailedToRunRelatedQuestion(e))?;
                 return Ok(());
             }
         };
@@ -408,16 +406,16 @@ impl Answer {
         while let Some(resp) = related_questions_stream.next().await {
             match resp {
                 Ok(chunk) => {
-                    sender.send(PlannedAnswerEvent::RelatedQueries(chunk))?;
+                    sender.send(AnswerEvent::RelatedQueries(chunk))?;
                 }
                 Err(e) => {
-                    sender.send(PlannedAnswerEvent::FailedToFetchRelatedQuestion(e))?;
+                    sender.send(AnswerEvent::FailedToFetchRelatedQuestion(e))?;
                     break;
                 }
             }
         }
 
-        sender.send(PlannedAnswerEvent::AnswerResponse("".to_string()))?;
+        sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
 
         Ok(())
     }
@@ -545,7 +543,7 @@ async fn select_triggers_and_segments(
     ReceiverStream::new(rx)
 }
 
-pub enum PlannedAnswerEvent {
+pub enum AnswerEvent {
     Acknowledged,
     SelectedLLM(InteractionLLMConfig),
     GetSegment(Option<Segment>),

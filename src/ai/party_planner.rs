@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use async_openai::config::OpenAIConfig;
-use axum::extract::State;
 use futures::{Stream, StreamExt};
 use llm_json::repair_json;
 use serde::{Deserialize, Serialize};
@@ -59,27 +58,7 @@ pub struct PartyPlanner {
 }
 
 impl PartyPlanner {
-    pub fn new(_read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
-        // let llm_service = read_side.get_llm_service();
-        // Let the user choose a remote LLM model / client if they want to.
-
-        /*
-        let chosen_model = get_chosen_model(llm_config.clone(), llm_service.model.clone());
-        let llm_client = get_chosen_llm_client(
-            llm_config.clone(),
-            llm_service.remote_clients.clone(),
-            llm_service.local_vllm_client.clone(),
-        );
-        */
-
-        Self {
-            // chosen_model,
-            // llm_client,
-            llm_config,
-        }
-    }
-
-    pub fn new2(_read_side: Arc<ReadSide>, llm_config: Option<InteractionLLMConfig>) -> Self {
+    pub fn new(_read_side: Arc<ReadSide>, llm_config: Option<InteractionLLMConfig>) -> Self {
         // let llm_service = read_side.get_llm_service();
         // Let the user choose a remote LLM model / client if they want to.
 

@@ -1,8 +1,7 @@
-use crate::ai::answer::{Answer, AnswerError, PlannedAnswerEvent};
+use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
 use crate::types::CollectionId;
-use crate::types::{ApiKey, Interaction, InteractionLLMConfig, InteractionMessage};
-use anyhow::Context;
+use crate::types::{ApiKey, Interaction};
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -16,23 +15,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info, warn};
+use tracing::error;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageChunk {
     text: String,
     is_final: bool,
-}
-
-#[derive(Serialize, Debug)]
-#[serde(tag = "type")]
-enum SseMessage {
-    #[serde(rename = "acknowledgement")]
-    Acknowledge { message: String },
-    #[serde(rename = "error")]
-    Error { message: String },
-    #[serde(rename = "response")]
-    Response { message: String },
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -133,139 +121,7 @@ async fn answer_v1(
     ))
 }
 
-enum AudienceManagementResult {
-    Segment(Option<crate::collection_manager::sides::segments::Segment>),
-    Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
-}
-
-async fn select_triggers_and_segments(
-    read_side: State<Arc<ReadSide>>,
-    read_api_key: ApiKey,
-    collection_id: CollectionId,
-    conversation: Option<Vec<InteractionMessage>>,
-    mut llm_config: Option<InteractionLLMConfig>,
-) -> impl Stream<Item = AudienceManagementResult> {
-    let segment_interface = read_side
-        .get_segments_manager(read_api_key, collection_id)
-        .await
-        .expect("Failed to get segments for the collection");
-    let all_segments = segment_interface
-        .list()
-        .await
-        .expect("Failed to get segments for the collection");
-
-    if read_side.is_gpu_overloaded() {
-        match read_side.select_random_remote_llm_service() {
-            Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
-                llm_config = Some(InteractionLLMConfig { model, provider });
-            }
-            None => {
-                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
-            }
-        }
-    }
-
-    let (tx, rx) = mpsc::channel(100);
-
-    tokio::spawn(async move {
-        if all_segments.is_empty() {
-            tx.send(AudienceManagementResult::Segment(None))
-                .await
-                .unwrap();
-            return;
-        };
-
-        let chosen_segment = segment_interface
-            .perform_segment_selection(conversation.clone(), llm_config.clone())
-            .await
-            .expect("Failed to choose a segment.");
-
-        let trigger_interface = read_side
-            .get_triggers_manager(read_api_key, collection_id)
-            .await
-            .expect("Failed to get triggers manager");
-
-        match chosen_segment {
-            None => {
-                tx.send(AudienceManagementResult::Segment(None))
-                    .await
-                    .unwrap();
-
-                tx.send(AudienceManagementResult::Trigger(None))
-                    .await
-                    .unwrap();
-            }
-            Some(segment) => {
-                let full_segment = segment_interface
-                    .get(segment.clone().id.clone())
-                    .await
-                    .expect("Failed to get full segment");
-
-                tx.send(AudienceManagementResult::Segment(full_segment.clone()))
-                    .await
-                    .unwrap();
-
-                let all_segments_triggers = trigger_interface
-                    .get_all_triggers_by_segment(full_segment.unwrap().id.clone())
-                    .await
-                    .expect("Failed to get triggers for the segment");
-
-                if all_segments_triggers.is_empty() {
-                    tx.send(AudienceManagementResult::Trigger(None))
-                        .await
-                        .unwrap();
-                    return;
-                }
-
-                let chosen_trigger = trigger_interface
-                    .perform_trigger_selection(
-                        conversation,
-                        all_segments_triggers,
-                        llm_config.clone(),
-                    )
-                    .await
-                    .context(
-                        "Failed to choose a trigger for the given segment. Will fall back to None.",
-                    )
-                    .unwrap_or(None);
-
-                match chosen_trigger {
-                    None => {
-                        tx.send(AudienceManagementResult::Trigger(None))
-                            .await
-                            .unwrap();
-                    }
-                    Some(chosen_trigger) => {
-                        let full_trigger = trigger_interface
-                            .get_trigger(chosen_trigger.id.clone())
-                            .await
-                            .expect("Failed to get full trigger");
-
-                        tx.send(AudienceManagementResult::Trigger(full_trigger))
-                            .await
-                            .unwrap();
-                    }
-                }
-            }
-        }
-    });
-
-    ReceiverStream::new(rx)
-}
-
-fn serialize_response(action: &str, result: &str, done: bool) -> serde_json::Result<String> {
-    serde_json::to_string(&SseMessage::Response {
-        message: json!({
-            "action": action,
-            "result": result,
-            "done": done,
-        })
-        .to_string(),
-    })
-}
-
-impl Serialize for PlannedAnswerEvent {
+impl Serialize for AnswerEvent {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -274,10 +130,10 @@ impl Serialize for PlannedAnswerEvent {
 
         let mut s = serializer.serialize_struct("", 1)?;
         match self {
-            PlannedAnswerEvent::Acknowledged => {
+            AnswerEvent::Acknowledged => {
                 s.serialize_field("message", "Acknowledged")?;
             }
-            PlannedAnswerEvent::SelectedLLM(config) => {
+            AnswerEvent::SelectedLLM(config) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -287,7 +143,7 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::GetSegment(segment) => {
+            AnswerEvent::GetSegment(segment) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -297,7 +153,7 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::GetTrigger(trigger) => {
+            AnswerEvent::GetTrigger(trigger) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -307,7 +163,7 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::ResultAction { action, result } => {
+            AnswerEvent::ResultAction { action, result } => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -316,13 +172,13 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::FailedToRunRelatedQuestion(err) => {
+            AnswerEvent::FailedToRunRelatedQuestion(err) => {
                 s.serialize_field(
                     "message",
                     &format!("Failed to run related questions stream, {:?}", err),
                 )?;
             }
-            PlannedAnswerEvent::RelatedQueries(chunk) => {
+            AnswerEvent::RelatedQueries(chunk) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -332,10 +188,10 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::FailedToFetchRelatedQuestion(err) => {
+            AnswerEvent::FailedToFetchRelatedQuestion(err) => {
                 s.serialize_field("message", &format!("Error during streaming, {:?}", err))?;
             }
-            PlannedAnswerEvent::OptimizeingQuery(query) => {
+            AnswerEvent::OptimizeingQuery(query) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -345,7 +201,7 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::SearchResults(results) => {
+            AnswerEvent::SearchResults(results) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -355,10 +211,10 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::FailedToRunPrompt(err) => {
+            AnswerEvent::FailedToRunPrompt(err) => {
                 s.serialize_field("message", &format!("Failed to run prompt: {:?}", err))?;
             }
-            PlannedAnswerEvent::AnswerResponse(chunk) => {
+            AnswerEvent::AnswerResponse(chunk) => {
                 s.serialize_field(
                     "message",
                     &json!({
@@ -368,7 +224,7 @@ impl Serialize for PlannedAnswerEvent {
                     }),
                 )?;
             }
-            PlannedAnswerEvent::FailedToFetchAnswer(err) => {
+            AnswerEvent::FailedToFetchAnswer(err) => {
                 s.serialize_field("message", &format!("Failed to fetch answer: {:?}", err))?;
             }
         }
