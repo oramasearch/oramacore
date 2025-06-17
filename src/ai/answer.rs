@@ -60,59 +60,16 @@ impl Answer {
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
     ) -> Result<(), AnswerError> {
-        if self.read_side.is_gpu_overloaded() {
-            match self.read_side.select_random_remote_llm_service() {
-                Some((provider, model)) => {
-                    info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
-                    interaction.llm_config = Some(InteractionLLMConfig { model, provider });
-                }
-                None => {
-                    warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
-                }
-            }
-        }
+        self.handle_gpu_overload(&mut interaction).await;
 
-        let llm_service = self.read_side.get_llm_service();
+        let llm_config = self.get_llm_config(&interaction);
 
         sender.send(AnswerEvent::Acknowledged)?;
-
-        let llm_config = interaction.llm_config.clone().unwrap_or_else(|| {
-            let (provider, model) = self.read_side.get_default_llm_config();
-
-            InteractionLLMConfig { model, provider }
-        });
-
         sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
 
-        let mut trigger: Option<Trigger> = None;
-        let mut segment: Option<Segment> = None;
-        let mut system_prompt: Option<SystemPrompt> = None;
-
-        match interaction.system_prompt_id {
-            Some(id) => {
-                let full_prompt = self
-                    .read_side
-                    .get_system_prompt(self.read_api_key, self.collection_id, id)
-                    .await?;
-
-                system_prompt = full_prompt;
-            }
-            None => {
-                let has_system_prompts = self
-                    .read_side
-                    .has_system_prompts(self.read_api_key, self.collection_id)
-                    .await?;
-
-                if has_system_prompts {
-                    let chosen_system_prompt = self
-                        .read_side
-                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
-                        .await?;
-
-                    system_prompt = chosen_system_prompt;
-                }
-            }
-        }
+        let system_prompt = self
+            .handle_system_prompt(interaction.system_prompt_id)
+            .await?;
 
         // Always make sure that the conversation is not empty, or else the AI will not be able to
         // determine the segment and trigger.
@@ -134,16 +91,17 @@ impl Answer {
         )
         .await;
 
+        let mut trigger: Option<Trigger> = None;
+        let mut segment: Option<Segment> = None;
+
         while let Some(result) = segments_and_triggers_stream.next().await {
             match result {
                 AudienceManagementResult::Segment(s) => {
                     segment = s.clone();
-
                     sender.send(AnswerEvent::GetSegment(s))?;
                 }
                 AudienceManagementResult::Trigger(t) => {
                     trigger = t.clone();
-
                     sender.send(AnswerEvent::GetTrigger(t))?;
                 }
             }
@@ -169,44 +127,18 @@ impl Answer {
             })?;
         }
 
+        let llm_service = self.read_side.get_llm_service();
         let mut related_queries_params =
             llm_service.get_related_questions_params(interaction.related);
-
         if related_queries_params.is_empty() {
             warn!("related_queries_params is empty. stop streaming");
             return Ok(());
         }
-
         related_queries_params.push(("context".to_string(), "{}".to_string())); // @todo: check if we can retrieve additional context
         related_queries_params.push(("query".to_string(), interaction.query.clone()));
 
-        let related_questions_stream = llm_service
-            .run_known_prompt_stream(
-                llms::KnownPrompts::GenerateRelatedQueries,
-                related_queries_params,
-                None,
-                interaction.llm_config,
-            )
-            .await;
-
-        let mut related_questions_stream = match related_questions_stream {
-            Ok(s) => s,
-            Err(e) => {
-                sender.send(AnswerEvent::FailedToRunRelatedQuestion(e))?;
-                return Ok(());
-            }
-        };
-
-        while let Some(resp) = related_questions_stream.next().await {
-            match resp {
-                Ok(chunk) => {
-                    sender.send(AnswerEvent::RelatedQueries(chunk))?;
-                }
-                Err(e) => {
-                    sender.send(AnswerEvent::FailedToFetchRelatedQuestion(e))?;
-                }
-            }
-        }
+        self.handle_related_queries(&llm_service, llm_config, related_queries_params, &sender)
+            .await?;
 
         Ok(())
     }
@@ -216,60 +148,16 @@ impl Answer {
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
     ) -> Result<(), AnswerError> {
-        if self.read_side.is_gpu_overloaded() {
-            match self.read_side.select_random_remote_llm_service() {
-                Some((provider, model)) => {
-                    info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
-                    interaction.llm_config = Some(InteractionLLMConfig { model, provider });
-                }
-                None => {
-                    warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
-                }
-            }
-        }
+        self.handle_gpu_overload(&mut interaction).await;
 
-        let llm_service = self.read_side.get_llm_service();
-
-        let llm_config = interaction.llm_config.unwrap_or_else(|| {
-            let (provider, model) = self.read_side.get_default_llm_config();
-
-            InteractionLLMConfig { model, provider }
-        });
+        let llm_config = self.get_llm_config(&interaction);
 
         sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
         sender.send(AnswerEvent::Acknowledged)?;
 
-        let mut trigger: Option<Trigger> = None;
-        let mut segment: Option<Segment> = None;
-        let mut system_prompt: Option<SystemPrompt> = None;
-
-        match interaction.system_prompt_id {
-            Some(id) => {
-                let full_prompt = self
-                    .read_side
-                    .get_system_prompt(self.read_api_key, self.collection_id, id)
-                    .await
-                    .context("Failed to get full system prompt")
-                    .unwrap();
-
-                system_prompt = full_prompt;
-            }
-            None => {
-                let has_system_prompts = self
-                    .read_side
-                    .has_system_prompts(self.read_api_key, self.collection_id)
-                    .await?;
-
-                if has_system_prompts {
-                    let chosen_system_prompt = self
-                        .read_side
-                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
-                        .await?;
-
-                    system_prompt = chosen_system_prompt;
-                }
-            }
-        };
+        let system_prompt = self
+            .handle_system_prompt(interaction.system_prompt_id.clone())
+            .await?;
 
         // Always make sure that the conversation is not empty, or else the AI will not be able to
         // determine the segment and trigger.
@@ -291,6 +179,9 @@ impl Answer {
         )
         .await;
 
+        let mut trigger: Option<Trigger> = None;
+        let mut segment: Option<Segment> = None;
+
         while let Some(result) = segments_and_triggers_stream.next().await {
             match result {
                 AudienceManagementResult::Segment(s) => {
@@ -304,6 +195,7 @@ impl Answer {
 
         sender.send(AnswerEvent::GetSegment(segment.clone()))?;
 
+        let llm_service = self.read_side.get_llm_service();
         let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
         let optimized_query = llm_service
             .run_known_prompt(
@@ -384,9 +276,77 @@ impl Answer {
             sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
             return Ok(());
         }
-        related_queries_params.push(("context".to_string(), search_result_str.clone()));
+
+        related_queries_params.push(("context".to_string(), search_result_str));
         related_queries_params.push(("query".to_string(), interaction.query.clone()));
 
+        self.handle_related_queries(&llm_service, llm_config, related_queries_params, &sender)
+            .await?;
+
+        sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
+
+        Ok(())
+    }
+
+    async fn handle_gpu_overload(&self, interaction: &mut Interaction) {
+        if self.read_side.is_gpu_overloaded() {
+            match self.read_side.select_random_remote_llm_service() {
+                Some((provider, model)) => {
+                    info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
+                    interaction.llm_config = Some(InteractionLLMConfig { model, provider });
+                }
+                None => {
+                    warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+                }
+            }
+        }
+    }
+
+    fn get_llm_config(&self, interaction: &Interaction) -> InteractionLLMConfig {
+        interaction.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = self.read_side.get_default_llm_config();
+            InteractionLLMConfig { model, provider }
+        })
+    }
+
+    async fn handle_system_prompt(
+        &self,
+        system_prompt_id: Option<String>,
+    ) -> Result<Option<SystemPrompt>, AnswerError> {
+        match system_prompt_id {
+            Some(id) => {
+                let full_prompt = self
+                    .read_side
+                    .get_system_prompt(self.read_api_key, self.collection_id, id)
+                    .await?;
+                Ok(full_prompt)
+            }
+            None => {
+                let has_system_prompts = self
+                    .read_side
+                    .has_system_prompts(self.read_api_key, self.collection_id)
+                    .await?;
+
+                if has_system_prompts {
+                    let chosen_system_prompt = self
+                        .read_side
+                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
+                        .await?;
+                    Ok(chosen_system_prompt)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    async fn handle_related_queries(
+        &self,
+        llm_service: &llms::LLMService,
+        llm_config: InteractionLLMConfig,
+        related_queries_params: Vec<(String, String)>,
+        sender: &tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
+    ) -> Result<(), AnswerError> {
         let related_questions_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::GenerateRelatedQueries,
@@ -395,6 +355,7 @@ impl Answer {
                 Some(llm_config),
             )
             .await;
+
         let mut related_questions_stream = match related_questions_stream {
             Ok(s) => s,
             Err(e) => {
@@ -414,8 +375,6 @@ impl Answer {
                 }
             }
         }
-
-        sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
 
         Ok(())
     }
