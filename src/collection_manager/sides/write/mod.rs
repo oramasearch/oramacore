@@ -35,7 +35,7 @@ use tokio::{
     time::{sleep, Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
@@ -50,8 +50,8 @@ use crate::{
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
-        triggers::WriteCollectionTriggerInterface, write::collection::IndexReadLock,
-        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
+        triggers::WriteCollectionTriggerInterface, DocumentStorageWriteOperation, DocumentToInsert,
+        ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -361,6 +361,7 @@ impl WriteSide {
         model: OramaModel,
         reference: Option<String>,
     ) -> Result<(), WriteError> {
+        // Get initial collection state and create temporary index
         let mut collection = self
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
@@ -368,10 +369,6 @@ impl WriteSide {
         collection
             .change_runtime_config(language.into(), model)
             .await;
-
-        // We should lock the collection during the reindex.
-        // Adding documents during the reindex could create problems
-        // TODO: check if we should lock the collection
 
         info!("Reindexing collection {}", collection_id);
 
@@ -391,6 +388,7 @@ impl WriteSide {
                 // This is safe because cuid2 is less than 64 bytes
                 .expect("Cannot create new index id");
             let document_ids = copy_from_index.get_document_ids().await;
+            let document_count = document_ids.len();
 
             // Free the read lock, so we can add new index
             drop(copy_from_index);
@@ -404,34 +402,41 @@ impl WriteSide {
                 .await
                 .expect("Temporary index not found but it should be there because already created");
 
-            let mut i = 0;
+            let mut index_operation_batch = Vec::with_capacity(document_count * 10);
+            let mut processed_count = -1;
 
             let mut stream = self.document_storage.stream_documents(document_ids).await;
             while let Some((doc_id, doc)) = stream.next().await {
-                i += 1;
+                processed_count += 1;
+                if processed_count % 100 == 0 {
+                    trace!("Processing document {}/{}", processed_count, document_count);
+                }
 
-                // We want to check if there's some pending write operation on collections hashmap
-                // If so, we need to yield the task to allow the other operations to acquire the write lock
-                if i % 50 == 0 && self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                if processed_count % 50 == 0 && !index_operation_batch.is_empty() {
+                    trace!("Sending operations before yielding");
+                    self.op_sender
+                        .send_batch(index_operation_batch)
+                        .await
+                        .context("Cannot send batch of operations")?;
+                    index_operation_batch = Vec::with_capacity(document_count * 10);
+                }
+
+                // Check for pending write operations and yield if needed
+                if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                    // Free resources...
                     drop(new_index);
                     drop(collection);
 
-                    tokio::task::yield_now().await;
-                    // `yield_now` doens't guarantee that the other task will be executed
-                    // If the scheduler will process this task without waiting the other task,
-                    // we propose a sleep of 10ms to be sure that the other task will be executed.
-                    // Anyway, this is not guaranteed again, it is just an hope.
-                    if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                        sleep(Duration::from_millis(10)).await;
-                    }
+                    self.wait_for_pending_write_operations().await?;
 
-                    collection = self
-                        .get_collection_with_write_key(collection_id, write_api_key)
-                        .await?;
-                    new_index = collection
-                        .get_index(new_index_id)
-                        .await
-                        .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+                    collection = match self.collections.get_collection(collection_id).await {
+                        Some(collection) => collection,
+                        None => return Err(WriteError::CollectionNotFound(collection_id)),
+                    };
+                    new_index = match collection.get_index(new_index_id).await {
+                        Some(index) => index,
+                        None => return Err(WriteError::IndexNotFound(collection_id, new_index_id)),
+                    };
                 }
 
                 let inner = doc.inner;
@@ -445,11 +450,20 @@ impl WriteSide {
                     .await
                     .context("Cannot add fields if needed")?;
 
-                let mut batch = Vec::new();
+                if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                    trace!("Sending operations");
+                    self.op_sender
+                        .send_batch(index_operation_batch)
+                        .await
+                        .context("Cannot send batch of operations")?;
+                    trace!("Operations sent");
+                    index_operation_batch = Vec::with_capacity(document_count * 10);
+                }
+
                 match new_index
-                    .reindex_document(doc_id, doc, &mut batch)
+                    .reindex_document(doc_id, doc, &mut index_operation_batch)
                     .await
-                    .context("Cannot process document")
+                    .context("Cannot process document during the reindexing. Ignore the error and continue")
                 {
                     Ok(_) => {}
                     Err(e) => {
@@ -457,11 +471,15 @@ impl WriteSide {
                         error!(error = ?e, "Cannot process document during the reindexing. Ignore the error and continue");
                     }
                 };
+            }
 
+            if !index_operation_batch.is_empty() {
+                trace!("Sending final operations");
                 self.op_sender
-                    .send_batch(batch)
+                    .send_batch(index_operation_batch)
                     .await
                     .context("Cannot send batch of operations")?;
+                trace!("Final operations sent");
             }
 
             let req = ReplaceIndexRequest {
@@ -590,14 +608,16 @@ impl WriteSide {
             .context("Cannot add fields if needed")?;
         debug!("Done");
 
+        drop(index);
+        drop(collection);
+
         debug!("Processing documents {}", document_count);
         let result = self
-            .inner_process_documents(document_list, doc_ids, index)
+            .inner_process_documents(collection_id, index_id, document_list, doc_ids)
             .await
             .context("Cannot process documents")?;
         info!("All documents are inserted");
 
-        drop(collection);
         drop(metric);
 
         let mut lock = self.operation_counter.write().await;
@@ -647,10 +667,10 @@ impl WriteSide {
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
-        let collection = self
+        let mut collection = self
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
-        let index = collection
+        let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
@@ -658,6 +678,7 @@ impl WriteSide {
 
         let document_count = update_document_request.documents.0.len();
 
+        // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
         let document_ids_map: HashMap<_, _> = update_document_request
             .documents
@@ -672,6 +693,7 @@ impl WriteSide {
         let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
         drop(document_id_storage);
 
+        // Prepare documents with IDs
         let mut documents: HashMap<String, Document> = update_document_request
             .documents
             .into_iter()
@@ -704,10 +726,45 @@ impl WriteSide {
             failed: 0,
         };
 
+        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
         let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut processed_count = -1;
+
         while let Some((doc_id, doc)) = doc_stream.next().await {
+            processed_count += 1;
+            if processed_count % 100 == 0 {
+                trace!("Processing document {}/{}", processed_count, document_count);
+            }
+
+            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                trace!("Sending operations");
+                self.op_sender
+                    .send_batch(index_operation_batch)
+                    .await
+                    .context("Cannot send index operation")?;
+                trace!("Operations sent");
+                index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
+            // Check for pending write operations and yield if needed
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(index);
+                drop(collection);
+
+                self.wait_for_pending_write_operations().await?;
+
+                collection = match self.collections.get_collection(collection_id).await {
+                    Some(collection) => collection,
+                    None => return Err(WriteError::CollectionNotFound(collection_id)),
+                };
+                index = match collection.get_index(index_id).await {
+                    Some(index) => index,
+                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
+                };
+            }
+
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
@@ -719,7 +776,7 @@ impl WriteSide {
                         self.document_storage
                             .insert(doc_id, doc_id_str.clone(), new_document.clone())
                             .await
-                            .context("Cannot inser document into document storage")?;
+                            .context("Cannot insert document into document storage")?;
 
                         self.op_sender
                             .send(WriteOperation::DocumentStorage(
@@ -736,9 +793,8 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        let mut batch = Vec::new();
                         match index
-                            .process_new_document(doc_id, new_document, &mut batch)
+                            .process_new_document(doc_id, new_document, &mut index_operation_batch)
                             .await
                             .context("Cannot process document")
                         {
@@ -759,18 +815,23 @@ impl WriteSide {
                                 result.failed += 1;
                             }
                         };
-
-                        self.op_sender
-                            .send_batch(batch)
-                            .await
-                            .context("Cannot send batch of operations")?;
                     }
                 }
             }
         }
+
+        if !index_operation_batch.is_empty() {
+            trace!("Sending operations");
+            self.op_sender
+                .send_batch(index_operation_batch)
+                .await
+                .context("Cannot send index operation")?;
+            trace!("Operations sent");
+        }
+
         self.document_storage.remove(docs_to_remove).await;
 
-        info!("All documents are updated");
+        debug!("All documents");
 
         Ok(result)
     }
@@ -928,14 +989,24 @@ impl WriteSide {
 
     async fn inner_process_documents<'s>(
         &'s self,
+        collection_id: CollectionId,
+        index_id: IndexId,
         document_list: DocumentList,
         doc_ids: Vec<DocumentId>,
-        index: IndexReadLock<'s>,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         let mut result = InsertDocumentsResult {
             inserted: 0,
             replaced: 0,
             failed: 0,
+        };
+
+        let mut collection = match self.collections.get_collection(collection_id).await {
+            Some(collection) => collection,
+            None => return Err(WriteError::CollectionNotFound(collection_id)),
+        };
+        let mut index = match collection.get_index(index_id).await {
+            Some(index) => index,
+            None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
 
         let document_count = document_list.len();
@@ -944,7 +1015,7 @@ impl WriteSide {
         let mut docs_to_remove = Vec::with_capacity(document_count);
         for (i, doc) in document_list.0.into_iter().enumerate() {
             if i % 100 == 0 {
-                trace!("Processing document {}/{}", i, document_count);
+                info!("Processing document {}/{}", i, document_count);
             }
 
             let doc_id = doc_ids[i];
@@ -956,6 +1027,25 @@ impl WriteSide {
                     .context("Cannot send index operation")?;
                 trace!("Operations sent");
                 index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
+            // Check for pending write operations and yield if needed
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                // We need to drop the index lock before waiting
+                drop(index);
+                drop(collection);
+
+                self.wait_for_pending_write_operations().await?;
+
+                // Reacquire the index lock
+                collection = match self.collections.get_collection(collection_id).await {
+                    Some(collection) => collection,
+                    None => return Err(WriteError::CollectionNotFound(collection_id)),
+                };
+                index = match collection.get_index(index_id).await {
+                    Some(index) => index,
+                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
+                };
             }
 
             match index
@@ -1100,6 +1190,39 @@ impl WriteSide {
             self.triggers.clone(),
             collection,
         ))
+    }
+
+    async fn wait_for_pending_write_operations(&self) -> Result<()> {
+        let timeout = Duration::from_secs(5);
+        let start = Instant::now();
+
+        // Initialize backoff parameters
+        let mut backoff = Duration::from_millis(10); // Start at 10ms
+        let max_backoff = Duration::from_millis(500); // Cap at 500ms to allow multiple retries within 5s
+
+        while self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+            if start.elapsed() > timeout {
+                warn!("Timeout waiting for write operations to complete");
+                break;
+            }
+
+            // If there's some write pending operation we yield to let the write operation be processed
+            tokio::task::yield_now().await;
+
+            // Anyway, `yield_now` doens't guarantee that the other task will be executed
+            // If the scheduler will process this task without waiting the other task,
+            // we propose a sleep of 10ms to be sure that the other task will be executed.
+            // Anyway, this is not guaranteed again, it is just an hope.
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                sleep(backoff).await;
+                // Triple the backoff time, but cap it at max_backoff
+                backoff = (backoff * 3).min(max_backoff);
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
     }
 }
 
