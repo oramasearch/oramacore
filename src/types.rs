@@ -602,7 +602,7 @@ impl ToSchema for ApiKey {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Deserialize)]
 pub enum WriteApiKey {
-    ApiKey(ApiKey)
+    ApiKey(ApiKey),
 }
 
 impl WriteApiKey {

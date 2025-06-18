@@ -14,7 +14,8 @@ use crate::{
     ai::tools::{Tool, ToolError},
     collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{
-        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams, WriteApiKey,
+        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams,
+        UpdateToolParams, WriteApiKey,
     },
 };
 
