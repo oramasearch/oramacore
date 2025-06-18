@@ -26,6 +26,7 @@ async fn test_collection_id_already_exists() {
                 read_api_key: collection_client.read_api_key,
                 write_api_key: match collection_client.write_api_key {
                     WriteApiKey::ApiKey(k) => k,
+                    _ => panic!(),
                 },
                 description: None,
                 embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),

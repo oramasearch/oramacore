@@ -1112,7 +1112,7 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
 
-        collection.check_write_api_key(write_api_key)?;
+        collection.check_write_api_key(write_api_key).await?;
 
         Ok(collection)
     }

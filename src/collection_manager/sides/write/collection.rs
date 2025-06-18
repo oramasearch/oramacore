@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
@@ -409,16 +409,49 @@ impl CollectionWriter {
         doc_id
     }
 
-    pub fn check_write_api_key(&self, api_key: WriteApiKey) -> Result<(), WriteError> {
+    pub async fn check_write_api_key(&self, api_key: WriteApiKey) -> Result<(), WriteError> {
         match api_key {
             WriteApiKey::ApiKey(api_key) => {
                 if self.write_api_key != api_key {
                     return Err(WriteError::InvalidWriteApiKey(self.id));
                 }
             }
+            WriteApiKey::Claims(claim) => {
+                if claim.sub != self.id {
+                    return Err(WriteError::InvalidWriteApiKey(self.id));
+                }
+
+                let document_count = self.get_document_count().await;
+
+                if claim.limits.max_doc_count < document_count {
+                    return Err(WriteError::Generic(anyhow!(
+                        "Ouch!! Your collection contains too much documents"
+                    )));
+                }
+            }
         };
 
         Ok(())
+    }
+
+    async fn get_document_count(&self) -> usize {
+        let mut document_count = 0_usize;
+
+        let indexes = self.indexes.read().await;
+        for index in indexes.values() {
+            let index_desc = index.describe().await;
+            document_count += index_desc.document_count;
+        }
+        drop(indexes);
+
+        let temp_indexs = self.temp_indexes.read().await;
+        for index in temp_indexs.values() {
+            let index_desc = index.describe().await;
+            document_count += index_desc.document_count;
+        }
+        drop(temp_indexs);
+
+        document_count
     }
 
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
