@@ -15,7 +15,7 @@ use crate::{
     collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt, write::WriteSide},
     types::{
         ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
-        InteractionLLMConfig, UpdateSystemPromptParams,
+        InteractionLLMConfig, UpdateSystemPromptParams, WriteApiKey,
     },
     web_server::api::util::print_error,
 };
@@ -119,7 +119,7 @@ async fn list_system_prompts_v1(
 )]
 async fn validate_system_prompt_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(mut params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
@@ -159,7 +159,7 @@ async fn validate_system_prompt_v1(
 )]
 async fn insert_system_prompt_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
@@ -190,7 +190,7 @@ async fn insert_system_prompt_v1(
 )]
 async fn delete_system_prompt_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSystemPromptParams>,
 ) -> impl IntoResponse {
@@ -211,7 +211,7 @@ async fn delete_system_prompt_v1(
 )]
 async fn update_system_prompt_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,
 ) -> impl IntoResponse {

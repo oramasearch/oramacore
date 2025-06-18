@@ -12,7 +12,7 @@ use serde_json::json;
 use crate::{
     collection_manager::sides::write::WriteSide,
     types::{
-        ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, IndexId, NewHookPostParams,
+        ApiKey, CollectionId, DeleteHookParams, GetHookQueryParams, IndexId, NewHookPostParams, WriteApiKey,
     },
 };
 
@@ -34,7 +34,7 @@ async fn add_hook_v0(
     collection_id: CollectionId,
     index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     Json(params): Json<NewHookPostParams>,
 ) -> impl IntoResponse {
     let NewHookPostParams { name, code } = params;
@@ -58,7 +58,7 @@ async fn get_hook_v0(
     collection_id: CollectionId,
     index_id: IndexId,
     write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     params: Query<GetHookQueryParams>,
 ) -> impl IntoResponse {
     let GetHookQueryParams { name } = params.0;
@@ -84,7 +84,7 @@ async fn get_hook_v0(
 async fn delete_hook_v0(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     Json(params): Json<DeleteHookParams>,
 ) -> impl IntoResponse {
     let name = params.name;
@@ -107,7 +107,7 @@ async fn delete_hook_v0(
 async fn list_hooks_v0(
     collection_id: CollectionId,
     write_side: State<Arc<WriteSide>>,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
 ) -> impl IntoResponse {
     let hooks_runtime = write_side
         .get_hooks_runtime(write_api_key, collection_id)

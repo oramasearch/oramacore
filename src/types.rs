@@ -600,6 +600,40 @@ impl PartialSchema for ApiKey {
 }
 impl ToSchema for ApiKey {}
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Deserialize)]
+pub struct WriteApiKey(ApiKey);
+
+impl WriteApiKey {
+    pub fn from_api_key(api_key: ApiKey) -> Self {
+        Self(api_key)
+    }
+
+    pub fn expose(&self) -> &str {
+        self.0.expose()
+    }
+
+    pub fn into_inner(self) -> ApiKey {
+        self.0
+    }
+}
+
+impl Serialize for WriteApiKey {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl PartialSchema for WriteApiKey {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        ApiKey::schema()
+    }
+}
+
+impl ToSchema for WriteApiKey {}
+
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ListDocumentInCollectionRequest {
     pub id: CollectionId,

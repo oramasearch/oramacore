@@ -18,8 +18,20 @@ use crate::{
     collection_manager::sides::{
         read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
     },
-    types::{ApiKey, CollectionId, IndexId},
+    types::{ApiKey, CollectionId, IndexId, WriteApiKey},
 };
+
+impl<S> FromRequestParts<S> for WriteApiKey
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let api_key = ApiKey::from_request_parts(parts, state).await?;
+        Ok(WriteApiKey::from_api_key(api_key))
+    }
+}
 
 impl<S> FromRequestParts<S> for ApiKey
 where

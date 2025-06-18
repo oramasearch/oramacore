@@ -16,7 +16,7 @@ use crate::{
         triggers::{parse_trigger_id, Trigger, TriggerError},
         write::WriteSide,
     },
-    types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams},
+    types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams, WriteApiKey},
 };
 
 #[derive(Deserialize, IntoParams)]
@@ -124,7 +124,7 @@ async fn get_all_triggers_v1(
 )]
 async fn insert_trigger_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertTriggerParams>,
 ) -> impl IntoResponse {
@@ -166,7 +166,7 @@ async fn insert_trigger_v1(
 )]
 async fn delete_trigger_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteTriggerParams>,
 ) -> impl IntoResponse {
@@ -187,7 +187,7 @@ async fn delete_trigger_v1(
 )]
 async fn update_trigger_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateTriggerParams>,
 ) -> impl IntoResponse {

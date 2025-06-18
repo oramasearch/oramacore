@@ -60,7 +60,7 @@ use crate::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
         IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
-        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult,
+        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
 
@@ -328,7 +328,7 @@ impl WriteSide {
 
     pub async fn create_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
@@ -355,7 +355,7 @@ impl WriteSide {
 
     pub async fn reindex(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         language: LanguageDTO,
         model: OramaModel,
@@ -507,7 +507,7 @@ impl WriteSide {
 
     pub async fn replace_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
@@ -530,7 +530,7 @@ impl WriteSide {
 
     pub async fn create_temp_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         copy_from: IndexId,
         req: CreateIndexRequest,
@@ -553,7 +553,7 @@ impl WriteSide {
 
     pub async fn delete_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
     ) -> Result<(), WriteError> {
@@ -570,7 +570,7 @@ impl WriteSide {
 
     pub async fn insert_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         mut document_list: DocumentList,
@@ -640,7 +640,7 @@ impl WriteSide {
 
     pub async fn delete_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
@@ -662,7 +662,7 @@ impl WriteSide {
 
     pub async fn update_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
@@ -870,7 +870,7 @@ impl WriteSide {
 
     pub async fn list_document(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
         let collection = self
@@ -1104,7 +1104,7 @@ impl WriteSide {
     async fn get_collection_with_write_key(
         &self,
         collection_id: CollectionId,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
     ) -> Result<CollectionReadLock, WriteError> {
         let collection = self
             .collections
@@ -1128,7 +1128,7 @@ impl WriteSide {
     async fn check_write_api_key(
         &self,
         collection_id: CollectionId,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
     ) -> Result<()> {
         self.get_collection_with_write_key(collection_id, write_api_key)
             .await?;
@@ -1141,7 +1141,7 @@ impl WriteSide {
 
     pub async fn get_system_prompts_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionSystemPromptsInterface, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1154,7 +1154,7 @@ impl WriteSide {
 
     pub async fn get_hooks_runtime(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionHooksRuntime, WriteError> {
         let collection = self
@@ -1168,7 +1168,7 @@ impl WriteSide {
 
     pub async fn get_tools_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionToolsRuntime, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1181,7 +1181,7 @@ impl WriteSide {
 
     pub async fn get_segments_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionSegmentInterface, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1194,7 +1194,7 @@ impl WriteSide {
 
     pub async fn get_triggers_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<WriteCollectionTriggerInterface, WriteError> {
         let collection = self

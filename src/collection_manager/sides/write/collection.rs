@@ -19,7 +19,7 @@ use crate::{
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
-        IndexId,
+        IndexId, WriteApiKey,
     },
 };
 
@@ -409,8 +409,8 @@ impl CollectionWriter {
         doc_id
     }
 
-    pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<(), WriteError> {
-        if self.write_api_key != api_key {
+    pub fn check_write_api_key(&self, api_key: WriteApiKey) -> Result<(), WriteError> {
+        if self.write_api_key != api_key.into_inner() {
             return Err(WriteError::InvalidWriteApiKey(self.id));
         }
         Ok(())
