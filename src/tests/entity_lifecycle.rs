@@ -7,6 +7,7 @@ use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
 use crate::types::CreateCollection;
 use crate::types::DocumentList;
+use crate::types::WriteApiKey;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_collection_id_already_exists() {
@@ -23,7 +24,9 @@ async fn test_collection_id_already_exists() {
             CreateCollection {
                 id: collection_client.collection_id,
                 read_api_key: collection_client.read_api_key,
-                write_api_key: collection_client.write_api_key.into_inner(),
+                write_api_key: match collection_client.write_api_key {
+                    WriteApiKey::ApiKey(k) => k,
+                },
                 description: None,
                 embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
                 language: None,

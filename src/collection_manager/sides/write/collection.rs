@@ -410,9 +410,14 @@ impl CollectionWriter {
     }
 
     pub fn check_write_api_key(&self, api_key: WriteApiKey) -> Result<(), WriteError> {
-        if self.write_api_key != api_key.into_inner() {
-            return Err(WriteError::InvalidWriteApiKey(self.id));
-        }
+        match api_key {
+            WriteApiKey::ApiKey(api_key) => {
+                if self.write_api_key != api_key {
+                    return Err(WriteError::InvalidWriteApiKey(self.id));
+                }
+            }
+        };
+        
         Ok(())
     }
 
