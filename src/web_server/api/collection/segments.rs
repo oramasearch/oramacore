@@ -12,7 +12,10 @@ use serde_json::json;
 
 use crate::{
     collection_manager::sides::{read::ReadSide, segments::Segment, write::WriteSide},
-    types::{ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams},
+    types::{
+        ApiKey, CollectionId, DeleteSegmentParams, InsertSegmentParams, UpdateSegmentParams,
+        WriteApiKey,
+    },
 };
 
 #[derive(Deserialize, IntoParams)]
@@ -95,7 +98,7 @@ async fn get_all_segments_v1(
 )]
 async fn insert_segment_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSegmentParams>,
 ) -> impl IntoResponse {
@@ -123,7 +126,7 @@ async fn insert_segment_v1(
 )]
 async fn delete_segment_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSegmentParams>,
 ) -> impl IntoResponse {
@@ -143,7 +146,7 @@ async fn delete_segment_v1(
 )]
 async fn update_segment_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSegmentParams>,
 ) -> impl IntoResponse {

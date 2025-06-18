@@ -10,6 +10,7 @@ use axum_extra::{
     TypedHeader,
 };
 use http::{request::Parts, StatusCode};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde_json::json;
 use tracing::error;
 
@@ -18,8 +19,68 @@ use crate::{
     collection_manager::sides::{
         read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
     },
-    types::{ApiKey, CollectionId, IndexId},
+    types::{ApiKey, Claims, CollectionId, IndexId, WriteApiKey},
 };
+
+impl<S> FromRequestParts<S> for WriteApiKey
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let bearer_token = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("missing api key: {:?}", e)
+                    })),
+                )
+            })?;
+        let bearer_token = bearer_token.0 .0;
+        let bearer_token = bearer_token.token();
+        let api_key = if bearer_token.starts_with("ey") && bearer_token.contains('.') {
+            let mut validation = Validation::new(Algorithm::HS256);
+            validation.set_audience(&["http://localhost:8080"]);
+            validation.set_issuer(&["https://dashboard.oramacore.com"]);
+
+            let decoded = decode::<Claims>(
+                bearer_token,
+                &DecodingKey::from_secret("wow".as_bytes()),
+                &validation,
+            );
+
+            let decoded = match decoded {
+                Ok(decoded) => decoded,
+                Err(e) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!("Bad API key: {:?}", e)
+                        })),
+                    ))
+                }
+            };
+
+            WriteApiKey::from_claims(decoded.claims)
+        } else {
+            let api_key = ApiKey::try_new(bearer_token).map_err(|e| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("Bad API key: {:?}", e)
+                    })),
+                )
+            })?;
+
+            WriteApiKey::from_api_key(api_key)
+        };
+
+        Ok(api_key)
+    }
+}
 
 impl<S> FromRequestParts<S> for ApiKey
 where
