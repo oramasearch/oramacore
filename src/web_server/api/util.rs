@@ -14,7 +14,7 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    ai::tools::ToolError,
+    ai::{answer::AnswerError, tools::ToolError},
     collection_manager::sides::{
         read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
     },
@@ -338,6 +338,31 @@ impl IntoResponse for ReadError {
                 format!("Collection {} not found", collection_id),
             )
                 .into_response(),
+        }
+    }
+}
+
+impl IntoResponse for AnswerError {
+    fn into_response(self) -> Response {
+        match self {
+            AnswerError::Generic(e) => {
+                print_error(&e, "Unhandled error in answer side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {:?}", e),
+                )
+                    .into_response()
+            }
+            AnswerError::ReadError(e) => e.into_response(),
+            AnswerError::SegmentError(e) => e.into_response(),
+            AnswerError::ChannelClosed(e) => {
+                print_error(&anyhow::anyhow!(e), "Channel closed in answer side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Channel closed unexpectedly",
+                )
+                    .into_response()
+            }
         }
     }
 }

@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use async_openai::config::OpenAIConfig;
-use axum::extract::State;
 use futures::{Stream, StreamExt};
 use llm_json::repair_json;
 use serde::{Deserialize, Serialize};
@@ -59,7 +58,7 @@ pub struct PartyPlanner {
 }
 
 impl PartyPlanner {
-    pub fn new(_read_side: State<Arc<ReadSide>>, llm_config: Option<InteractionLLMConfig>) -> Self {
+    pub fn new(_read_side: Arc<ReadSide>, llm_config: Option<InteractionLLMConfig>) -> Self {
         // let llm_service = read_side.get_llm_service();
         // Let the user choose a remote LLM model / client if they want to.
 
@@ -82,7 +81,7 @@ impl PartyPlanner {
     #[allow(clippy::too_many_arguments)]
     pub fn run(
         &self,
-        read_side: State<Arc<ReadSide>>,
+        read_side: Arc<ReadSide>,
         collection_id: CollectionId,
         api_key: ApiKey,
         input: String,
@@ -375,7 +374,7 @@ impl PartyPlanner {
     }
 
     async fn handle_orama_search(
-        read_side: State<Arc<ReadSide>>,
+        read_side: Arc<ReadSide>,
         input: String,
         collection_id: CollectionId,
         api_key: ApiKey,
