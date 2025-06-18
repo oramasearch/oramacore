@@ -16,7 +16,10 @@ use crate::{
         triggers::{parse_trigger_id, Trigger, TriggerError},
         write::WriteSide,
     },
-    types::{ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams, WriteApiKey},
+    types::{
+        ApiKey, CollectionId, DeleteTriggerParams, InsertTriggerParams, UpdateTriggerParams,
+        WriteApiKey,
+    },
 };
 
 #[derive(Deserialize, IntoParams)]

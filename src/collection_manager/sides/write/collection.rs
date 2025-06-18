@@ -417,7 +417,7 @@ impl CollectionWriter {
                 }
             }
         };
-        
+
         Ok(())
     }
 
