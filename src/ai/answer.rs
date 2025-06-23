@@ -15,8 +15,9 @@ use crate::{
         triggers::Trigger,
     },
     types::{
-        ApiKey, AutoMode, CollectionId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
+        ApiKey, CollectionId, Interaction, InteractionLLMConfig, InteractionMessage, Limit,
+        Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
+        VectorMode,
     },
 };
 
@@ -208,16 +209,21 @@ impl Answer {
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
+        // Set the limit based on the interaction's max_documents with 5 by default
+        let max_documents = Limit(interaction.max_documents.unwrap_or(5));
+        let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
+
         let search_results = self
             .read_side
             .search(
                 self.read_api_key,
                 self.collection_id,
                 SearchParams {
-                    mode: SearchMode::Auto(AutoMode {
-                        term: optimized_query,
+                    mode: SearchMode::Vector(VectorMode {
+                        term: interaction.query.clone(), // Optimized query IS NOT working well enough, defaults for current term for now
+                        similarity: min_similarity,
                     }),
-                    limit: Limit(5),
+                    limit: max_documents,
                     offset: SearchOffset(0),
                     where_filter: Default::default(),
                     boost: HashMap::new(),

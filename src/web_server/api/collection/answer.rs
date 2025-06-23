@@ -92,7 +92,7 @@ async fn answer_v1(
     tokio::spawn(async {
         let r = answer.answer(interaction, answer_sender).await;
         if let Err(e) = r {
-            error!(error = ?e, "Failed to run planned answer");
+            error!(error = ?e, "Failed to run answer");
         }
     });
 
