@@ -19,6 +19,19 @@ pub struct LocalGPUManager {
     pub device_count: u32,
 }
 
+impl std::fmt::Debug for LocalGPUManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalGPUManager")
+            .field("device_count", &self.device_count)
+            .field("has_nvidia_gpu", &self.has_nvidia_gpu().unwrap_or(false))
+            .field(
+                "utilization",
+                &self.get_gpu_utilization().unwrap_or_default(),
+            )
+            .finish()
+    }
+}
+
 impl Default for LocalGPUManager {
     fn default() -> Self {
         Self::new()

@@ -1,11 +1,5 @@
 use itertools::Itertools;
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 use zebo::{Zebo, ZeboInfo};
@@ -13,17 +7,11 @@ use zebo::{Zebo, ZeboInfo};
 use anyhow::{Context, Result};
 
 use crate::{
-    collection_manager::sides::DocumentStorageWriteOperation,
+    collection_manager::sides::{DocumentStorageWriteOperation, DocumentToInsert},
     file_utils::{create_if_not_exists, read_file},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
-
-// The `CommittedDiskDocumentStorage` implementation is not optimal.
-// Defenitely, we cannot read every time from disk, it is too heavy.
-// We should be backed by the disk, but we should also have a cache in memory.
-// We should find a good balance between memory and disk usage.
-// TODO: think about a better implementation.
 
 // 1 GB
 static PAGE_SIZE: u64 = 1024 * 1024 * 1024;
@@ -85,13 +73,29 @@ impl CommittedDiskDocumentStorage {
         Ok(output)
     }
 
-    async fn add(&self, docs: Vec<(DocumentId, Arc<RawJSONDocument>)>) -> Result<()> {
+    async fn apply(
+        &self,
+        new_docs: Vec<(DocumentId, Arc<RawJSONDocument>)>,
+        to_delete: Vec<DocumentId>,
+    ) -> Result<()> {
+        info!(
+            "Committing {} documents and deleting {} documents",
+            new_docs.len(),
+            to_delete.len()
+        );
+
         let mut zebo = self.zebo.write().await;
-        zebo.add_documents(
-            docs.into_iter()
+        zebo.add_documents_batch(
+            new_docs
+                .into_iter()
                 .map(|(doc_id, doc)| (doc_id, ZeboDocument::FromJSONDoc(doc))),
+            200,  // 200 at the time
+            1024, // each document is 1kb
         )
         .context("Cannot add documents")?;
+
+        zebo.remove_documents(to_delete, false)
+            .context("Cannot remove documents")?;
 
         Ok(())
     }
@@ -104,9 +108,9 @@ pub struct DocumentStorageConfig {
 
 #[derive(Debug)]
 pub struct DocumentStorage {
-    uncommitted: tokio::sync::RwLock<HashMap<DocumentId, Arc<RawJSONDocument>>>,
+    uncommitted: tokio::sync::RwLock<Vec<(DocumentId, Arc<RawJSONDocument>)>>,
     committed: CommittedDiskDocumentStorage,
-    uncommitted_document_deletions: tokio::sync::RwLock<HashSet<DocumentId>>,
+    uncommitted_document_deletions: tokio::sync::RwLock<Vec<DocumentId>>,
 }
 
 impl DocumentStorage {
@@ -127,7 +131,12 @@ impl DocumentStorage {
     pub async fn update(&self, op: DocumentStorageWriteOperation) -> Result<()> {
         match op {
             DocumentStorageWriteOperation::InsertDocument { doc_id, doc } => {
-                self.add_document(doc_id, doc.0).await
+                self.add_document(doc_id, doc).await;
+                Ok(())
+            }
+            DocumentStorageWriteOperation::InsertDocuments(docs) => {
+                self.add_documents(docs).await;
+                Ok(())
             }
             DocumentStorageWriteOperation::DeleteDocuments { doc_ids } => {
                 self.delete_documents(doc_ids).await?;
@@ -136,19 +145,26 @@ impl DocumentStorage {
         }
     }
 
-    async fn add_document(&self, doc_id: DocumentId, doc: RawJSONDocument) -> Result<()> {
-        let doc = Arc::new(doc);
-        let mut uncommitted = self.uncommitted.write().await;
-        if uncommitted.insert(doc_id, doc).is_some() {
-            warn!("Document {:?} already exists. Overwritten.", doc_id);
+    async fn add_documents(&self, docs: Vec<(DocumentId, DocumentToInsert)>) {
+        if cfg!(test) && !docs.is_sorted_by(|a, b| a.0 < b.0) {
+            panic!("Add documents are not in order");
         }
-        Ok(())
+
+        let mut uncommitted = self.uncommitted.write().await;
+        uncommitted.extend(
+            docs.into_iter()
+                .map(|(doc_id, doc)| (doc_id, Arc::new(doc.0))),
+        );
+        drop(uncommitted);
+    }
+
+    async fn add_document(&self, doc_id: DocumentId, doc: DocumentToInsert) {
+        self.add_documents(vec![(doc_id, doc)]).await;
     }
 
     async fn delete_documents(&self, doc_ids: Vec<DocumentId>) -> Result<()> {
         let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
         uncommitted_document_deletions.extend(doc_ids);
-
         Ok(())
     }
 
@@ -172,7 +188,7 @@ impl DocumentStorage {
         let uncommitted = self.uncommitted.read().await;
         let uncommitted: Vec<_> = doc_ids
             .iter()
-            .map(|doc_id| uncommitted.get(doc_id).cloned())
+            .map(|doc_id| uncommitted.iter().find(|i| i.0 == *doc_id).cloned())
             .collect();
         trace!("Get from uncommitted documents done");
 
@@ -181,7 +197,7 @@ impl DocumentStorage {
             let committed = committed.get(i).cloned().flatten();
             let uncommitted = uncommitted.get(i).cloned().flatten();
 
-            if let Some(doc) = uncommitted {
+            if let Some((_, doc)) = uncommitted {
                 result.push(Some(doc));
             } else {
                 if committed.is_none() {
@@ -196,34 +212,26 @@ impl DocumentStorage {
 
     pub async fn commit(&self) -> Result<()> {
         info!("Commit documents");
-        // This implementation is wrong:
-        // in the mean time we "dran" + "collection" + "write on FS"
-        // The documents aren't reachable. So the search output will not contain them.
-        // We should follow the same path of the indexes.
-        // TODO: fix me
 
         let m = DOCUMENT_COMMIT_CALCULATION_TIME.create(Empty {});
 
-        let mut lock = self.uncommitted.write().await;
-        let mut uncommitted_document_deletions = self.uncommitted_document_deletions.write().await;
+        let uncommitted_lock = self.uncommitted.read().await;
+        let uncommitted_docs: Vec<_> = uncommitted_lock.clone();
+        drop(uncommitted_lock);
 
-        let doc_to_delete: Vec<_> = uncommitted_document_deletions.drain().collect();
-
-        let mut uncommitted: Vec<_> = lock.drain().collect();
-        uncommitted.sort_by_key(|(doc_id, _)| *doc_id);
+        let uncommitted_document_deletions_lock = self.uncommitted_document_deletions.read().await;
+        let uncommitted_document_deletions_docs = uncommitted_document_deletions_lock.clone();
+        drop(uncommitted_document_deletions_lock);
 
         self.committed
-            .add(uncommitted)
+            .apply(uncommitted_docs, uncommitted_document_deletions_docs)
             .await
             .context("Cannot commit documents")?;
-        let mut zebo = self.committed.zebo.write().await;
 
-        zebo.remove_documents(doc_to_delete, false)
-            .context("Cannot remove documents")?;
+        let mut uncommitted_lock = self.uncommitted.write().await;
+        uncommitted_lock.clear();
+        drop(uncommitted_lock);
 
-        drop(zebo);
-        drop(uncommitted_document_deletions);
-        drop(lock);
         drop(m);
 
         info!("Documents committed");
@@ -290,24 +298,19 @@ enum ZeboDocument<'s> {
 }
 
 impl zebo::Document for ZeboDocument<'_> {
-    fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
+    fn as_bytes(&self, v: &mut Vec<u8>) {
         match self {
             Self::Split(id, json) => {
-                let mut bytes = Vec::with_capacity(3);
-                bytes.push(Cow::Borrowed(id.as_bytes()));
-                bytes.push(Cow::Borrowed(ZERO));
-                bytes.push(Cow::Borrowed(json.as_bytes()));
-                Cow::Owned(bytes)
+                v.extend(id.as_bytes());
+                v.extend(ZERO);
+                v.extend(json.as_bytes());
             }
             Self::FromJSONDoc(a) => {
-                let mut bytes = Vec::with_capacity(3);
                 if let Some(id) = &a.id {
-                    bytes.push(Cow::Borrowed(id.as_bytes()))
+                    v.extend(id.as_bytes())
                 };
-                bytes.push(Cow::Borrowed(ZERO));
-
-                bytes.push(Cow::Borrowed(a.inner.get().as_bytes()));
-                Cow::Owned(bytes)
+                v.extend(ZERO);
+                v.extend(a.inner.get().as_bytes());
             }
         }
     }

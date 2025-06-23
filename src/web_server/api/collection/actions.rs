@@ -6,14 +6,11 @@ use axum::{
     Json, Router,
 };
 use axum_openapi3::{endpoint, utoipa::IntoParams, AddRoute};
-use http::StatusCode;
 use serde::Deserialize;
-use serde_json::json;
 
 use crate::{
     collection_manager::sides::read::ReadSide,
-    types::{ApiKey, CollectionId, ExecuteActionPayload, SearchParams},
-    web_server::api::util::print_error,
+    types::{ApiKey, CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, SearchParams},
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
@@ -43,27 +40,13 @@ async fn execute_action_v0(
 
     let read_api_key = query.api_key;
 
-    match name.as_str() {
-        "search" => {
+    match name {
+        ExecuteActionPayloadName::Search => {
             let search_context: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
-            let output = read_side
+            read_side
                 .search(read_api_key, collection_id, search_context)
-                .await;
-
-            match output {
-                Ok(data) => Ok((StatusCode::OK, Json(data))),
-                Err(e) => {
-                    print_error(&e, "Error executing action");
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": e.to_string() })),
-                    ))
-                }
-            }
+                .await
+                .map(Json)
         }
-        _ => Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": format!("Action {} was not found", name) })),
-        )),
     }
 }

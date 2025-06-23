@@ -28,17 +28,18 @@ use tracing::{error, info, trace, warn};
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, LLMService};
-use crate::ai::tools::{Tool, ToolExecutionReturnType, ToolsRuntime};
+use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
-use crate::collection_manager::sides::segments::SegmentInterface;
+use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
+use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
 use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, InteractionMessage, NLPSearchRequest,
-    SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, NLPSearchRequest, SearchMode,
+    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
@@ -47,12 +48,13 @@ use crate::{
     types::{CollectionId, DocumentId},
 };
 
-use super::segments::{Segment, SelectedSegment};
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
-use super::triggers::{SelectedTrigger, Trigger, TriggerInterface};
+use super::triggers::TriggerInterface;
 use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
+pub use collections::CollectionReadLock;
+use thiserror::Error;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
@@ -68,6 +70,14 @@ pub struct IndexesConfig {
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
     pub notifier: Option<NotifierConfig>,
+}
+
+#[derive(Error, Debug)]
+pub enum ReadError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Not found {0}")]
+    NotFound(CollectionId),
 }
 
 pub struct ReadSide {
@@ -247,12 +257,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         req: CollectionStatsRequest,
-    ) -> Result<CollectionStats> {
+    ) -> Result<CollectionStats, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         collection.stats(req).await
@@ -342,7 +352,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: SearchParams,
-    ) -> Result<SearchResult> {
+    ) -> Result<SearchResult, ReadError> {
         let limit = search_params.limit;
         let offset = search_params.offset;
 
@@ -353,7 +363,7 @@ impl ReadSide {
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
@@ -423,12 +433,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<Vec<QueryMappedSearchResult>> {
+    ) -> Result<Vec<QueryMappedSearchResult>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let collection_stats = self
@@ -458,12 +468,12 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
-    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+    ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key)?;
 
         let collection_stats = self
@@ -542,84 +552,36 @@ impl ReadSide {
         self.system_prompts.list_by_collection(collection_id).await
     }
 
-    pub async fn get_segment(
+    pub async fn get_segments_manager(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Option<Segment>> {
+    ) -> Result<CollectionSegmentInterface> {
         self.check_read_api_key(collection_id, read_api_key).await?;
-        self.segments.get(collection_id, segment_id).await
+
+        Ok(CollectionSegmentInterface::new(
+            self.segments.clone(),
+            collection_id,
+        ))
     }
 
-    pub async fn get_all_segments_by_collection(
+    pub async fn get_triggers_manager(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Vec<Segment>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.segments.list_by_collection(collection_id).await
-    }
-
-    pub async fn perform_segment_selection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        conversation: Option<Vec<InteractionMessage>>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<SelectedSegment>> {
+    ) -> Result<ReadCollectionTriggerInterface, ReadError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
-        self.segments
-            .perform_segment_selection(collection_id, conversation, llm_config)
+        let collection = self
+            .collections
+            .get_collection(collection_id)
             .await
-    }
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
-    pub async fn perform_trigger_selection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        conversation: Option<Vec<InteractionMessage>>,
-        triggers: Vec<Trigger>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<SelectedTrigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-
-        self.triggers
-            .perform_trigger_selection(collection_id, conversation, triggers, llm_config)
-            .await
-    }
-
-    pub async fn get_all_triggers_by_segment(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.triggers
-            .list_by_segment(collection_id, segment_id)
-            .await
-    }
-
-    pub async fn get_trigger(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.triggers.get(collection_id, trigger_id).await
-    }
-
-    pub async fn get_all_triggers_by_collection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<Vec<Trigger>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-
-        self.triggers.list_by_collection(collection_id).await
+        Ok(ReadCollectionTriggerInterface::new(
+            self.triggers.clone(),
+            collection,
+        ))
     }
 
     pub async fn get_search_mode(
@@ -644,12 +606,12 @@ impl ReadSide {
         &self,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<()> {
+    ) -> Result<(), ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
         collection.check_read_api_key(read_api_key)
     }
@@ -686,37 +648,17 @@ impl ReadSide {
         (RemoteLLMProvider::OramaCore, self.llm_service.model.clone())
     }
 
-    pub async fn get_tool(
+    pub async fn get_tools_interface(
         &self,
         read_api_key: ApiKey,
         collection_id: CollectionId,
-        tool_id: String,
-    ) -> Result<Option<Tool>> {
+    ) -> Result<CollectionToolsRuntime, ToolError> {
         self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools.get(collection_id, tool_id).await
-    }
 
-    pub async fn get_all_tools_by_collection(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<Vec<Tool>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools.list_by_collection(collection_id).await
-    }
-
-    pub async fn execute_tools(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-        messages: Vec<InteractionMessage>,
-        tool_ids: Option<Vec<String>>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<Option<Vec<ToolExecutionReturnType>>> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-        self.tools
-            .execute_tools(collection_id, messages, tool_ids, llm_config)
-            .await
+        Ok(CollectionToolsRuntime::new(
+            self.tools.clone(),
+            collection_id,
+        ))
     }
 }
 

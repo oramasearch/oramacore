@@ -11,12 +11,11 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    ai::tools::Tool,
+    ai::tools::{Tool, ToolError},
     collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{
         ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams,
     },
-    web_server::api::util::print_error,
 };
 
 #[derive(Deserialize, IntoParams)]
@@ -58,24 +57,20 @@ async fn get_tool_v1(
     collection_id: CollectionId,
     Query(query): Query<GetToolQueryParams>,
     read_side: State<Arc<ReadSide>>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ToolError> {
     let tool_id = query.tool_id;
     let read_api_key = query.api_key;
 
-    match read_side
-        .get_tool(read_api_key, collection_id, tool_id)
-        .await
-    {
-        Ok(Some(tool)) => Ok((StatusCode::OK, Json(json!({ "tool": tool })))),
-        Ok(None) => Ok((StatusCode::OK, Json(json!({ "tool": null })))),
-        Err(e) => {
-            print_error(&e, "Error getting tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+    let tool_interface = read_side
+        .get_tools_interface(read_api_key, collection_id)
+        .await?;
+
+    let j = match tool_interface.get_tool(tool_id).await? {
+        None => Json(json!({ "tool": null })),
+        Some(tool) => Json(json!({ "tool": tool })),
+    };
+
+    Ok(j)
 }
 
 #[endpoint(
@@ -87,22 +82,38 @@ async fn get_all_tools_v1(
     collection_id: CollectionId,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ToolError> {
     let read_api_key = query.api_key;
 
-    match read_side
-        .get_all_tools_by_collection(read_api_key, collection_id)
-        .await
-    {
-        Ok(tools) => Ok((StatusCode::OK, Json(json!({ "tools": tools })))),
-        Err(e) => {
-            print_error(&e, "Error getting all tools");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+    let tool_interface = read_side
+        .get_tools_interface(read_api_key, collection_id)
+        .await?;
+
+    let tools = tool_interface.get_all_tools_by_collection().await?;
+    Ok(Json(json!({ "tools": tools })))
+}
+
+// #[axum::debug_handler]
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/tools/run",
+    description = "Run one or more tools"
+)]
+async fn run_tools_v1(
+    collection_id: CollectionId,
+    read_api_key: ApiKey,
+    read_side: State<Arc<ReadSide>>,
+    Json(params): Json<RunToolsParams>,
+) -> Result<impl IntoResponse, ToolError> {
+    let tool_interface = read_side
+        .get_tools_interface(read_api_key, collection_id)
+        .await?;
+
+    let tools_result = tool_interface
+        .execute_tools(params.messages, params.tool_ids, params.llm_config)
+        .await?;
+
+    Ok(Json(json!({ "results": tools_result })))
 }
 
 #[endpoint(
@@ -123,22 +134,16 @@ async fn insert_tool_v1(
         code: params.code,
     };
 
-    match write_side
-        .insert_tool(write_api_key, collection_id, tool.clone())
-        .await
-    {
-        Ok(_) => Ok((
+    let tool_interface = write_side
+        .get_tools_manager(write_api_key, collection_id)
+        .await?;
+
+    tool_interface.insert_tool(tool.clone()).await.map(|_| {
+        (
             StatusCode::CREATED,
             Json(json!({ "success": true, "id": tool.id, "tool": tool })),
-        )),
-        Err(e) => {
-            print_error(&e, "Error inserting tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        )
+    })
 }
 
 #[endpoint(
@@ -152,19 +157,14 @@ async fn delete_tool_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteToolParams>,
 ) -> impl IntoResponse {
-    match write_side
-        .delete_tool(write_api_key, collection_id, params.id)
+    let tool_interface = write_side
+        .get_tools_manager(write_api_key, collection_id)
+        .await?;
+
+    tool_interface
+        .delete_tool(params.id)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error deleting tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
 #[endpoint(
@@ -185,51 +185,12 @@ async fn update_tool_v1(
         code: params.code,
     };
 
-    match write_side
-        .update_tool(write_api_key, collection_id, tool)
+    let tool_interface = write_side
+        .get_tools_manager(write_api_key, collection_id)
+        .await?;
+
+    tool_interface
+        .update_tool(tool)
         .await
-    {
-        Ok(_) => Ok((StatusCode::OK, Json(json!({ "success": true })))),
-        Err(e) => {
-            print_error(&e, "Error updating tool");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
-}
-
-// #[axum::debug_handler]
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/tools/run",
-    description = "Run one or more tools"
-)]
-async fn run_tools_v1(
-    collection_id: CollectionId,
-    read_api_key: ApiKey,
-    read_side: State<Arc<ReadSide>>,
-    Json(params): Json<RunToolsParams>,
-) -> impl IntoResponse {
-    let tools_result = read_side
-        .execute_tools(
-            read_api_key,
-            collection_id,
-            params.messages,
-            params.tool_ids,
-            params.llm_config,
-        )
-        .await;
-
-    match tools_result {
-        Ok(results) => Ok((StatusCode::OK, Json(json!({ "results": results })))),
-        Err(e) => {
-            print_error(&e, "Error running tools");
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            ))
-        }
-    }
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }

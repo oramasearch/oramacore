@@ -262,6 +262,7 @@ pub enum DocumentStorageWriteOperation {
         doc_id: DocumentId,
         doc: DocumentToInsert,
     },
+    InsertDocuments(Vec<(DocumentId, DocumentToInsert)>),
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
@@ -345,6 +346,9 @@ impl WriteOperation {
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",
+            WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocuments(_)) => {
+                "document_storage_insert_documents"
+            }
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
                 ..
             }) => "document_storage_delete_documents",

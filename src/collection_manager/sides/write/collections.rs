@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Ok, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info};
@@ -10,6 +10,7 @@ use tracing::{error, info};
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::ai::OramaModel;
 use crate::collection_manager::sides::hooks::HooksRuntime;
+use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
@@ -123,7 +124,7 @@ impl CollectionsWriter {
         &self,
         collection_option: CreateCollection,
         sender: OperationSender,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let CreateCollection {
             id,
             description,
@@ -155,12 +156,7 @@ impl CollectionsWriter {
         let mut collections = self.collections.write().await;
 
         if collections.contains_key(&id) {
-            // This error should be typed.
-            // TODO: create a custom error type
-            return Err(anyhow!(format!(
-                "Collection \"{}\" already exists",
-                id.as_str()
-            )));
+            return Err(WriteError::CollectionAlreadyExists(id));
         }
 
         collections.insert(id, collection);
@@ -263,7 +259,7 @@ impl CollectionsWriter {
 
 pub struct CollectionReadLock<'guard> {
     lock: RwLockReadGuard<'guard, HashMap<CollectionId, CollectionWriter>>,
-    id: CollectionId,
+    pub id: CollectionId,
 }
 
 impl<'guard> CollectionReadLock<'guard> {

@@ -22,7 +22,7 @@ use crate::{
         AIService, OramaModel,
     },
     collection_manager::sides::{
-        read::{CommittedDateFieldStats, UncommittedDateFieldStats},
+        read::{CommittedDateFieldStats, ReadError, UncommittedDateFieldStats},
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     file_utils::BufferedFile,
@@ -290,10 +290,11 @@ impl CollectionReader {
     }
 
     #[inline]
-    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<()> {
+    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<(), ReadError> {
         if api_key != self.read_api_key {
-            return Err(anyhow!("Invalid read api key"));
+            return Err(ReadError::Generic(anyhow!("Invalid read api key")));
         }
+
         Ok(())
     }
 
@@ -334,7 +335,7 @@ impl CollectionReader {
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
-    ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>> {
+    ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
@@ -567,7 +568,7 @@ impl CollectionReader {
         Ok(())
     }
 
-    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats> {
+    pub async fn stats(&self, req: CollectionStatsRequest) -> Result<CollectionStats, ReadError> {
         let indexes_lock = self.indexes.read().await;
         let mut indexes_stats = Vec::with_capacity(indexes_lock.len());
         let mut embedding_model: Option<String> = None;

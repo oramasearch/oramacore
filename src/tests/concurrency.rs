@@ -1,0 +1,124 @@
+use std::{sync::Arc, time::Duration};
+
+use chrono::Utc;
+use serde_json::json;
+use tokio::{runtime::Builder, task::LocalSet, time::sleep};
+
+use crate::{
+    tests::utils::{init_log, TestContext},
+    types::DocumentList,
+};
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_insert_create_collection_concurrency() {
+    use std::sync::Mutex;
+
+    #[derive(Clone, Debug)]
+    enum LogType {
+        InsertDocument {
+            start: chrono::DateTime<Utc>,
+            end: chrono::DateTime<Utc>,
+        },
+        CreateCollection {
+            start: chrono::DateTime<Utc>,
+            end: chrono::DateTime<Utc>,
+        },
+    }
+    let events = Arc::new(Mutex::new(Vec::with_capacity(300)));
+
+    let (sender, _) = tokio::sync::broadcast::channel(1);
+
+    init_log();
+
+    let test_context = TestContext::new().await;
+
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs: Vec<_> = (0..200)
+        .map(|i| json!({ "id": i.to_string(), "text": format!("text {}", i)}))
+        .collect();
+    let docs: DocumentList = docs.try_into().unwrap();
+
+    let events1 = events.clone();
+    let mut receiver1 = sender.subscribe();
+    let insert_document_handler = std::thread::spawn(move || {
+        let local = LocalSet::new();
+        local.spawn_local(async move {
+            receiver1.recv().await.unwrap();
+
+            let start = Utc::now();
+            index_client.insert_documents(docs).await.unwrap();
+            events1.lock().unwrap().push(LogType::InsertDocument {
+                start,
+                end: Utc::now(),
+            });
+        });
+
+        // Let's tell the local set to run the async code and wait for it to finish.
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(local)
+    });
+
+    let events2 = events.clone();
+    let mut receiver2 = sender.subscribe();
+    let insert_collections_handler = std::thread::spawn(move || {
+        let local = LocalSet::new();
+        local.spawn_local(async move {
+            receiver2.recv().await.unwrap();
+
+            for _ in 0..30 {
+                let start = Utc::now();
+                test_context.create_collection().await.unwrap();
+                events2.lock().unwrap().push(LogType::CreateCollection {
+                    start,
+                    end: Utc::now(),
+                });
+            }
+
+            // Leak the test_context to avoid run `drop`
+            // We don't care too much in tests...
+            Box::leak(Box::new(test_context));
+        });
+
+        // Let's tell the local set to run the async code and wait for it to finish.
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(local);
+    });
+
+    // Let's the threads start...
+    sleep(Duration::from_millis(100)).await;
+
+    sender.send(()).unwrap();
+
+    insert_document_handler.join().unwrap();
+    insert_collections_handler.join().unwrap();
+
+    let events = events.lock().unwrap();
+    let (insert_doc_start, insert_doc_end) = events
+        .iter()
+        .filter_map(|ev| match ev {
+            LogType::InsertDocument { start, end } => Some((start, end)),
+            LogType::CreateCollection { .. } => None,
+        })
+        .next()
+        .unwrap();
+
+    let create_collection_during_insertion: Vec<_> = events
+        .iter()
+        .filter(|ev| match ev {
+            LogType::InsertDocument { .. } => false,
+            LogType::CreateCollection { start, end } => {
+                insert_doc_start < start && insert_doc_end > end
+            }
+        })
+        .collect();
+
+    assert!(!create_collection_during_insertion.is_empty());
+}

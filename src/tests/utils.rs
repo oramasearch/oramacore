@@ -28,7 +28,9 @@ use crate::{
         hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
         triggers::Trigger,
-        write::{CollectionsWriterConfig, OramaModelSerializable, WriteSide, WriteSideConfig},
+        write::{
+            CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
+        },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
     types::{
@@ -43,8 +45,12 @@ use crate::{
 use anyhow::Context;
 
 pub fn init_log() {
-    if std::env::var("LOG").is_ok() {
-        std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+    if let Ok(a) = std::env::var("LOG") {
+        if a == "info" {
+            std::env::set_var("RUST_LOG", "oramacore=info,warn");
+        } else {
+            std::env::set_var("RUST_LOG", "oramacore=trace,warn");
+        }
     }
     let _ = tracing_subscriber::fmt::try_init();
 }
@@ -380,6 +386,7 @@ impl TestContext {
                         CollectionStatsRequest { with_keys: false },
                     )
                     .await
+                    .context("")
             }
             .boxed()
         })
@@ -521,14 +528,13 @@ impl TestCollectionClient {
         trigger: Trigger,
         trigger_id: Option<String>,
     ) -> Result<Trigger> {
-        let trigger = self
+        let trigger_interface = self
             .writer
-            .insert_trigger(
-                self.write_api_key,
-                self.collection_id,
-                trigger,
-                trigger_id.clone(),
-            )
+            .get_triggers_manager(self.write_api_key, self.collection_id)
+            .await?;
+
+        let trigger = trigger_interface
+            .insert_trigger(trigger, trigger_id.clone())
             .await?;
 
         wait_for(self, |coll| {
@@ -537,9 +543,11 @@ impl TestCollectionClient {
             let collection_id = coll.collection_id;
             let trigger_id = trigger_id.clone();
             async move {
-                let trigger = reader
-                    .get_trigger(read_api_key, collection_id, trigger_id.unwrap())
+                let trigger_interface = reader
+                    .get_triggers_manager(read_api_key, collection_id)
                     .await?;
+
+                let trigger = trigger_interface.get_trigger(trigger_id.unwrap()).await?;
 
                 if trigger.is_none() {
                     bail!("Trigger not found");
@@ -555,9 +563,12 @@ impl TestCollectionClient {
     }
 
     pub async fn get_trigger(&self, trigger_id: String) -> Result<Option<Trigger>> {
-        self.reader
-            .get_trigger(self.read_api_key, self.collection_id, trigger_id)
-            .await
+        let trigger_interface = self
+            .reader
+            .get_triggers_manager(self.read_api_key, self.collection_id)
+            .await?;
+
+        trigger_interface.get_trigger(trigger_id).await.context("")
     }
 
     pub async fn replace_index(
@@ -647,12 +658,14 @@ impl TestCollectionClient {
                 CollectionStatsRequest { with_keys: false },
             )
             .await
+            .context("")
     }
 
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
             .search(self.read_api_key, self.collection_id, search_params)
             .await
+            .context("")
     }
 
     pub async fn rebuild_index(&self, language: LanguageDTO) -> Result<()> {
@@ -687,7 +700,7 @@ impl TestIndexClient {
     pub async fn unchecked_insert_documents(
         &self,
         documents: DocumentList,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         self.writer
             .insert_documents(
                 self.write_api_key,
@@ -854,7 +867,7 @@ impl TestIndexClient {
     pub async fn update_documents(
         &self,
         req: UpdateDocumentRequest,
-    ) -> Result<UpdateDocumentsResult> {
+    ) -> Result<UpdateDocumentsResult, WriteError> {
         self.writer
             .update_documents(self.write_api_key, self.collection_id, self.index_id, req)
             .await

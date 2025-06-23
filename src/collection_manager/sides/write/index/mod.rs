@@ -19,7 +19,7 @@ use fields::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
-use tracing::{info, instrument, trace};
+use tracing::{info, instrument, trace, warn};
 
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
@@ -242,6 +242,7 @@ impl Index {
         let string_calculation = match embedding_calculation {
             IndexEmbeddingsCalculation::AllProperties => EmbeddingStringCalculation::AllProperties,
             IndexEmbeddingsCalculation::Automatic => EmbeddingStringCalculation::Automatic,
+            IndexEmbeddingsCalculation::None => return Ok(()),
             IndexEmbeddingsCalculation::Properties(v) => {
                 EmbeddingStringCalculation::Properties(field_names_to_paths(v))
             }
@@ -450,26 +451,30 @@ impl Index {
         let mut doc_id_storage = self.doc_id_storage.write().await;
         let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
 
-        self.op_sender
-            .send(WriteOperation::Collection(
-                self.collection_id,
-                CollectionWriteOperation::IndexWriteOperation(
-                    self.index_id,
-                    IndexWriteOperation::DeleteDocuments {
+        if !doc_ids.is_empty() {
+            self.op_sender
+                .send(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::DeleteDocuments {
+                            doc_ids: doc_ids.clone(),
+                        },
+                    ),
+                ))
+                .await
+                .context("Cannot send operation")?;
+            self.op_sender
+                .send(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::DeleteDocuments {
                         doc_ids: doc_ids.clone(),
                     },
-                ),
-            ))
-            .await
-            .context("Cannot send operation")?;
-        self.op_sender
-            .send(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::DeleteDocuments {
-                    doc_ids: doc_ids.clone(),
-                },
-            ))
-            .await
-            .context("Cannot send operation")?;
+                ))
+                .await
+                .context("Cannot send operation")?;
+        } else {
+            warn!("No document to delete");
+        }
         drop(doc_id_storage);
 
         Ok(doc_ids)

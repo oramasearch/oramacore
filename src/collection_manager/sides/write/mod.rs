@@ -4,6 +4,7 @@ pub mod document_storage;
 mod embedding;
 pub mod index;
 pub use index::OramaModelSerializable;
+use thiserror::Error;
 
 use std::{
     collections::HashMap,
@@ -17,14 +18,14 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{HookName, HooksRuntime, HooksRuntimeConfig},
-    segments::{Segment, SegmentInterface},
-    system_prompts::{SystemPrompt, SystemPromptInterface, SystemPromptValidationResponse},
-    triggers::{get_trigger_key, parse_trigger_id, Trigger, TriggerInterface},
+    hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
+    segments::{CollectionSegmentInterface, SegmentInterface},
+    system_prompts::SystemPromptInterface,
+    triggers::TriggerInterface,
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
 use serde::{Deserialize, Serialize};
@@ -34,33 +35,54 @@ use tokio::{
     time::{sleep, Instant, MissedTickBehavior},
 };
 use tokio_stream::StreamExt;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
+pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
-        gpu::LocalGPUManager,
         llms::LLMService,
-        tools::{Tool, ToolsRuntime},
-        AIService, OramaModel, RemoteLLMProvider,
+        tools::{CollectionToolsRuntime, ToolsRuntime},
+        AIService, OramaModel,
     },
     collection_manager::sides::{
-        write::collection::IndexReadLock, DocumentStorageWriteOperation, DocumentToInsert,
+        system_prompts::CollectionSystemPromptsInterface,
+        triggers::WriteCollectionTriggerInterface, DocumentStorageWriteOperation, DocumentToInsert,
         ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     nlp::NLPService,
     types::{
-        ApiKey, CollectionId, CreateCollection, CreateIndexRequest, DeleteDocuments,
-        DescribeCollectionResponse, Document, DocumentId, DocumentList, IndexEmbeddingsCalculation,
-        IndexId, InsertDocumentsResult, InteractionLLMConfig, LanguageDTO, ReplaceIndexRequest,
-        UpdateDocumentRequest, UpdateDocumentsResult,
+        ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
+        DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
+        IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
+        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult,
     },
 };
+
+#[derive(Error, Debug)]
+pub enum WriteError {
+    #[error("Invalid master API key")]
+    InvalidMasterApiKey,
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Collection already exists: {0}")]
+    CollectionAlreadyExists(CollectionId),
+    #[error("Invalid write api key for: {0}")]
+    InvalidWriteApiKey(CollectionId),
+    #[error("Collection not found: {0}")]
+    CollectionNotFound(CollectionId),
+    #[error("Index {1} already exists in collection {0}")]
+    IndexAlreadyExists(CollectionId, IndexId),
+    #[error("Index {1} doesn't exist in collection {0}")]
+    IndexNotFound(CollectionId, IndexId),
+    #[error("Temp index {1} doesn't exist in collection {0}")]
+    TempIndexNotFound(CollectionId, IndexId),
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
@@ -100,9 +122,8 @@ pub struct WriteSide {
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
-    local_gpu_manager: Arc<LocalGPUManager>,
-    master_api_key: ApiKey,
     llm_service: Arc<LLMService>,
+    master_api_key: ApiKey,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
@@ -128,7 +149,6 @@ impl WriteSide {
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
-        local_gpu_manager: Arc<LocalGPUManager>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Arc<Self>> {
         let master_api_key = config.master_api_key;
@@ -212,7 +232,6 @@ impl WriteSide {
             system_prompts,
             tools,
             kv,
-            local_gpu_manager,
             llm_service,
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
@@ -290,8 +309,10 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         option: CreateCollection,
-    ) -> Result<()> {
+    ) -> Result<CollectionCreated, WriteError> {
         self.check_master_api_key(master_api_key)?;
+
+        let collection_id = option.id;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let res = self
@@ -302,7 +323,7 @@ impl WriteSide {
 
         res?;
 
-        Ok(())
+        Ok(CollectionCreated { collection_id })
     }
 
     pub async fn create_index(
@@ -310,13 +331,10 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         req: CreateIndexRequest,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let CreateIndexRequest {
             index_id,
@@ -342,37 +360,35 @@ impl WriteSide {
         language: LanguageDTO,
         model: OramaModel,
         reference: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
+        // Get initial collection state and create temporary index
         let mut collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         collection
             .change_runtime_config(language.into(), model)
             .await;
-
-        // We should lock the collection during the reindex.
-        // Adding documents during the reindex could create problems
-        // TODO: check if we should lock the collection
 
         info!("Reindexing collection {}", collection_id);
 
         let index_ids = collection.get_index_ids().await;
         for copy_from in index_ids {
             info!("Reindexing index {}", copy_from);
-            let copy_from_index = collection
-                .get_index(copy_from)
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            let copy_from_index = collection.get_index(copy_from).await.ok_or_else(|| {
+                // The data doesn't come from the user:
+                // `copy_from` is an index id that we already have
+                // If this happen, we have a bug in the code but the user cannot do anything
+                // No typed error
+                anyhow::anyhow!("Index not found")
+            })?;
 
             let new_index_id = cuid2::create_id();
             let new_index_id = IndexId::try_new(new_index_id)
                 // This is safe because cuid2 is less than 64 bytes
                 .expect("Cannot create new index id");
             let document_ids = copy_from_index.get_document_ids().await;
+            let document_count = document_ids.len();
 
             // Free the read lock, so we can add new index
             drop(copy_from_index);
@@ -386,36 +402,41 @@ impl WriteSide {
                 .await
                 .expect("Temporary index not found but it should be there because already created");
 
-            let mut i = 0;
+            let mut index_operation_batch = Vec::with_capacity(document_count * 10);
+            let mut processed_count = -1;
 
             let mut stream = self.document_storage.stream_documents(document_ids).await;
             while let Some((doc_id, doc)) = stream.next().await {
-                i += 1;
+                processed_count += 1;
+                if processed_count % 100 == 0 {
+                    trace!("Processing document {}/{}", processed_count, document_count);
+                }
 
-                // We want to check if there's some pending write operation on collections hashmap
-                // If so, we need to yield the task to allow the other operations to acquire the write lock
-                if i % 50 == 0 && self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                if processed_count % 50 == 0 && !index_operation_batch.is_empty() {
+                    trace!("Sending operations before yielding");
+                    self.op_sender
+                        .send_batch(index_operation_batch)
+                        .await
+                        .context("Cannot send batch of operations")?;
+                    index_operation_batch = Vec::with_capacity(document_count * 10);
+                }
+
+                // Check for pending write operations and yield if needed
+                if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                    // Free resources...
                     drop(new_index);
                     drop(collection);
 
-                    tokio::task::yield_now().await;
-                    // `yield_now` doens't guarantee that the other task will be executed
-                    // If the scheduler will process this task without waiting the other task,
-                    // we propose a sleep of 10ms to be sure that the other task will be executed.
-                    // Anyway, this is not guaranteed again, it is just an hope.
-                    if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                        sleep(Duration::from_millis(10)).await;
-                    }
+                    self.wait_for_pending_write_operations().await?;
 
-                    collection = self
-                        .collections
-                        .get_collection(collection_id)
-                        .await
-                        .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-                    new_index = collection
-                        .get_index(new_index_id)
-                        .await
-                        .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+                    collection = match self.collections.get_collection(collection_id).await {
+                        Some(collection) => collection,
+                        None => return Err(WriteError::CollectionNotFound(collection_id)),
+                    };
+                    new_index = match collection.get_index(new_index_id).await {
+                        Some(index) => index,
+                        None => return Err(WriteError::IndexNotFound(collection_id, new_index_id)),
+                    };
                 }
 
                 let inner = doc.inner;
@@ -429,11 +450,20 @@ impl WriteSide {
                     .await
                     .context("Cannot add fields if needed")?;
 
-                let mut batch = Vec::new();
+                if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                    trace!("Sending operations");
+                    self.op_sender
+                        .send_batch(index_operation_batch)
+                        .await
+                        .context("Cannot send batch of operations")?;
+                    trace!("Operations sent");
+                    index_operation_batch = Vec::with_capacity(document_count * 10);
+                }
+
                 match new_index
-                    .reindex_document(doc_id, doc, &mut batch)
+                    .reindex_document(doc_id, doc, &mut index_operation_batch)
                     .await
-                    .context("Cannot process document")
+                    .context("Cannot process document during the reindexing. Ignore the error and continue")
                 {
                     Ok(_) => {}
                     Err(e) => {
@@ -441,11 +471,15 @@ impl WriteSide {
                         error!(error = ?e, "Cannot process document during the reindexing. Ignore the error and continue");
                     }
                 };
+            }
 
+            if !index_operation_batch.is_empty() {
+                trace!("Sending final operations");
                 self.op_sender
-                    .send_batch(batch)
+                    .send_batch(index_operation_batch)
                     .await
                     .context("Cannot send batch of operations")?;
+                trace!("Final operations sent");
             }
 
             let req = ReplaceIndexRequest {
@@ -477,13 +511,10 @@ impl WriteSide {
         collection_id: CollectionId,
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         collection
             .replace_index(
@@ -503,13 +534,10 @@ impl WriteSide {
         collection_id: CollectionId,
         copy_from: IndexId,
         req: CreateIndexRequest,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let CreateIndexRequest {
             index_id: new_index_id,
@@ -528,13 +556,10 @@ impl WriteSide {
         write_api_key: ApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
@@ -549,22 +574,18 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         mut document_list: DocumentList,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let index = collection
             .get_index(index_id)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
 
         // The doc_id_str is the composition of index_id + document_id
         // Anyway, for temp indexes, instead of using the temp index id,
@@ -575,7 +596,7 @@ impl WriteSide {
 
         debug!("Inserting documents {}", document_count);
         let doc_ids = self
-            .inner_insert_documents(&mut document_list, target_index_id)
+            .add_documents_to_storage(&mut document_list, target_index_id)
             .await
             .context("Cannot insert documents into document storage")?;
         debug!("Document inserted");
@@ -587,14 +608,16 @@ impl WriteSide {
             .context("Cannot add fields if needed")?;
         debug!("Done");
 
+        drop(index);
+        drop(collection);
+
         debug!("Processing documents {}", document_count);
         let result = self
-            .inner_process_documents(document_list, doc_ids, index)
+            .inner_process_documents(collection_id, index_id, document_list, doc_ids)
             .await
             .context("Cannot process documents")?;
         info!("All documents are inserted");
 
-        drop(collection);
         drop(metric);
 
         let mut lock = self.operation_counter.write().await;
@@ -621,17 +644,15 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .context("Collection not found")?;
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
         let index = collection
             .get_index(index_id)
             .await
-            .context("Cannot get index")?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
         let doc_ids = index.delete_documents(document_ids_to_delete).await?;
 
         self.document_storage.remove(doc_ids).await;
@@ -645,21 +666,19 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
-    ) -> Result<UpdateDocumentsResult> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .context("Collection not found")?;
-        collection.check_write_api_key(write_api_key)?;
-        let index = collection
+    ) -> Result<UpdateDocumentsResult, WriteError> {
+        let mut collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        let mut index = collection
             .get_index(index_id)
             .await
-            .context("Cannot get index")?;
+            .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let document_count = update_document_request.documents.0.len();
 
+        // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
         let document_ids_map: HashMap<_, _> = update_document_request
             .documents
@@ -674,6 +693,7 @@ impl WriteSide {
         let document_ids: Vec<_> = document_ids_map.keys().copied().collect();
         drop(document_id_storage);
 
+        // Prepare documents with IDs
         let mut documents: HashMap<String, Document> = update_document_request
             .documents
             .into_iter()
@@ -706,10 +726,45 @@ impl WriteSide {
             failed: 0,
         };
 
+        let mut index_operation_batch = Vec::with_capacity(document_count * 10);
         let mut docs_to_remove = Vec::with_capacity(document_count);
 
         let mut doc_stream = self.document_storage.stream_documents(document_ids).await;
+        let mut processed_count = -1;
+
         while let Some((doc_id, doc)) = doc_stream.next().await {
+            processed_count += 1;
+            if processed_count % 100 == 0 {
+                trace!("Processing document {}/{}", processed_count, document_count);
+            }
+
+            if index_operation_batch.capacity() * 4 / 5 < index_operation_batch.len() {
+                trace!("Sending operations");
+                self.op_sender
+                    .send_batch(index_operation_batch)
+                    .await
+                    .context("Cannot send index operation")?;
+                trace!("Operations sent");
+                index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
+            // Check for pending write operations and yield if needed
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(index);
+                drop(collection);
+
+                self.wait_for_pending_write_operations().await?;
+
+                collection = match self.collections.get_collection(collection_id).await {
+                    Some(collection) => collection,
+                    None => return Err(WriteError::CollectionNotFound(collection_id)),
+                };
+                index = match collection.get_index(index_id).await {
+                    Some(index) => index,
+                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
+                };
+            }
+
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
                 if let Ok(v) = serde_json::from_str(doc.inner.get()) {
                     if let Some(delta) = documents.remove(doc_id_str) {
@@ -721,7 +776,7 @@ impl WriteSide {
                         self.document_storage
                             .insert(doc_id, doc_id_str.clone(), new_document.clone())
                             .await
-                            .context("Cannot inser document into document storage")?;
+                            .context("Cannot insert document into document storage")?;
 
                         self.op_sender
                             .send(WriteOperation::DocumentStorage(
@@ -738,9 +793,8 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        let mut batch = Vec::new();
                         match index
-                            .process_new_document(doc_id, new_document, &mut batch)
+                            .process_new_document(doc_id, new_document, &mut index_operation_batch)
                             .await
                             .context("Cannot process document")
                         {
@@ -761,18 +815,23 @@ impl WriteSide {
                                 result.failed += 1;
                             }
                         };
-
-                        self.op_sender
-                            .send_batch(batch)
-                            .await
-                            .context("Cannot send batch of operations")?;
                     }
                 }
             }
         }
+
+        if !index_operation_batch.is_empty() {
+            trace!("Sending operations");
+            self.op_sender
+                .send_batch(index_operation_batch)
+                .await
+                .context("Cannot send index operation")?;
+            trace!("Operations sent");
+        }
+
         self.document_storage.remove(docs_to_remove).await;
 
-        info!("All documents are updated");
+        debug!("All documents");
 
         Ok(result)
     }
@@ -781,7 +840,7 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<()> {
+    ) -> Result<(), WriteError> {
         self.check_master_api_key(master_api_key)?;
 
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
@@ -813,14 +872,10 @@ impl WriteSide {
         &self,
         write_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Vec<Document>> {
+    ) -> Result<Vec<Document>, WriteError> {
         let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
 
         let document_ids = collection.get_document_ids().await;
 
@@ -844,43 +899,10 @@ impl WriteSide {
         Ok(docs)
     }
 
-    pub async fn insert_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-        code: String,
-    ) -> Result<()> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
-
-        let index = collection
-            .get_index(index_id)
-            .await
-            .context("Cannot get index")?;
-        index
-            .switch_to_embedding_hook(self.hook_runtime.clone())
-            .await
-            .context("Cannot set embedding hook")?;
-
-        self.hook_runtime
-            .insert_hook(collection_id, index_id, name.clone(), code)
-            .await
-            .context("Cannot insert hook")?;
-
-        Ok(())
-    }
-
     pub async fn list_collections(
         &self,
         master_api_key: ApiKey,
-    ) -> Result<Vec<DescribeCollectionResponse>> {
+    ) -> Result<Vec<DescribeCollectionResponse>, WriteError> {
         self.check_master_api_key(master_api_key)?;
 
         Ok(self.collections.list().await)
@@ -890,428 +912,37 @@ impl WriteSide {
         &self,
         master_api_key: ApiKey,
         collection_id: CollectionId,
-    ) -> Result<Option<DescribeCollectionResponse>> {
+    ) -> Result<DescribeCollectionResponse, WriteError> {
         self.check_master_api_key(master_api_key)?;
         let collection = match self.collections.get_collection(collection_id).await {
             Some(collection) => collection,
-            None => return Ok(None),
+            None => return Err(WriteError::CollectionNotFound(collection_id)),
         };
-        Ok(Some(collection.as_dto().await))
+        Ok(collection.as_dto().await)
     }
 
-    pub async fn get_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        index_id: IndexId,
-        name: HookName,
-    ) -> Result<Option<String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
-
-        Ok(self
-            .hook_runtime
-            .get_hook(collection_id, index_id, name)
-            .await
-            .map(|hook| hook.code))
-    }
-
-    pub async fn delete_javascript_hook(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        _name: HookName,
-    ) -> Result<Option<String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
-
-        bail!("Not implemented yet.") // @todo: implement delete hook in HooksRuntime and CollectionsWriter
-    }
-
-    pub async fn list_javascript_hooks(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<HashMap<HookName, String>> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-        collection.check_write_api_key(write_api_key)?;
-
-        Ok(self
-            .hook_runtime
-            .list_hooks(collection_id)
-            .await
-            .context("Cannot list hooks")?
-            .into_iter()
-            .map(|(name, hook)| (name, hook.code))
-            .collect())
-    }
-
-    async fn check_write_api_key(
-        &self,
-        collection_id: CollectionId,
-        write_api_key: ApiKey,
-    ) -> Result<()> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
-
-        collection.check_write_api_key(write_api_key)?;
-
-        Ok(())
-    }
-
-    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<()> {
-        if self.master_api_key != master_api_key {
-            return Err(anyhow::anyhow!("Invalid master api key"));
-        }
-
-        Ok(())
-    }
-
-    pub async fn validate_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<SystemPromptValidationResponse> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .validate_prompt(system_prompt, llm_config)
-            .await
-    }
-
-    pub async fn insert_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .insert(collection_id, system_prompt.clone())
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt_id: String,
-    ) -> Result<Option<SystemPrompt>> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .delete(collection_id, system_prompt_id.clone())
-            .await
-            .context("Cannot delete system prompt")
-    }
-
-    pub async fn update_system_prompt(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        system_prompt: SystemPrompt,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.system_prompts
-            .delete(collection_id, system_prompt.id.clone())
-            .await
-            .context("Cannot delete system prompt")?;
-        self.system_prompts
-            .insert(collection_id, system_prompt)
-            .await
-            .context("Cannot insert system prompt")?;
-
-        Ok(())
-    }
-
-    pub async fn insert_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.segments
-            .insert(collection_id, segment.clone())
-            .await
-            .context("Cannot insert segment")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment_id: String,
-    ) -> Result<Option<Segment>> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.segments
-            .delete(collection_id, segment_id.clone())
-            .await
-            .context("Cannot delete segment")
-    }
-
-    pub async fn update_segment(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        segment: Segment,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.segments
-            .delete(collection_id, segment.id.clone())
-            .await
-            .context("Cannot delete segment")?;
-        self.segments
-            .insert(collection_id, segment)
-            .await
-            .context("Cannot insert segment")?;
-
-        Ok(())
-    }
-
-    pub async fn insert_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-        trigger_id: Option<String>,
-    ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let final_trigger_id = match trigger_id {
-            Some(mut id) => {
-                let required_prefix = format!("{}:trigger:", collection_id.as_str());
-
-                if !id.starts_with(&required_prefix) {
-                    id = get_trigger_key(collection_id, id, trigger.segment_id.clone());
-                }
-
-                id
-            }
-            None => {
-                let cuid = cuid2::create_id();
-                get_trigger_key(collection_id, cuid, trigger.segment_id.clone())
-            }
-        };
-
-        let trigger = Trigger {
-            id: final_trigger_id,
-            name: trigger.name,
-            description: trigger.description,
-            response: trigger.response,
-            segment_id: trigger.segment_id,
-        };
-
-        self.triggers
-            .insert(trigger.clone())
-            .await
-            .context("Cannot insert trigger")?;
-
-        Ok(trigger)
-    }
-
-    pub async fn get_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Trigger> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        let trigger = self
-            .triggers
-            .get(collection_id, trigger_id)
-            .await
-            .context("Cannot insert trigger")?;
-        let trigger = match trigger {
-            Some(trigger) => trigger,
-            None => bail!("Trigger not found"),
-        };
-
-        Ok(trigger)
-    }
-
-    pub async fn delete_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger_id: String,
-    ) -> Result<Option<Trigger>> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.triggers
-            .delete(collection_id, trigger_id)
-            .await
-            .context("Cannot delete trigger")
-    }
-
-    pub async fn update_trigger(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        trigger: Trigger,
-    ) -> Result<Option<Trigger>> {
-        let trigger_key = get_trigger_key(
-            collection_id,
-            trigger.id.clone(),
-            trigger.segment_id.clone(),
-        );
-
-        let new_trigger = Trigger {
-            id: trigger_key.clone(),
-            ..trigger
-        };
-
-        self.insert_trigger(write_api_key, collection_id, new_trigger, Some(trigger.id))
-            .await
-            .context("Cannot insert updated trigger")?;
-
-        match parse_trigger_id(trigger_key.clone()) {
-            Some(key_content) => {
-                let updated_trigger = self
-                    .triggers
-                    .get(collection_id, key_content.trigger_id.clone())
-                    .await
-                    .context("Cannot get updated trigger")?;
-
-                match updated_trigger {
-                    Some(trigger) => Ok(Some(Trigger {
-                        id: key_content.trigger_id,
-                        ..trigger
-                    })),
-                    None => bail!("Cannot get updated trigger"),
-                }
-            }
-            None => {
-                bail!("Cannot parse trigger id")
-            }
-        }
-    }
-
-    pub async fn insert_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.tools
-            .insert(collection_id, tool.clone())
-            .await
-            .context("Cannot insert tool")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool_id: String,
-    ) -> Result<()> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-
-        self.tools
-            .delete(collection_id, tool_id.clone())
-            .await
-            .context("Cannot delete tool")?;
-
-        Ok(())
-    }
-
-    pub async fn update_tool(
-        &self,
-        write_api_key: ApiKey,
-        collection_id: CollectionId,
-        tool: Tool,
-    ) -> Result<()> {
-        self.delete_tool(write_api_key, collection_id, tool.id.clone())
-            .await?;
-        self.insert_tool(write_api_key, collection_id, tool).await?;
-
-        Ok(())
-    }
-
-    pub fn is_gpu_overloaded(&self) -> bool {
-        match self.local_gpu_manager.is_overloaded() {
-            Ok(overloaded) => overloaded,
-            Err(e) => {
-                error!(error = ?e, "Cannot check if GPU is overloaded. This may be due to GPU malfunction. Forcing inference on remote LLMs for safety.");
-                true
-            }
-        }
-    }
-
-    pub fn get_available_remote_llm_services(&self) -> Option<HashMap<RemoteLLMProvider, String>> {
-        self.llm_service.default_remote_models.clone()
-    }
-
-    pub fn select_random_remote_llm_service(&self) -> Option<(RemoteLLMProvider, String)> {
-        match self.get_available_remote_llm_services() {
-            Some(services) => {
-                let mut rng = rand::rng();
-                let random_index = rand::Rng::random_range(&mut rng, 0..services.len());
-                services.into_iter().nth(random_index)
-            }
-            None => {
-                error!("No remote LLM services available. Unable to select a random one for handling a offloading request.");
-                None
-            }
-        }
-    }
-
-    async fn inner_insert_documents(
+    async fn add_documents_to_storage(
         self: &WriteSide,
         document_list: &mut DocumentList,
         target_index_id: IndexId,
     ) -> Result<Vec<DocumentId>> {
         let document_count = document_list.len();
 
+        let batch_size = document_list.0.len().min(200);
+        let mut batch = Vec::with_capacity(batch_size);
+
         let mut insert_document_batch = Vec::with_capacity(document_count);
         let mut doc_ids = Vec::with_capacity(document_count);
         for (index, doc) in document_list.0.iter_mut().enumerate() {
             if index % 100 == 0 {
                 trace!("Processing document {}/{}", index, document_count);
+            }
+
+            if index % batch_size == 0 && !batch.is_empty() {
+                insert_document_batch.push(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                ));
+                batch = Vec::with_capacity(batch_size);
             }
 
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
@@ -1344,15 +975,19 @@ impl WriteSide {
                 .await
                 .context("Cannot inser document into document storage")?;
 
+            batch.push((
+                doc_id,
+                DocumentToInsert(
+                    doc.clone()
+                        .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                        .expect("Cannot get raw document"),
+                ),
+            ));
+        }
+
+        if !batch.is_empty() {
             insert_document_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::InsertDocument {
-                    doc_id,
-                    doc: DocumentToInsert(
-                        doc.clone()
-                            .into_raw(format!("{}:{}", target_index_id, doc_id_str))
-                            .expect("Cannot get raw document"),
-                    ),
-                },
+                DocumentStorageWriteOperation::InsertDocuments(batch),
             ));
         }
 
@@ -1368,14 +1003,24 @@ impl WriteSide {
 
     async fn inner_process_documents<'s>(
         &'s self,
+        collection_id: CollectionId,
+        index_id: IndexId,
         document_list: DocumentList,
         doc_ids: Vec<DocumentId>,
-        index: IndexReadLock<'s>,
-    ) -> Result<InsertDocumentsResult> {
+    ) -> Result<InsertDocumentsResult, WriteError> {
         let mut result = InsertDocumentsResult {
             inserted: 0,
             replaced: 0,
             failed: 0,
+        };
+
+        let mut collection = match self.collections.get_collection(collection_id).await {
+            Some(collection) => collection,
+            None => return Err(WriteError::CollectionNotFound(collection_id)),
+        };
+        let mut index = match collection.get_index(index_id).await {
+            Some(index) => index,
+            None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
 
         let document_count = document_list.len();
@@ -1384,7 +1029,7 @@ impl WriteSide {
         let mut docs_to_remove = Vec::with_capacity(document_count);
         for (i, doc) in document_list.0.into_iter().enumerate() {
             if i % 100 == 0 {
-                trace!("Processing document {}/{}", i, document_count);
+                info!("Processing document {}/{}", i, document_count);
             }
 
             let doc_id = doc_ids[i];
@@ -1396,6 +1041,25 @@ impl WriteSide {
                     .context("Cannot send index operation")?;
                 trace!("Operations sent");
                 index_operation_batch = Vec::with_capacity(document_count * 10);
+            }
+
+            // Check for pending write operations and yield if needed
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                // We need to drop the index lock before waiting
+                drop(index);
+                drop(collection);
+
+                self.wait_for_pending_write_operations().await?;
+
+                // Reacquire the index lock
+                collection = match self.collections.get_collection(collection_id).await {
+                    Some(collection) => collection,
+                    None => return Err(WriteError::CollectionNotFound(collection_id)),
+                };
+                index = match collection.get_index(index_id).await {
+                    Some(index) => index,
+                    None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
+                };
             }
 
             match index
@@ -1435,6 +1099,144 @@ impl WriteSide {
         self.document_storage.remove(docs_to_remove).await;
 
         Ok(result)
+    }
+
+    async fn get_collection_with_write_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<CollectionReadLock, WriteError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
+
+        collection.check_write_api_key(write_api_key)?;
+
+        Ok(collection)
+    }
+
+    fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
+        if self.master_api_key != master_api_key {
+            return Err(WriteError::InvalidMasterApiKey);
+        }
+
+        Ok(())
+    }
+
+    async fn check_write_api_key(
+        &self,
+        collection_id: CollectionId,
+        write_api_key: ApiKey,
+    ) -> Result<()> {
+        self.get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(())
+    }
+
+    pub fn llm_service(&self) -> &LLMService {
+        &self.llm_service
+    }
+
+    pub async fn get_system_prompts_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSystemPromptsInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSystemPromptsInterface::new(
+            self.system_prompts.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_hooks_runtime(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionHooksRuntime, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionHooksRuntime::new(
+            self.hook_runtime.clone(),
+            collection,
+        ))
+    }
+
+    pub async fn get_tools_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionToolsRuntime, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionToolsRuntime::new(
+            self.tools.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_segments_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<CollectionSegmentInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+        Ok(CollectionSegmentInterface::new(
+            self.segments.clone(),
+            collection_id,
+        ))
+    }
+
+    pub async fn get_triggers_manager(
+        &self,
+        write_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<WriteCollectionTriggerInterface, WriteError> {
+        let collection = self
+            .get_collection_with_write_key(collection_id, write_api_key)
+            .await?;
+        Ok(WriteCollectionTriggerInterface::new(
+            self.triggers.clone(),
+            collection,
+        ))
+    }
+
+    async fn wait_for_pending_write_operations(&self) -> Result<()> {
+        let timeout = Duration::from_secs(5);
+        let start = Instant::now();
+
+        // Initialize backoff parameters
+        let mut backoff = Duration::from_millis(10); // Start at 10ms
+        let max_backoff = Duration::from_millis(500); // Cap at 500ms to allow multiple retries within 5s
+
+        while self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+            if start.elapsed() > timeout {
+                warn!("Timeout waiting for write operations to complete");
+                break;
+            }
+
+            // If there's some write pending operation we yield to let the write operation be processed
+            tokio::task::yield_now().await;
+
+            // Anyway, `yield_now` doens't guarantee that the other task will be executed
+            // If the scheduler will process this task without waiting the other task,
+            // we propose a sleep of 10ms to be sure that the other task will be executed.
+            // Anyway, this is not guaranteed again, it is just an hope.
+            if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                sleep(backoff).await;
+                // Triple the backoff time, but cap it at max_backoff
+                backoff = (backoff * 3).min(max_backoff);
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
     }
 }
 

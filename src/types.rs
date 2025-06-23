@@ -637,6 +637,11 @@ pub struct CreateCollection {
     pub embeddings_model: Option<OramaModelSerializable>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct CollectionCreated {
+    pub collection_id: CollectionId,
+}
+
 #[derive(Debug, Deserialize, Clone, ToSchema)]
 pub struct ReindexConfig {
     pub language: LanguageDTO,
@@ -1334,8 +1339,14 @@ pub struct DeleteHookParams {
 }
 
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
+pub enum ExecuteActionPayloadName {
+    #[serde(rename = "search")]
+    Search,
+}
+
+#[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub struct ExecuteActionPayload {
-    pub name: String, // we're not using an enum here since users will be able to define their own actions
+    pub name: ExecuteActionPayloadName,
     pub context: String,
 }
 
@@ -1429,6 +1440,7 @@ pub struct UpdateDocumentsResult {
 
 #[derive(Debug, ToSchema, PartialEq)]
 pub enum IndexEmbeddingsCalculation {
+    None,
     Automatic,
     AllProperties,
     Properties(Vec<String>),
@@ -1451,11 +1463,12 @@ impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
         match v {
             HiddenIndexEmbeddingsCalculation::S(s) => {
                 match s.as_str() {
+                    "none" => Ok(IndexEmbeddingsCalculation::None),
                     "automatic" => Ok(IndexEmbeddingsCalculation::Automatic),
                     "all_properties" => Ok(IndexEmbeddingsCalculation::AllProperties),
                     "hook" => Ok(IndexEmbeddingsCalculation::Hook),
                     _ => Err(de::Error::custom(
-                        "Invalid value for index embeddings calculation. Expected 'automatic', 'all_properties', or 'hook' or an array of strings",
+                        "Invalid value for index embeddings calculation. Expected 'none', 'automatic', 'all_properties', or 'hook' or an array of strings",
                     )),
                 }
             },

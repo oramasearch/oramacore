@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     ai::llms::{KnownPrompts, LLMService},
+    collection_manager::sides::write::WriteError,
     types::{CollectionId, InteractionLLMConfig, SystemPromptUsageMode},
 };
 
@@ -46,6 +47,7 @@ pub struct SystemPromptValidationResponse {
     pub overall_assessment: SystemPromptValidationOverall,
 }
 
+#[derive(Clone)]
 pub struct SystemPromptInterface {
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
@@ -56,33 +58,52 @@ impl SystemPromptInterface {
         Self { kv, llm_service }
     }
 
-    pub async fn validate_prompt(
+    pub async fn validate_system_prompt(
         &self,
         system_prompt: SystemPrompt,
         llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<SystemPromptValidationResponse> {
-        let variables = vec![("input".to_string(), system_prompt.prompt)];
-        let response = self
-            .llm_service
-            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables, llm_config)
-            .await?;
+    ) -> Result<SystemPromptValidationResponse, WriteError> {
+        let r = self.validate_prompt(system_prompt, llm_config).await?;
 
-        let repaired = repair_json(&response, &Default::default())?;
-        let deserialized: SystemPromptValidationResponse = serde_json::from_str(&repaired)?;
-
-        Ok(deserialized)
+        Ok(r)
     }
 
-    pub async fn insert(
+    pub async fn insert_system_prompt(
         &self,
         collection_id: CollectionId,
         system_prompt: SystemPrompt,
-    ) -> Result<()> {
-        let key = format_key(
-            collection_id,
-            &format!("system_prompt:{}", system_prompt.id),
-        );
-        self.kv.insert(key, system_prompt).await?;
+    ) -> Result<(), WriteError> {
+        self.insert(collection_id, system_prompt.clone())
+            .await
+            .context("Cannot insert system prompt")?;
+
+        Ok(())
+    }
+
+    pub async fn delete_system_prompt(
+        &self,
+        collection_id: CollectionId,
+        system_prompt_id: String,
+    ) -> Result<Option<SystemPrompt>, WriteError> {
+        let r = self
+            .delete(collection_id, system_prompt_id.clone())
+            .await
+            .context("Cannot delete system prompt")?;
+        Ok(r)
+    }
+
+    pub async fn update_system_prompt(
+        &self,
+        collection_id: CollectionId,
+        system_prompt: SystemPrompt,
+    ) -> Result<(), WriteError> {
+        self.delete(collection_id, system_prompt.id.clone())
+            .await
+            .context("Cannot delete system prompt")?;
+        self.insert(collection_id, system_prompt)
+            .await
+            .context("Cannot insert system prompt")?;
+
         Ok(())
     }
 
@@ -101,7 +122,33 @@ impl SystemPromptInterface {
         }
     }
 
-    pub async fn delete(
+    async fn validate_prompt(
+        &self,
+        system_prompt: SystemPrompt,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<SystemPromptValidationResponse> {
+        let variables = vec![("input".to_string(), system_prompt.prompt)];
+        let response = self
+            .llm_service
+            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables, llm_config)
+            .await?;
+
+        let repaired = repair_json(&response, &Default::default())?;
+        let deserialized: SystemPromptValidationResponse = serde_json::from_str(&repaired)?;
+
+        Ok(deserialized)
+    }
+
+    async fn insert(&self, collection_id: CollectionId, system_prompt: SystemPrompt) -> Result<()> {
+        let key = format_key(
+            collection_id,
+            &format!("system_prompt:{}", system_prompt.id),
+        );
+        self.kv.insert(key, system_prompt).await?;
+        Ok(())
+    }
+
+    async fn delete(
         &self,
         collection_id: CollectionId,
         system_prompt_id: String,
@@ -151,5 +198,76 @@ impl SystemPromptInterface {
         let chosen = system_prompts.choose(&mut rng);
 
         Ok(chosen.cloned())
+    }
+}
+
+pub struct CollectionSystemPromptsInterface {
+    interface: SystemPromptInterface,
+    collection_id: CollectionId,
+}
+
+impl CollectionSystemPromptsInterface {
+    pub fn new(interface: SystemPromptInterface, collection_id: CollectionId) -> Self {
+        Self {
+            interface,
+            collection_id,
+        }
+    }
+
+    pub async fn validate_system_prompt(
+        &self,
+        system_prompt: SystemPrompt,
+        llm_config: Option<InteractionLLMConfig>,
+    ) -> Result<SystemPromptValidationResponse, WriteError> {
+        self.interface
+            .validate_system_prompt(system_prompt, llm_config)
+            .await
+    }
+
+    pub async fn insert_system_prompt(
+        &self,
+        system_prompt: SystemPrompt,
+    ) -> Result<(), WriteError> {
+        self.interface
+            .insert_system_prompt(self.collection_id, system_prompt)
+            .await
+    }
+
+    pub async fn delete_system_prompt(
+        &self,
+        system_prompt_id: String,
+    ) -> Result<Option<SystemPrompt>, WriteError> {
+        self.interface
+            .delete_system_prompt(self.collection_id, system_prompt_id)
+            .await
+    }
+
+    pub async fn update_system_prompt(
+        &self,
+        system_prompt: SystemPrompt,
+    ) -> Result<(), WriteError> {
+        self.interface
+            .update_system_prompt(self.collection_id, system_prompt)
+            .await
+    }
+
+    pub async fn get(&self, system_prompt_id: String) -> Result<Option<SystemPrompt>> {
+        self.interface
+            .get(self.collection_id, system_prompt_id)
+            .await
+    }
+
+    pub async fn has_system_prompts(&self) -> Result<bool> {
+        self.interface.has_system_prompts(self.collection_id).await
+    }
+
+    pub async fn list_by_collection(&self) -> Result<Vec<SystemPrompt>> {
+        self.interface.list_by_collection(self.collection_id).await
+    }
+
+    pub async fn perform_system_prompt_selection(&self) -> Result<Option<SystemPrompt>> {
+        self.interface
+            .perform_system_prompt_selection(self.collection_id)
+            .await
     }
 }
