@@ -4228,7 +4228,6 @@ dependencies = [
  "prost",
  "ptrie",
  "rabbitmq-stream-client",
- "rallo",
  "rand 0.9.1",
  "rayon",
  "redact",
@@ -5334,18 +5333,6 @@ checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
 dependencies = [
  "endian-type",
  "nibble_vec",
-]
-
-[[package]]
-name = "rallo"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96aa7ca885f691b446c47037bfbbe3bb6c306fb3bc176749247ed9d95bcdfd14"
-dependencies = [
- "backtrace",
- "rustc-demangle",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -8219,9 +8206,9 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de9eecd1a2f1ff3bfba6ca58753c3c368cc5999e68718a2227f2a77246756bde"
+checksum = "3179a8f34a9f87d488d34c0782975ebefd53f516cd601db2debcc30dcd4d6278"
 
 [[package]]
 name = "zerocopy"
