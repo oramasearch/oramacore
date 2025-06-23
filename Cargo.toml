@@ -117,7 +117,7 @@ rustls = "0.23.26"
 
 filters = { path = "./crates/filters" }
 
-zebo = "0.2.1"
+zebo = "0.3.0"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
@@ -140,7 +140,7 @@ reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 tempfile = "3"
 fake = "4.0.0"
 dircpy = "0.3.19"
-rallo = { version = "0.2.0" }
+# rallo = { version = "0.4.0" }
 glob = "0.3.2"
 
 [[bin]]
@@ -166,4 +166,7 @@ reader = []
 test-mem-alloc = []
 
 [workspace]
-members = ["crates/hnsw2", "crates/filters"]
+members = [
+    "crates/hnsw2",
+    "crates/filters",
+]

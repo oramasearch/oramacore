@@ -65,8 +65,10 @@ impl DocumentStorage {
     }
 
     pub async fn remove(&self, ids: Vec<DocumentId>) {
-        let mut zebo = self.zebo.write().await;
-        zebo.remove_documents(ids, false).unwrap();
+        if !ids.is_empty() {
+            let mut zebo = self.zebo.write().await;
+            zebo.remove_documents(ids, false).unwrap();
+        }
     }
 
     pub async fn stream_documents(
@@ -252,12 +254,10 @@ static ZERO: &[u8] = b"\0";
 struct ZeboDocument<'s>(Cow<'s, str>, Cow<'s, str>);
 
 impl zebo::Document for ZeboDocument<'_> {
-    fn as_bytes(&self) -> Cow<[Cow<[u8]>]> {
-        let mut bytes = Vec::with_capacity(3);
-        bytes.push(Cow::Borrowed(self.0.as_bytes()));
-        bytes.push(Cow::Borrowed(ZERO));
-        bytes.push(Cow::Borrowed(self.1.as_bytes()));
-        Cow::Owned(bytes)
+    fn as_bytes(&self, v: &mut Vec<u8>) {
+        v.extend(self.0.as_bytes());
+        v.extend(ZERO);
+        v.extend(self.1.as_bytes());
     }
 }
 

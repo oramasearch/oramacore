@@ -928,11 +928,21 @@ impl WriteSide {
     ) -> Result<Vec<DocumentId>> {
         let document_count = document_list.len();
 
+        let batch_size = document_list.0.len().min(200);
+        let mut batch = Vec::with_capacity(batch_size);
+
         let mut insert_document_batch = Vec::with_capacity(document_count);
         let mut doc_ids = Vec::with_capacity(document_count);
         for (index, doc) in document_list.0.iter_mut().enumerate() {
             if index % 100 == 0 {
                 trace!("Processing document {}/{}", index, document_count);
+            }
+
+            if index % batch_size == 0 && !batch.is_empty() {
+                insert_document_batch.push(WriteOperation::DocumentStorage(
+                    DocumentStorageWriteOperation::InsertDocuments(batch),
+                ));
+                batch = Vec::with_capacity(batch_size);
             }
 
             let doc_id = self.document_count.fetch_add(1, Ordering::Relaxed);
@@ -965,15 +975,19 @@ impl WriteSide {
                 .await
                 .context("Cannot inser document into document storage")?;
 
+            batch.push((
+                doc_id,
+                DocumentToInsert(
+                    doc.clone()
+                        .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                        .expect("Cannot get raw document"),
+                ),
+            ));
+        }
+
+        if !batch.is_empty() {
             insert_document_batch.push(WriteOperation::DocumentStorage(
-                DocumentStorageWriteOperation::InsertDocument {
-                    doc_id,
-                    doc: DocumentToInsert(
-                        doc.clone()
-                            .into_raw(format!("{}:{}", target_index_id, doc_id_str))
-                            .expect("Cannot get raw document"),
-                    ),
-                },
+                DocumentStorageWriteOperation::InsertDocuments(batch),
             ));
         }
 
