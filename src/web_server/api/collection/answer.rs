@@ -128,7 +128,8 @@ impl Serialize for AnswerEvent {
     {
         use serde::ser::SerializeStruct;
 
-        let mut s = serializer.serialize_struct("", 1)?;
+        let mut s = serializer.serialize_struct("", 2)?;
+        s.serialize_field("type", "response")?;
         match self {
             AnswerEvent::Acknowledged => {
                 s.serialize_field("message", "Acknowledged")?;
