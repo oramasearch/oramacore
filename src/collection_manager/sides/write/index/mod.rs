@@ -242,6 +242,7 @@ impl Index {
         let string_calculation = match embedding_calculation {
             IndexEmbeddingsCalculation::AllProperties => EmbeddingStringCalculation::AllProperties,
             IndexEmbeddingsCalculation::Automatic => EmbeddingStringCalculation::Automatic,
+            IndexEmbeddingsCalculation::None => return Ok(()),
             IndexEmbeddingsCalculation::Properties(v) => {
                 EmbeddingStringCalculation::Properties(field_names_to_paths(v))
             }
