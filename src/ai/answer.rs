@@ -1,5 +1,5 @@
 use anyhow::Context;
-use futures::Stream;
+use futures::{Stream, TryFutureExt};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -7,7 +7,11 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{info, warn};
 
 use crate::{
-    ai::{llms, party_planner::PartyPlanner},
+    ai::{
+        llms,
+        party_planner::PartyPlanner,
+        ragat::{ContextComponent, GeneralRagAtError, RAGAtParser},
+    },
     collection_manager::sides::{
         read::{ReadError, ReadSide},
         segments::{Segment, SegmentError},
@@ -15,8 +19,9 @@ use crate::{
         triggers::Trigger,
     },
     types::{
-        ApiKey, AutoMode, CollectionId, Interaction, InteractionLLMConfig, InteractionMessage,
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
         Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
+        Similarity, VectorMode,
     },
 };
 
@@ -36,6 +41,11 @@ pub struct Answer {
     read_side: Arc<ReadSide>,
     collection_id: CollectionId,
     read_api_key: ApiKey,
+}
+
+#[derive(Debug)]
+struct ComponentResult {
+    hits: Vec<SearchResultHit>,
 }
 
 impl Answer {
@@ -208,28 +218,58 @@ impl Answer {
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
-        let search_results = self
-            .read_side
-            .search(
-                self.read_api_key,
-                self.collection_id,
-                SearchParams {
-                    mode: SearchMode::Auto(AutoMode {
-                        term: optimized_query,
-                    }),
-                    limit: Limit(5),
-                    offset: SearchOffset(0),
-                    where_filter: Default::default(),
-                    boost: HashMap::new(),
-                    facets: HashMap::new(),
-                    properties: Properties::Star,
-                    indexes: None, // Search all indexes
-                },
-            )
-            .await?;
+        let mut search_results = Vec::<SearchResultHit>::new();
+        if let Some(ref notation) = interaction.ragat_notation {
+            let parsed = RAGAtParser::parse(&notation);
 
-        let search_result_str = serde_json::to_string(&search_results.hits).unwrap();
-        sender.send(AnswerEvent::SearchResults(search_results.hits))?;
+            let components = self
+                .execute_rag_at_specification(&parsed.components, interaction.clone())
+                .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
+                .await?;
+
+            let results = self
+                .merge_component_results(components)
+                .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
+                .await?;
+            search_results = results;
+        } else {
+            let max_documents = Limit(interaction.max_documents.unwrap_or(5));
+            let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
+
+            let search_mode = match interaction
+                .search_mode
+                .as_ref()
+                .map_or("vector", |s| s.as_str())
+            {
+                "vector" => SearchMode::Vector(VectorMode {
+                    term: interaction.query.clone(),
+                    similarity: min_similarity,
+                }),
+                mode => SearchMode::from_str(mode, interaction.query.clone()),
+            };
+
+            let result = self
+                .read_side
+                .search(
+                    self.read_api_key,
+                    self.collection_id,
+                    SearchParams {
+                        mode: search_mode,
+                        limit: max_documents,
+                        offset: SearchOffset(0),
+                        where_filter: Default::default(),
+                        boost: HashMap::new(),
+                        facets: HashMap::new(),
+                        properties: Properties::Star,
+                        indexes: None, // Search all indexes
+                    },
+                )
+                .await?;
+            search_results = result.hits;
+        }
+
+        let search_result_str = serde_json::to_string(&search_results).unwrap();
+        sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
         let mut variables = vec![
             ("question".to_string(), interaction.query.clone()),
@@ -377,6 +417,80 @@ impl Answer {
         }
 
         Ok(())
+    }
+
+    async fn execute_rag_at_specification(
+        &self,
+        components: &[ContextComponent],
+        interaction: Interaction,
+    ) -> Result<Vec<ComponentResult>, GeneralRagAtError> {
+        let mut results = Vec::new();
+
+        for component in components {
+            let component_result = self
+                .execute_single_component(component, interaction.clone())
+                .await?;
+
+            results.push(component_result);
+        }
+
+        Ok(results)
+    }
+
+    async fn execute_single_component(
+        &self,
+        component: &ContextComponent,
+        interaction: Interaction,
+    ) -> Result<ComponentResult, GeneralRagAtError> {
+        let index_ids: Result<Vec<IndexId>, GeneralRagAtError> = component
+            .source_ids
+            .iter()
+            .map(|source_id| {
+                IndexId::try_new(source_id)
+                    .map_err(|_| GeneralRagAtError::InvalidIndexId(source_id.clone()))
+            })
+            .collect();
+
+        let index_ids = index_ids?;
+
+        let search_results = self
+            .read_side
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                SearchParams {
+                    mode: SearchMode::Vector(VectorMode {
+                        term: interaction.query.clone(),
+                        similarity: Similarity(component.threshold),
+                    }),
+                    limit: Limit(component.max_documents),
+                    offset: SearchOffset(0),
+                    where_filter: Default::default(),
+                    boost: HashMap::new(),
+                    facets: HashMap::new(),
+                    properties: Properties::Star,
+                    indexes: Some(index_ids),
+                },
+            )
+            .map_err(|_| GeneralRagAtError::ReadError)
+            .await?;
+
+        let all_hits = search_results.hits.clone();
+
+        Ok(ComponentResult { hits: all_hits })
+    }
+
+    async fn merge_component_results(
+        &self,
+        component_results: Vec<ComponentResult>,
+    ) -> Result<Vec<SearchResultHit>, GeneralRagAtError> {
+        let mut final_hits = Vec::new();
+
+        for result in component_results {
+            final_hits.extend(result.hits);
+        }
+
+        Ok(final_hits)
     }
 }
 
