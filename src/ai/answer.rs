@@ -239,7 +239,7 @@ impl Answer {
             let search_mode = match interaction
                 .search_mode
                 .as_ref()
-                .map_or("fulltext", |s| s.as_str())
+                .map_or("vector", |s| s.as_str())
             {
                 "vector" => SearchMode::Vector(VectorMode {
                     term: interaction.query.clone(),
