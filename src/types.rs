@@ -1320,6 +1320,10 @@ pub struct Interaction {
     pub related: Option<RelatedRequest>,
     pub messages: Vec<InteractionMessage>,
     pub llm_config: Option<InteractionLLMConfig>,
+    pub min_similarity: Option<f32>,
+    pub max_documents: Option<usize>,
+    pub ragat_notation: Option<String>,
+    pub search_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
