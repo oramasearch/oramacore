@@ -47,15 +47,6 @@ impl std::fmt::Display for ParseError {
 pub struct RAGAtParser;
 
 impl RAGAtParser {
-    /// Parse RAG@ notation string into ContextComponents
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rag_at::RAGAtParser;
-    ///
-    /// let notation = "[idx1,idx2]@0.7:6; ![idx3,idx4]@0.85:4+";
-    /// let result = RAGAtParser::parse(notation);
     pub fn parse(notation: &str) -> ParseResult {
         match Self::parse_internal(notation) {
             Ok(components) => ParseResult {
