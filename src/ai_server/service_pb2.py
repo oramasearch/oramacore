@@ -17,7 +17,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\rservice.proto\x12\x10orama_ai_service"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t*\xba\x01\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05\x12\x1b\n\x17MultilingualMiniLML12V2\x10\x06\x12\x1c\n\x18JinaEmbeddingsV2BaseCode\x10\x07*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01\x32\xc1\x01\n\nLLMService\x12Z\n\x0b\x43heckHealth\x12$.orama_ai_service.HealthCheckRequest\x1a%.orama_ai_service.HealthCheckResponse\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponseb\x06proto3'
+    b'\n\rservice.proto\x12\x10orama_ai_service"}\n\x10\x45mbeddingRequest\x12+\n\x05model\x18\x01 \x01(\x0e\x32\x1c.orama_ai_service.OramaModel\x12\r\n\x05input\x18\x02 \x03(\t\x12-\n\x06intent\x18\x03 \x01(\x0e\x32\x1d.orama_ai_service.OramaIntent"_\n\x11\x45mbeddingResponse\x12\x36\n\x11\x65mbeddings_result\x18\x01 \x03(\x0b\x32\x1b.orama_ai_service.Embedding\x12\x12\n\ndimensions\x18\x02 \x01(\x05"\x1f\n\tEmbedding\x12\x12\n\nembeddings\x18\x01 \x03(\x02"%\n\x12HealthCheckRequest\x12\x0f\n\x07service\x18\x01 \x01(\t"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t"9\n\x16NLPQueryTriggerRequest\x12\x10\n\x08language\x18\x01 \x01(\t\x12\r\n\x05query\x18\x02 \x01(\t"\xae\x01\n\x17NLPQueryTriggerResponse\x12\x15\n\rshould_search\x18\x01 \x01(\x08\x12\x1a\n\x12searchable_content\x18\x02 \x01(\t\x12\x19\n\x11\x64\x65tected_language\x18\x03 \x01(\t\x12\x15\n\roriginal_text\x18\x04 \x01(\t\x12\x1a\n\x12processing_time_ms\x18\x05 \x01(\x02\x12\x12\n\nmodel_used\x18\x06 \x01(\t*\xba\x01\n\nOramaModel\x12\x0c\n\x08\x42GESmall\x10\x00\x12\x0b\n\x07\x42GEBase\x10\x01\x12\x0c\n\x08\x42GELarge\x10\x02\x12\x17\n\x13MultilingualE5Small\x10\x03\x12\x16\n\x12MultilingualE5Base\x10\x04\x12\x17\n\x13MultilingualE5Large\x10\x05\x12\x1b\n\x17MultilingualMiniLML12V2\x10\x06\x12\x1c\n\x18JinaEmbeddingsV2BaseCode\x10\x07*%\n\x0bOramaIntent\x12\t\n\x05query\x10\x00\x12\x0b\n\x07passage\x10\x01\x32\xa9\x02\n\nLLMService\x12Z\n\x0b\x43heckHealth\x12$.orama_ai_service.HealthCheckRequest\x1a%.orama_ai_service.HealthCheckResponse\x12W\n\x0cGetEmbedding\x12".orama_ai_service.EmbeddingRequest\x1a#.orama_ai_service.EmbeddingResponse\x12\x66\n\x0fNLPQueryTrigger\x12(.orama_ai_service.NLPQueryTriggerRequest\x1a).orama_ai_service.NLPQueryTriggerResponseb\x06proto3'
 )
 
 _globals = globals()
@@ -25,10 +25,10 @@ _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, "service_pb2", _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
-    _globals["_ORAMAMODEL"]._serialized_start = 371
-    _globals["_ORAMAMODEL"]._serialized_end = 557
-    _globals["_ORAMAINTENT"]._serialized_start = 559
-    _globals["_ORAMAINTENT"]._serialized_end = 596
+    _globals["_ORAMAMODEL"]._serialized_start = 607
+    _globals["_ORAMAMODEL"]._serialized_end = 793
+    _globals["_ORAMAINTENT"]._serialized_start = 795
+    _globals["_ORAMAINTENT"]._serialized_end = 832
     _globals["_EMBEDDINGREQUEST"]._serialized_start = 35
     _globals["_EMBEDDINGREQUEST"]._serialized_end = 160
     _globals["_EMBEDDINGRESPONSE"]._serialized_start = 162
@@ -39,6 +39,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_HEALTHCHECKREQUEST"]._serialized_end = 329
     _globals["_HEALTHCHECKRESPONSE"]._serialized_start = 331
     _globals["_HEALTHCHECKRESPONSE"]._serialized_end = 368
-    _globals["_LLMSERVICE"]._serialized_start = 599
-    _globals["_LLMSERVICE"]._serialized_end = 792
+    _globals["_NLPQUERYTRIGGERREQUEST"]._serialized_start = 370
+    _globals["_NLPQUERYTRIGGERREQUEST"]._serialized_end = 427
+    _globals["_NLPQUERYTRIGGERRESPONSE"]._serialized_start = 430
+    _globals["_NLPQUERYTRIGGERRESPONSE"]._serialized_end = 604
+    _globals["_LLMSERVICE"]._serialized_start = 835
+    _globals["_LLMSERVICE"]._serialized_end = 1132
 # @@protoc_insertion_point(module_scope)
