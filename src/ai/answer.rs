@@ -235,16 +235,26 @@ impl Answer {
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
+
+            let search_mode = match interaction
+                .search_mode
+                .as_ref()
+                .map_or("fulltext", |s| s.as_str())
+            {
+                "vector" => SearchMode::Vector(VectorMode {
+                    term: interaction.query.clone(),
+                    similarity: min_similarity,
+                }),
+                mode => SearchMode::from_str(mode, interaction.query.clone()),
+            };
+
             let result = self
                 .read_side
                 .search(
                     self.read_api_key,
                     self.collection_id,
                     SearchParams {
-                        mode: SearchMode::Vector(VectorMode {
-                            term: interaction.query.clone(), // Optimized query IS NOT working well enough, defaults for current term for now
-                            similarity: min_similarity,
-                        }),
+                        mode: search_mode,
                         limit: max_documents,
                         offset: SearchOffset(0),
                         where_filter: Default::default(),
