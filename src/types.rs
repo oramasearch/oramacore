@@ -1322,6 +1322,7 @@ pub struct Interaction {
     pub llm_config: Option<InteractionLLMConfig>,
     pub min_similarity: Option<f32>,
     pub max_documents: Option<usize>,
+    pub ragat_notation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

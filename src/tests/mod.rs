@@ -12,6 +12,7 @@ mod fulltext_search;
 mod index_rebuild;
 mod list_documents;
 mod migrations;
+mod ragat;
 mod replace_doc_on_insert;
 mod replace_index;
 mod shutdown;
