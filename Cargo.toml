@@ -34,7 +34,6 @@ ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/scan-
 regex = "1.11.1"
 
 invocation-counter = "0.1.0"
-jsonwebtoken = "9.3.1"
 
 rust-stemmers = "1.2.0"
 text-splitter = { version = "0.22", features = [
@@ -121,6 +120,11 @@ zebo = "0.3.0"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
+jwt-authorizer = "0.15"
+jsonwebtoken = "9.3.1"
+
+# [patch.crates-io]
+# jsonwebtoken = { path = "../jsonwebtoken" }
 
 [build-dependencies]
 cc = "1"

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{FromRequestParts, Path},
+    extract::{FromRef, FromRequestParts, Path},
     response::{IntoResponse, Response},
     Json,
 };
@@ -10,20 +10,26 @@ use axum_extra::{
     TypedHeader,
 };
 use http::{request::Parts, StatusCode};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde_json::json;
 use tracing::error;
 
 use crate::{
     ai::{answer::AnswerError, tools::ToolError},
     collection_manager::sides::{
-        read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
+        read::ReadError,
+        segments::SegmentError,
+        triggers::TriggerError,
+        write::{
+            jwt_manager::{JwtError, JwtManager},
+            WriteError,
+        },
     },
-    types::{ApiKey, Claims, CollectionId, IndexId, WriteApiKey},
+    types::{ApiKey, CollectionId, IndexId, WriteApiKey},
 };
 
 impl<S> FromRequestParts<S> for WriteApiKey
 where
+    JwtManager: FromRef<S>,
     S: Send + Sync,
 {
     type Rejection = (StatusCode, Json<serde_json::Value>);
@@ -42,29 +48,65 @@ where
         let bearer_token = bearer_token.0 .0;
         let bearer_token = bearer_token.token();
         let api_key = if bearer_token.starts_with("ey") && bearer_token.contains('.') {
-            let mut validation = Validation::new(Algorithm::HS256);
-            validation.set_audience(&["http://localhost:8080"]);
-            validation.set_issuer(&["https://dashboard.oramacore.com"]);
-
-            let decoded = decode::<Claims>(
-                bearer_token,
-                &DecodingKey::from_secret("wow".as_bytes()),
-                &validation,
-            );
-
-            let decoded = match decoded {
-                Ok(decoded) => decoded,
-                Err(e) => {
+            let manager = JwtManager::from_ref(state);
+            let claims = match manager.check(bearer_token).await {
+                Ok(claims) => claims,
+                Err(JwtError::Generic(e)) => {
                     return Err((
                         StatusCode::UNAUTHORIZED,
                         Json(json!({
-                            "message": format!("Bad API key: {:?}", e)
+                            "message": format!("JWT Auth error: {:?}", e)
                         })),
-                    ))
+                    ));
+                }
+                Err(JwtError::InvalidIssuer { wanted }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "Invalid issuer. Wanted one of {:?}",
+                                wanted
+                            )
+                        })),
+                    ));
+                }
+                Err(JwtError::InvalidAudience { wanted }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "Invalid audience. Wanted '{:?}'",
+                                wanted
+                            )
+                        })),
+                    ));
+                }
+                Err(JwtError::NotConfigured) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "message": "JWT is not configured on this instance"
+                        })),
+                    ));
+                }
+                Err(JwtError::ExpiredToken) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": "JWT token is expired"
+                        })),
+                    ));
+                }
+                Err(JwtError::MissingRequiredClaim(c)) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!("Missing required claim {c}"),
+                        })),
+                    ));
                 }
             };
-
-            WriteApiKey::from_claims(decoded.claims)
+            WriteApiKey::from_claims(claims)
         } else {
             let api_key = ApiKey::try_new(bearer_token).map_err(|e| {
                 (

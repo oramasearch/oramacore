@@ -5,6 +5,7 @@ mod embedding;
 pub mod index;
 pub use index::OramaModelSerializable;
 use thiserror::Error;
+pub mod jwt_manager;
 
 use std::{
     collections::HashMap,
@@ -50,8 +51,9 @@ use crate::{
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
-        triggers::WriteCollectionTriggerInterface, DocumentStorageWriteOperation, DocumentToInsert,
-        ReplaceIndexReason, WriteOperation,
+        triggers::WriteCollectionTriggerInterface,
+        write::jwt_manager::{JwtConfig, JwtManager},
+        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -105,6 +107,7 @@ pub struct WriteSideConfig {
     pub hooks: HooksRuntimeConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
+    pub jwt: Option<JwtConfig>,
 }
 
 pub struct WriteSide {
@@ -140,6 +143,8 @@ pub struct WriteSide {
     // allowing other operations to obtain the write lock,
     // and then we can continue the insertion.
     write_operation_counter: AtomicU32,
+
+    jwt_manager: JwtManager,
 }
 
 impl WriteSide {
@@ -217,6 +222,10 @@ impl WriteSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        let jwt_manager = JwtManager::new(config.jwt)
+            .await
+            .context("Cannot create jwt_manager")?;
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
@@ -236,6 +245,7 @@ impl WriteSide {
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
+            jwt_manager,
         };
 
         let write_side = Arc::new(write_side);
@@ -1204,6 +1214,10 @@ impl WriteSide {
             self.triggers.clone(),
             collection,
         ))
+    }
+
+    pub fn get_jwt_manager(&self) -> JwtManager {
+        self.jwt_manager.clone()
     }
 
     async fn wait_for_pending_write_operations(&self) -> Result<()> {

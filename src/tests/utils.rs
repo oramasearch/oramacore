@@ -112,6 +112,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 javascript_queue_limit: 10_000,
                 commit_interval: Duration::from_secs(3_000),
             },
+            jwt: None,
         },
         reader_side: ReadSideConfig {
             input: InputSideChannelType::InMemory { capacity: 100 },
