@@ -104,23 +104,25 @@ impl JwtManager {
 
                 use jsonwebtoken::errors::ErrorKind;
 
-                if let AuthError::InvalidToken(e) = &e { match e.kind() {
-                    ErrorKind::ExpiredSignature => return Err(JwtError::ExpiredToken),
-                    ErrorKind::InvalidIssuer => {
-                        return Err(JwtError::InvalidIssuer {
-                            wanted: issuers.clone(),
-                        })
+                if let AuthError::InvalidToken(e) = &e {
+                    match e.kind() {
+                        ErrorKind::ExpiredSignature => return Err(JwtError::ExpiredToken),
+                        ErrorKind::InvalidIssuer => {
+                            return Err(JwtError::InvalidIssuer {
+                                wanted: issuers.clone(),
+                            })
+                        }
+                        ErrorKind::InvalidAudience => {
+                            return Err(JwtError::InvalidAudience {
+                                wanted: audiences.clone(),
+                            })
+                        }
+                        ErrorKind::MissingRequiredClaim(c) => {
+                            return Err(JwtError::MissingRequiredClaim(c.clone()))
+                        }
+                        _ => {}
                     }
-                    ErrorKind::InvalidAudience => {
-                        return Err(JwtError::InvalidAudience {
-                            wanted: audiences.clone(),
-                        })
-                    }
-                    ErrorKind::MissingRequiredClaim(c) => {
-                        return Err(JwtError::MissingRequiredClaim(c.clone()))
-                    }
-                    _ => {}
-                } }
+                }
                 return Err(JwtError::Generic(e));
             }
         };
