@@ -5,6 +5,7 @@ mod embedding;
 pub mod index;
 pub use index::OramaModelSerializable;
 use thiserror::Error;
+pub mod jwt_manager;
 
 use std::{
     collections::HashMap,
@@ -50,8 +51,9 @@ use crate::{
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
-        triggers::WriteCollectionTriggerInterface, DocumentStorageWriteOperation, DocumentToInsert,
-        ReplaceIndexReason, WriteOperation,
+        triggers::WriteCollectionTriggerInterface,
+        write::jwt_manager::{JwtConfig, JwtManager},
+        DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
@@ -60,7 +62,7 @@ use crate::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
         IndexEmbeddingsCalculation, IndexId, InsertDocumentsResult, LanguageDTO,
-        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult,
+        ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
 
@@ -74,6 +76,8 @@ pub enum WriteError {
     CollectionAlreadyExists(CollectionId),
     #[error("Invalid write api key for: {0}")]
     InvalidWriteApiKey(CollectionId),
+    #[error("JWT belong to another collection. Wanted: {0}")]
+    JwtBelongToAnotherCollection(CollectionId),
     #[error("Collection not found: {0}")]
     CollectionNotFound(CollectionId),
     #[error("Index {1} already exists in collection {0}")]
@@ -105,6 +109,7 @@ pub struct WriteSideConfig {
     pub hooks: HooksRuntimeConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
+    pub jwt: Option<JwtConfig>,
 }
 
 pub struct WriteSide {
@@ -140,6 +145,8 @@ pub struct WriteSide {
     // allowing other operations to obtain the write lock,
     // and then we can continue the insertion.
     write_operation_counter: AtomicU32,
+
+    jwt_manager: JwtManager,
 }
 
 impl WriteSide {
@@ -217,6 +224,10 @@ impl WriteSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        let jwt_manager = JwtManager::new(config.jwt)
+            .await
+            .context("Cannot create jwt_manager")?;
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
@@ -236,6 +247,7 @@ impl WriteSide {
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
+            jwt_manager,
         };
 
         let write_side = Arc::new(write_side);
@@ -328,7 +340,7 @@ impl WriteSide {
 
     pub async fn create_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
@@ -355,7 +367,7 @@ impl WriteSide {
 
     pub async fn reindex(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         language: LanguageDTO,
         model: OramaModel,
@@ -507,7 +519,7 @@ impl WriteSide {
 
     pub async fn replace_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
@@ -530,7 +542,7 @@ impl WriteSide {
 
     pub async fn create_temp_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         copy_from: IndexId,
         req: CreateIndexRequest,
@@ -553,7 +565,7 @@ impl WriteSide {
 
     pub async fn delete_index(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
     ) -> Result<(), WriteError> {
@@ -570,7 +582,7 @@ impl WriteSide {
 
     pub async fn insert_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         mut document_list: DocumentList,
@@ -640,7 +652,7 @@ impl WriteSide {
 
     pub async fn delete_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
@@ -662,7 +674,7 @@ impl WriteSide {
 
     pub async fn update_documents(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
@@ -870,7 +882,7 @@ impl WriteSide {
 
     pub async fn list_document(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
         let collection = self
@@ -1104,7 +1116,7 @@ impl WriteSide {
     async fn get_collection_with_write_key(
         &self,
         collection_id: CollectionId,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
     ) -> Result<CollectionReadLock, WriteError> {
         let collection = self
             .collections
@@ -1112,7 +1124,7 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
 
-        collection.check_write_api_key(write_api_key)?;
+        collection.check_write_api_key(write_api_key).await?;
 
         Ok(collection)
     }
@@ -1128,7 +1140,7 @@ impl WriteSide {
     async fn check_write_api_key(
         &self,
         collection_id: CollectionId,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
     ) -> Result<()> {
         self.get_collection_with_write_key(collection_id, write_api_key)
             .await?;
@@ -1141,7 +1153,7 @@ impl WriteSide {
 
     pub async fn get_system_prompts_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionSystemPromptsInterface, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1154,7 +1166,7 @@ impl WriteSide {
 
     pub async fn get_hooks_runtime(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionHooksRuntime, WriteError> {
         let collection = self
@@ -1168,7 +1180,7 @@ impl WriteSide {
 
     pub async fn get_tools_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionToolsRuntime, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1181,7 +1193,7 @@ impl WriteSide {
 
     pub async fn get_segments_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<CollectionSegmentInterface, WriteError> {
         self.check_write_api_key(collection_id, write_api_key)
@@ -1194,7 +1206,7 @@ impl WriteSide {
 
     pub async fn get_triggers_manager(
         &self,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<WriteCollectionTriggerInterface, WriteError> {
         let collection = self
@@ -1204,6 +1216,10 @@ impl WriteSide {
             self.triggers.clone(),
             collection,
         ))
+    }
+
+    pub fn get_jwt_manager(&self) -> JwtManager {
+        self.jwt_manager.clone()
     }
 
     async fn wait_for_pending_write_operations(&self) -> Result<()> {

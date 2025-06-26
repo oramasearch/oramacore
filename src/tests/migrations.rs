@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::{
     collection_manager::sides::read::IndexFieldStatsType,
     tests::utils::{create_oramacore_config, init_log, TestContext},
-    types::{ApiKey, CollectionId, Number},
+    types::{ApiKey, CollectionId, Number, WriteApiKey},
     OramacoreConfig,
 };
 
@@ -107,7 +107,7 @@ async fn test_ordered_key_index() -> Result<()> {
     let collection_client = test_context
         .get_test_collection_client(
             CollectionId::try_new("tommaso-1").unwrap(),
-            ApiKey::try_new("write").unwrap(),
+            WriteApiKey::from_api_key(ApiKey::try_new("write").unwrap()),
             ApiKey::try_new("read").unwrap(),
         )
         .unwrap();

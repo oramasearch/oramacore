@@ -14,7 +14,8 @@ use crate::{
     ai::tools::{Tool, ToolError},
     collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{
-        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams, UpdateToolParams,
+        ApiKey, CollectionId, DeleteToolParams, InsertToolsParams, RunToolsParams,
+        UpdateToolParams, WriteApiKey,
     },
 };
 
@@ -123,7 +124,7 @@ async fn run_tools_v1(
 )]
 async fn insert_tool_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertToolsParams>,
 ) -> impl IntoResponse {
@@ -153,7 +154,7 @@ async fn insert_tool_v1(
 )]
 async fn delete_tool_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteToolParams>,
 ) -> impl IntoResponse {
@@ -174,7 +175,7 @@ async fn delete_tool_v1(
 )]
 async fn update_tool_v1(
     collection_id: CollectionId,
-    write_api_key: ApiKey,
+    write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateToolParams>,
 ) -> impl IntoResponse {

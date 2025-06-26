@@ -195,6 +195,10 @@ impl Index {
         self.runtime_index_id
     }
 
+    pub fn is_temp(&self) -> bool {
+        self.runtime_index_id.is_some()
+    }
+
     pub async fn get_embedding_field(
         &self,
         field_path: Box<[String]>,

@@ -600,6 +600,45 @@ impl PartialSchema for ApiKey {
 }
 impl ToSchema for ApiKey {}
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct ClaimLimits {
+    pub max_doc_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct Claims {
+    pub sub: CollectionId,
+    pub scope: StackString<20>,
+    pub iss: StackString<128>,
+    pub aud: StackString<128>,
+    #[serde(rename = "lmt")]
+    pub limits: ClaimLimits,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum WriteApiKey {
+    ApiKey(ApiKey),
+    Claims(Claims),
+}
+
+impl WriteApiKey {
+    pub fn from_api_key(api_key: ApiKey) -> Self {
+        Self::ApiKey(api_key)
+    }
+
+    pub fn from_claims(claims: Claims) -> Self {
+        Self::Claims(claims)
+    }
+}
+
+impl PartialSchema for WriteApiKey {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        ApiKey::schema()
+    }
+}
+
+impl ToSchema for WriteApiKey {}
+
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct ListDocumentInCollectionRequest {
     pub id: CollectionId,
@@ -2514,7 +2553,7 @@ pub struct DescribeCollectionIndexResponse {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
-struct StackString<const N: usize>(ArrayString<N>);
+pub struct StackString<const N: usize>(ArrayString<N>);
 impl<const N: usize> PartialSchema for StackString<N> {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         // TODO: put a max length

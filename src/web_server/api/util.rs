@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{FromRequestParts, Path},
+    extract::{FromRef, FromRequestParts, Path},
     response::{IntoResponse, Response},
     Json,
 };
@@ -16,10 +16,113 @@ use tracing::error;
 use crate::{
     ai::{answer::AnswerError, tools::ToolError},
     collection_manager::sides::{
-        read::ReadError, segments::SegmentError, triggers::TriggerError, write::WriteError,
+        read::ReadError,
+        segments::SegmentError,
+        triggers::TriggerError,
+        write::{
+            jwt_manager::{JwtError, JwtManager},
+            WriteError,
+        },
     },
-    types::{ApiKey, CollectionId, IndexId},
+    types::{ApiKey, CollectionId, IndexId, WriteApiKey},
 };
+
+impl<S> FromRequestParts<S> for WriteApiKey
+where
+    JwtManager: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let bearer_token = TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("missing api key: {:?}", e)
+                    })),
+                )
+            })?;
+        let bearer_token = bearer_token.0 .0;
+        let bearer_token = bearer_token.token();
+        let api_key = if bearer_token.starts_with("ey") && bearer_token.contains('.') {
+            let manager = JwtManager::from_ref(state);
+            let claims = match manager.check(bearer_token).await {
+                Ok(claims) => claims,
+                Err(JwtError::Generic(e)) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!("JWT Auth error: {:?}", e)
+                        })),
+                    ));
+                }
+                Err(JwtError::InvalidIssuer { wanted }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "Invalid issuer. Wanted one of {:?}",
+                                wanted
+                            )
+                        })),
+                    ));
+                }
+                Err(JwtError::InvalidAudience { wanted }) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!(
+                                "Invalid audience. Wanted '{:?}'",
+                                wanted
+                            )
+                        })),
+                    ));
+                }
+                Err(JwtError::NotConfigured) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "message": "JWT is not configured on this instance"
+                        })),
+                    ));
+                }
+                Err(JwtError::ExpiredToken) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": "JWT token is expired"
+                        })),
+                    ));
+                }
+                Err(JwtError::MissingRequiredClaim(c)) => {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "message": format!("Missing required claim {c}"),
+                        })),
+                    ));
+                }
+            };
+            WriteApiKey::from_claims(claims)
+        } else {
+            let api_key = ApiKey::try_new(bearer_token).map_err(|e| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "message": format!("Bad API key: {:?}", e)
+                    })),
+                )
+            })?;
+
+            WriteApiKey::from_api_key(api_key)
+        };
+
+        Ok(api_key)
+    }
+}
 
 impl<S> FromRequestParts<S> for ApiKey
 where
@@ -158,7 +261,8 @@ impl IntoResponse for WriteError {
                 (StatusCode::CONFLICT, body).into_response()
             }
             WriteError::InvalidWriteApiKey(collection_id)
-            | WriteError::CollectionNotFound(collection_id) => {
+            | WriteError::CollectionNotFound(collection_id)
+            | WriteError::JwtBelongToAnotherCollection(collection_id) => {
                 let body = format!(
                     "Collection with id {} not found or invalid write api key",
                     collection_id
