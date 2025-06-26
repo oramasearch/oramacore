@@ -37,7 +37,7 @@ use crate::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
         DescribeCollectionResponse, DocumentList, IndexId, InsertDocumentsResult, LanguageDTO,
         ReplaceIndexRequest, SearchParams, SearchResult, UpdateDocumentRequest,
-        UpdateDocumentsResult,
+        UpdateDocumentsResult, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,
@@ -112,6 +112,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 javascript_queue_limit: 10_000,
                 commit_interval: Duration::from_secs(3_000),
             },
+            jwt: None,
         },
         reader_side: ReadSideConfig {
             input: InputSideChannelType::InMemory { capacity: 100 },
@@ -392,13 +393,13 @@ impl TestContext {
         })
         .await?;
 
-        self.get_test_collection_client(id, write_api_key, read_api_key)
+        self.get_test_collection_client(id, WriteApiKey::from_api_key(write_api_key), read_api_key)
     }
 
     pub fn get_test_collection_client(
         &self,
         collection_id: CollectionId,
-        write_api_key: ApiKey,
+        write_api_key: WriteApiKey,
         read_api_key: ApiKey,
     ) -> Result<TestCollectionClient> {
         Ok(TestCollectionClient {
@@ -445,7 +446,7 @@ impl Drop for TestContext {
 
 pub struct TestCollectionClient {
     pub collection_id: CollectionId,
-    pub write_api_key: ApiKey,
+    pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
     master_api_key: ApiKey,
     reader: Arc<ReadSide>,
@@ -691,7 +692,7 @@ impl TestCollectionClient {
 pub struct TestIndexClient {
     pub collection_id: CollectionId,
     pub index_id: IndexId,
-    pub write_api_key: ApiKey,
+    pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
     reader: Arc<ReadSide>,
     writer: Arc<WriteSide>,

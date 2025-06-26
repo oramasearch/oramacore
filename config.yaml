@@ -50,6 +50,14 @@ writer_side:
         javascript_queue_limit: 500000
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
+    # Uncomment to allow JWT validation
+    # jwt:
+    #     jwks_url: http://localhost:3000/.well-known/jwks.json
+    #     issuers: 
+    #         - http://localhost:3000
+    #     audiences:
+    #         - http://localhost:8080
+
 
 reader_side:
     input:

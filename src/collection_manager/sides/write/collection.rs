@@ -19,7 +19,7 @@ use crate::{
     nlp::{locales::Locale, NLPService, TextParser},
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
-        IndexId,
+        IndexId, WriteApiKey,
     },
 };
 
@@ -409,11 +409,43 @@ impl CollectionWriter {
         doc_id
     }
 
-    pub fn check_write_api_key(&self, api_key: ApiKey) -> Result<(), WriteError> {
-        if self.write_api_key != api_key {
-            return Err(WriteError::InvalidWriteApiKey(self.id));
-        }
+    pub async fn check_write_api_key(&self, api_key: WriteApiKey) -> Result<(), WriteError> {
+        match api_key {
+            WriteApiKey::ApiKey(api_key) => {
+                if self.write_api_key != api_key {
+                    return Err(WriteError::InvalidWriteApiKey(self.id));
+                }
+            }
+            WriteApiKey::Claims(claim) => {
+                if claim.sub != self.id {
+                    return Err(WriteError::JwtBelongToAnotherCollection(self.id));
+                }
+            }
+        };
+
         Ok(())
+    }
+
+    async fn get_current_document_count(&self, with_tmp: bool) -> usize {
+        let mut document_count = 0_usize;
+
+        let indexes = self.indexes.read().await;
+        for index in indexes.values() {
+            let index_desc = index.describe().await;
+            document_count += index_desc.document_count;
+        }
+        drop(indexes);
+
+        if with_tmp {
+            let temp_indexs = self.temp_indexes.read().await;
+            for index in temp_indexs.values() {
+                let index_desc = index.describe().await;
+                document_count += index_desc.document_count;
+            }
+            drop(temp_indexs);
+        }
+
+        document_count
     }
 
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
