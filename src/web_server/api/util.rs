@@ -261,7 +261,8 @@ impl IntoResponse for WriteError {
                 (StatusCode::CONFLICT, body).into_response()
             }
             WriteError::InvalidWriteApiKey(collection_id)
-            | WriteError::CollectionNotFound(collection_id) => {
+            | WriteError::CollectionNotFound(collection_id)
+            | WriteError::JwtBelongToAnotherCollection(collection_id) => {
                 let body = format!(
                     "Collection with id {} not found or invalid write api key",
                     collection_id

@@ -76,6 +76,8 @@ pub enum WriteError {
     CollectionAlreadyExists(CollectionId),
     #[error("Invalid write api key for: {0}")]
     InvalidWriteApiKey(CollectionId),
+    #[error("JWT belong to another collection. Wanted: {0}")]
+    JwtBelongToAnotherCollection(CollectionId),
     #[error("Collection not found: {0}")]
     CollectionNotFound(CollectionId),
     #[error("Index {1} already exists in collection {0}")]
