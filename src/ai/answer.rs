@@ -220,7 +220,7 @@ impl Answer {
 
         let mut search_results = Vec::<SearchResultHit>::new();
         if let Some(ref notation) = interaction.ragat_notation {
-            let parsed = RAGAtParser::parse(&notation);
+            let parsed = RAGAtParser::parse(notation);
 
             let components = self
                 .execute_rag_at_specification(&parsed.components, interaction.clone())

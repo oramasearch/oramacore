@@ -452,6 +452,16 @@ impl Index {
     #[instrument(skip(self, doc_ids), fields(collection_id = ?self.collection_id, index_id = ?self.index_id))]
     pub async fn delete_documents(&self, doc_ids: Vec<String>) -> Result<Vec<DocumentId>> {
         info!("Deleting documents: {:?}", doc_ids);
+
+        let doc_ids: Vec<&str> = doc_ids
+            .iter()
+            .map(|id| {
+                id.strip_prefix(self.index_id.as_str())
+                    .and_then(|a| a.strip_prefix(":"))
+                    .unwrap_or(id)
+            })
+            .collect();
+
         let mut doc_id_storage = self.doc_id_storage.write().await;
         let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
 

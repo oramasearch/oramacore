@@ -1,5 +1,6 @@
 // mod old;
 
+mod api_key_chain;
 mod bugs;
 mod commit;
 mod concurrency;

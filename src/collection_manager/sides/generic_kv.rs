@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use ptrie::Trie;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tracing::{instrument, trace};
 
 use super::{KVWriteOperation, Offset, OperationSender, WriteOperation};
 
@@ -62,6 +63,7 @@ impl KV {
         key: String,
         value: V,
     ) -> Result<()> {
+        trace!("Insert key {key}");
         let value = serde_json::to_string(&value).context("Cannot serialize value")?;
         self.data
             .write()
@@ -82,6 +84,7 @@ impl KV {
         &self,
         key: &str,
     ) -> Option<Result<V>> {
+        trace!("Fetching key {key}");
         let read_ref = self.data.read().await;
 
         match read_ref.get(key.as_bytes().iter().cloned()) {
@@ -167,17 +170,20 @@ impl KV {
             .collect()
     }
 
+    #[instrument[skip(self, offset, op)]]
     pub async fn update(&self, offset: Offset, op: KVWriteOperation) -> Result<()> {
         self.last_offset.store(offset.0, Ordering::Relaxed);
 
         match op {
             KVWriteOperation::Create(key, value) => {
+                trace!("Apply insertion {key}");
                 self.data
                     .write()
                     .await
                     .insert(key.as_bytes().iter().cloned(), value.clone());
             }
             KVWriteOperation::Delete(key) => {
+                trace!("Apply deletion {key}");
                 self.data
                     .write()
                     .await
