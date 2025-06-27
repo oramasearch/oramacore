@@ -163,9 +163,10 @@ impl CollectionsWriter {
         drop(collections);
 
         sender
-            .send(WriteOperation::CreateCollection {
+            .send(WriteOperation::CreateCollection2 {
                 id,
                 read_api_key,
+                write_api_key,
                 description,
                 default_locale,
             })

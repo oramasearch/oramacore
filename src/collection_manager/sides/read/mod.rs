@@ -58,6 +58,7 @@ use thiserror::Error;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
+    pub master_api_key: Option<ApiKey>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
@@ -81,7 +82,7 @@ pub enum ReadError {
 }
 
 pub struct ReadSide {
-    pub collections: CollectionsReader,
+    collections: CollectionsReader,
     document_storage: DocumentStorage,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
@@ -89,6 +90,8 @@ pub struct ReadSide {
     live_offset: RwLock<Offset>,
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
+
+    master_api_key: Option<ApiKey>,
 
     triggers: TriggerInterface,
     segments: SegmentInterface,
@@ -171,6 +174,7 @@ impl ReadSide {
             data_dir,
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
+            master_api_key: config.master_api_key,
             segments,
             triggers,
             system_prompts,
@@ -263,7 +267,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         collection.stats(req).await
     }
@@ -295,7 +299,24 @@ impl ReadSide {
                 description,
             } => {
                 self.collections
-                    .create_collection(id, description, default_locale, read_api_key)
+                    .create_collection(id, description, default_locale, read_api_key, None)
+                    .await?;
+            }
+            WriteOperation::CreateCollection2 {
+                id,
+                read_api_key,
+                write_api_key,
+                default_locale,
+                description,
+            } => {
+                self.collections
+                    .create_collection(
+                        id,
+                        description,
+                        default_locale,
+                        read_api_key,
+                        Some(write_api_key),
+                    )
                     .await?;
             }
             WriteOperation::DeleteCollection(collection_id) => {
@@ -364,7 +385,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
             collection: collection_id.to_string().into(),
@@ -439,7 +460,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let collection_stats = self
             .collection_stats(
@@ -474,7 +495,7 @@ impl ReadSide {
             .get_collection(collection_id)
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key)?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let collection_stats = self
             .collection_stats(
@@ -613,7 +634,7 @@ impl ReadSide {
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
 
-        collection.check_read_api_key(read_api_key)
+        collection.check_read_api_key(read_api_key, self.master_api_key)
     }
 
     pub fn is_gpu_overloaded(&self) -> bool {

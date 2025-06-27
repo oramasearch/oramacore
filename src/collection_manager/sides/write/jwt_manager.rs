@@ -50,8 +50,6 @@ pub enum JwtManager {
 
 impl JwtManager {
     pub async fn new(config: Option<JwtConfig>) -> Result<Self> {
-        println!("url {:?}", config);
-
         let Some(config) = config else {
             return Ok(Self::Disabled);
         };

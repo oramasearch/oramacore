@@ -281,6 +281,21 @@ pub enum WriteOperation {
         description: Option<String>,
         default_locale: Locale,
     },
+    CreateCollection2 {
+        id: CollectionId,
+        #[serde(
+            deserialize_with = "deserialize_api_key",
+            serialize_with = "serialize_api_key"
+        )]
+        read_api_key: ApiKey,
+        #[serde(
+            deserialize_with = "deserialize_api_key",
+            serialize_with = "serialize_api_key"
+        )]
+        write_api_key: ApiKey,
+        description: Option<String>,
+        default_locale: Locale,
+    },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
     DocumentStorage(DocumentStorageWriteOperation),
@@ -290,19 +305,8 @@ impl WriteOperation {
     pub fn get_type_id(&self) -> &'static str {
         match self {
             WriteOperation::CreateCollection { .. } => "create_collection",
+            WriteOperation::CreateCollection2 { .. } => "create_collection2",
             WriteOperation::DeleteCollection(_) => "delete_collection",
-            /*
-            WriteOperation::Collection(_, CollectionWriteOperation::CreateField { .. }) => {
-                "create_field"
-            }
-            WriteOperation::Collection(_, CollectionWriteOperation::DeleteDocuments { .. }) => {
-                "delete_documents"
-            }
-            WriteOperation::Collection(_, CollectionWriteOperation::InsertDocument { .. }) => {
-                "insert_document"
-            }
-            WriteOperation::Collection(_, CollectionWriteOperation::Index(_, _, _)) => "index",
-            */
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",
             WriteOperation::Collection(
@@ -507,36 +511,4 @@ mod tests {
             let _: WriteOperation = bincode::deserialize(&serialized).unwrap();
         }
     }
-
-    /*
-    #[test]
-    fn test_bincode_index_number() {
-        let op = WriteOperation::Collection(
-            CollectionId::try_new("col").unwrap(),
-            CollectionWriteOperation::Index(
-                DocumentId(1),
-                FieldId(1),
-                DocumentFieldIndexOperation::IndexNumber {
-                    value: NumberWrapper(Number::I32(1)),
-                },
-            ),
-        );
-        let serialized = bincode::serialize(&op).unwrap();
-        let a: WriteOperation = bincode::deserialize(&serialized).unwrap();
-
-        let WriteOperation::Collection(
-            _,
-            CollectionWriteOperation::Index(
-                _,
-                _,
-                DocumentFieldIndexOperation::IndexNumber { value },
-            ),
-        ) = a
-        else {
-            panic!("Expected Index operation");
-        };
-        assert_eq!(value.0, Number::I32(1));
-    }
-
-    */
 }

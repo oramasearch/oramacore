@@ -1124,6 +1124,12 @@ impl WriteSide {
             .await
             .ok_or_else(|| WriteError::CollectionNotFound(collection_id))?;
 
+        if let WriteApiKey::ApiKey(p) = write_api_key {
+            // Allow master api key usage as a write api key
+            if p == self.master_api_key {
+                return Ok(collection);
+            }
+        }
         collection.check_write_api_key(write_api_key).await?;
 
         Ok(collection)

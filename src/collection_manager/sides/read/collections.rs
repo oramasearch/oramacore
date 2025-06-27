@@ -207,6 +207,7 @@ impl CollectionsReader {
         description: Option<String>,
         default_locale: Locale,
         read_api_key: ApiKey,
+        write_api_key: Option<ApiKey>,
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
@@ -215,6 +216,7 @@ impl CollectionsReader {
             description,
             default_locale,
             read_api_key,
+            write_api_key,
             self.ai_service.clone(),
             self.nlp_service.clone(),
             self.llm_service.clone(),
