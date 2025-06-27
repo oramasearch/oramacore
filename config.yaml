@@ -8,7 +8,7 @@ log:
     # Comment the following line to disable the logging
     file_path: "./log.log"
     levels:
-        oramacore: info
+        oramacore: trace
 
 writer_side:
     output:
@@ -51,12 +51,12 @@ writer_side:
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
     # Uncomment to allow JWT validation
-    # jwt:
-    #     jwks_url: http://localhost:3000/.well-known/jwks.json
-    #     issuers: 
-    #         - http://localhost:3000
-    #     audiences:
-    #         - http://localhost:8080
+    jwt:
+        jwks_url: http://localhost:3000/api/.well-known/jwks.json
+        issuers: 
+            - http://localhost:3000
+        audiences:
+            - http://localhost:8080
 
 
 reader_side:
