@@ -19,7 +19,7 @@ use crate::{
     ai::{
         advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
         llms::LLMService,
-        AIService, OramaModel,
+        AIService,
     },
     collection_manager::sides::{
         read::{CommittedDateFieldStats, ReadError, UncommittedDateFieldStats},
@@ -49,6 +49,7 @@ pub struct CollectionReader {
     deleted: bool,
 
     read_api_key: ApiKey,
+    write_api_key: Option<ApiKey>,
     ai_service: Arc<AIService>,
     nlp_service: Arc<NLPService>,
     llm_service: Arc<LLMService>,
@@ -71,6 +72,7 @@ impl CollectionReader {
         description: Option<String>,
         default_locale: Locale,
         read_api_key: ApiKey,
+        write_api_key: Option<ApiKey>,
         ai_service: Arc<AIService>,
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
@@ -83,6 +85,7 @@ impl CollectionReader {
             deleted: false,
 
             read_api_key,
+            write_api_key,
             ai_service,
             nlp_service,
             llm_service,
@@ -144,6 +147,7 @@ impl CollectionReader {
             deleted: false,
 
             read_api_key: dump.read_api_key,
+            write_api_key: dump.write_api_key,
             ai_service,
             nlp_service,
             llm_service,
@@ -226,6 +230,7 @@ impl CollectionReader {
             description: self.description.clone(),
             default_locale: self.default_locale,
             read_api_key: self.read_api_key,
+            write_api_key: self.write_api_key,
             index_ids,
             temp_index_ids,
             created_at: self.created_at,
@@ -290,12 +295,26 @@ impl CollectionReader {
     }
 
     #[inline]
-    pub fn check_read_api_key(&self, api_key: ApiKey) -> Result<(), ReadError> {
-        if api_key != self.read_api_key {
-            return Err(ReadError::Generic(anyhow!("Invalid read api key")));
+    pub fn check_read_api_key(
+        &self,
+        api_key: ApiKey,
+        master_api_key: Option<ApiKey>,
+    ) -> Result<(), ReadError> {
+        if api_key == self.read_api_key {
+            return Ok(());
+        }
+        if let Some(write_api_key) = self.write_api_key {
+            if write_api_key == api_key {
+                return Ok(());
+            }
+        }
+        if let Some(master_api_key) = master_api_key {
+            if master_api_key == api_key {
+                return Ok(());
+            }
         }
 
-        Ok(())
+        Err(ReadError::Generic(anyhow!("Invalid read api key")))
     }
 
     #[inline]
@@ -580,12 +599,9 @@ impl CollectionReader {
 
             // This should only happen on the first iteration
             if embedding_model.is_none() {
-                match i.get_model().await {
-                    Some(model) => {
-                        let serializable_model = model.as_str_name();
-                        embedding_model = Some(serializable_model.to_string());
-                    }
-                    None => {}
+                if let Some(model) = i.get_model().await {
+                    let serializable_model = model.as_str_name();
+                    embedding_model = Some(serializable_model.to_string());
                 }
             }
 
@@ -807,6 +823,7 @@ struct DumpV1 {
     description: Option<String>,
     default_locale: Locale,
     read_api_key: ApiKey,
+    write_api_key: Option<ApiKey>,
     index_ids: Vec<IndexId>,
     temp_index_ids: Vec<IndexId>,
     created_at: DateTime<Utc>,

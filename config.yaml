@@ -60,6 +60,9 @@ writer_side:
 
 
 reader_side:
+    # Optional on the reader side
+    master_api_key: my-master-api-key
+
     input:
         type: in-memory
         # type: rabbitmq

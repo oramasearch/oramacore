@@ -115,6 +115,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             jwt: None,
         },
         reader_side: ReadSideConfig {
+            master_api_key: None,
             input: InputSideChannelType::InMemory { capacity: 100 },
             config: IndexesConfig {
                 data_dir: generate_new_path(),
@@ -310,12 +311,12 @@ pub struct TestContext {
 }
 impl TestContext {
     pub async fn new() -> Self {
-        let config: OramacoreConfig = create_oramacore_config();
+        let mut config: OramacoreConfig = create_oramacore_config();
+        config.writer_side.master_api_key = Self::generate_api_key();
         Self::new_with_config(config).await
     }
 
     pub async fn new_with_config(mut config: OramacoreConfig) -> Self {
-        config.writer_side.master_api_key = Self::generate_api_key();
         if config.ai_server.port == 0 {
             let address = create_grpc_server().await.unwrap();
             config.ai_server.host = address.ip().to_string();
@@ -449,8 +450,8 @@ pub struct TestCollectionClient {
     pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
     master_api_key: ApiKey,
-    reader: Arc<ReadSide>,
-    writer: Arc<WriteSide>,
+    pub reader: Arc<ReadSide>,
+    pub writer: Arc<WriteSide>,
 }
 impl TestCollectionClient {
     pub async fn create_index(&self) -> Result<TestIndexClient> {
@@ -694,8 +695,8 @@ pub struct TestIndexClient {
     pub index_id: IndexId,
     pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
-    reader: Arc<ReadSide>,
-    writer: Arc<WriteSide>,
+    pub reader: Arc<ReadSide>,
+    pub writer: Arc<WriteSide>,
 }
 impl TestIndexClient {
     pub async fn unchecked_insert_documents(
