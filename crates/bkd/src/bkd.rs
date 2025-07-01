@@ -171,6 +171,30 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
             buffer: Vec::new(),
         }
     }
+
+    pub fn iter(&self) -> BKDTreeIter<T, D> {
+        BKDTreeIter {
+            stack: vec![self],
+            buffer: Vec::new(),
+        }
+    }
+
+    /// Deletes all points whose data matches any element in the given slice.
+    /// This scans the entire tree and is inefficient (O(n)).
+    pub fn delete(&mut self, data_to_delete: &[D])
+    where
+        D: PartialEq,
+    {
+        match self {
+            BKDTree::Leaf(ref mut points) => {
+                points.retain(|p| !data_to_delete.contains(&p.data));
+            }
+            BKDTree::Node { left, right, .. } => {
+                left.delete(data_to_delete);
+                right.delete(data_to_delete);
+            }
+        }
+    }
 }
 
 // Helper function to find the axis with the largest spread
@@ -358,6 +382,37 @@ impl<'a, T: num_traits::Float + Copy + PartialOrd, D> Iterator for PolygonQueryI
                         if (inside && self.inclusive) || (!inside && !self.inclusive) {
                             self.buffer.push(&p.data);
                         }
+                    }
+                }
+                BKDTree::Node { left, right, .. } => {
+                    self.stack.push(left);
+                    self.stack.push(right);
+                }
+            }
+        }
+    }
+}
+
+// Iterator over all points in the BKDTree
+pub struct BKDTreeIter<'a, T: Copy + PartialOrd, D> {
+    stack: Vec<&'a BKDTree<T, D>>,
+    buffer: Vec<&'a Point<T, D>>,
+}
+
+impl<'a, T: Copy + PartialOrd, D> Iterator for BKDTreeIter<'a, T, D> {
+    type Item = &'a Point<T, D>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(point) = self.buffer.pop() {
+                return Some(point);
+            }
+            let node = self.stack.pop()?;
+            match node {
+                BKDTree::Leaf(points) => {
+                    // Push all points in reverse order so we can pop from the end
+                    for p in points.iter().rev() {
+                        self.buffer.push(p);
                     }
                 }
                 BKDTree::Node { left, right, .. } => {
