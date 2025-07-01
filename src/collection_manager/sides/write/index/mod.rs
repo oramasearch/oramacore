@@ -37,7 +37,7 @@ use crate::{
 };
 
 use super::embedding::MultiEmbeddingCalculationRequest;
-pub use fields::{FieldType, IndexedValue, OramaModelSerializable, GeoPoint};
+pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -669,7 +669,9 @@ impl Index {
                                     IndexWriteOperationFieldType::StringFilter
                                 }
                                 IndexFilterField::Date(_) => IndexWriteOperationFieldType::Date,
-                                IndexFilterField::GeoPoint(_) => IndexWriteOperationFieldType::GeoPoint,
+                                IndexFilterField::GeoPoint(_) => {
+                                    IndexWriteOperationFieldType::GeoPoint
+                                }
                             },
                         },
                     ),
@@ -803,11 +805,8 @@ fn calculate_fields_for(
         }
         Value::Null => {}
         Value::Object(obj) => {
-            if obj.len() == 2 && obj.contains_key("lon")  && obj.contains_key("lat") {
-                filter_field = Some(IndexFilterField::new_geopoint(
-                    generate_id(),
-                    field_path,
-                ));
+            if obj.len() == 2 && obj.contains_key("lon") && obj.contains_key("lat") {
+                filter_field = Some(IndexFilterField::new_geopoint(generate_id(), field_path));
             } else {
                 use debug_panic::debug_panic;
                 eprintln!("Path: {:?}", field_path);
@@ -859,7 +858,6 @@ fn get_value<'doc, X: AsRef<str>>(
         let value = obj.get(key)?;
 
         if let Value::Object(obj) = value {
-
             if index == field_path.len() - 1 {
                 return Some(value);
             }

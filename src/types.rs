@@ -2111,7 +2111,7 @@ mod test {
         assert!(p.is_ok());
 
         let j = json!({
-            "position": { 
+            "position": {
                 "radius": {
                   "coordinates": {
                     "lat": 45.4648,
@@ -2436,11 +2436,11 @@ impl GeoSearchRadiusValue {
     pub fn to_meter(&self, in_unit: GeoSearchRadiusUnit) -> f32 {
         match in_unit {
             GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01, // 1 cm = 0.01 m
-            GeoSearchRadiusUnit::Meter => self.0, // already in meters
+            GeoSearchRadiusUnit::Meter => self.0,             // already in meters
             GeoSearchRadiusUnit::KiloMeter => self.0 * 1000.0, // 1 km = 1000 m
-            GeoSearchRadiusUnit::Feet => self.0 * 0.3048, // 1 ft = 0.3048 m
-            GeoSearchRadiusUnit::Yard => self.0 * 0.9144, // 1 yd = 0.9144 m
-            GeoSearchRadiusUnit::Mile => self.0 * 1609.344, // 1 mi = 1609.344 m
+            GeoSearchRadiusUnit::Feet => self.0 * 0.3048,     // 1 ft = 0.3048 m
+            GeoSearchRadiusUnit::Yard => self.0 * 0.9144,     // 1 yd = 0.9144 m
+            GeoSearchRadiusUnit::Mile => self.0 * 1609.344,   // 1 mi = 1609.344 m
         }
     }
 }
@@ -2459,7 +2459,7 @@ pub enum GeoSearchRadiusUnit {
     #[serde(rename = "yd")]
     Yard,
     #[serde(rename = "mi")]
-    Mile
+    Mile,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

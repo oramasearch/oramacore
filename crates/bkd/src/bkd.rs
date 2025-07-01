@@ -1,5 +1,5 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{cmp::Ordering, fmt::Debug};
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 /// Mean radius of the Earth in meters
 const EARTH_RADIUS_M: f32 = 6_371_000.0;
@@ -35,7 +35,10 @@ where
         D: Deserializer<'de>,
     {
         let arr = <[T; 2]>::deserialize(deserializer)?;
-        Ok(Coord { lat: arr[0], lon: arr[1] })
+        Ok(Coord {
+            lat: arr[0],
+            lon: arr[1],
+        })
     }
 }
 
@@ -65,10 +68,7 @@ pub struct Point<T: Copy + PartialOrd, D> {
 
 impl<T: Copy + PartialOrd, D> Point<T, D> {
     pub fn new(coords: Coord<T>, data: D) -> Self {
-        Self {
-            coords,
-            data,
-        }
+        Self { coords, data }
     }
 }
 
@@ -103,7 +103,11 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
                 if points.len() > LEAF_SIZE {
                     // Split on axis with largest spread
                     let axis = find_largest_spread_axis(points);
-                    points.sort_by(|a, b| a.coords[axis].partial_cmp(&b.coords[axis]).unwrap_or(Ordering::Equal));
+                    points.sort_by(|a, b| {
+                        a.coords[axis]
+                            .partial_cmp(&b.coords[axis])
+                            .unwrap_or(Ordering::Equal)
+                    });
                     let median = points.len() / 2;
                     let split = points[median].coords[axis];
                     let right_points = points.split_off(median);
@@ -116,7 +120,12 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
                     };
                 }
             }
-            BKDTree::Node { axis, split, left, right } => {
+            BKDTree::Node {
+                axis,
+                split,
+                left,
+                right,
+            } => {
                 if point.coords[*axis] < *split {
                     left.insert(point);
                 } else {
@@ -172,8 +181,14 @@ where
     let mut max_spread = T::zero();
     let mut axis = 0;
     for i in 0..2 {
-        let min = points.iter().map(|p| p.coords[i]).fold(T::max_value(), |a, b| a.min(b));
-        let max = points.iter().map(|p| p.coords[i]).fold(T::min_value(), |a, b| a.max(b));
+        let min = points
+            .iter()
+            .map(|p| p.coords[i])
+            .fold(T::max_value(), |a, b| a.min(b));
+        let max = points
+            .iter()
+            .map(|p| p.coords[i])
+            .fold(T::min_value(), |a, b| a.max(b));
         let spread = max - min;
         if spread > max_spread {
             max_spread = spread;
@@ -191,10 +206,18 @@ impl<T: Copy + PartialOrd + std::fmt::Debug, D: std::fmt::Debug> BKDTree<T, D> {
             BKDTree::Leaf(points) => {
                 println!("{}Leaf with {} points:", indent, points.len());
                 for p in points {
-                    println!("{}  Point: coords={:?}, data={:?}", indent, p.coords, p.data);
+                    println!(
+                        "{}  Point: coords={:?}, data={:?}",
+                        indent, p.coords, p.data
+                    );
                 }
             }
-            BKDTree::Node { axis, split, left, right } => {
+            BKDTree::Node {
+                axis,
+                split,
+                left,
+                right,
+            } => {
                 println!("{}Node: axis={}, split={:?}", indent, axis, split);
                 left.display(depth + 1);
                 right.display(depth + 1);
@@ -220,8 +243,7 @@ pub fn haversine_distance<T: num_traits::Float + Copy + PartialOrd + Debug>(
     let lon2 = to_radians(coord2.lon);
     let dlat = lat2 - lat1;
     let dlon = lon2 - lon1;
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     let d = EARTH_RADIUS_M * c;
 
@@ -238,7 +260,9 @@ pub struct RadiusQueryIter<'a, T: Copy + PartialOrd, D> {
     inside: bool,
 }
 
-impl<'a, T: num_traits::Float + Copy + PartialOrd + Debug, D> Iterator for RadiusQueryIter<'a, T, D> {
+impl<'a, T: num_traits::Float + Copy + PartialOrd + Debug, D> Iterator
+    for RadiusQueryIter<'a, T, D>
+{
     type Item = &'a D;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -251,12 +275,19 @@ impl<'a, T: num_traits::Float + Copy + PartialOrd + Debug, D> Iterator for Radiu
                 BKDTree::Leaf(points) => {
                     for p in points.iter().rev() {
                         let dist = (self.distance_fn)(&self.center, &p.coords);
-                        if (self.inside && dist <= self.radius) || (!self.inside && dist > self.radius) {
+                        if (self.inside && dist <= self.radius)
+                            || (!self.inside && dist > self.radius)
+                        {
                             self.buffer.push(&p.data);
                         }
                     }
                 }
-                BKDTree::Node { axis, split, left, right } => {
+                BKDTree::Node {
+                    axis,
+                    split,
+                    left,
+                    right,
+                } => {
                     let diff = self.center[*axis] - *split;
                     let abs_diff = diff.abs();
                     let sqrt_radius2 = self.radius.sqrt();
@@ -295,8 +326,7 @@ pub fn is_point_in_polygon<T: Copy + PartialOrd + num_traits::Float>(
         let xj = polygon[j].lon;
         let yj = polygon[j].lat;
 
-        let intersect = (yi > lat) != (yj > lat)
-            && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi;
+        let intersect = (yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi;
         if intersect {
             is_inside = !is_inside;
         }
@@ -343,34 +373,56 @@ impl<'a, T: num_traits::Float + Copy + PartialOrd, D> Iterator for PolygonQueryI
 mod tests {
     use std::collections::HashSet;
 
-    use rand::{rngs::StdRng, SeedableRng, Rng};
     use super::*;
     use bincode;
-
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
     fn distance2<T: Copy + PartialOrd + num_traits::Float>(c1: &Coord<T>, c2: &Coord<T>) -> f32 {
         let dx = num_traits::cast::<T, f32>(c1.lat - c2.lat).unwrap();
         let dy = num_traits::cast::<T, f32>(c1.lon - c2.lon).unwrap();
         (dx * dx + dy * dy).sqrt()
     }
-    
 
     #[test]
     fn test_insert_and_query_radius() {
         let mut tree = BKDTree::<f32, &'static str>::new();
         let pts = vec![
-            Point { coords: Coord { lat: 0.0, lon: 0.0 }, data: "a" },
-            Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "b" },
-            Point { coords: Coord { lat: 2.0, lon: 2.0 }, data: "c" },
-            Point { coords: Coord { lat: 2.1, lon: 2.1 }, data: "d" },
-            Point { coords: Coord { lat: 3.0, lon: 3.0 }, data: "e" },
-            Point { coords: Coord { lat: 5.0, lon: 5.0 }, data: "f" },
+            Point {
+                coords: Coord { lat: 0.0, lon: 0.0 },
+                data: "a",
+            },
+            Point {
+                coords: Coord { lat: 1.0, lon: 1.0 },
+                data: "b",
+            },
+            Point {
+                coords: Coord { lat: 2.0, lon: 2.0 },
+                data: "c",
+            },
+            Point {
+                coords: Coord { lat: 2.1, lon: 2.1 },
+                data: "d",
+            },
+            Point {
+                coords: Coord { lat: 3.0, lon: 3.0 },
+                data: "e",
+            },
+            Point {
+                coords: Coord { lat: 5.0, lon: 5.0 },
+                data: "f",
+            },
         ];
         for p in pts {
             tree.insert(p);
         }
-        let center = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "b" };
-        let found: Vec<&str> = tree.search_by_radius(center.coords, 1.5, distance2, true).copied().collect();
+        let center = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "b",
+        };
+        let found: Vec<&str> = tree
+            .search_by_radius(center.coords, 1.5, distance2, true)
+            .copied()
+            .collect();
         // Should find "a", "b", "c"
         assert_eq!(found.len(), 3);
         assert!(found.contains(&"a"));
@@ -381,15 +433,30 @@ mod tests {
     #[test]
     fn test_insert_same_coords_different_data() {
         let mut tree = BKDTree::<f32, &'static str>::new();
-        let p1 = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "a" };
-        let p2 = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "b" };
-        let p3 = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "c" };
+        let p1 = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "a",
+        };
+        let p2 = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "b",
+        };
+        let p3 = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "c",
+        };
         tree.insert(p1);
         tree.insert(p2);
         tree.insert(p3);
         // Query with a small radius to get all points at [1.0, 1.0]
-        let center = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "irrelevant" };
-        let found: Vec<&str> = tree.search_by_radius(center.coords, 0.01, distance2, true).copied().collect();
+        let center = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "irrelevant",
+        };
+        let found: Vec<&str> = tree
+            .search_by_radius(center.coords, 0.01, distance2, true)
+            .copied()
+            .collect();
         assert_eq!(found.len(), 3);
         assert!(found.contains(&"a"));
         assert!(found.contains(&"b"));
@@ -400,18 +467,42 @@ mod tests {
     fn test_query_radius_iter() {
         let mut tree = BKDTree::<f32, &'static str>::new();
         let pts = vec![
-            Point { coords: Coord { lat: 0.0, lon: 0.0 }, data: "a" },
-            Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "b" },
-            Point { coords: Coord { lat: 2.0, lon: 2.0 }, data: "c" },
-            Point { coords: Coord { lat: 2.1, lon: 2.1 }, data: "d" },
-            Point { coords: Coord { lat: 3.0, lon: 3.0 }, data: "e" },
-            Point { coords: Coord { lat: 5.0, lon: 5.0 }, data: "f" },
+            Point {
+                coords: Coord { lat: 0.0, lon: 0.0 },
+                data: "a",
+            },
+            Point {
+                coords: Coord { lat: 1.0, lon: 1.0 },
+                data: "b",
+            },
+            Point {
+                coords: Coord { lat: 2.0, lon: 2.0 },
+                data: "c",
+            },
+            Point {
+                coords: Coord { lat: 2.1, lon: 2.1 },
+                data: "d",
+            },
+            Point {
+                coords: Coord { lat: 3.0, lon: 3.0 },
+                data: "e",
+            },
+            Point {
+                coords: Coord { lat: 5.0, lon: 5.0 },
+                data: "f",
+            },
         ];
         for p in pts {
             tree.insert(p);
         }
-        let center = Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "b" };
-        let found: Vec<&str> = tree.search_by_radius(center.coords, 1.5, distance2, true).copied().collect();
+        let center = Point {
+            coords: Coord { lat: 1.0, lon: 1.0 },
+            data: "b",
+        };
+        let found: Vec<&str> = tree
+            .search_by_radius(center.coords, 1.5, distance2, true)
+            .copied()
+            .collect();
         // Should find "a", "b", "c"
         assert_eq!(found.len(), 3);
         assert!(found.contains(&"a"));
@@ -426,7 +517,10 @@ mod tests {
         let mut tree = BKDTree::<f32, usize>::new();
         let mut rng = StdRng::seed_from_u64(42);
         for i in 0..NUM_POINTS {
-            let coords = Coord { lat: rng.random_range(0.0..100.0), lon: rng.random_range(0.0..100.0) };
+            let coords = Coord {
+                lat: rng.random_range(0.0..100.0),
+                lon: rng.random_range(0.0..100.0),
+            };
             let point = Point { coords, data: i };
             tree.insert(point);
         }
@@ -444,13 +538,58 @@ mod tests {
         ];
         // Points: some inside, some outside
         let points = vec![
-            (Point { coords: Coord { lat: 2.5, lon: 2.0 }, data: "inside" }, true),
-            (Point { coords: Coord { lat: 1.0, lon: 1.0 }, data: "inside2" }, true),
-            (Point { coords: Coord { lat: 4.0, lon: 1.0 }, data: "inside3" }, true),
-            (Point { coords: Coord { lat: 2.5, lon: 4.9 }, data: "near_top" }, true),
-            (Point { coords: Coord { lat: 2.5, lon: 5.1 }, data: "above" }, false),
-            (Point { coords: Coord { lat: 5.1, lon: 0.0 }, data: "right" }, false),
-            (Point { coords: Coord { lat: -1.0, lon: 0.0 }, data: "left" }, false),
+            (
+                Point {
+                    coords: Coord { lat: 2.5, lon: 2.0 },
+                    data: "inside",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 1.0, lon: 1.0 },
+                    data: "inside2",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 4.0, lon: 1.0 },
+                    data: "inside3",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 2.5, lon: 4.9 },
+                    data: "near_top",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 2.5, lon: 5.1 },
+                    data: "above",
+                },
+                false,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 5.1, lon: 0.0 },
+                    data: "right",
+                },
+                false,
+            ),
+            (
+                Point {
+                    coords: Coord {
+                        lat: -1.0,
+                        lon: 0.0,
+                    },
+                    data: "left",
+                },
+                false,
+            ),
         ];
         let mut tree = BKDTree::<f32, &str>::new();
         for (p, _) in &points {
@@ -460,9 +599,17 @@ mod tests {
         let found: Vec<&str> = tree.search_by_polygon(polygon, true).copied().collect();
         for (p, should_be_inside) in &points {
             if *should_be_inside {
-                assert!(found.contains(&p.data), "Point {:?} should be inside polygon", p);
+                assert!(
+                    found.contains(&p.data),
+                    "Point {:?} should be inside polygon",
+                    p
+                );
             } else {
-                assert!(!found.contains(&p.data), "Point {:?} should be outside polygon", p);
+                assert!(
+                    !found.contains(&p.data),
+                    "Point {:?} should be outside polygon",
+                    p
+                );
             }
         }
     }
@@ -471,8 +618,20 @@ mod tests {
         fn eq(&self, other: &Self) -> bool {
             match (self, other) {
                 (BKDTree::Leaf(a), BKDTree::Leaf(b)) => a == b,
-                (BKDTree::Node { axis: a_axis, split: a_split, left: a_left, right: a_right },
-                 BKDTree::Node { axis: b_axis, split: b_split, left: b_left, right: b_right }) => {
+                (
+                    BKDTree::Node {
+                        axis: a_axis,
+                        split: a_split,
+                        left: a_left,
+                        right: a_right,
+                    },
+                    BKDTree::Node {
+                        axis: b_axis,
+                        split: b_split,
+                        left: b_left,
+                        right: b_right,
+                    },
+                ) => {
                     a_axis == b_axis && a_split == b_split && a_left == b_left && a_right == b_right
                 }
                 _ => false,
@@ -484,12 +643,16 @@ mod tests {
     fn test_serialize_deserialize_bkdtree() {
         let mut tree = BKDTree::<f32, usize>::new();
         for i in 0..10 {
-            let coords = Coord { lat: i as f32, lon: (i * 2) as f32 };
+            let coords = Coord {
+                lat: i as f32,
+                lon: (i * 2) as f32,
+            };
             let point = Point { coords, data: i };
             tree.insert(point);
         }
         let encoded = bincode::serialize(&tree).expect("serialize BKDTree");
-        let decoded: BKDTree<f32, usize> = bincode::deserialize(&encoded).expect("deserialize BKDTree");
+        let decoded: BKDTree<f32, usize> =
+            bincode::deserialize(&encoded).expect("deserialize BKDTree");
         assert_eq!(tree, decoded);
     }
 
@@ -497,14 +660,35 @@ mod tests {
     fn test_test1() {
         let mut tree = BKDTree::<f32, &'static str>::new();
         let pts = vec![
-            Point { coords: Coord { lat: 9.0814233, lon: 45.2623823, }, data: "1" },
-            Point { coords: Coord { lat: 9.0979028, lon: 45.1995182, }, data: "2" },
+            Point {
+                coords: Coord {
+                    lat: 9.0814233,
+                    lon: 45.2623823,
+                },
+                data: "1",
+            },
+            Point {
+                coords: Coord {
+                    lat: 9.0979028,
+                    lon: 45.1995182,
+                },
+                data: "2",
+            },
         ];
         for p in pts {
             tree.insert(p);
         }
-        let center = Point { coords: Coord { lat: 9.1418481, lon: 45.2324096 }, data: "b" };
-        let found: Vec<&str> = tree.search_by_radius(center.coords, 10_000.0, haversine_distance, true).copied().collect();
+        let center = Point {
+            coords: Coord {
+                lat: 9.1418481,
+                lon: 45.2324096,
+            },
+            data: "b",
+        };
+        let found: Vec<&str> = tree
+            .search_by_radius(center.coords, 10_000.0, haversine_distance, true)
+            .copied()
+            .collect();
         // Should find "a", "b", "c"
         assert_eq!(found.len(), 2);
         assert!(found.contains(&"1"));
@@ -515,12 +699,48 @@ mod tests {
     fn test_test2() {
         let mut tree = BKDTree::<f32, &'static str>::new();
         let pts = vec![
-            Point::new(Coord { lat: -72.1928787, lon: 42.9309292 }, "1" ),
-            Point::new(Coord { lat: -72.1928787, lon: 42.929908 },  "2" ),
-            Point::new(Coord { lat: -72.1912479, lon: 42.9302222 }, "3" ),
-            Point::new(Coord { lat: -72.1917844, lon: 42.9312277 }, "4" ),
-            Point::new(Coord { lat: -72.1928787, lon: 42.9309292 }, "5" ),
-            Point::new(Coord { lat: -10.2328721, lon: 20.9385112 }, "6" ),
+            Point::new(
+                Coord {
+                    lat: -72.1928787,
+                    lon: 42.9309292,
+                },
+                "1",
+            ),
+            Point::new(
+                Coord {
+                    lat: -72.1928787,
+                    lon: 42.929908,
+                },
+                "2",
+            ),
+            Point::new(
+                Coord {
+                    lat: -72.1912479,
+                    lon: 42.9302222,
+                },
+                "3",
+            ),
+            Point::new(
+                Coord {
+                    lat: -72.1917844,
+                    lon: 42.9312277,
+                },
+                "4",
+            ),
+            Point::new(
+                Coord {
+                    lat: -72.1928787,
+                    lon: 42.9309292,
+                },
+                "5",
+            ),
+            Point::new(
+                Coord {
+                    lat: -10.2328721,
+                    lon: 20.9385112,
+                },
+                "6",
+            ),
         ];
 
         for p in pts {
@@ -528,46 +748,88 @@ mod tests {
         }
         let center = Coord {
             lat: -10.2328758,
-            lon: 20.938517
+            lon: 20.938517,
         };
-        let found: HashSet<&str> = tree.search_by_radius(center, 10_000.0, haversine_distance, false).copied().collect();
-        assert_eq!(found, HashSet::from([
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-        ]));
+        let found: HashSet<&str> = tree
+            .search_by_radius(center, 10_000.0, haversine_distance, false)
+            .copied()
+            .collect();
+        assert_eq!(found, HashSet::from(["1", "2", "3", "4", "5",]));
     }
 
     #[test]
     fn test_test3() {
         let mut tree = BKDTree::<f32, &'static str>::new();
         let pts = vec![
-            Point::new(Coord { lat: -50.6964111, lon: 70.2120854 }, "1"),
-            Point::new(Coord { lat: -50.7403564, lon: 70.1823094 }, "2"),
-            Point::new(Coord { lat: -51.2512207, lon: 70.1123535 }, "3"),
-            Point::new(Coord { lat: -50.8639526, lon: 70.0796264 }, "4"),
-            Point::new(Coord { lat: -50.6167603, lon: 70.0973989 }, "5"),
+            Point::new(
+                Coord {
+                    lat: -50.6964111,
+                    lon: 70.2120854,
+                },
+                "1",
+            ),
+            Point::new(
+                Coord {
+                    lat: -50.7403564,
+                    lon: 70.1823094,
+                },
+                "2",
+            ),
+            Point::new(
+                Coord {
+                    lat: -51.2512207,
+                    lon: 70.1123535,
+                },
+                "3",
+            ),
+            Point::new(
+                Coord {
+                    lat: -50.8639526,
+                    lon: 70.0796264,
+                },
+                "4",
+            ),
+            Point::new(
+                Coord {
+                    lat: -50.6167603,
+                    lon: 70.0973989,
+                },
+                "5",
+            ),
         ];
 
         for p in pts {
             tree.insert(p);
         }
 
-        let found: HashSet<&str> = tree.search_by_polygon(vec![
-            Coord { lat: -51.3693237, lon: 70.4082687 },
-            Coord { lat: -51.5643311, lon: 69.8623282 },
-            Coord { lat: -49.9822998, lon: 69.8273124 },
-            Coord { lat: -49.7543335, lon: 70.3787763 },
-            Coord { lat: -51.3693237, lon: 70.4082687 },
-        ], true).copied().collect();
-        assert_eq!(found, HashSet::from([
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-        ]));
+        let found: HashSet<&str> = tree
+            .search_by_polygon(
+                vec![
+                    Coord {
+                        lat: -51.3693237,
+                        lon: 70.4082687,
+                    },
+                    Coord {
+                        lat: -51.5643311,
+                        lon: 69.8623282,
+                    },
+                    Coord {
+                        lat: -49.9822998,
+                        lon: 69.8273124,
+                    },
+                    Coord {
+                        lat: -49.7543335,
+                        lon: 70.3787763,
+                    },
+                    Coord {
+                        lat: -51.3693237,
+                        lon: 70.4082687,
+                    },
+                ],
+                true,
+            )
+            .copied()
+            .collect();
+        assert_eq!(found, HashSet::from(["1", "2", "3", "4", "5",]));
     }
 }

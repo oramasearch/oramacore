@@ -24,7 +24,9 @@ use crate::{
         global_info::GlobalInfo,
         sides::{
             read::index::{
-                committed_field::{CommittedDateField, CommittedGeoPointField, DateFieldInfo, GeoPointFieldInfo},
+                committed_field::{
+                    CommittedDateField, CommittedGeoPointField, DateFieldInfo, GeoPointFieldInfo,
+                },
                 merge::{merge_date_field, merge_geopoint_field},
             },
             Offset,
@@ -69,12 +71,14 @@ use crate::{
 };
 
 pub use committed_field::{
-    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedNumberFieldStats, CommittedGeoPointFieldStats,
-    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
+    CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
+    CommittedVectorFieldStats,
 };
 pub use uncommitted_field::{
-    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedNumberFieldStats, UncommittedGeoPointFieldStats,
-    UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
+    UncommittedVectorFieldStats,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -229,7 +233,8 @@ impl Index {
                 field_id,
                 UncommittedGeoPointFilterField::empty(info.field_path.clone()),
             );
-            let field = CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
+            let field =
+                CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
             committed_fields.geopoint_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.string_filter_field_ids {
@@ -879,7 +884,9 @@ impl Index {
                             }
                         }
                         IndexedValue::FilterGeoPoint(field_id, geopoint) => {
-                            if let Some(field) = uncommitted_fields.geopoint_fields.get_mut(&field_id) {
+                            if let Some(field) =
+                                uncommitted_fields.geopoint_fields.get_mut(&field_id)
+                            {
                                 field.insert(doc_id, geopoint);
                             } else {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
@@ -1173,14 +1180,19 @@ impl Index {
                 stats: IndexFieldStatsType::CommittedDate(v.stats().ok()?),
             })
         }));
-        fields_stats.extend(committed_fields.geopoint_fields.iter().filter_map(|(k, v)| {
-            let path = v.field_path().join(".");
-            Some(IndexFieldStats {
-                field_id: *k,
-                field_path: path,
-                stats: IndexFieldStatsType::CommittedGeoPoint(v.stats().ok()?),
-            })
-        }));
+        fields_stats.extend(
+            committed_fields
+                .geopoint_fields
+                .iter()
+                .filter_map(|(k, v)| {
+                    let path = v.field_path().join(".");
+                    Some(IndexFieldStats {
+                        field_id: *k,
+                        field_path: path,
+                        stats: IndexFieldStatsType::CommittedGeoPoint(v.stats().ok()?),
+                    })
+                }),
+        );
         fields_stats.extend(
             committed_fields
                 .string_filter_fields
@@ -1582,8 +1594,8 @@ impl Index {
                             .geopoint_fields
                             .get(&field_id)
                             .ok_or_else(|| {
-                                anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
-                            })?;
+                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                        })?;
 
                         let filtered = PlainFilterResult::from_iter(
                             document_count_estimate,

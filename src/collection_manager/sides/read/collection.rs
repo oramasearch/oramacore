@@ -22,7 +22,10 @@ use crate::{
         AIService,
     },
     collection_manager::sides::{
-        read::{CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats},
+        read::{
+            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
+            UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+        },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     file_utils::BufferedFile,
@@ -665,7 +668,6 @@ pub enum IndexFieldStatsType {
     UncommittedDate(UncommittedDateFieldStats),
     #[serde(rename = "committed_date")]
     CommittedDate(CommittedDateFieldStats),
-
 
     #[serde(rename = "uncommitted_geopoint")]
     UncommittedGeoPoint(UncommittedGeoPointFieldStats),

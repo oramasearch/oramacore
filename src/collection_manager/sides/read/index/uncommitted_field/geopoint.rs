@@ -1,7 +1,10 @@
 use bkd::{haversine_distance, BKDTree, Coord, Point};
 use serde::Serialize;
 
-use crate::{collection_manager::sides::write::index::GeoPoint, types::{DocumentId, GeoSearchFilter}};
+use crate::{
+    collection_manager::sides::write::index::GeoPoint,
+    types::{DocumentId, GeoSearchFilter},
+};
 
 #[derive(Debug)]
 pub struct UncommittedGeoPointFilterField {
@@ -38,42 +41,47 @@ impl UncommittedGeoPointFilterField {
 
     pub fn insert(&mut self, doc_id: DocumentId, value: GeoPoint) {
         self.count += 1;
-        self.inner.insert(Point::new(
-            Coord::new(value.lat, value.lon),
-            doc_id,
-        ));
+        self.inner
+            .insert(Point::new(Coord::new(value.lat, value.lon), doc_id));
     }
 
     pub fn filter<'s, 'iter>(
         &'s self,
         filter_geopoint: &GeoSearchFilter,
-    ) -> Box<dyn  Iterator<Item = DocumentId> + 'iter>
+    ) -> Box<dyn Iterator<Item = DocumentId> + 'iter>
     where
         's: 'iter,
     {
         match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => {
-                Box::new(self.inner.search_by_radius(
-                    Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                    filter.value.to_meter(filter.unit),
-                    haversine_distance,
-                    filter.inside,
-                ).copied())
-            },
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.inner
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            ),
             GeoSearchFilter::Polygon(filter) => {
-                let iter = self.inner.search_by_polygon(
-                    filter.coordinates.iter().map(|g| Coord::new(g.lat, g.lon)).collect(),
-                    false,
-                ).copied();
+                let iter = self
+                    .inner
+                    .search_by_polygon(
+                        filter
+                            .coordinates
+                            .iter()
+                            .map(|g| Coord::new(g.lat, g.lon))
+                            .collect(),
+                        false,
+                    )
+                    .copied();
                 Box::new(iter)
             }
         }
     }
 
     pub fn stats(&self) -> UncommittedGeoPointFieldStats {
-        UncommittedGeoPointFieldStats {
-            count: self.len(),
-        }
+        UncommittedGeoPointFieldStats { count: self.len() }
     }
 }
 

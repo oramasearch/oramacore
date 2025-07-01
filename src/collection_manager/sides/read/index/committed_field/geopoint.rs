@@ -5,7 +5,9 @@ use bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::sides::write::index::GeoPoint, file_utils::create_if_not_exists, types::{DocumentId, GeoSearchFilter, GeoSearchPolygonFilter, NumberFilter}
+    collection_manager::sides::write::index::GeoPoint,
+    file_utils::create_if_not_exists,
+    types::{DocumentId, GeoSearchFilter},
 };
 
 #[derive(Debug)]
@@ -42,7 +44,7 @@ impl CommittedGeoPointField {
                     .context("Failed to deserialize number_vec.bin")?
             }
             Err(_) => {
-                
+
                 let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
                 // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
                 vec.sort_by_key(|(key, _)| key.0);
@@ -97,19 +99,28 @@ impl CommittedGeoPointField {
         's: 'iter,
     {
         match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => {
-                Box::new(self.tree.search_by_radius(
-                    Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                    filter.value.to_meter(filter.unit),
-                    haversine_distance,
-                    filter.inside,
-                ).copied())
-            },
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.tree
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            ),
             GeoSearchFilter::Polygon(filter) => {
-                let iter = self.tree.search_by_polygon(
-                    filter.coordinates.iter().map(|g| Coord::new(g.lat, g.lon)).collect(),
-                    false,
-                ).copied();
+                let iter = self
+                    .tree
+                    .search_by_polygon(
+                        filter
+                            .coordinates
+                            .iter()
+                            .map(|g| Coord::new(g.lat, g.lon))
+                            .collect(),
+                        false,
+                    )
+                    .copied();
                 Box::new(iter)
             }
         }

@@ -20,7 +20,9 @@ use crate::{
         Term, TermStringField,
     },
     nlp::{
-        chunker::{Chunker, ChunkerConfig}, locales::Locale, TextParser
+        chunker::{Chunker, ChunkerConfig},
+        locales::Locale,
+        TextParser,
     },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
@@ -46,7 +48,7 @@ pub enum FilterFieldType {
     #[serde(rename = "date")]
     Date,
     #[serde(rename = "geopoint")]
-    GeoPoint
+    GeoPoint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +112,7 @@ pub enum IndexFilterField {
     Bool(BoolFilterField),
     String(StringFilterField),
     Date(DateFilterField),
-    GeoPoint(GeoPointFilterField)
+    GeoPoint(GeoPointFilterField),
 }
 
 impl GenericField for IndexFilterField {
@@ -261,11 +263,9 @@ impl IndexFilterField {
                 field.field_path,
                 field.is_array,
             )),
-            SerializedFilterFieldType::GeoPoint(field) => IndexFilterField::GeoPoint(GeoPointFilterField::new(
-                field.field_id,
-                field.field_path,
-                field.is_array,
-            )),
+            SerializedFilterFieldType::GeoPoint(field) => IndexFilterField::GeoPoint(
+                GeoPointFilterField::new(field.field_id, field.field_path, field.is_array),
+            ),
         }
     }
 }
@@ -471,24 +471,14 @@ impl GeoPointFilterField {
                 let lon = map.get("lon");
                 let lat = map.get("lat");
 
-                let output = lon.zip(lat)
-                    .and_then(|l| {
-                        l.0.as_number()
-                            .zip(l.1.as_number())
-                    })
-                    .and_then(|d| {
-                        d.0.as_f64()
-                            .zip(d.1.as_f64())
-                    })
-                    .map(|d| {
-                        (d.0 as f32, d.1 as f32)
-                    });
+                let output = lon
+                    .zip(lat)
+                    .and_then(|l| l.0.as_number().zip(l.1.as_number()))
+                    .and_then(|d| d.0.as_f64().zip(d.1.as_f64()))
+                    .map(|d| (d.0 as f32, d.1 as f32));
 
                 match output {
-                    Some(d) => vec![GeoPoint{
-                        lon: d.0,
-                        lat: d.1,
-                    }],
+                    Some(d) => vec![GeoPoint { lon: d.0, lat: d.1 }],
                     _ => vec![],
                 }
             }

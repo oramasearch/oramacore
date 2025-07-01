@@ -210,7 +210,6 @@ pub fn merge_date_field(
     }
 }
 
-
 pub fn merge_geopoint_field(
     uncommitted: Option<&UncommittedGeoPointFilterField>,
     committed: Option<&CommittedGeoPointField>,
