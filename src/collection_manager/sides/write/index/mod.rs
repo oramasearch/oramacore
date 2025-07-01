@@ -37,7 +37,7 @@ use crate::{
 };
 
 use super::embedding::MultiEmbeddingCalculationRequest;
-pub use fields::{FieldType, IndexedValue, OramaModelSerializable};
+pub use fields::{FieldType, IndexedValue, OramaModelSerializable, GeoPoint};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -544,6 +544,7 @@ impl Index {
             Bool(Value),
             Number(Value),
             String(Value),
+            GeoPoint(Value),
             Array(Value),
         }
 
@@ -578,10 +579,17 @@ impl Index {
                         }
                     }
                     Value::Object(obj) => {
-                        let mut path = stack.clone();
-                        path.push(Cow::Borrowed(key));
-                        recursive_object_inspection(obj, fields, path);
-                        continue;
+                        if obj.len() == 2 && obj.contains_key("lat") && obj.contains_key("lon") {
+                            let mut path = stack.clone();
+                            path.push(Cow::Borrowed(key));
+
+                            F::GeoPoint(Value::Object(obj.clone()))
+                        } else {
+                            let mut path = stack.clone();
+                            path.push(Cow::Borrowed(key));
+                            recursive_object_inspection(obj, fields, path);
+                            continue;
+                        }
                     }
                     Value::Bool(v) => F::Bool(Value::Bool(*v)),
                     Value::Number(v) => F::Number(Value::Number(v.clone())),
@@ -640,7 +648,7 @@ impl Index {
         for (k, f) in current_fields {
             let (filter, score) = match f {
                 F::AlreadyInserted => continue,
-                F::Bool(v) | F::Number(v) | F::String(v) | F::Array(v) => {
+                F::Bool(v) | F::Number(v) | F::String(v) | F::Array(v) | F::GeoPoint(v) => {
                     calculate_fields_for(&k, &v, &self.text_parser, &self.field_id_generator)
                 }
             };
@@ -661,6 +669,7 @@ impl Index {
                                     IndexWriteOperationFieldType::StringFilter
                                 }
                                 IndexFilterField::Date(_) => IndexWriteOperationFieldType::Date,
+                                IndexFilterField::GeoPoint(_) => IndexWriteOperationFieldType::GeoPoint,
                             },
                         },
                     ),
@@ -793,10 +802,17 @@ fn calculate_fields_for(
             }
         }
         Value::Null => {}
-        Value::Object(_) => {
-            use debug_panic::debug_panic;
-            eprintln!("Path: {:?}", field_path);
-            debug_panic!("Something is wrong: we should never have an object here.");
+        Value::Object(obj) => {
+            if obj.len() == 2 && obj.contains_key("lon")  && obj.contains_key("lat") {
+                filter_field = Some(IndexFilterField::new_geopoint(
+                    generate_id(),
+                    field_path,
+                ));
+            } else {
+                use debug_panic::debug_panic;
+                eprintln!("Path: {:?}", field_path);
+                debug_panic!("Something is wrong: we should never have an object here.");
+            }
         }
     };
 
@@ -843,6 +859,11 @@ fn get_value<'doc, X: AsRef<str>>(
         let value = obj.get(key)?;
 
         if let Value::Object(obj) = value {
+
+            if index == field_path.len() - 1 {
+                return Some(value);
+            }
+
             return recursive_object_inspection(obj, field_path, index + 1);
         }
         // We threat null values as empty values

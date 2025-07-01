@@ -1,6 +1,7 @@
 pub use bool::{BoolFieldInfo, BoolWrapper, CommittedBoolField, CommittedBoolFieldStats};
 pub use date::{CommittedDateField, CommittedDateFieldStats, DateFieldInfo};
 pub use number::{CommittedNumberField, CommittedNumberFieldStats, NumberFieldInfo};
+pub use geopoint::{CommittedGeoPointField, CommittedGeoPointFieldStats, GeoPointFieldInfo};
 pub use string::{CommittedStringField, CommittedStringFieldStats, StringFieldInfo};
 pub use string_filter::{
     CommittedStringFilterField, CommittedStringFilterFieldStats, StringFilterFieldInfo,
@@ -12,4 +13,5 @@ mod date;
 mod number;
 mod string;
 mod string_filter;
+mod geopoint;
 mod vector;

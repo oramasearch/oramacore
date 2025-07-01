@@ -210,6 +210,17 @@ pub fn merge_date_field(
     }
 }
 
+
+pub fn merge_geopoint_field(
+    uncommitted: Option<&UncommittedGeoPointFilterField>,
+    committed: Option<&CommittedGeoPointField>,
+    data_dir: PathBuf,
+    uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
+) -> Result<Option<CommittedGeoPointField>> {
+    panic!()
+}
+
 pub fn merge_string_filter_field(
     uncommitted: Option<&UncommittedStringFilterField>,
     committed: Option<&CommittedStringFilterField>,

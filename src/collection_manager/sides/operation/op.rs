@@ -123,6 +123,7 @@ pub enum IndexWriteOperationFieldType {
     Bool,
     StringFilter,
     Date,
+    GeoPoint,
     String,
     Embedding(OramaModelSerializable),
 }

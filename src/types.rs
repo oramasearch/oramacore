@@ -3,7 +3,7 @@ use crate::ai::{OramaModel, RemoteLLMProvider};
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
 use crate::collection_manager::sides::hooks::HookName;
-use crate::collection_manager::sides::write::index::FieldType;
+use crate::collection_manager::sides::write::index::{FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use crate::nlp::locales::Locale;
@@ -738,13 +738,14 @@ impl Default for Limit {
 pub struct SearchOffset(pub usize);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
 #[serde(untagged)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Filter {
     Date(DateFilter),
     Number(NumberFilter),
     Bool(bool),
     String(String),
+    GeoPoint(GeoSearchFilter),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2091,6 +2092,39 @@ mod test {
         });
         let p = serde_json::from_value::<WhereFilter>(j);
         assert!(p.is_ok());
+
+        let j = json!({
+            "position": {
+                "polygon": {
+                    "coordinates": [
+                        { "lat": 45.46472, "lon": 9.1886  },
+                        { "lat": 45.46352, "lon": 9.19177 },
+                        { "lat": 45.46278, "lon": 9.19176 },
+                        { "lat": 45.4628,  "lon": 9.18857 },
+                        { "lat": 45.46472, "lon": 9.1886  },
+                    ],
+                    "inside": true,
+                }
+            }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j);
+        assert!(p.is_ok());
+
+        let j = json!({
+            "position": { 
+                "radius": {
+                  "coordinates": {
+                    "lat": 45.4648,
+                    "lon": 9.18998
+                  },
+                  "unit": "m",
+                  "value": 1000,
+                  "inside": true
+                }
+              }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j);
+        assert!(p.is_ok());
     }
 
     #[test]
@@ -2386,6 +2420,71 @@ pub enum DateFilter {
     LessThanOrEqual(OramaDate),
     #[serde(rename = "between")]
     Between((OramaDate, OramaDate)),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeoSearchRadiusValue(f32);
+
+impl PartialEq for GeoSearchRadiusValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl Eq for GeoSearchRadiusValue {}
+
+impl GeoSearchRadiusValue {
+    pub fn to_meter(&self, in_unit: GeoSearchRadiusUnit) -> f32 {
+        match in_unit {
+            GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01, // 1 cm = 0.01 m
+            GeoSearchRadiusUnit::Meter => self.0, // already in meters
+            GeoSearchRadiusUnit::KiloMeter => self.0 * 1000.0, // 1 km = 1000 m
+            GeoSearchRadiusUnit::Feet => self.0 * 0.3048, // 1 ft = 0.3048 m
+            GeoSearchRadiusUnit::Yard => self.0 * 0.9144, // 1 yd = 0.9144 m
+            GeoSearchRadiusUnit::Mile => self.0 * 1609.344, // 1 mi = 1609.344 m
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum GeoSearchRadiusUnit {
+    #[serde(rename = "cm")]
+    CentiMeter,
+    #[serde(rename = "m")]
+    Meter,
+    #[serde(rename = "km")]
+    KiloMeter,
+    #[serde(rename = "ft")]
+    Feet,
+    #[serde(rename = "yd")]
+    Yard,
+    #[serde(rename = "mi")]
+    Mile
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct GeoSearchRadiusFilter {
+    pub coordinates: GeoPoint,
+    pub unit: GeoSearchRadiusUnit,
+    pub value: GeoSearchRadiusValue,
+    pub inside: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct GeoSearchPolygonFilter {
+    pub coordinates: Vec<GeoPoint>,
+    pub inside: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum GeoSearchFilter {
+    #[serde(rename = "radius")]
+    Radius(GeoSearchRadiusFilter),
+    #[serde(rename = "polygon")]
+    Polygon(GeoSearchPolygonFilter),
 }
 
 #[cfg(test)]

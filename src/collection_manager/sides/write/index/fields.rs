@@ -20,9 +20,7 @@ use crate::{
         Term, TermStringField,
     },
     nlp::{
-        chunker::{Chunker, ChunkerConfig},
-        locales::Locale,
-        TextParser,
+        chunker::{Chunker, ChunkerConfig}, locales::Locale, TextParser
     },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
@@ -47,6 +45,8 @@ pub enum FilterFieldType {
     String,
     #[serde(rename = "date")]
     Date,
+    #[serde(rename = "geopoint")]
+    GeoPoint
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +71,7 @@ pub enum SerializedFilterFieldType {
     Bool(SerializedFilterFieldIndexer),
     String(SerializedFilterFieldIndexer),
     Date(SerializedFilterFieldIndexer),
+    GeoPoint(SerializedFilterFieldIndexer),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -109,6 +110,7 @@ pub enum IndexFilterField {
     Bool(BoolFilterField),
     String(StringFilterField),
     Date(DateFilterField),
+    GeoPoint(GeoPointFilterField)
 }
 
 impl GenericField for IndexFilterField {
@@ -118,6 +120,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Bool(field) => field.field_id,
             IndexFilterField::String(field) => field.field_id,
             IndexFilterField::Date(field) => field.field_id,
+            IndexFilterField::GeoPoint(field) => field.field_id,
         }
     }
 
@@ -127,6 +130,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Bool(field) => &field.field_path,
             IndexFilterField::String(field) => &field.field_path,
             IndexFilterField::Date(field) => &field.field_path,
+            IndexFilterField::GeoPoint(field) => &field.field_path,
         }
     }
 
@@ -136,6 +140,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Bool(field) => field.is_array,
             IndexFilterField::String(field) => field.is_array,
             IndexFilterField::Date(field) => field.is_array,
+            IndexFilterField::GeoPoint(field) => field.is_array,
         }
     }
 
@@ -145,6 +150,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Bool(_) => FieldType::Filter(FilterFieldType::Bool),
             IndexFilterField::String(_) => FieldType::Filter(FilterFieldType::String),
             IndexFilterField::Date(_) => FieldType::Filter(FilterFieldType::Date),
+            IndexFilterField::GeoPoint(_) => FieldType::Filter(FilterFieldType::GeoPoint),
         }
     }
 
@@ -161,6 +167,7 @@ impl GenericField for IndexFilterField {
             IndexFilterField::Bool(field) => field.index_value(value),
             IndexFilterField::String(field) => field.index_value(value),
             IndexFilterField::Date(field) => field.index_value(value),
+            IndexFilterField::GeoPoint(field) => field.index_value(value),
         }
     }
 }
@@ -186,6 +193,9 @@ impl IndexFilterField {
     }
     pub fn new_date(field_id: FieldId, field_path: Box<[String]>) -> Self {
         IndexFilterField::Date(DateFilterField::new(field_id, field_path, false))
+    }
+    pub fn new_geopoint(field_id: FieldId, field_path: Box<[String]>) -> Self {
+        IndexFilterField::GeoPoint(GeoPointFilterField::new(field_id, field_path, false))
     }
 
     pub fn serialize(&self) -> SerializedFilterFieldType {
@@ -222,6 +232,14 @@ impl IndexFilterField {
                     field_type: FilterFieldType::Date,
                 })
             }
+            IndexFilterField::GeoPoint(_) => {
+                SerializedFilterFieldType::GeoPoint(SerializedFilterFieldIndexer {
+                    field_id: self.field_id(),
+                    field_path: self.field_path().to_vec().into_boxed_slice(),
+                    is_array: self.is_array(),
+                    field_type: FilterFieldType::Date,
+                })
+            }
         }
     }
 
@@ -239,6 +257,11 @@ impl IndexFilterField {
                 StringFilterField::new(field.field_id, field.field_path, field.is_array),
             ),
             SerializedFilterFieldType::Date(field) => IndexFilterField::Date(DateFilterField::new(
+                field.field_id,
+                field.field_path,
+                field.is_array,
+            )),
+            SerializedFilterFieldType::GeoPoint(field) => IndexFilterField::GeoPoint(GeoPointFilterField::new(
                 field.field_id,
                 field.field_path,
                 field.is_array,
@@ -421,6 +444,60 @@ impl DateFilterField {
         let data = data
             .into_iter()
             .map(|t| IndexedValue::FilterDate(self.field_id, t.as_i64()))
+            .collect();
+
+        Ok(data)
+    }
+}
+
+pub struct GeoPointFilterField {
+    field_id: FieldId,
+    field_path: Box<[String]>,
+    is_array: bool,
+}
+
+impl GeoPointFilterField {
+    pub fn new(field_id: FieldId, field_path: Box<[String]>, is_array: bool) -> Self {
+        Self {
+            field_id,
+            field_path,
+            is_array,
+        }
+    }
+
+    pub fn index_value(&self, value: &Value) -> Result<Vec<IndexedValue>> {
+        let data: Vec<GeoPoint> = match value {
+            Value::Object(map) => {
+                let lon = map.get("lon");
+                let lat = map.get("lat");
+
+                let output = lon.zip(lat)
+                    .and_then(|l| {
+                        l.0.as_number()
+                            .zip(l.1.as_number())
+                    })
+                    .and_then(|d| {
+                        d.0.as_f64()
+                            .zip(d.1.as_f64())
+                    })
+                    .map(|d| {
+                        (d.0 as f32, d.1 as f32)
+                    });
+
+                match output {
+                    Some(d) => vec![GeoPoint{
+                        lon: d.0,
+                        lat: d.1,
+                    }],
+                    _ => vec![],
+                }
+            }
+            _ => vec![],
+        };
+
+        let data = data
+            .into_iter()
+            .map(|t| IndexedValue::FilterGeoPoint(self.field_id, t))
             .collect();
 
         Ok(data)
@@ -992,12 +1069,26 @@ impl EmbeddingField {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct GeoPoint {
+    pub lon: f32,
+    pub lat: f32,
+}
+
+impl PartialEq for GeoPoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.lon == other.lon && self.lat == other.lat
+    }
+}
+impl Eq for GeoPoint {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IndexedValue {
     FilterNumber(FieldId, SerializableNumber),
     FilterBool(FieldId, bool),
     FilterString(FieldId, String),
     FilterDate(FieldId, i64),
+    FilterGeoPoint(FieldId, GeoPoint),
     ScoreString(FieldId, u16, HashMap<Term, TermStringField>),
 }
 
