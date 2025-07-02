@@ -685,7 +685,7 @@ impl TestCollectionClient {
     }
 
     fn generate_index_id(prefix: &str) -> IndexId {
-        let id: String = format!("{}:{}", prefix, Faker.fake::<String>());
+        let id: String = format!("{}_{}", prefix, Faker.fake::<String>());
         IndexId::try_new(id).unwrap()
     }
 }

@@ -45,6 +45,14 @@ impl UncommittedGeoPointFilterField {
             .insert(Point::new(Coord::new(value.lat, value.lon), doc_id));
     }
 
+    pub fn inner(&self) -> BKDTree<f32, DocumentId> {
+        self.inner.clone()
+    }
+
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item = &'s Point<f32, DocumentId>> + 's {
+        self.inner.iter()
+    }
+
     pub fn filter<'s, 'iter>(
         &'s self,
         filter_geopoint: &GeoSearchFilter,
@@ -52,17 +60,21 @@ impl UncommittedGeoPointFilterField {
     where
         's: 'iter,
     {
+        self.inner.display(0);
+
         match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => Box::new(
-                self.inner
-                    .search_by_radius(
-                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                        filter.value.to_meter(filter.unit),
-                        haversine_distance,
-                        filter.inside,
-                    )
-                    .copied(),
-            ),
+            GeoSearchFilter::Radius(filter) => {
+                Box::new(
+                    self.inner
+                        .search_by_radius(
+                            Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                            filter.value.to_meter(filter.unit),
+                            haversine_distance,
+                            filter.inside,
+                        )
+                        .copied(),
+                )
+            },
             GeoSearchFilter::Polygon(filter) => {
                 let iter = self
                     .inner

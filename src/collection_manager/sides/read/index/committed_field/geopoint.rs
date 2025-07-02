@@ -1,12 +1,11 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
 use bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    collection_manager::sides::write::index::GeoPoint,
-    file_utils::create_if_not_exists,
+    file_utils::{create_if_not_exists, BufferedFile},
     types::{DocumentId, GeoSearchFilter},
 };
 
@@ -18,14 +17,14 @@ pub struct CommittedGeoPointField {
 }
 
 impl CommittedGeoPointField {
-    pub fn from_iter<I>(field_path: Box<[String]>, iter: I, data_dir: PathBuf) -> Result<Self>
-    where
-        I: Iterator<Item = (GeoPoint, DocumentId)>,
-    {
-        let vec: Vec<_> = iter.collect();
+    pub fn from_raw(
+        tree: BKDTree<f32, DocumentId>,
+        field_path: Box<[String]>,
+        data_dir: PathBuf,
+    ) -> Result<Self> {
         let s = Self {
             field_path,
-            tree: BKDTree::new(),
+            tree,
             data_dir,
         };
 
@@ -34,44 +33,51 @@ impl CommittedGeoPointField {
         Ok(s)
     }
 
-    #[allow(deprecated)]
     pub fn try_load(info: GeoPointFieldInfo) -> Result<Self> {
-        /*
         let data_dir = info.data_dir;
-        let vec = match std::fs::File::open(data_dir.join("number_vec.bin")) {
-            Ok(file) => {
-                bincode::deserialize_from::<_, Vec<(GeoPoint, DocumentId)>>(file)
-                    .context("Failed to deserialize number_vec.bin")?
-            }
-            Err(_) => {
-
-                let mut vec: Vec<_> = items.map(|item| (item.key, item.values)).collect();
-                // ensure the order is by key. This should not be necessary, but we do it to ensure consistency.
-                vec.sort_by_key(|(key, _)| key.0);
-                vec
-            }
-        };
+        let tree: BKDTree<f32, DocumentId>  = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
+            .context("Cannot open geopoint file")?
+            .read_bincode_data()
+            .context("Cannot deserialize geopoint file")?;
 
         let s = Self {
+            data_dir: data_dir,
             field_path: info.field_path,
-            vec,
-            data_dir,
+            tree,
         };
 
+        // Is it really needed?
         s.commit().context("Failed to commit number field")?;
 
         Ok(s)
-        */
-        panic!("aaa")
+    }
+
+    pub fn update<'s, 'iter, 'to_delete>(
+        &'s mut self,
+        iter: impl Iterator<Item = &'iter bkd::Point<f32, DocumentId>> + 'iter,
+        to_delete: &'to_delete HashSet<DocumentId>,
+        data_dir: PathBuf,
+    ) -> Result<()> {
+        for point in iter {
+            self.tree.insert(point.clone());
+        }
+        self.tree.delete(to_delete);
+
+        self.data_dir = data_dir;
+
+        self.commit()?;
+
+        Ok(())
     }
 
     fn commit(&self) -> Result<()> {
         // Ensure the data directory exists
         create_if_not_exists(&self.data_dir).context("Failed to create data directory")?;
 
-        let file_path = self.data_dir.join("number_vec.bin");
-        let file = std::fs::File::create(&file_path).context("Failed to create number_vec.bin")?;
-        bincode::serialize_into(file, &self.tree).context("Failed to serialize number vec")?;
+        BufferedFile::create_or_overwrite(self.data_dir.join("geopoint_tree.bin"))
+            .context("Cannot open geopoint file")?
+            .write_bincode_data(&self.tree)
+            .context("Cannot deserialize geopoint file")?;
 
         Ok(())
     }
@@ -88,7 +94,9 @@ impl CommittedGeoPointField {
     }
 
     pub fn stats(&self) -> Result<CommittedGeoPointFieldStats> {
-        panic!();
+        Ok(CommittedGeoPointFieldStats {
+            count: self.tree.len(),
+        })
     }
 
     pub fn filter<'s, 'iter>(

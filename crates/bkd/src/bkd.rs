@@ -73,7 +73,7 @@ impl<T: Copy + PartialOrd, D> Point<T, D> {
 }
 
 /// BKD-tree node
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum BKDTree<T: Copy + PartialOrd, D> {
     Leaf(Vec<Point<T, D>>),
     Node {
@@ -81,12 +81,20 @@ pub enum BKDTree<T: Copy + PartialOrd, D> {
         split: T,
         left: Box<BKDTree<T, D>>,
         right: Box<BKDTree<T, D>>,
+        count: usize,
     },
 }
 
 impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
     pub fn new() -> Self {
-        BKDTree::Leaf(Vec::new())
+        BKDTree::Leaf (Vec::new())
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            BKDTree::Leaf(points) => points.len(),
+            BKDTree::Node { count, .. } => *count,
+        }
     }
 
     pub fn insert(&mut self, point: Point<T, D>)
@@ -112,11 +120,14 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
                     let split = points[median].coords[axis];
                     let right_points = points.split_off(median);
                     let left_points = std::mem::take(points);
+                    let left_count = left_points.len();
+                    let right_count = right_points.len();
                     *self = BKDTree::Node {
                         axis,
                         split,
                         left: Box::new(BKDTree::Leaf(left_points)),
                         right: Box::new(BKDTree::Leaf(right_points)),
+                        count: left_count + right_count,
                     };
                 }
             }
@@ -125,12 +136,14 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
                 split,
                 left,
                 right,
+                count,
             } => {
                 if point.coords[*axis] < *split {
                     left.insert(point);
                 } else {
                     right.insert(point);
                 }
+                *count += 1;
             }
         }
     }
@@ -179,19 +192,20 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
         }
     }
 
-    /// Deletes all points whose data matches any element in the given slice.
+    /// Deletes all points whose data matches any element in the given set.
     /// This scans the entire tree and is inefficient (O(n)).
-    pub fn delete(&mut self, data_to_delete: &[D])
+    pub fn delete(&mut self, data_to_delete: &std::collections::HashSet<D>)
     where
-        D: PartialEq,
+        D: PartialEq + Eq + std::hash::Hash,
     {
         match self {
             BKDTree::Leaf(ref mut points) => {
                 points.retain(|p| !data_to_delete.contains(&p.data));
             }
-            BKDTree::Node { left, right, .. } => {
+            BKDTree::Node { left, right, count, .. } => {
                 left.delete(data_to_delete);
                 right.delete(data_to_delete);
+                *count = left.len() + right.len();
             }
         }
     }
@@ -241,6 +255,7 @@ impl<T: Copy + PartialOrd + std::fmt::Debug, D: std::fmt::Debug> BKDTree<T, D> {
                 split,
                 left,
                 right,
+                ..
             } => {
                 println!("{}Node: axis={}, split={:?}", indent, axis, split);
                 left.display(depth + 1);
@@ -311,6 +326,7 @@ impl<'a, T: num_traits::Float + Copy + PartialOrd + Debug, D> Iterator
                     split,
                     left,
                     right,
+                    ..
                 } => {
                     let diff = self.center[*axis] - *split;
                     let abs_diff = diff.abs();
@@ -679,15 +695,17 @@ mod tests {
                         split: a_split,
                         left: a_left,
                         right: a_right,
+                        count: a_count,
                     },
                     BKDTree::Node {
                         axis: b_axis,
                         split: b_split,
                         left: b_left,
                         right: b_right,
+                        count: b_count,
                     },
                 ) => {
-                    a_axis == b_axis && a_split == b_split && a_left == b_left && a_right == b_right
+                    a_axis == b_axis && a_split == b_split && a_left == b_left && a_right == b_right && a_count == b_count
                 }
                 _ => false,
             }
@@ -886,5 +904,40 @@ mod tests {
             .copied()
             .collect();
         assert_eq!(found, HashSet::from(["1", "2", "3", "4", "5",]));
+    }
+
+    #[test]
+    fn test_len_empty_and_insert() {
+        let mut tree = BKDTree::<f32, i32>::new();
+        assert_eq!(tree.len(), 0);
+        tree.insert(Point::new(Coord::new(1.0, 2.0), 42));
+        assert_eq!(tree.len(), 1);
+        tree.insert(Point::new(Coord::new(2.0, 3.0), 43));
+        assert_eq!(tree.len(), 2);
+    }
+
+    #[test]
+    fn test_len_after_delete() {
+        let mut tree = BKDTree::<f32, i32>::new();
+        for i in 0..5 {
+            tree.insert(Point::new(Coord::new(i as f32, i as f32), i));
+        }
+        assert_eq!(tree.len(), 5);
+        let mut to_delete = HashSet::new();
+        to_delete.insert(2);
+        to_delete.insert(66); // this doesn't exist
+        to_delete.insert(4);
+        tree.delete(&to_delete);
+        assert_eq!(tree.len(), 3);
+    }
+
+    #[test]
+    fn test_len_after_split() {
+        let mut tree = BKDTree::<f32, i32>::new();
+        // Insert more than LEAF_SIZE points to force a split
+        for i in 0..20 {
+            tree.insert(Point::new(Coord::new(i as f32, i as f32), i));
+        }
+        assert_eq!(tree.len(), 20);
     }
 }

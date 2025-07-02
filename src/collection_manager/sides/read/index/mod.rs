@@ -227,7 +227,7 @@ impl Index {
             committed_fields.date_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.geopoint_field_ids {
-            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::Date));
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
 
             uncommitted_fields.geopoint_fields.insert(
                 field_id,
@@ -468,14 +468,16 @@ impl Index {
             let data_dir = data_dir_with_offset.join(field_id.0.to_string());
             let uncommitted = uncommitted_fields.geopoint_fields.get(&field_id);
             let committed = committed_fields.geopoint_fields.get(&field_id);
-            if let Some(merged) = merge_geopoint_field(
+            let output = merge_geopoint_field(
                 uncommitted,
                 committed,
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
             )
-            .context("Cannot merge geopoint field")?
+            .context("Cannot merge geopoint field")?;
+
+            if let Some(merged) = output
             {
                 merged_geopoints.insert(field_id, MergeResult::Changed(merged));
             } else {
@@ -1820,7 +1822,6 @@ impl Index {
             filtered_doc_ids,
             global_info: GlobalInfo::default(),
             uncommitted_deleted_documents,
-
             total_term_count: 0,
         };
 

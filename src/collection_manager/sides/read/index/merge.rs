@@ -217,26 +217,22 @@ pub fn merge_geopoint_field(
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
 ) -> Result<Option<CommittedGeoPointField>> {
-    panic!()
-    /*
     match (uncommitted, committed) {
         (None, None) => {
             bail!("Both uncommitted and committed number fields are None. Never should happen");
         }
         (None, Some(_)) => {
-            bail!("Both uncommitted field is None. Never should happen");
+            bail!("Uncommitted field is None. Never should happen");
         }
         (Some(uncommitted), None) => {
-        
-            let iter = uncommitted.iter().map(|(k, mut d)| {
-                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
-                (k, d)
-            });
-            Ok(Some(CommittedStringFilterField::from_iter(
+            let mut tree = uncommitted.inner();
+            tree.delete(uncommitted_document_deletions);
+            let committed = CommittedGeoPointField::from_raw(
+                tree,
                 uncommitted.field_path().to_vec().into_boxed_slice(),
-                iter,
                 data_dir,
-            )?))
+            )?;
+            Ok(Some(committed))
         }
         (Some(uncommitted), Some(committed)) => {
             if uncommitted.is_empty() {
@@ -268,30 +264,13 @@ pub fn merge_geopoint_field(
                     info.data_dir = data_dir;
 
                     return Ok(Some(
-                        CommittedStringFilterField::try_load(info)
+                        CommittedGeoPointField::try_load(info)
                             .context("Failed to load committed string field")?,
                     ));
                 }
 
                 return Ok(None);
             }
-
-            let uncommitted_iter = uncommitted.iter();
-            let committed_iter = committed.iter();
-
-            let iter = MergedIterator::new(
-                committed_iter,
-                uncommitted_iter,
-                |_, v| v,
-                |_, mut v1, v2| {
-                    v1.extend(v2);
-                    v1
-                },
-            )
-            .map(|(k, mut d)| {
-                d.retain(|doc_id| !uncommitted_document_deletions.contains(doc_id));
-                (k, d)
-            });
 
             // uncommitted and committed field_path has to be the same
             debug_assert_eq!(
@@ -300,14 +279,19 @@ pub fn merge_geopoint_field(
                 "Uncommitted and committed field paths should be the same",
             );
 
-            Ok(Some(CommittedStringFilterField::from_iter(
-                uncommitted.field_path().to_vec().into_boxed_slice(),
-                iter,
+            let info = committed.get_field_info();
+            let mut field = CommittedGeoPointField::try_load(info)
+                .context("Failed to load committed string field")?;
+
+            field.update(
+                uncommitted.iter(),
+                uncommitted_document_deletions,
                 data_dir,
-            )?))
+            )?;
+
+            Ok(Some(field))
         }
     }
-    */
 }
 
 pub fn merge_string_filter_field(
