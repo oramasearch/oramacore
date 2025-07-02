@@ -731,6 +731,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bkd"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "fixedbitset",
+ "num",
+ "num-traits",
+ "rand 0.9.1",
+ "rayon",
+ "serde",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4216,7 +4229,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-version = "1.1.55"
+version = "1.1.56"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -4229,6 +4242,7 @@ dependencies = [
  "axum-openapi3",
  "backoff",
  "bincode",
+ "bkd",
  "cc",
  "chrono",
  "clap",

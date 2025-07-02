@@ -24,8 +24,10 @@ use crate::{
         global_info::GlobalInfo,
         sides::{
             read::index::{
-                committed_field::{CommittedDateField, DateFieldInfo},
-                merge::merge_date_field,
+                committed_field::{
+                    CommittedDateField, CommittedGeoPointField, DateFieldInfo, GeoPointFieldInfo,
+                },
+                merge::{merge_date_field, merge_geopoint_field},
             },
             Offset,
         },
@@ -69,12 +71,14 @@ use crate::{
 };
 
 pub use committed_field::{
-    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedNumberFieldStats,
-    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
+    CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
+    CommittedVectorFieldStats,
 };
 pub use uncommitted_field::{
-    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedNumberFieldStats,
-    UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+    UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+    UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
+    UncommittedVectorFieldStats,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +94,7 @@ struct UncommittedFields {
     number_fields: HashMap<FieldId, UncommittedNumberField>,
     string_filter_fields: HashMap<FieldId, UncommittedStringFilterField>,
     date_fields: HashMap<FieldId, UncommittedDateFilterField>,
+    geopoint_fields: HashMap<FieldId, UncommittedGeoPointFilterField>,
     string_fields: HashMap<FieldId, UncommittedStringField>,
     vector_fields: HashMap<FieldId, UncommittedVectorField>,
 }
@@ -100,6 +105,7 @@ struct CommittedFields {
     number_fields: HashMap<FieldId, CommittedNumberField>,
     string_filter_fields: HashMap<FieldId, CommittedStringFilterField>,
     date_fields: HashMap<FieldId, CommittedDateField>,
+    geopoint_fields: HashMap<FieldId, CommittedGeoPointField>,
     string_fields: HashMap<FieldId, CommittedStringField>,
     vector_fields: HashMap<FieldId, CommittedVectorField>,
 }
@@ -220,6 +226,17 @@ impl Index {
             let field = CommittedDateField::try_load(info).context("Cannot load date field")?;
             committed_fields.date_fields.insert(field_id, field);
         }
+        for (field_id, info) in dump.geopoint_field_ids {
+            filter_fields.insert(info.field_path.clone(), (field_id, FieldType::GeoPoint));
+
+            uncommitted_fields.geopoint_fields.insert(
+                field_id,
+                UncommittedGeoPointFilterField::empty(info.field_path.clone()),
+            );
+            let field =
+                CommittedGeoPointField::try_load(info).context("Cannot load geopoint field")?;
+            committed_fields.geopoint_fields.insert(field_id, field);
+        }
         for (field_id, info) in dump.string_filter_field_ids {
             filter_fields.insert(info.field_path.clone(), (field_id, FieldType::StringFilter));
 
@@ -332,6 +349,10 @@ impl Index {
                 .iter()
                 .any(|(_, field)| !field.is_empty())
             || uncommitted_fields
+                .geopoint_fields
+                .iter()
+                .any(|(_, field)| !field.is_empty())
+            || uncommitted_fields
                 .string_fields
                 .iter()
                 .any(|(_, field)| !field.is_empty())
@@ -433,6 +454,33 @@ impl Index {
                 merged_dates.insert(field_id, MergeResult::Changed(merged));
             } else {
                 merged_dates.insert(field_id, MergeResult::Unchanged);
+            }
+        }
+
+        let mut merged_geopoints = HashMap::new();
+        let geopoint_indexes: HashSet<_> = uncommitted_fields
+            .geopoint_fields
+            .keys()
+            .chain(committed_fields.geopoint_fields.keys())
+            .copied()
+            .collect();
+        for field_id in geopoint_indexes {
+            let data_dir = data_dir_with_offset.join(field_id.0.to_string());
+            let uncommitted = uncommitted_fields.geopoint_fields.get(&field_id);
+            let committed = committed_fields.geopoint_fields.get(&field_id);
+            let output = merge_geopoint_field(
+                uncommitted,
+                committed,
+                data_dir,
+                &self.uncommitted_deleted_documents,
+                is_promoted,
+            )
+            .context("Cannot merge geopoint field")?;
+
+            if let Some(merged) = output {
+                merged_geopoints.insert(field_id, MergeResult::Changed(merged));
+            } else {
+                merged_geopoints.insert(field_id, MergeResult::Unchanged);
             }
         }
 
@@ -563,6 +611,17 @@ impl Index {
                 uncommitted.clear();
             }
         }
+        for (field_id, merged) in merged_geopoints {
+            match merged {
+                MergeResult::Changed(merged) => {
+                    committed_fields.geopoint_fields.insert(field_id, merged);
+                }
+                MergeResult::Unchanged => {}
+            }
+            if let Some(uncommitted) = uncommitted_fields.geopoint_fields.get_mut(&field_id) {
+                uncommitted.clear();
+            }
+        }
         for (field_id, merged) in merged_string_filters {
             match merged {
                 MergeResult::Changed(merged) => {
@@ -616,6 +675,11 @@ impl Index {
                 .collect(),
             date_field_ids: committed_fields
                 .date_fields
+                .iter()
+                .map(|(k, v)| (*k, v.get_field_info()))
+                .collect(),
+            geopoint_field_ids: committed_fields
+                .geopoint_fields
                 .iter()
                 .map(|(k, v)| (*k, v.get_field_info()))
                 .collect(),
@@ -742,6 +806,16 @@ impl Index {
                             .date_fields
                             .insert(field_id, UncommittedDateFilterField::empty(field_path));
                     }
+                    IndexWriteOperationFieldType::GeoPoint => {
+                        self.path_to_index_id_map.insert_filter_field(
+                            field_path.clone(),
+                            field_id,
+                            FieldType::GeoPoint,
+                        );
+                        uncommitted_fields
+                            .geopoint_fields
+                            .insert(field_id, UncommittedGeoPointFilterField::empty(field_path));
+                    }
                     IndexWriteOperationFieldType::String => {
                         self.path_to_index_id_map.insert_score_field(
                             field_path.clone(),
@@ -806,6 +880,15 @@ impl Index {
                         IndexedValue::FilterDate(field_id, timestamp) => {
                             if let Some(field) = uncommitted_fields.date_fields.get_mut(&field_id) {
                                 field.insert(doc_id, timestamp);
+                            } else {
+                                error!("Cannot find field {:?} in uncommitted fields", field_id);
+                            }
+                        }
+                        IndexedValue::FilterGeoPoint(field_id, geopoint) => {
+                            if let Some(field) =
+                                uncommitted_fields.geopoint_fields.get_mut(&field_id)
+                            {
+                                field.insert(doc_id, geopoint);
                             } else {
                                 error!("Cannot find field {:?} in uncommitted fields", field_id);
                             }
@@ -1036,6 +1119,14 @@ impl Index {
                 stats: IndexFieldStatsType::UncommittedDate(v.stats()),
             }
         }));
+        fields_stats.extend(uncommitted_fields.geopoint_fields.iter().map(|(k, v)| {
+            let path = v.field_path().join(".");
+            IndexFieldStats {
+                field_id: *k,
+                field_path: path,
+                stats: IndexFieldStatsType::UncommittedGeoPoint(v.stats()),
+            }
+        }));
         fields_stats.extend(
             uncommitted_fields
                 .string_filter_fields
@@ -1090,6 +1181,19 @@ impl Index {
                 stats: IndexFieldStatsType::CommittedDate(v.stats().ok()?),
             })
         }));
+        fields_stats.extend(
+            committed_fields
+                .geopoint_fields
+                .iter()
+                .filter_map(|(k, v)| {
+                    let path = v.field_path().join(".");
+                    Some(IndexFieldStats {
+                        field_id: *k,
+                        field_path: path,
+                        stats: IndexFieldStatsType::CommittedGeoPoint(v.stats().ok()?),
+                    })
+                }),
+        );
         fields_stats.extend(
             committed_fields
                 .string_filter_fields
@@ -1486,6 +1590,35 @@ impl Index {
 
                         results.push(filtered);
                     }
+                    (FieldType::GeoPoint, Filter::GeoPoint(geopoint_filter)) => {
+                        let uncommitted_field = uncommitted_fields
+                            .geopoint_fields
+                            .get(&field_id)
+                            .ok_or_else(|| {
+                            anyhow::anyhow!("Cannot filter by \"{}\": unknown field", &k)
+                        })?;
+
+                        let filtered = PlainFilterResult::from_iter(
+                            document_count_estimate,
+                            uncommitted_field.filter(geopoint_filter),
+                        );
+                        let mut filtered = FilterResult::Filter(filtered);
+
+                        let committed_field = committed_fields.geopoint_fields.get(&field_id);
+                        if let Some(committed_field) = committed_field {
+                            let committed_docs = committed_field.filter(geopoint_filter);
+
+                            filtered = FilterResult::or(
+                                filtered,
+                                FilterResult::Filter(PlainFilterResult::from_iter(
+                                    document_count_estimate,
+                                    committed_docs,
+                                )),
+                            );
+                        }
+
+                        results.push(filtered);
+                    }
                     _ => {
                         // If the user specified a field that is not in the index,
                         // we should return an empty set.
@@ -1688,7 +1821,6 @@ impl Index {
             filtered_doc_ids,
             global_info: GlobalInfo::default(),
             uncommitted_deleted_documents,
-
             total_term_count: 0,
         };
 
@@ -1799,6 +1931,7 @@ enum FieldType {
     Number,
     StringFilter,
     Date,
+    GeoPoint,
     String,
     Vector,
 }
@@ -1813,6 +1946,8 @@ struct DumpV1 {
     number_field_ids: Vec<(FieldId, NumberFieldInfo)>,
     #[serde(default)]
     date_field_ids: Vec<(FieldId, DateFieldInfo)>,
+    #[serde(default)]
+    geopoint_field_ids: Vec<(FieldId, GeoPointFieldInfo)>,
     string_filter_field_ids: Vec<(FieldId, StringFilterFieldInfo)>,
     string_field_ids: Vec<(FieldId, StringFieldInfo)>,
     vector_field_ids: Vec<(FieldId, VectorFieldInfo)>,

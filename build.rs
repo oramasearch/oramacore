@@ -7,8 +7,6 @@ fn main() {
         .expect("Failed to read stop words directory")
         .filter_map(|dir| dir.ok())
         .filter_map(|dir| {
-            println!("cargo::rerun-if-changed={:?}", dir.path());
-
             let filepath = dir.file_name().to_str()?.to_string();
             let (lang, _) = filepath.split_once(".").unwrap();
             let stop_words = std::fs::read_to_string(dir.path()).ok()?;
@@ -16,6 +14,7 @@ fn main() {
             Some((lang.to_owned(), stop_words))
         })
         .collect();
+    println!("cargo::rerun-if-changed=./src/nlp/stop_words");
 
     let mut modules = "".to_string();
     let mut hash_map_insert = "".to_string();
