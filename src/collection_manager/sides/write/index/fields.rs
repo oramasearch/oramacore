@@ -1065,11 +1065,13 @@ pub struct GeoPoint {
     pub lat: f32,
 }
 
+#[cfg(test)]
 impl PartialEq for GeoPoint {
     fn eq(&self, other: &Self) -> bool {
         self.lon == other.lon && self.lat == other.lat
     }
 }
+#[cfg(test)]
 impl Eq for GeoPoint {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
