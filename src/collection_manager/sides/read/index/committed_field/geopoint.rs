@@ -35,13 +35,13 @@ impl CommittedGeoPointField {
 
     pub fn try_load(info: GeoPointFieldInfo) -> Result<Self> {
         let data_dir = info.data_dir;
-        let tree: BKDTree<f32, DocumentId>  = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
+        let tree: BKDTree<f32, DocumentId> = BufferedFile::open(data_dir.join("geopoint_tree.bin"))
             .context("Cannot open geopoint file")?
             .read_bincode_data()
             .context("Cannot deserialize geopoint file")?;
 
         let s = Self {
-            data_dir: data_dir,
+            data_dir,
             field_path: info.field_path,
             tree,
         };

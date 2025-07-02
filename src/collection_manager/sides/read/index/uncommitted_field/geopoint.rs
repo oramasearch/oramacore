@@ -63,18 +63,16 @@ impl UncommittedGeoPointFilterField {
         self.inner.display(0);
 
         match filter_geopoint {
-            GeoSearchFilter::Radius(filter) => {
-                Box::new(
-                    self.inner
-                        .search_by_radius(
-                            Coord::new(filter.coordinates.lat, filter.coordinates.lon),
-                            filter.value.to_meter(filter.unit),
-                            haversine_distance,
-                            filter.inside,
-                        )
-                        .copied(),
-                )
-            },
+            GeoSearchFilter::Radius(filter) => Box::new(
+                self.inner
+                    .search_by_radius(
+                        Coord::new(filter.coordinates.lat, filter.coordinates.lon),
+                        filter.value.to_meter(filter.unit),
+                        haversine_distance,
+                        filter.inside,
+                    )
+                    .copied(),
+            ),
             GeoSearchFilter::Polygon(filter) => {
                 let iter = self
                     .inner

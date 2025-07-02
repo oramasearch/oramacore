@@ -87,7 +87,7 @@ pub enum BKDTree<T: Copy + PartialOrd, D> {
 
 impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
     pub fn new() -> Self {
-        BKDTree::Leaf (Vec::new())
+        BKDTree::Leaf(Vec::new())
     }
 
     pub fn len(&self) -> usize {
@@ -202,7 +202,9 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
             BKDTree::Leaf(ref mut points) => {
                 points.retain(|p| !data_to_delete.contains(&p.data));
             }
-            BKDTree::Node { left, right, count, .. } => {
+            BKDTree::Node {
+                left, right, count, ..
+            } => {
                 left.delete(data_to_delete);
                 right.delete(data_to_delete);
                 *count = left.len() + right.len();
@@ -705,7 +707,11 @@ mod tests {
                         count: b_count,
                     },
                 ) => {
-                    a_axis == b_axis && a_split == b_split && a_left == b_left && a_right == b_right && a_count == b_count
+                    a_axis == b_axis
+                        && a_split == b_split
+                        && a_left == b_left
+                        && a_right == b_right
+                        && a_count == b_count
                 }
                 _ => false,
             }

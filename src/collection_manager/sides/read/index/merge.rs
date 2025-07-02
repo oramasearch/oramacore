@@ -283,11 +283,7 @@ pub fn merge_geopoint_field(
             let mut field = CommittedGeoPointField::try_load(info)
                 .context("Failed to load committed string field")?;
 
-            field.update(
-                uncommitted.iter(),
-                uncommitted_document_deletions,
-                data_dir,
-            )?;
+            field.update(uncommitted.iter(), uncommitted_document_deletions, data_dir)?;
 
             Ok(Some(field))
         }

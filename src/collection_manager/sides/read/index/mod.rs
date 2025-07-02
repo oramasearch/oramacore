@@ -477,8 +477,7 @@ impl Index {
             )
             .context("Cannot merge geopoint field")?;
 
-            if let Some(merged) = output
-            {
+            if let Some(merged) = output {
                 merged_geopoints.insert(field_id, MergeResult::Changed(merged));
             } else {
                 merged_geopoints.insert(field_id, MergeResult::Unchanged);
