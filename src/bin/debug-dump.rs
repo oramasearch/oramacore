@@ -9,10 +9,11 @@ use oramacore::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index,
     },
-    nlp::NLPService,
     types::{DocumentId, IndexId},
     OramacoreConfig,
 };
+
+use nlp::NLPService;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

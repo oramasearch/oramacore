@@ -1,7 +1,6 @@
 #![allow(unused_variables)]
 
 use nlp::chunker::{Chunker, ChunkerConfig};
-use types::CodeLanguage;
 
 fn main() {
     let text = r#"
@@ -607,7 +606,6 @@ fn main() {
     .unwrap();
 
     let text_result = chunker.chunk_text(text);
-    let code_result = chunker.chunk_code(code, CodeLanguage::TypeScript);
     let mdx_result = chunker.chunk_markdown(mdx);
 
     dbg!(text_result);

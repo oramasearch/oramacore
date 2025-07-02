@@ -8,11 +8,11 @@ use crate::{
         hooks::HookName,
         write::{index::IndexedValue, OramaModelSerializable},
     },
-    nlp::locales::Locale,
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
 };
+use nlp::locales::Locale;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Term(pub String);
@@ -383,10 +383,8 @@ mod tests {
 
     use serde_json::value::RawValue;
 
-    use crate::{
-        nlp::locales::Locale,
-        types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber},
-    };
+    use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
+    use nlp::locales::Locale;
 
     #[test]
     fn test_bincode() {

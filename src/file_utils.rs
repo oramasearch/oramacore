@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// foo
+
 use anyhow::{Context, Result};
 use atomic_write_file::AtomicWriteFile;
 use tracing::{error, trace};

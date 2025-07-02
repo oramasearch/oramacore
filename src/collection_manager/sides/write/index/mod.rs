@@ -29,12 +29,12 @@ use crate::{
         OperationSender, WriteOperation,
     },
     file_utils::BufferedFile,
-    nlp::{locales::Locale, TextParser},
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
     },
 };
+use nlp::{locales::Locale, TextParser};
 
 use super::embedding::MultiEmbeddingCalculationRequest;
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};

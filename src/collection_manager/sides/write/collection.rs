@@ -16,12 +16,13 @@ use crate::{
         ReplaceIndexReason, WriteOperation,
     },
     file_utils::BufferedFile,
-    nlp::{locales::Locale, NLPService, TextParser},
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
     },
 };
+
+use nlp::{locales::Locale, NLPService, TextParser};
 
 use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
 

@@ -19,12 +19,13 @@ use crate::{
         write::embedding::MultiEmbeddingCalculationRequest,
         Term, TermStringField,
     },
-    nlp::{
-        chunker::{Chunker, ChunkerConfig},
-        locales::Locale,
-        TextParser,
-    },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
+};
+
+use nlp::{
+    chunker::{Chunker, ChunkerConfig},
+    locales::Locale,
+    TextParser,
 };
 
 use super::{get_value, EmbeddingStringCalculation};

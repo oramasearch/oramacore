@@ -6,11 +6,11 @@ use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::write::index::{FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
-use crate::nlp::locales::Locale;
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
 use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
+use nlp::locales::Locale;
 
 use async_openai::types::{
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -360,10 +360,6 @@ impl TryFrom<Vec<Value>> for DocumentList {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(DocumentList(docs))
     }
-}
-
-pub trait StringParser: Send + Sync {
-    fn tokenize_str_and_stem(&self, input: &str) -> Result<Vec<(String, Vec<String>)>>;
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]

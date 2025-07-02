@@ -29,10 +29,9 @@ use crate::{
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     file_utils::BufferedFile,
-    nlp::{locales::Locale, NLPService},
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, NLPSearchRequest, Role, SearchParams,
+        InteractionMessage, Role, SearchParams,
     },
 };
 
@@ -44,6 +43,9 @@ use super::{
     UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
+
+use crate::types::NLPSearchRequest;
+use nlp::{locales::Locale, NLPService};
 
 pub struct CollectionReader {
     id: CollectionId,

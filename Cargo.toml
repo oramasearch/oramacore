@@ -116,6 +116,7 @@ rustls = "0.23.26"
 
 filters = { path = "./crates/filters" }
 bkd = { path = "./crates/bkd" }
+nlp = { path = "crates/nlp" }
 
 zebo = "0.3.0"
 llm_json = "1.0.2"
@@ -123,9 +124,6 @@ dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
 jwt-authorizer = "0.15"
 jsonwebtoken = "9.3.1"
-
-# [patch.crates-io]
-# jsonwebtoken = { path = "../jsonwebtoken" }
 
 [build-dependencies]
 cc = "1"
@@ -175,4 +173,5 @@ members = [
     "crates/hnsw2",
     "crates/filters",
     "crates/bkd",
+    "crates/nlp",
 ]

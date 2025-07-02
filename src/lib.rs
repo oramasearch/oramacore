@@ -12,7 +12,6 @@ use collection_manager::sides::{
     InputSideChannelType, OutputSideChannelType,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nlp::NLPService;
 use serde::Deserialize;
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
@@ -23,7 +22,6 @@ pub mod indexes;
 pub mod types;
 
 pub mod code_parser;
-pub mod nlp;
 
 pub mod collection_manager;
 
@@ -168,7 +166,7 @@ pub async fn build_orama(
         channel_creator(writer_sender_config, reader_sender_config).await?;
 
     info!("Building nlp_service");
-    let nlp_service = Arc::new(NLPService::new());
+    let nlp_service = Arc::new(nlp::NLPService::new());
 
     #[cfg(feature = "writer")]
     let write_side = {

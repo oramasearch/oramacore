@@ -1,4 +1,4 @@
-use crate::nlp::stop_words::{get_stop_words, StopWords};
+use crate::stop_words::{get_stop_words, StopWords};
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};

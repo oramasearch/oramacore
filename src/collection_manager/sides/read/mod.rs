@@ -37,16 +37,17 @@ use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
+use crate::types::NLPSearchRequest;
 use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, NLPSearchRequest, SearchMode,
-    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+    ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
+    SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
 use crate::{
     ai::AIService,
     capped_heap::CappedHeap,
-    nlp::NLPService,
     types::{CollectionId, DocumentId},
 };
+use nlp::NLPService;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::triggers::TriggerInterface;
