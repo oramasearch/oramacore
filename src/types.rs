@@ -2125,6 +2125,22 @@ mod test {
         });
         let p = serde_json::from_value::<WhereFilter>(j);
         assert!(p.is_ok());
+
+        let j = json!({
+            "location": {
+                "radius": {
+                    "coordinates": {
+                        "lat": 45.4648,
+                        "lon": 9.18998
+                    },
+                    // "unit": 'm',        // The unit of measurement. The default is "m" (meters)
+                    "value": 1000,      // The radius length. In that case, 1km
+                    // "inside": true      // Whether we want to return the documents inside or outside the radius. The default is "true"
+                }
+            }
+        });
+        let p = serde_json::from_value::<WhereFilter>(j);
+        assert!(p.is_ok());
     }
 
     #[test]
@@ -2461,20 +2477,32 @@ pub enum GeoSearchRadiusUnit {
     #[serde(rename = "mi")]
     Mile,
 }
+impl Default for GeoSearchRadiusUnit {
+    fn default() -> Self {
+        Self::Meter
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct GeoSearchRadiusFilter {
     pub coordinates: GeoPoint,
+    #[serde(default)]
     pub unit: GeoSearchRadiusUnit,
     pub value: GeoSearchRadiusValue,
+    #[serde(default = "get_true")]
     pub inside: bool,
+}
+
+fn get_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct GeoSearchPolygonFilter {
     pub coordinates: Vec<GeoPoint>,
+    #[serde(default = "get_true")]
     pub inside: bool,
 }
 

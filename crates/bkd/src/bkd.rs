@@ -172,7 +172,7 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
     pub fn search_by_polygon<'a>(
         &'a self,
         polygon: Vec<Coord<T>>,
-        inclusive: bool,
+        inside: bool,
     ) -> PolygonQueryIter<'a, T, D>
     where
         T: num_traits::Float,
@@ -180,7 +180,7 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
         PolygonQueryIter {
             stack: vec![self],
             polygon,
-            inclusive,
+            inside,
             buffer: Vec::new(),
         }
     }
@@ -380,7 +380,7 @@ pub fn is_point_in_polygon<T: Copy + PartialOrd + num_traits::Float>(
 pub struct PolygonQueryIter<'a, T: Copy + PartialOrd, D> {
     stack: Vec<&'a BKDTree<T, D>>,
     polygon: Vec<Coord<T>>,
-    inclusive: bool,
+    inside: bool,
     buffer: Vec<&'a D>,
 }
 
@@ -397,7 +397,7 @@ impl<'a, T: num_traits::Float + Copy + PartialOrd, D> Iterator for PolygonQueryI
                 BKDTree::Leaf(points) => {
                     for p in points.iter().rev() {
                         let inside = is_point_in_polygon(&self.polygon, &p.coords);
-                        if (inside && self.inclusive) || (!inside && !self.inclusive) {
+                        if (inside && self.inside) || (!inside && !self.inside) {
                             self.buffer.push(&p.data);
                         }
                     }
@@ -945,5 +945,128 @@ mod tests {
             tree.insert(Point::new(Coord::new(i as f32, i as f32), i));
         }
         assert_eq!(tree.len(), 20);
+    }
+
+    #[test]
+    fn test_search_by_radius_inside_and_outside() {
+        let mut tree = BKDTree::<f32, &'static str>::new();
+        let pts = vec![
+            Point {
+                coords: Coord { lat: 0.0, lon: 0.0 },
+                data: "a",
+            },
+            Point {
+                coords: Coord { lat: 1.0, lon: 1.0 },
+                data: "b",
+            },
+            Point {
+                coords: Coord { lat: 2.0, lon: 2.0 },
+                data: "c",
+            },
+            Point {
+                coords: Coord { lat: 5.0, lon: 5.0 },
+                data: "d",
+            },
+        ];
+        for p in pts {
+            tree.insert(p);
+        }
+        let center = Coord { lat: 1.0, lon: 1.0 };
+        let radius = 2.0f32;
+        // inside = true: should return a, b, c
+        let found_inside: Vec<&str> = tree
+            .search_by_radius(center, radius, distance2, true)
+            .copied()
+            .collect();
+        assert!(found_inside.contains(&"a"));
+        assert!(found_inside.contains(&"b"));
+        assert!(found_inside.contains(&"c"));
+        assert!(!found_inside.contains(&"d"));
+        // inside = false: should return only d
+        let found_outside: Vec<&str> = tree
+            .search_by_radius(center, radius, distance2, false)
+            .copied()
+            .collect();
+        assert!(!found_outside.contains(&"a"));
+        assert!(!found_outside.contains(&"b"));
+        assert!(!found_outside.contains(&"c"));
+        assert!(found_outside.contains(&"d"));
+    }
+
+    #[test]
+    fn test_search_by_polygon_inside_and_outside() {
+        // Define a square polygon
+        let polygon = vec![
+            Coord { lat: 0.0, lon: 0.0 },
+            Coord { lat: 0.0, lon: 2.0 },
+            Coord { lat: 2.0, lon: 2.0 },
+            Coord { lat: 2.0, lon: 0.0 },
+        ];
+        let points = vec![
+            (
+                Point {
+                    coords: Coord { lat: 1.0, lon: 1.0 },
+                    data: "inside",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 0.5, lon: 1.5 },
+                    data: "inside2",
+                },
+                true,
+            ),
+            (
+                Point {
+                    coords: Coord { lat: 2.5, lon: 1.0 },
+                    data: "outside1",
+                },
+                false,
+            ),
+            (
+                Point {
+                    coords: Coord {
+                        lat: -1.0,
+                        lon: 1.0,
+                    },
+                    data: "outside2",
+                },
+                false,
+            ),
+        ];
+        let mut tree = BKDTree::<f32, &str>::new();
+        for (p, _) in &points {
+            tree.insert(p.clone());
+        }
+        // inside = true: should return only points inside the polygon
+        let found_inside: Vec<&str> = tree
+            .search_by_polygon(polygon.clone(), true)
+            .copied()
+            .collect();
+        for (p, is_inside) in &points {
+            if *is_inside {
+                assert!(found_inside.contains(&p.data), "Should contain {}", p.data);
+            } else {
+                assert!(
+                    !found_inside.contains(&p.data),
+                    "Should not contain {}",
+                    p.data
+                );
+            }
+        }
+        // inside = false: should return only points outside the polygon
+        let found_outside: Vec<&str> = tree.search_by_polygon(polygon, false).copied().collect();
+        for (p, is_inside) in &points {
+            if !*is_inside {
+                assert!(found_outside.contains(&p.data), "Should contain {}", p.data);
+            } else {
+                assert!(
+                    !found_outside.contains(&p.data),
+                    "Should not contain {}",
+                    p.data
+                );
+            }
+        }
     }
 }
