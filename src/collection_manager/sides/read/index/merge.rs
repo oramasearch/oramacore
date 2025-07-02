@@ -210,6 +210,86 @@ pub fn merge_date_field(
     }
 }
 
+pub fn merge_geopoint_field(
+    uncommitted: Option<&UncommittedGeoPointFilterField>,
+    committed: Option<&CommittedGeoPointField>,
+    data_dir: PathBuf,
+    uncommitted_document_deletions: &HashSet<DocumentId>,
+    is_promoted: bool,
+) -> Result<Option<CommittedGeoPointField>> {
+    match (uncommitted, committed) {
+        (None, None) => {
+            bail!("Both uncommitted and committed number fields are None. Never should happen");
+        }
+        (None, Some(_)) => {
+            bail!("Uncommitted field is None. Never should happen");
+        }
+        (Some(uncommitted), None) => {
+            let mut tree = uncommitted.inner();
+            tree.delete(uncommitted_document_deletions);
+            let committed = CommittedGeoPointField::from_raw(
+                tree,
+                uncommitted.field_path().to_vec().into_boxed_slice(),
+                data_dir,
+            )?;
+            Ok(Some(committed))
+        }
+        (Some(uncommitted), Some(committed)) => {
+            if uncommitted.is_empty() {
+                if is_promoted {
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let mut info = committed.get_field_info();
+                    debug_assert_ne!(
+                        info.data_dir,
+                        data_dir,
+                        "when promoting, data_dir should be different from the one in the field info"
+                    );
+
+                    create_if_not_exists(&data_dir)
+                        .context("Failed to create data directory for vector field")?;
+
+                    let old_dir = info.data_dir;
+
+                    // Copy the data from the old directory to the new one
+                    let options = CopyOptions::new()
+                        // BAD: this is bad because if a crash happens during the copy,
+                        // the data will be corrupted
+                        // Instead we should... ???? WHAT?
+                        // TODO: check if this is the right way to do it
+                        .overwrite(true);
+                    copy_items(&[old_dir], data_dir.parent().unwrap(), &options)?;
+                    // And move the field to the new directory
+                    info.data_dir = data_dir;
+
+                    return Ok(Some(
+                        CommittedGeoPointField::try_load(info)
+                            .context("Failed to load committed string field")?,
+                    ));
+                }
+
+                return Ok(None);
+            }
+
+            // uncommitted and committed field_path has to be the same
+            debug_assert_eq!(
+                uncommitted.field_path(),
+                committed.field_path(),
+                "Uncommitted and committed field paths should be the same",
+            );
+
+            let info = committed.get_field_info();
+            let mut field = CommittedGeoPointField::try_load(info)
+                .context("Failed to load committed string field")?;
+
+            field.update(uncommitted.iter(), uncommitted_document_deletions, data_dir)?;
+
+            Ok(Some(field))
+        }
+    }
+}
+
 pub fn merge_string_filter_field(
     uncommitted: Option<&UncommittedStringFilterField>,
     committed: Option<&CommittedStringFilterField>,
