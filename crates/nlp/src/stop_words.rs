@@ -1,8 +1,8 @@
-use crate::nlp::locales::Locale;
+use crate::locales::Locale;
 
 include!(concat!(
     env!("OUT_DIR"),
-    "/nlp/stop_words/stop_words_gen/mod.rs"
+    "/stop_words/stop_words_gen/mod.rs"
 ));
 
 pub fn get_stop_words(locale: Locale) -> Option<StopWords> {
@@ -13,7 +13,7 @@ pub fn get_stop_words(locale: Locale) -> Option<StopWords> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nlp::locales::Locale;
+    use crate::locales::Locale;
 
     #[test]
     fn test_stop_words1() {

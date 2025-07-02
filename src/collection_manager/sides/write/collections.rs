@@ -15,10 +15,10 @@ use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
-use crate::nlp::locales::Locale;
-use crate::nlp::NLPService;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
+use nlp::locales::Locale;
+use nlp::NLPService;
 
 use super::collection::CollectionWriter;
 use super::embedding::MultiEmbeddingCalculationRequest;

@@ -13,9 +13,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
+use crate::types::NLPSearchRequest;
 use crate::{
     collection_manager::sides::read::ReadSide,
-    types::{ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams},
+    types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
     web_server::api::util::print_error,
 };
 

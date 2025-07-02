@@ -9,9 +9,10 @@ use crate::{
     collection_manager::sides::{read::notify::Notifier, Offset},
     file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
-    nlp::{locales::Locale, NLPService},
     types::{ApiKey, CollectionId},
 };
+
+use nlp::{locales::Locale, NLPService};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

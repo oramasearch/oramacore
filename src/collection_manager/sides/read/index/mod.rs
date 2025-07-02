@@ -37,13 +37,13 @@ use crate::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels,
     },
-    nlp::{locales::Locale, NLPService, TextParser},
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
         Threshold, VectorMode, WhereFilter,
     },
 };
+use nlp::{locales::Locale, NLPService, TextParser};
 
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 mod committed_field;

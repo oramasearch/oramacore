@@ -57,7 +57,6 @@ use crate::{
     },
     file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
-    nlp::NLPService,
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
@@ -65,6 +64,8 @@ use crate::{
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
+
+use nlp::NLPService;
 
 #[derive(Error, Debug)]
 pub enum WriteError {
