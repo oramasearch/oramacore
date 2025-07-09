@@ -920,7 +920,7 @@ impl EmbeddingField {
                     let mut current_size: usize = 0;
 
                     for path_group in paths.iter() {
-                        println!("  - {:?}", path_group);
+                        println!("  - {path_group:?}");
                     }
 
                     // Process each path group

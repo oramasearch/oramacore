@@ -124,7 +124,7 @@ impl Document {
             .flat_map(|(key, value)| match value {
                 Value::Object(map) => map
                     .into_iter()
-                    .map(|(sub_key, sub_value)| (format!("{}.{}", key, sub_key), sub_value.clone()))
+                    .map(|(sub_key, sub_value)| (format!("{key}.{sub_key}"), sub_value.clone()))
                     .collect::<Map<_, _>>(),
                 _ => {
                     let mut map = Map::new();
@@ -942,8 +942,7 @@ impl<'de> Deserialize<'de> for SearchMode {
             })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
-                "Invalid search mode: {}",
-                m
+                "Invalid search mode: {m}"
             ))),
         }
     }
@@ -1065,8 +1064,7 @@ impl<'de> Deserialize<'de> for WhereFilter {
                         }
                         (_, value) => {
                             return Err(de::Error::custom(format!(
-                                "Invalid where filter for key {}: {:?}",
-                                key, value
+                                "Invalid where filter for key {key}: {value:?}"
                             )))
                         }
                     }
@@ -1621,7 +1619,7 @@ mod test {
         });
         let j = serde_json::to_string(&j).unwrap();
         let p = serde_json::from_str::<SearchParams>(&j).unwrap_err();
-        assert!(format!("{}", p).contains("Invalid search mode: unknown_value"));
+        assert!(format!("{p}").contains("Invalid search mode: unknown_value"));
 
         let j = json!({
             "mode": "vector",
@@ -2182,8 +2180,8 @@ pub enum Number {
 impl std::fmt::Display for Number {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Number::I32(value) => write!(f, "{}", value),
-            Number::F32(value) => write!(f, "{}", value),
+            Number::I32(value) => write!(f, "{value}"),
+            Number::F32(value) => write!(f, "{value}"),
         }
     }
 }

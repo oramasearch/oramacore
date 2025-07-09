@@ -240,7 +240,7 @@ pub fn print_error(e: &anyhow::Error, msg: &'static str) {
     error!(error = ?e, msg);
     e.chain()
         .skip(1)
-        .for_each(|cause| println!("because: {:?}", cause));
+        .for_each(|cause| println!("because: {cause:?}"));
 }
 
 impl IntoResponse for WriteError {
@@ -249,7 +249,7 @@ impl IntoResponse for WriteError {
             WriteError::Generic(e) => {
                 print_error(&e, "Unhandled error in write side");
                 error!(error = ?e, "Generic write error");
-                let body = format!("Cannot process the request: {:?}", e);
+                let body = format!("Cannot process the request: {e:?}");
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             WriteError::InvalidMasterApiKey => {
@@ -257,37 +257,30 @@ impl IntoResponse for WriteError {
                 (StatusCode::UNAUTHORIZED, body).into_response()
             }
             WriteError::CollectionAlreadyExists(collection_id) => {
-                let body = format!("Collection with id {} already exists", collection_id);
+                let body = format!("Collection with id {collection_id} already exists");
                 (StatusCode::CONFLICT, body).into_response()
             }
             WriteError::InvalidWriteApiKey(collection_id)
             | WriteError::CollectionNotFound(collection_id)
             | WriteError::JwtBelongToAnotherCollection(collection_id) => {
                 let body = format!(
-                    "Collection with id {} not found or invalid write api key",
-                    collection_id
+                    "Collection with id {collection_id} not found or invalid write api key"
                 );
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
             WriteError::IndexAlreadyExists(collection_id, index_id) => {
                 let body = format!(
-                    "Index with id {} already exists in collection {}",
-                    index_id, collection_id
+                    "Index with id {index_id} already exists in collection {collection_id}"
                 );
                 (StatusCode::CONFLICT, body).into_response()
             }
             WriteError::IndexNotFound(collection_id, index_id) => {
-                let body = format!(
-                    "Index {} not found in collection {}",
-                    index_id, collection_id
-                );
+                let body = format!("Index {index_id} not found in collection {collection_id}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
             WriteError::TempIndexNotFound(collection_id, index_id) => {
-                let body = format!(
-                    "Temporary index {} not found in collection {}",
-                    index_id, collection_id
-                );
+                let body =
+                    format!("Temporary index {index_id} not found in collection {collection_id}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
         }
@@ -301,19 +294,19 @@ impl IntoResponse for SegmentError {
                 print_error(&e, "Unhandled error in segment side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {:?}", e),
+                    format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
             }
             SegmentError::WriteError(e) => e.into_response(),
             SegmentError::RepairError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Cannot repair JSON: {:?}", e),
+                format!("Cannot repair JSON: {e:?}"),
             )
                 .into_response(),
             SegmentError::DeserializationError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid JSON format: {:?}", e),
+                format!("Invalid JSON format: {e:?}"),
             )
                 .into_response(),
         }
@@ -327,7 +320,7 @@ impl IntoResponse for TriggerError {
                 print_error(&e, "Unhandled error in trigger side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {:?}", e),
+                    format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
             }
@@ -335,25 +328,20 @@ impl IntoResponse for TriggerError {
             TriggerError::ReadError(e) => e.into_response(),
             TriggerError::NotFound(collection_id, trigger_id) => (
                 StatusCode::BAD_REQUEST,
-                format!(
-                    "Trigger {} not found in collection {}",
-                    trigger_id, collection_id
-                ),
+                format!("Trigger {trigger_id} not found in collection {collection_id}"),
             )
                 .into_response(),
-            TriggerError::InvalidTriggerId(id) => (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid trigger id: {}", id),
-            )
-                .into_response(),
+            TriggerError::InvalidTriggerId(id) => {
+                (StatusCode::BAD_REQUEST, format!("Invalid trigger id: {id}")).into_response()
+            }
             TriggerError::RepairError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Cannot repair JSON: {:?}", e),
+                format!("Cannot repair JSON: {e:?}"),
             )
                 .into_response(),
             TriggerError::DeserializationError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid JSON format: {:?}", e),
+                format!("Invalid JSON format: {e:?}"),
             )
                 .into_response(),
         }
@@ -367,7 +355,7 @@ impl IntoResponse for ToolError {
                 print_error(&e, "Unhandled error in tool side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {:?}", e),
+                    format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
             }
@@ -375,50 +363,45 @@ impl IntoResponse for ToolError {
             ToolError::ReadError(e) => e.into_response(),
             ToolError::ValidationError(tool_id, msg) => (
                 StatusCode::BAD_REQUEST,
-                format!("Tool {} contains invalid code: {}", tool_id, msg),
+                format!("Tool {tool_id} contains invalid code: {msg}"),
             )
                 .into_response(),
             ToolError::CompilationError(tool_id, msg) => (
                 StatusCode::BAD_REQUEST,
-                format!("Tool {} doesn't compile: {}", tool_id, msg),
+                format!("Tool {tool_id} doesn't compile: {msg}"),
             )
                 .into_response(),
             ToolError::Duplicate(tool_id) => (
                 StatusCode::CONFLICT,
-                format!("Tool {} already exists", tool_id),
+                format!("Tool {tool_id} already exists"),
             )
                 .into_response(),
             ToolError::NotFound(tool_id, collection_id) => (
                 StatusCode::BAD_REQUEST,
-                format!("Tool {} not found in collection {}", tool_id, collection_id),
+                format!("Tool {tool_id} not found in collection {collection_id}"),
             )
                 .into_response(),
             ToolError::NoTools(collection_id) => (
                 StatusCode::BAD_REQUEST,
-                format!("Collection {} doesn't have any tool", collection_id),
+                format!("Collection {collection_id} doesn't have any tool"),
             )
                 .into_response(),
             ToolError::ExecutionSerializationError(collection_id, tool_id, e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "Tool {} from collection {} returns an JSON error: {:?}",
-                    tool_id, collection_id, e
+                    "Tool {tool_id} from collection {collection_id} returns an JSON error: {e:?}"
                 ),
             )
                 .into_response(),
             ToolError::ExecutionTimeout(collection_id, tool_id) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "Tool {} from collection {} goes in timeout",
-                    tool_id, collection_id
-                ),
+                format!("Tool {tool_id} from collection {collection_id} goes in timeout"),
             )
                 .into_response(),
             ToolError::ExecutionError(collection_id, tool_id, e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "Tool {} from collection {} exited with this error: {:?}",
-                    tool_id, collection_id, e
+                    "Tool {tool_id} from collection {collection_id} exited with this error: {e:?}"
                 ),
             )
                 .into_response(),
@@ -433,13 +416,13 @@ impl IntoResponse for ReadError {
                 print_error(&e, "Unhandled error in read side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {:?}", e),
+                    format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
             }
             ReadError::NotFound(collection_id) => (
                 StatusCode::BAD_REQUEST,
-                format!("Collection {} not found", collection_id),
+                format!("Collection {collection_id} not found"),
             )
                 .into_response(),
         }
@@ -453,7 +436,7 @@ impl IntoResponse for AnswerError {
                 print_error(&e, "Unhandled error in answer side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {:?}", e),
+                    format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
             }

@@ -54,7 +54,7 @@ impl OnClosed for MyHAProducer {
         if !unconfirmed.is_empty() {
             info!("Resending {} unconfirmed messages.", unconfirmed.len());
             if let Err(e) = producer.batch_send_with_confirm(unconfirmed).await {
-                eprintln!("Error resending unconfirmed messages: {:?}", e);
+                eprintln!("Error resending unconfirmed messages: {e:?}");
             }
         }
 

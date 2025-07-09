@@ -7,10 +7,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use axum::{
-    response::sse::{Event, KeepAlive},
-    Json, Router,
-};
+use axum::{response::sse::Event, Json};
 use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
@@ -18,7 +15,7 @@ use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
-use futures::{future::BoxFuture, stream, FutureExt};
+use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
 use http::uri::Scheme;
 use tokio::{
@@ -229,8 +226,8 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
 
     // Waiting for the server to start
     loop {
-        let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", addr))
-            .await;
+        let c =
+            grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{addr}")).await;
         if c.is_ok() {
             break;
         }
@@ -248,7 +245,7 @@ pub async fn create_ai_server_mock(
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
     tokio::task::spawn(async {
-        use axum::{routing::get, Router};
+        use axum::Router;
         use std::net::*;
 
         let listener = TcpListener::bind("127.0.0.1:8000").unwrap();

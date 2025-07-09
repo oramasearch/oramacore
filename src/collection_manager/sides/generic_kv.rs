@@ -207,7 +207,7 @@ impl KV {
             return Ok(());
         }
 
-        let new_path = self.data_dir.join(format!("kv-{}.bin", current_offset));
+        let new_path = self.data_dir.join(format!("kv-{current_offset}.bin"));
         BufferedFile::create_or_overwrite(new_path.clone())
             .context("Cannot create previous kv info")?
             .write_bincode_data(&*data)

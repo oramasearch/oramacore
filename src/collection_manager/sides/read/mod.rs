@@ -802,7 +802,7 @@ fn start_receive_operations(
                     error!(error = ?e, "Cannot update read side");
                     e.chain()
                         .skip(1)
-                        .for_each(|cause| eprintln!("because: {}", cause));
+                        .for_each(|cause| eprintln!("because: {cause}"));
                 }
 
                 trace!("Operation applied");

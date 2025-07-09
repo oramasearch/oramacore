@@ -372,8 +372,7 @@ where
     D: serde::de::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|s| {
-        ApiKey::try_new(s)
-            .map_err(|e| serde::de::Error::custom(format!("Invalid API key: {:?}", e)))
+        ApiKey::try_new(s).map_err(|e| serde::de::Error::custom(format!("Invalid API key: {e:?}")))
     })
 }
 

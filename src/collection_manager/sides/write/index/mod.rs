@@ -809,7 +809,7 @@ fn calculate_fields_for(
                 filter_field = Some(IndexFilterField::new_geopoint(generate_id(), field_path));
             } else {
                 use debug_panic::debug_panic;
-                eprintln!("Path: {:?}", field_path);
+                eprintln!("Path: {field_path:?}");
                 debug_panic!("Something is wrong: we should never have an object here.");
             }
         }

@@ -365,7 +365,7 @@ impl ToolsRuntime {
     }
 
     fn format_key(&self, collection_id: CollectionId, tool_id: &str) -> String {
-        format!("{}:tool:{}", collection_id, tool_id)
+        format!("{collection_id}:tool:{tool_id}")
     }
 }
 

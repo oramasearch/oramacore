@@ -238,7 +238,7 @@ async fn test_facets_unknown_field() {
         )
         .await;
 
-    assert!(format!("{:?}", output).contains("Unknown field name 'unknown'"));
+    assert!(format!("{output:?}").contains("Unknown field name 'unknown'"));
 
     drop(test_context);
 }

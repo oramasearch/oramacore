@@ -60,16 +60,16 @@ pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
 pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T> {
     let vec = tokio::fs::read(&path)
         .await
-        .with_context(|| format!("Cannot open file at {:?}", path))?;
+        .with_context(|| format!("Cannot open file at {path:?}"))?;
     serde_json::from_slice(&vec)
-        .with_context(|| format!("Cannot deserialize json data from {:?}", path))
+        .with_context(|| format!("Cannot deserialize json data from {path:?}"))
 }
 
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
         let buf = AtomicWriteFile::open(&path)
-            .with_context(|| format!("Cannot create file at {:?}", path))?;
+            .with_context(|| format!("Cannot create file at {path:?}"))?;
         // let file = std::fs::File::create(&path)
         //     .with_context(|| format!("Cannot create file at {:?}", path))?;
         let buf = BufWriter::new(buf);

@@ -339,7 +339,7 @@ impl AdvancedAutoQuery {
                 }
                 Ok(_step) => {}
                 Err(e) => {
-                    eprintln!("Error during auto-query processing: {}", e);
+                    eprintln!("Error during auto-query processing: {e}");
                     return Err(e);
                 }
             }
@@ -489,13 +489,13 @@ impl AdvancedAutoQuery {
                 Ok(response) => {
                     let cleaned = repair_json(&response, &Default::default())?;
                     let parsed = parse_properties_response(&cleaned).unwrap_or_else(|e| {
-                        eprintln!("Failed to parse LLM response at index {}: {}", index, e);
+                        eprintln!("Failed to parse LLM response at index {index}: {e}");
                         HashMap::new()
                     });
                     parsed_results.push(parsed);
                 }
                 Err(e) => {
-                    eprintln!("LLM call failed at index {}: {}", index, e);
+                    eprintln!("LLM call failed at index {index}: {e}");
                     parsed_results.push(HashMap::new());
                 }
             }
@@ -555,7 +555,7 @@ impl AdvancedAutoQuery {
             .enumerate()
             .map(|(index, result)| {
                 result
-                    .with_context(|| format!("LLM call failed for query {}", index))
+                    .with_context(|| format!("LLM call failed for query {index}"))
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .context("Failed to clean LLM response")?;
@@ -615,7 +615,7 @@ impl AdvancedAutoQuery {
             .filter_map(|result| match result {
                 Ok(mapped_result) => Some(mapped_result),
                 Err(e) => {
-                    eprintln!("Search execution failed: {}", e);
+                    eprintln!("Search execution failed: {e}");
                     None
                 }
             })

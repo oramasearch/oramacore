@@ -124,16 +124,13 @@ async fn test_answer() {
     answer_receiver.recv_many(&mut buffer, 100).await;
     assert!(buffer
         .iter()
-        .find(|i| matches!(i, AnswerEvent::SelectedLLM(_)))
-        .is_some());
+        .any(|i| matches!(&i, AnswerEvent::SelectedLLM(_))));
     assert!(buffer
         .iter()
-        .find(|i| matches!(i, AnswerEvent::OptimizeingQuery(_)))
-        .is_some());
+        .any(|i| matches!(&i, AnswerEvent::OptimizeingQuery(_))));
     assert!(buffer
         .iter()
-        .find(|i| matches!(i, AnswerEvent::SearchResults(_)))
-        .is_some());
+        .any(|i| matches!(&i, AnswerEvent::SearchResults(_))));
     let output = buffer
         .iter()
         .filter_map(|i| match i {

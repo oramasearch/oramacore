@@ -142,6 +142,6 @@ mod tests {
             reference: Some("reference".to_string()),
         };
         let json = serde_json::to_string(&notification).unwrap();
-        println!("Serialized JSON: {}", json);
+        println!("Serialized JSON: {json}");
     }
 }

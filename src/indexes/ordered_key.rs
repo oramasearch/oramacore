@@ -213,7 +213,7 @@ impl<
                 let max = value;
 
                 let page_id = pages.len();
-                let page_file = data_dir.join(format!("page_{}.bin", page_id));
+                let page_file = data_dir.join(format!("page_{page_id}.bin"));
                 let current_page = Page {
                     id: ChunkId(page_id),
                     pointer: PagePointer::<Key, Value>::InMemory {
@@ -242,7 +242,7 @@ impl<
             let page_id = pages.len();
             let max = Key::max_value();
             let min = first.key.clone();
-            let page_file = data_dir.join(format!("page_{}.bin", page_id));
+            let page_file = data_dir.join(format!("page_{page_id}.bin"));
             let current_page = Page {
                 id: ChunkId(page_id),
                 pointer: PagePointer::<Key, Value>::InMemory {
@@ -287,7 +287,7 @@ impl<
             .iter()
             .enumerate()
             .map(|(index, (min, max))| {
-                let page_file = data_dir.join(format!("page_{}.bin", index));
+                let page_file = data_dir.join(format!("page_{index}.bin"));
                 Page {
                     id: ChunkId(index),
                     pointer: PagePointer::<Key, Value>::OnFile { path: page_file },

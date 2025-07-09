@@ -176,7 +176,7 @@ impl Serialize for AnswerEvent {
             AnswerEvent::FailedToRunRelatedQuestion(err) => {
                 s.serialize_field(
                     "message",
-                    &format!("Failed to run related questions stream, {:?}", err),
+                    &format!("Failed to run related questions stream, {err:?}"),
                 )?;
             }
             AnswerEvent::RelatedQueries(chunk) => {
@@ -190,7 +190,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToFetchRelatedQuestion(err) => {
-                s.serialize_field("message", &format!("Error during streaming, {:?}", err))?;
+                s.serialize_field("message", &format!("Error during streaming, {err:?}"))?;
             }
             AnswerEvent::OptimizeingQuery(query) => {
                 s.serialize_field(
@@ -213,7 +213,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToRunPrompt(err) => {
-                s.serialize_field("message", &format!("Failed to run prompt: {:?}", err))?;
+                s.serialize_field("message", &format!("Failed to run prompt: {err:?}"))?;
             }
             AnswerEvent::AnswerResponse(chunk) => {
                 s.serialize_field(
@@ -226,7 +226,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToFetchAnswer(err) => {
-                s.serialize_field("message", &format!("Failed to fetch answer: {:?}", err))?;
+                s.serialize_field("message", &format!("Failed to fetch answer: {err:?}"))?;
             }
         }
 

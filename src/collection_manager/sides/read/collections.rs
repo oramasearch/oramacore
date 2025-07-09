@@ -100,7 +100,7 @@ impl CollectionsReader {
                 notifier.clone(),
                 collection_dir,
             )
-            .with_context(|| format!("Cannot load {:?} collection", collection_id))?;
+            .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 
             collections.insert(collection_id, collection);
         }

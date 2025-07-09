@@ -63,7 +63,7 @@ async fn main2() -> Result<()> {
 
     println!("Receiving message");
     let a = consumer.recv().await;
-    println!("{:?}", a);
+    println!("{a:?}");
 
     println!("Done");
 

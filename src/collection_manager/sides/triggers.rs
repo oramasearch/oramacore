@@ -54,7 +54,7 @@ impl fmt::Display for Trigger {
             self.name, self.description, self.response
         );
 
-        write!(f, "{}", displayed)
+        write!(f, "{displayed}")
     }
 }
 
@@ -211,9 +211,9 @@ pub fn get_trigger_key(
     match segment_id {
         Some(segment_id) => format_key(
             collection_id,
-            &format!("trigger:t_{}:s_{}", trigger_id, segment_id),
+            &format!("trigger:t_{trigger_id}:s_{segment_id}"),
         ),
-        None => format_key(collection_id, &format!("trigger:t_{}", trigger_id)),
+        None => format_key(collection_id, &format!("trigger:t_{trigger_id}")),
     }
 }
 

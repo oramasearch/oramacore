@@ -124,8 +124,7 @@ impl CommittedStringField {
             std::fs::copy(&old_posting_storage_file, &new_posting_storage_file).with_context(
                 || {
                     format!(
-                        "Cannot copy posting storage file: old {:?} -> new {:?}",
-                        old_posting_storage_file, new_posting_storage_file
+                        "Cannot copy posting storage file: old {old_posting_storage_file:?} -> new {new_posting_storage_file:?}"
                     )
                 },
             )?;

@@ -513,7 +513,7 @@ impl CollectionReader {
                 if let Some(mut temp_index) = temp_index {
                     temp_index
                         .update(index_op)
-                        .with_context(|| format!("Cannot update index {:?}", index_id))?;
+                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
                 } else {
                     let index = self.get_index_mut(index_id).await;
                     let Some(mut index) = index else {
@@ -521,7 +521,7 @@ impl CollectionReader {
                     };
                     index
                         .update(index_op)
-                        .with_context(|| format!("Cannot update index {:?}", index_id))?;
+                        .with_context(|| format!("Cannot update index {index_id:?}"))?;
                 }
             }
             CollectionWriteOperation::ReplaceIndex {

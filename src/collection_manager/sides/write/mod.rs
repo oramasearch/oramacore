@@ -798,7 +798,7 @@ impl WriteSide {
                                     doc: DocumentToInsert(
                                         new_document
                                             .clone()
-                                            .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                                            .into_raw(format!("{target_index_id}:{doc_id_str}"))
                                             .expect("Cannot get raw document"),
                                     ),
                                 },
@@ -992,7 +992,7 @@ impl WriteSide {
                 doc_id,
                 DocumentToInsert(
                     doc.clone()
-                        .into_raw(format!("{}:{}", target_index_id, doc_id_str))
+                        .into_raw(format!("{target_index_id}:{doc_id_str}"))
                         .expect("Cannot get raw document"),
                 ),
             ));
