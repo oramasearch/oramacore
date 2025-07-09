@@ -7,6 +7,10 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use axum::{
+    response::sse::{Event, KeepAlive},
+    Json, Router,
+};
 use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
@@ -14,10 +18,14 @@ use fastembed::{
     EmbeddingModel, InitOptions, InitOptionsUserDefined, Pooling, TextEmbedding, TokenizerFiles,
     UserDefinedEmbeddingModel,
 };
-use futures::{future::BoxFuture, FutureExt};
+use futures::{future::BoxFuture, stream, FutureExt};
 use grpc_def::Embedding;
 use http::uri::Scheme;
-use tokio::time::sleep;
+use tokio::{
+    sync::{mpsc, RwLock},
+    time::sleep,
+};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
@@ -232,6 +240,82 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
     Ok(addr)
 }
 
+pub async fn create_ai_server_mock(
+    completitions_mock: Arc<RwLock<Vec<Vec<String>>>>,
+    completitions_req_mock: Arc<RwLock<Vec<serde_json::Value>>>,
+) -> Result<SocketAddr> {
+    use axum::routing::post;
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    tokio::task::spawn(async {
+        use axum::{routing::get, Router};
+        use std::net::*;
+
+        let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(|r: Json<serde_json::Value>| async move {
+                use axum::response::Sse;
+                use serde_json::json;
+
+                let mut lock = completitions_req_mock.write().await;
+                lock.push(r.0);
+                drop(lock);
+
+                let (http_sender, http_receiver) = mpsc::channel::<Result<Event, &str>>(10);
+                tokio::spawn(async move {
+                    let mut lock = completitions_mock.write().await;
+                    let first = lock.remove(0);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    let model = "gpt-3.5-turbo-0301";
+                    let id = "chatcmpl-mock";
+                    let mut idx = 0;
+                    for s in first {
+                        let chunk = json!({
+                            "id": id,
+                            "object": "chat.completion.chunk",
+                            "created": now,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "delta": { "content": s },
+                                    "index": idx,
+                                    "finish_reason": null
+                                }
+                            ]
+                        });
+                        let ev = Event::default().json_data(chunk).unwrap();
+                        http_sender.send(Ok(ev)).await.unwrap();
+                        idx += 1;
+                    }
+                    let ev = Event::default().data("[DONE]");
+                    http_sender.send(Ok(ev)).await.unwrap();
+                });
+
+                let rx_stream = ReceiverStream::new(http_receiver);
+                Sse::new(rx_stream).keep_alive(
+                    axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+        let _ = sender.send(addr);
+
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let addr = receiver.await.unwrap();
+
+    Ok(addr)
+}
+
 pub mod grpc_def {
     tonic::include_proto!("orama_ai_service");
 }
@@ -305,7 +389,7 @@ where
 
 pub struct TestContext {
     pub config: OramacoreConfig,
-    reader: Arc<ReadSide>,
+    pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
 }

@@ -218,8 +218,7 @@ impl Answer {
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
-        let mut search_results = Vec::<SearchResultHit>::new();
-        if let Some(ref notation) = interaction.ragat_notation {
+        let search_results = if let Some(ref notation) = interaction.ragat_notation {
             let parsed = RAGAtParser::parse(notation);
 
             let components = self
@@ -231,7 +230,7 @@ impl Answer {
                 .merge_component_results(components)
                 .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
                 .await?;
-            search_results = results;
+            results
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
@@ -265,8 +264,8 @@ impl Answer {
                     },
                 )
                 .await?;
-            search_results = result.hits;
-        }
+            result.hits
+        };
 
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
@@ -616,6 +615,7 @@ async fn select_triggers_and_segments(
     ReceiverStream::new(rx)
 }
 
+#[derive(Debug)]
 pub enum AnswerEvent {
     Acknowledged,
     SelectedLLM(InteractionLLMConfig),
