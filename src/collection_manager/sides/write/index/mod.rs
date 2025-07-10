@@ -24,7 +24,7 @@ use tracing::{info, instrument, trace, warn};
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
-        field_names_to_paths, hooks::HooksRuntime, CollectionWriteOperation,
+        field_names_to_paths, CollectionWriteOperation,
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         OperationSender, WriteOperation,
     },
@@ -43,7 +43,6 @@ pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 pub enum EmbeddingStringCalculation {
     AllProperties,
     Properties(Box<[Box<[String]>]>),
-    Hook(Arc<HooksRuntime>),
     Automatic,
 }
 
@@ -62,7 +61,6 @@ pub struct Index {
 
     op_sender: OperationSender,
     embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-    hook_runtime: Arc<HooksRuntime>,
     automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
 
     created_at: DateTime<Utc>,
@@ -77,7 +75,6 @@ impl Index {
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         text_parser: Arc<TextParser>,
         op_sender: OperationSender,
-        hook_runtime: Arc<HooksRuntime>,
         automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
         runtime_index_id: Option<IndexId>,
     ) -> Result<Self> {
@@ -100,7 +97,6 @@ impl Index {
             field_id_generator: AtomicU16::new(field_id),
 
             op_sender,
-            hook_runtime,
             embedding_sender,
             automatically_chosen_properties,
 
@@ -115,9 +111,7 @@ impl Index {
         index_id: IndexId,
         data_dir: PathBuf,
         op_sender: OperationSender,
-        hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
         automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
         let dump: IndexDump = BufferedFile::open(data_dir.join("info.json"))
@@ -150,7 +144,6 @@ impl Index {
                     d,
                     collection_id,
                     index_id,
-                    hooks_runtime.clone(),
                     embedding_sender.clone(),
                     automatically_chosen_properties.clone(),
                 )
@@ -173,7 +166,6 @@ impl Index {
             field_id_generator: AtomicU16::new(0),
 
             op_sender,
-            hook_runtime,
             embedding_sender,
             automatically_chosen_properties,
 
@@ -228,7 +220,6 @@ impl Index {
                 }
                 Ok(IndexEmbeddingsCalculation::Properties(results))
             }
-            EmbeddingStringCalculation::Hook(_) => Ok(IndexEmbeddingsCalculation::Hook),
         }
     }
 
@@ -249,9 +240,6 @@ impl Index {
             IndexEmbeddingsCalculation::None => return Ok(()),
             IndexEmbeddingsCalculation::Properties(v) => {
                 EmbeddingStringCalculation::Properties(field_names_to_paths(v))
-            }
-            IndexEmbeddingsCalculation::Hook => {
-                EmbeddingStringCalculation::Hook(self.hook_runtime.clone())
             }
         };
 
@@ -709,18 +697,6 @@ impl Index {
             .send_batch(index_operation_batch)
             .await
             .context("Cannot send add fields operation")?;
-
-        Ok(())
-    }
-
-    pub async fn switch_to_embedding_hook(&self, hooks_runtime: Arc<HooksRuntime>) -> Result<()> {
-        let mut score_fields = self.score_fields.write().await;
-
-        for field in score_fields.iter_mut() {
-            if let IndexScoreField::Embedding(field) = field {
-                field.switch_to_embedding_hook(hooks_runtime.clone());
-            }
-        }
 
         Ok(())
     }

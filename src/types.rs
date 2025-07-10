@@ -2,7 +2,6 @@ use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
-use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::write::index::{FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
@@ -524,7 +523,6 @@ impl From<Locale> for LanguageDTO {
 #[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
-    Hook(HookName),
     AllStringProperties,
     Automatic,
 }
@@ -1360,22 +1358,6 @@ pub struct Interaction {
     pub search_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct NewHookPostParams {
-    pub name: HookName,
-    pub code: String,
-}
-
-#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
-pub struct GetHookQueryParams {
-    pub name: HookName,
-}
-
-#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
-pub struct DeleteHookParams {
-    pub name: HookName,
-}
-
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]
@@ -1482,7 +1464,6 @@ pub enum IndexEmbeddingsCalculation {
     Automatic,
     AllProperties,
     Properties(Vec<String>),
-    Hook,
 }
 
 impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
@@ -1504,7 +1485,6 @@ impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
                     "none" => Ok(IndexEmbeddingsCalculation::None),
                     "automatic" => Ok(IndexEmbeddingsCalculation::Automatic),
                     "all_properties" => Ok(IndexEmbeddingsCalculation::AllProperties),
-                    "hook" => Ok(IndexEmbeddingsCalculation::Hook),
                     _ => Err(de::Error::custom(
                         "Invalid value for index embeddings calculation. Expected 'none', 'automatic', 'all_properties', or 'hook' or an array of strings",
                     )),

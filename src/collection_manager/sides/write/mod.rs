@@ -19,7 +19,6 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    hooks::{CollectionHooksRuntime, HooksRuntime, HooksRuntimeConfig},
     segments::{CollectionSegmentInterface, SegmentInterface},
     system_prompts::SystemPromptInterface,
     triggers::TriggerInterface,
@@ -107,7 +106,7 @@ pub struct CollectionsWriterConfig {
 #[derive(Deserialize, Clone)]
 pub struct WriteSideConfig {
     pub master_api_key: ApiKey,
-    pub hooks: HooksRuntimeConfig,
+    // pub hooks: HooksRuntimeConfig,
     pub output: OutputSideChannelType,
     pub config: CollectionsWriterConfig,
     pub jwt: Option<JwtConfig>,
@@ -118,7 +117,6 @@ pub struct WriteSide {
     collections: CollectionsWriter,
     document_count: AtomicU64,
     data_dir: PathBuf,
-    hook_runtime: Arc<HooksRuntime>,
     operation_counter: RwLock<u64>,
     insert_batch_commit_size: u64,
 
@@ -202,13 +200,10 @@ impl WriteSide {
         let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
-        let hook = HooksRuntime::new(kv.clone(), config.hooks).await;
-        let hook_runtime = Arc::new(hook);
 
         let collections_writer = CollectionsWriter::try_load(
             collections_writer_config,
             sx,
-            hook_runtime.clone(),
             nlp_service.clone(),
             op_sender.clone(),
             automatic_embeddings_selector.clone(),
@@ -234,7 +229,6 @@ impl WriteSide {
             collections: collections_writer,
             document_storage,
             data_dir,
-            hook_runtime,
             insert_batch_commit_size,
             master_api_key,
             operation_counter: Default::default(),
@@ -1171,6 +1165,7 @@ impl WriteSide {
         ))
     }
 
+    /*
     pub async fn get_hooks_runtime(
         &self,
         write_api_key: WriteApiKey,
@@ -1184,6 +1179,7 @@ impl WriteSide {
             collection,
         ))
     }
+    */
 
     pub async fn get_tools_manager(
         &self,

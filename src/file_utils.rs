@@ -1,6 +1,6 @@
 use std::{
     fmt::Debug,
-    io::{BufWriter, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -67,6 +67,10 @@ pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<
 
 pub struct BufferedFile;
 impl BufferedFile {
+    pub fn exists_as_file(path: &PathBuf) -> bool {
+        std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+    }
+
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
         let buf = AtomicWriteFile::open(&path)
             .with_context(|| format!("Cannot create file at {path:?}"))?;
@@ -98,6 +102,16 @@ impl ReadBufferedFile {
         Ok(data)
     }
 
+    pub fn read_text_data(self) -> Result<String> {
+        let file = std::fs::File::open(&self.path)
+            .with_context(|| format!("Cannot open file at {:?}", self.path))?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut b = String::new();
+        reader.read_to_string(&mut b)
+            .with_context(|| format!("Cannot read text data from {:?}", self.path))?;
+        Ok(b)
+    }
+
     pub fn read_bincode_data<T: serde::de::DeserializeOwned>(self) -> Result<T> {
         let file = std::fs::File::open(&self.path)
             .with_context(|| format!("Cannot open file at {:?}", self.path))?;
@@ -117,6 +131,16 @@ impl WriteBufferedFile {
         if let Some(buf) = self.buf.as_mut() {
             serde_json::to_writer(buf, data)
                 .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
+        }
+
+        self.close()
+    }
+
+
+    pub fn write_text_data<T: AsRef<[u8]>>(mut self, data: &T) -> Result<()> {
+        if let Some(buf) = self.buf.as_mut() {
+            buf.write_all(data.as_ref())
+                .with_context(|| format!("Cannot write text data to {:?}", self.path))?;
         }
 
         self.close()

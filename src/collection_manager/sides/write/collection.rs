@@ -10,7 +10,6 @@ use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
         field_name_to_path,
-        hooks::HooksRuntime,
         write::{OramaModelSerializable, WriteError},
         CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
         ReplaceIndexReason, WriteOperation,
@@ -43,7 +42,6 @@ pub struct CollectionWriter {
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
     op_sender: OperationSender,
-    hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 
@@ -59,7 +57,6 @@ impl CollectionWriter {
         default_locale: Locale,
         embeddings_model: OramaModel,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
         nlp_service: Arc<NLPService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
@@ -77,7 +74,6 @@ impl CollectionWriter {
             indexes: Default::default(),
             temp_indexes: Default::default(),
             op_sender,
-            hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
 
@@ -87,10 +83,8 @@ impl CollectionWriter {
 
     pub async fn try_load(
         path: PathBuf,
-        hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
@@ -116,9 +110,7 @@ impl CollectionWriter {
                 index_id,
                 path.join("indexes").join(index_id.as_str()),
                 op_sender.clone(),
-                hooks_runtime.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
@@ -131,9 +123,7 @@ impl CollectionWriter {
                 temp_index_id,
                 path.join("temp_indexes").join(temp_index_id.as_str()),
                 op_sender.clone(),
-                hooks_runtime.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
@@ -153,7 +143,6 @@ impl CollectionWriter {
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
             op_sender,
-            hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
 
@@ -232,7 +221,6 @@ impl CollectionWriter {
             self.embedding_sender.clone(),
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
-            self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
             None,
         )
@@ -307,7 +295,6 @@ impl CollectionWriter {
             self.embedding_sender.clone(),
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
-            self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
             Some(copy_from),
         )

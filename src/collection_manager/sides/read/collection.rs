@@ -586,6 +586,10 @@ impl CollectionReader {
                         }
                     }
                 }
+            },
+            CollectionWriteOperation::Hook(op) => {
+                println!("Hook!! {op:?}");
+                unimplemented!("")
             }
         }
 

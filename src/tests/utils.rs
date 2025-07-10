@@ -30,7 +30,6 @@ use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
         triggers::Trigger,
         write::{
@@ -67,6 +66,7 @@ pub fn generate_new_path() -> PathBuf {
     dir
 }
 
+/*
 pub fn hooks_runtime_config() -> HooksRuntimeConfig {
     HooksRuntimeConfig {
         select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
@@ -79,6 +79,7 @@ pub fn hooks_runtime_config() -> HooksRuntimeConfig {
         },
     }
 }
+*/
 
 pub fn create_oramacore_config() -> OramacoreConfig {
     OramacoreConfig {
@@ -106,7 +107,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
-            hooks: hooks_runtime_config(),
+            // hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,

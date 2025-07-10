@@ -9,7 +9,6 @@ use tracing::{error, info};
 
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::ai::OramaModel;
-use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::file_utils::{create_if_not_exists, BufferedFile};
@@ -29,7 +28,6 @@ pub struct CollectionsWriter {
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
-    hooks_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     default_model: OramaModel,
@@ -39,7 +37,6 @@ impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
         embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
-        hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
@@ -67,7 +64,6 @@ impl CollectionsWriter {
                     config,
                     embedding_sender,
                     op_sender,
-                    hooks_runtime,
                     nlp_service,
                     automatic_embeddings_selector,
                     default_model,
@@ -84,10 +80,8 @@ impl CollectionsWriter {
             // TODO: think about it
             let collection = CollectionWriter::try_load(
                 collection_dir,
-                hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 op_sender.clone(),
                 automatic_embeddings_selector.clone(),
             )
@@ -100,7 +94,6 @@ impl CollectionsWriter {
             config,
             embedding_sender,
             op_sender,
-            hooks_runtime,
             nlp_service,
             automatic_embeddings_selector,
             default_model,
@@ -147,7 +140,6 @@ impl CollectionsWriter {
             default_locale,
             embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
             self.embedding_sender.clone(),
-            self.hooks_runtime.clone(),
             self.op_sender.clone(),
             self.nlp_service.clone(),
             self.automatic_embeddings_selector.clone(),
