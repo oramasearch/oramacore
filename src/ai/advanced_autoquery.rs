@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use axum::extract::State;
 use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
+use orama_js_pool::{ExecOption, JSExecutor};
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -590,11 +591,42 @@ impl AdvancedAutoQuery {
             let tracked_query = tracked_query.clone();
 
             async move {
+                let search_params = tracked_query.search_params.clone();
+                let hook_storage = read_side
+                    .get_hook_storage(
+                        read_api_key,
+                        collection_id,
+                    ).await?;
+                let lock = hook_storage.read().await;
+                let content = lock.get_hook_content(hook_storage::HookType::BeforeRetrieval)?;
+
+                let search_params = if let Some(code) = content {
+                    let mut a: JSExecutor<SearchParams, Option<SearchParams>> = JSExecutor::try_new(
+                        code,
+                        Some(vec![]),
+                        Duration::from_millis(200),
+                        true,
+                        "beforeRetrieval".to_string()
+                    )
+                        .await?;
+
+                    // TODO
+                    let output: Option<SearchParams> = a.exec(search_params.clone(), None, ExecOption {
+                        allowed_hosts: Some(vec![]),
+                        timeout: Duration::from_millis(500),
+                    }).await?;
+
+                    output.unwrap_or(search_params)
+                } else {
+                    search_params
+                };
+                drop(lock);
+
                 let search_result = read_side
                     .search(
                         read_api_key,
                         collection_id,
-                        tracked_query.search_params.clone(),
+                        search_params,
                     )
                     .await
                     .context("Failed to execute search")?;

@@ -11,6 +11,7 @@ mod facets;
 mod filter;
 mod fulltext_search;
 mod geosearch;
+mod hooks;
 // mod hurl;
 mod index_rebuild;
 mod list_documents;

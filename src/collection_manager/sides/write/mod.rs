@@ -3,18 +3,16 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
+use hook_storage::{HookWriter, HookWriterError};
 pub use index::OramaModelSerializable;
 use thiserror::Error;
 pub mod jwt_manager;
 
 use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
+    collections::HashMap, ops::Deref, path::PathBuf, sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
-    },
-    time::Duration,
+    }, time::Duration
 };
 
 use super::{
@@ -54,7 +52,6 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
-    file_utils::BufferedFile,
     metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
@@ -63,7 +60,7 @@ use crate::{
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
-
+use fs::BufferedFile;
 use nlp::NLPService;
 
 #[derive(Error, Debug)]
@@ -86,6 +83,8 @@ pub enum WriteError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Temp index {1} doesn't exist in collection {0}")]
     TempIndexNotFound(CollectionId, IndexId),
+    #[error("Error in hook")]
+    HookWriterError(#[from] HookWriterError),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1165,21 +1164,18 @@ impl WriteSide {
         ))
     }
 
-    /*
-    pub async fn get_hooks_runtime(
-        &self,
+    pub async fn get_hooks_storage<'s>(
+        &'s self,
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
-    ) -> Result<CollectionHooksRuntime, WriteError> {
+    ) -> Result<HookWriterLock<'s>, WriteError> {
         let collection = self
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
-        Ok(CollectionHooksRuntime::new(
-            self.hook_runtime.clone(),
+        Ok(HookWriterLock {
             collection,
-        ))
+        })
     }
-    */
 
     pub async fn get_tools_manager(
         &self,
@@ -1326,6 +1322,17 @@ fn embedding_model_default() -> OramaModelSerializable {
 
 fn default_insert_batch_commit_size() -> u64 {
     1_000
+}
+
+pub struct HookWriterLock<'guard> {
+    collection: CollectionReadLock<'guard>
+}
+impl<'guard> Deref for HookWriterLock<'guard> {
+    type Target = HookWriter;
+
+    fn deref(&self) -> &Self::Target {
+        self.collection.get_hook_storage()
+    }
 }
 
 fn merge(mut old: serde_json::value::Map<String, serde_json::Value>, delta: Document) -> Document {

@@ -6,11 +6,13 @@ pub mod notify;
 
 use axum::extract::State;
 use futures::Stream;
+use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -33,7 +35,6 @@ use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
 use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
-use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
@@ -47,6 +48,7 @@ use crate::{
     capped_heap::CappedHeap,
     types::{CollectionId, DocumentId},
 };
+use fs::BufferedFile;
 use nlp::NLPService;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
@@ -80,6 +82,8 @@ pub enum ReadError {
     Generic(#[from] anyhow::Error),
     #[error("Not found {0}")]
     NotFound(CollectionId),
+    #[error("Hook error: {0:?}")]
+    Hook(#[from] HookReaderError)
 }
 
 pub struct ReadSide {
@@ -682,6 +686,23 @@ impl ReadSide {
             collection_id,
         ))
     }
+
+    pub async fn get_hook_storage<'s>(
+        &'s self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<HookReaderLock<'s>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        Ok(HookReaderLock {
+            collection
+        })
+    }
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
@@ -859,6 +880,18 @@ struct ReadInfoV1 {
 #[derive(Deserialize, Serialize, Debug)]
 enum ReadInfo {
     V1(ReadInfoV1),
+}
+
+pub struct HookReaderLock<'guard> {
+    collection: CollectionReadLock<'guard>
+}
+
+impl<'guard> Deref for HookReaderLock<'guard> {
+    type Target = RwLock<HookReader>;
+
+    fn deref(&self) -> &Self::Target {
+        self.collection.get_hook_storage()
+    }
 }
 
 #[cfg(test)]

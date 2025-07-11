@@ -17,11 +17,11 @@ use crate::{
             uncommitted_field::{Positions, TotalDocumentsWithTermInField},
         },
     },
-    file_utils::create_if_not_exists,
     indexes::{fst::FSTIndex, map::Map},
     merger::MergedIterator,
     types::DocumentId,
 };
+use fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedStringField {

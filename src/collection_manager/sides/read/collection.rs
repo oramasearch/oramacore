@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
+use hook_storage::{HookReader, HookType};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
@@ -28,7 +29,6 @@ use crate::{
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
-    file_utils::BufferedFile,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
         InteractionMessage, Role, SearchParams,
@@ -45,9 +45,11 @@ use super::{
 };
 
 use crate::types::NLPSearchRequest;
+use fs::*;
 use nlp::{locales::Locale, NLPService};
 
 pub struct CollectionReader {
+    data_dir: PathBuf,
     id: CollectionId,
     description: Option<String>,
     default_locale: Locale,
@@ -63,6 +65,8 @@ pub struct CollectionReader {
 
     temp_indexes: RwLock<Vec<Index>>,
 
+    hook: RwLock<HookReader>,
+
     notifier: Option<Arc<Notifier>>,
 
     created_at: DateTime<Utc>,
@@ -73,6 +77,7 @@ pub struct CollectionReader {
 
 impl CollectionReader {
     pub fn empty(
+        data_dir: PathBuf,
         id: CollectionId,
         description: Option<String>,
         default_locale: Locale,
@@ -99,10 +104,14 @@ impl CollectionReader {
             temp_indexes: Default::default(),
             notifier,
 
+            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks")).unwrap()),
+
             created_at: Utc::now(),
             updated_at: RwLock::new(Utc::now()),
 
             document_count_estimation: AtomicU64::new(0),
+
+            data_dir,
         }
     }
 
@@ -159,18 +168,23 @@ impl CollectionReader {
 
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
+
+            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
+
             notifier,
 
             created_at: dump.created_at,
             updated_at: RwLock::new(dump.updated_at),
 
             document_count_estimation: AtomicU64::new(document_count_estimation),
+
+            data_dir,
         };
 
         Ok(s)
     }
 
-    pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+    pub async fn commit(&self, offset: Offset) -> Result<()> {
         // During the commit we have:
         // 1. indexes till alive
         // 2. indexes deleted by the user
@@ -192,7 +206,7 @@ impl CollectionReader {
         let mut temp_index_id_to_remove = vec![];
 
         let mut count = 0;
-        let indexes_dir = data_dir.join("indexes");
+        let indexes_dir = self.data_dir.join("indexes");
         for (i, index) in indexes_lock.iter().enumerate() {
             match index.get_deletion_reason() {
                 Some(DeletionReason::UserWanted) => {
@@ -218,7 +232,7 @@ impl CollectionReader {
 
         let temp_indexes_lock = self.temp_indexes.read().await;
         let mut temp_index_ids = Vec::with_capacity(temp_indexes_lock.len());
-        let temp_indexes_dir = data_dir.join("temp_indexes");
+        let temp_indexes_dir = self.data_dir.join("temp_indexes");
         for index in temp_indexes_lock.iter() {
             if index.is_deleted() {
                 debug_panic!("It is not possible to delete a temp index (yet)");
@@ -242,7 +256,7 @@ impl CollectionReader {
             updated_at: *self.updated_at.read().await,
         });
 
-        BufferedFile::create_or_overwrite(data_dir.join("collection.json"))
+        BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
             .context("Cannot create collection.json")?
             .write_json_data(&dump)
             .context("Cannot write collection.json")?;
@@ -325,6 +339,10 @@ impl CollectionReader {
     #[inline]
     pub fn get_id(&self) -> CollectionId {
         self.id
+    }
+
+    pub fn get_hook_storage(&self) -> &RwLock<HookReader> {
+        &self.hook
     }
 
     pub async fn nlp_search(
@@ -586,10 +604,11 @@ impl CollectionReader {
                         }
                     }
                 }
-            },
+            }
             CollectionWriteOperation::Hook(op) => {
-                println!("Hook!! {op:?}");
-                unimplemented!("")
+                let mut lock = self.hook.write().await;
+                lock.update(op)?;
+                drop(lock);
             }
         }
 
@@ -626,6 +645,11 @@ impl CollectionReader {
             indexes_stats.push(i.stats(true, req.with_keys).await?);
         }
 
+        let lock = self.hook.read().await;
+        let hooks = lock.list()?;
+        let hooks = hooks.into_iter().filter_map(|(t, c)| c.map(|_| t)).collect();
+        drop(lock);
+
         Ok(CollectionStats {
             id: self.get_id(),
             document_count: indexes_stats
@@ -636,6 +660,7 @@ impl CollectionReader {
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
+            hooks,
             created_at: self.created_at,
             updated_at: *self.updated_at.read().await,
         })
@@ -712,6 +737,7 @@ pub struct CollectionStats {
     pub default_locale: Locale,
     pub embedding_model: Option<String>,
     pub indexes_stats: Vec<IndexStats>,
+    pub hooks: Vec<HookType>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -4443,6 +4443,7 @@ dependencies = [
  "fake",
  "fastembed",
  "filters",
+ "fs",
  "fs_extra",
  "fst",
  "futures",

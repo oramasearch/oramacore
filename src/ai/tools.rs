@@ -280,19 +280,23 @@ impl ToolsRuntime {
                             Some(vec![]),
                             Duration::from_millis(500), // @todo: make this configurable
                             true,
-                            function_name.clone()
+                            function_name.clone(),
                         )
-                            .await
-                                .map_err(|e| {
-                                    ToolError::ExecutionError(collection_id, function_name, e)
-                                })?;
+                        .await
+                        .map_err(|e| ToolError::ExecutionError(collection_id, function_name, e))?;
 
                         // The JSExecutor call can easily fail under different circumstances.
                         // We need to handle this error and send it back to the main thread.
-                        let output: Result<Value, JSRunnerError> = executor.exec(arguments_as_json_value, None, ExecOption {
-                            timeout: Duration::from_secs(3), // @todo: make this configurable
-                            allowed_hosts: Some(vec![]), // @todo: make this configurable
-                        }).await;
+                        let output: Result<Value, JSRunnerError> = executor
+                            .exec(
+                                arguments_as_json_value,
+                                None,
+                                ExecOption {
+                                    timeout: Duration::from_secs(3), // @todo: make this configurable
+                                    allowed_hosts: Some(vec![]), // @todo: make this configurable
+                                },
+                            )
+                            .await;
 
                         // If the function call was successful, we push the result to the results vector.
                         // For now, we'll bail if the function call fails.

@@ -1,6 +1,8 @@
 use anyhow::Context;
 use futures::{Stream, TryFutureExt};
-use std::{collections::HashMap, sync::Arc};
+use hook_storage::HookReaderError;
+use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError, OutputChannel};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -35,6 +37,10 @@ pub enum AnswerError {
     SegmentError(#[from] SegmentError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
+    #[error("Hook read error: {0:?}")]
+    HookError(#[from] HookReaderError),
+    #[error("JS run error: {0:?}")]
+    JSError(#[from] JSRunnerError),
 }
 
 pub struct Answer {
@@ -157,6 +163,7 @@ impl Answer {
         self,
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>
     ) -> Result<(), AnswerError> {
         self.handle_gpu_overload(&mut interaction).await;
 
@@ -247,21 +254,52 @@ impl Answer {
                 mode => SearchMode::from_str(mode, interaction.query.clone()),
             };
 
+            let params = SearchParams {
+                mode: search_mode,
+                limit: max_documents,
+                offset: SearchOffset(0),
+                where_filter: Default::default(),
+                boost: HashMap::new(),
+                facets: HashMap::new(),
+                properties: Properties::Star,
+                indexes: None, // Search all indexes
+            };
+
+            let hook_storage = self.read_side
+                .get_hook_storage(
+                    self.read_api_key,
+                    self.collection_id,
+                ).await?;
+            let lock = hook_storage.read().await;
+            let content = lock.get_hook_content(hook_storage::HookType::BeforeRetrieval)?;
+
+            let params = if let Some(code) = content {
+                let mut a: JSExecutor<SearchParams, Option<SearchParams>> = JSExecutor::try_new(
+                    code,
+                    Some(vec![]),
+                    Duration::from_millis(200),
+                    true,
+                    "beforeRetrieval".to_string()
+                )
+                    .await?;
+
+                let output: Option<SearchParams> = a.exec(params.clone(), log_sender, ExecOption {
+                    allowed_hosts: Some(vec![]),
+                    timeout: Duration::from_millis(500),
+                }).await?;
+
+                output.unwrap_or(params)
+            } else {
+                params
+            };
+            drop(lock);
+
             let result = self
                 .read_side
                 .search(
                     self.read_api_key,
                     self.collection_id,
-                    SearchParams {
-                        mode: search_mode,
-                        limit: max_documents,
-                        offset: SearchOffset(0),
-                        where_filter: Default::default(),
-                        boost: HashMap::new(),
-                        facets: HashMap::new(),
-                        properties: Properties::Star,
-                        indexes: None, // Search all indexes
-                    },
+                    params,
                 )
                 .await?;
             result.hits

@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::error;
 
-use crate::file_utils::BufferedFile;
+use fs::BufferedFile;
 
 const BOUND_FILE_NAME: &str = "bounds.bin";
 

@@ -117,7 +117,8 @@ rustls = "0.23.26"
 filters = { path = "./crates/filters" }
 bkd = { path = "./crates/bkd" }
 nlp = { path = "crates/nlp" }
-hook_storage = { path = "crates/hook_storage" }
+hook_storage = { path = "./crates/hook_storage" }
+fs = { path = "./crates/fs" }
 
 zebo = "0.3.0"
 llm_json = "1.0.2"

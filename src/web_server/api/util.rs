@@ -246,41 +246,46 @@ pub fn print_error(e: &anyhow::Error, msg: &'static str) {
 impl IntoResponse for WriteError {
     fn into_response(self) -> Response {
         match self {
-            WriteError::Generic(e) => {
+            Self::Generic(e) => {
                 print_error(&e, "Unhandled error in write side");
                 error!(error = ?e, "Generic write error");
                 let body = format!("Cannot process the request: {e:?}");
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
-            WriteError::InvalidMasterApiKey => {
+            Self::InvalidMasterApiKey => {
                 let body = "Invalid master API key".to_string();
                 (StatusCode::UNAUTHORIZED, body).into_response()
             }
-            WriteError::CollectionAlreadyExists(collection_id) => {
+            Self::CollectionAlreadyExists(collection_id) => {
                 let body = format!("Collection with id {collection_id} already exists");
                 (StatusCode::CONFLICT, body).into_response()
             }
-            WriteError::InvalidWriteApiKey(collection_id)
-            | WriteError::CollectionNotFound(collection_id)
-            | WriteError::JwtBelongToAnotherCollection(collection_id) => {
+            Self::InvalidWriteApiKey(collection_id)
+            | Self::CollectionNotFound(collection_id)
+            | Self::JwtBelongToAnotherCollection(collection_id) => {
                 let body = format!(
                     "Collection with id {collection_id} not found or invalid write api key"
                 );
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
-            WriteError::IndexAlreadyExists(collection_id, index_id) => {
+            Self::IndexAlreadyExists(collection_id, index_id) => {
                 let body = format!(
                     "Index with id {index_id} already exists in collection {collection_id}"
                 );
                 (StatusCode::CONFLICT, body).into_response()
             }
-            WriteError::IndexNotFound(collection_id, index_id) => {
+            Self::IndexNotFound(collection_id, index_id) => {
                 let body = format!("Index {index_id} not found in collection {collection_id}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
-            WriteError::TempIndexNotFound(collection_id, index_id) => {
+            Self::TempIndexNotFound(collection_id, index_id) => {
                 let body =
                     format!("Temporary index {index_id} not found in collection {collection_id}");
+                (StatusCode::BAD_REQUEST, body).into_response()
+            },
+            Self::HookWriterError(e) => {
+                let body =
+                    format!("Invalid hook: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
         }
@@ -425,6 +430,11 @@ impl IntoResponse for ReadError {
                 format!("Collection {collection_id} not found"),
             )
                 .into_response(),
+            Self::Hook(e) => (
+                StatusCode::BAD_REQUEST,
+                format!("Hook error: {e:?}"),
+            )
+                .into_response(),
         }
     }
 }
@@ -447,6 +457,20 @@ impl IntoResponse for AnswerError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Channel closed unexpectedly",
+                )
+                    .into_response()
+            },
+            AnswerError::HookError(e) => {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Hook error",
+                )
+                    .into_response()
+            },
+            AnswerError::JSError(e) => {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Error running JS code: {e:?}"),
                 )
                     .into_response()
             }

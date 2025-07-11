@@ -24,16 +24,15 @@ use tracing::{info, instrument, trace, warn};
 use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
-        field_names_to_paths, CollectionWriteOperation,
-        DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
-        OperationSender, WriteOperation,
+        field_names_to_paths, CollectionWriteOperation, DocumentStorageWriteOperation,
+        IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation,
     },
-    file_utils::BufferedFile,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
     },
 };
+use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
 use super::embedding::MultiEmbeddingCalculationRequest;

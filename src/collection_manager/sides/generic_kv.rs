@@ -4,11 +4,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    types::CollectionId,
-};
+use crate::types::CollectionId;
 use anyhow::{Context, Result};
+use fs::{create_if_not_exists, BufferedFile};
 use ptrie::Trie;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::RwLock;

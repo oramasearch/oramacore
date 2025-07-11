@@ -1,0 +1,19 @@
+[package]
+name = "fs"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0.98"
+atomic-write-file = "0.2.3"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+bincode = "1.3.3"
+
+tempfile = { version = "3", optional = true }
+
+[features]
+generate_new_path = ["tempfile"]

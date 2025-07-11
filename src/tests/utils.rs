@@ -1,14 +1,12 @@
 use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
-    str::FromStr,
     sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
-use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
 use fastembed::{
@@ -17,6 +15,7 @@ use fastembed::{
 };
 use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
+use hook_storage::HookType;
 use http::uri::Scheme;
 use tokio::{
     sync::{mpsc, RwLock},
@@ -249,7 +248,7 @@ pub async fn create_ai_server_mock(
         use axum::Router;
         use std::net::*;
 
-        let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         drop(listener);
 
@@ -605,6 +604,15 @@ impl TestCollectionClient {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
+    }
+
+    pub async fn insert_hook(&self, hook_type: HookType, code: String) -> Result<()> {
+        let hook_storage = self.writer
+            .get_hooks_storage(self.write_api_key, self.collection_id).await?;
+
+        hook_storage.insert_hook(hook_type, code).await?;
+
+        Ok(())
     }
 
     pub async fn insert_trigger(

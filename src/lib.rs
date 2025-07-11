@@ -31,8 +31,6 @@ mod capped_heap;
 
 mod metrics;
 
-mod file_utils;
-
 mod merger;
 
 pub mod build_info;

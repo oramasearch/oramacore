@@ -202,7 +202,6 @@ async fn test_vector_search_should_work_after_commit() {
     drop(test_context);
 }
 
-
 /*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_commit_hooks() {

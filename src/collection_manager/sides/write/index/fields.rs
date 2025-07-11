@@ -15,8 +15,7 @@ use crate::{
         OramaModel,
     },
     collection_manager::sides::{
-        write::embedding::MultiEmbeddingCalculationRequest,
-        Term, TermStringField,
+        write::embedding::MultiEmbeddingCalculationRequest, Term, TermStringField,
     },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };

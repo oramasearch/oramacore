@@ -2,6 +2,8 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use futures::FutureExt;
+use hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -14,12 +16,12 @@ use crate::{
         CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
         ReplaceIndexReason, WriteOperation,
     },
-    file_utils::BufferedFile,
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
     },
 };
+use fs::BufferedFile;
 
 use nlp::{locales::Locale, NLPService, TextParser};
 
@@ -46,11 +48,14 @@ pub struct CollectionWriter {
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 
     created_at: DateTime<Utc>,
+
+    hook: HookWriter,
 }
 
 impl CollectionWriter {
     pub fn empty(
         id: CollectionId,
+        data_dir: PathBuf,
         description: Option<String>,
         write_api_key: ApiKey,
         read_api_key: ApiKey,
@@ -61,6 +66,9 @@ impl CollectionWriter {
         nlp_service: Arc<NLPService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
+
+        let a = op_sender.clone();
+
         Self {
             id,
             description,
@@ -78,17 +86,24 @@ impl CollectionWriter {
             automatic_embeddings_selector,
 
             created_at: Utc::now(),
+
+            hook: HookWriter::try_new(data_dir.join("hooks"), Box::new(move |op| {
+                let b = a.clone();
+                async move {
+                    let _ = b.send(WriteOperation::Collection(id, CollectionWriteOperation::Hook(op))).await;
+                }.boxed()
+            })).unwrap()
         }
     }
 
     pub async fn try_load(
-        path: PathBuf,
+        data_dir: PathBuf,
         nlp_service: Arc<NLPService>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
-        let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
+        let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize collection info")?;
@@ -108,7 +123,7 @@ impl CollectionWriter {
             let index = Index::try_load(
                 id,
                 index_id,
-                path.join("indexes").join(index_id.as_str()),
+                data_dir.join("indexes").join(index_id.as_str()),
                 op_sender.clone(),
                 embedding_sender.clone(),
                 automatic_embeddings_selector.clone(),
@@ -121,7 +136,7 @@ impl CollectionWriter {
             let index = Index::try_load(
                 id,
                 temp_index_id,
-                path.join("temp_indexes").join(temp_index_id.as_str()),
+                data_dir.join("temp_indexes").join(temp_index_id.as_str()),
                 op_sender.clone(),
                 embedding_sender.clone(),
                 automatic_embeddings_selector.clone(),
@@ -129,6 +144,8 @@ impl CollectionWriter {
             .context("Cannot load index")?;
             temp_indexes.insert(temp_index_id, index);
         }
+
+        let a = op_sender.clone();
 
         Ok(Self {
             id,
@@ -147,6 +164,13 @@ impl CollectionWriter {
             automatic_embeddings_selector,
 
             created_at: dump.created_at,
+
+            hook: HookWriter::try_new(data_dir.join("hooks"), Box::new(move |op| {
+                let b = a.clone();
+                async move {
+                    let _ = b.send(WriteOperation::Collection(id, CollectionWriteOperation::Hook(op))).await;
+                }.boxed()
+            })).unwrap()
         })
     }
 
@@ -541,6 +565,10 @@ impl CollectionWriter {
             .context("Cannot send operation")?;
 
         Ok(())
+    }
+
+    pub fn get_hook_storage<'s>(&'s self) -> &'s HookWriter {
+        &self.hook
     }
 }
 

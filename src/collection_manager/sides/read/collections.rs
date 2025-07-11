@@ -7,10 +7,11 @@ use std::{
 use crate::{
     ai::{llms::LLMService, AIService},
     collection_manager::sides::{read::notify::Notifier, Offset},
-    file_utils::{create_if_not_exists, create_if_not_exists_async, BufferedFile},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     types::{ApiKey, CollectionId},
 };
+
+use fs::{create_if_not_exists, create_if_not_exists_async, BufferedFile};
 
 use nlp::{locales::Locale, NLPService};
 
@@ -174,7 +175,7 @@ impl CollectionsReader {
 
             let m = COMMIT_CALCULATION_TIME.create(Empty);
 
-            match collection.commit(collection_dir, offset).await {
+            match collection.commit(offset).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);
@@ -212,7 +213,12 @@ impl CollectionsReader {
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
+        let collection_dir = self.indexes_config.data_dir
+            .join("collections")
+            .join(id.as_str());
+
         let collection = CollectionReader::empty(
+            collection_dir,
             id,
             description,
             default_locale,

@@ -4,14 +4,13 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, trace, warn};
 use zebo::{Zebo, ZeboInfo};
 
-use anyhow::{Context, Result};
-
 use crate::{
     collection_manager::sides::{DocumentStorageWriteOperation, DocumentToInsert},
-    file_utils::{create_if_not_exists, read_file},
     metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
+use anyhow::{Context, Result};
+use fs::{create_if_not_exists, read_file};
 
 // 1 GB
 static PAGE_SIZE: u64 = 1024 * 1024 * 1024;

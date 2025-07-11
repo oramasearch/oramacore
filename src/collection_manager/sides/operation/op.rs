@@ -1,13 +1,11 @@
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use hook_storage::HookOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::sides::{
-        write::{index::IndexedValue, OramaModelSerializable}
-    },
+    collection_manager::sides::write::{index::IndexedValue, OramaModelSerializable},
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
@@ -332,12 +330,14 @@ impl WriteOperation {
             WriteOperation::Collection(_, CollectionWriteOperation::CreateIndex2 { .. }) => {
                 "create_index"
             }
-            WriteOperation::Collection(_, CollectionWriteOperation::Hook(HookOperation::Delete(_))) => {
-                "delete_hook"
-            }
-            WriteOperation::Collection(_, CollectionWriteOperation::Hook(HookOperation::Insert(_, _))) => {
-                "insert_hook"
-            }
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Hook(HookOperation::Delete(_)),
+            ) => "delete_hook",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Hook(HookOperation::Insert(_, _)),
+            ) => "insert_hook",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },

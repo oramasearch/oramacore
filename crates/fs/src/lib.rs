@@ -4,8 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// foo
-
 use anyhow::{Context, Result};
 use atomic_write_file::AtomicWriteFile;
 use tracing::{error, trace};
@@ -68,7 +66,9 @@ pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<
 pub struct BufferedFile;
 impl BufferedFile {
     pub fn exists_as_file(path: &PathBuf) -> bool {
-        std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+        std::fs::metadata(path)
+            .map(|m| m.is_file())
+            .unwrap_or(false)
     }
 
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
@@ -107,7 +107,8 @@ impl ReadBufferedFile {
             .with_context(|| format!("Cannot open file at {:?}", self.path))?;
         let mut reader = std::io::BufReader::new(file);
         let mut b = String::new();
-        reader.read_to_string(&mut b)
+        reader
+            .read_to_string(&mut b)
             .with_context(|| format!("Cannot read text data from {:?}", self.path))?;
         Ok(b)
     }
@@ -135,7 +136,6 @@ impl WriteBufferedFile {
 
         self.close()
     }
-
 
     pub fn write_text_data<T: AsRef<[u8]>>(mut self, data: &T) -> Result<()> {
         if let Some(buf) = self.buf.as_mut() {
@@ -241,4 +241,12 @@ impl Drop for WriteBufferedFile {
             error!("Error while dropping buffered file: {:?}", e);
         });
     }
+}
+
+#[cfg(feature = "generate_new_path")]
+pub fn generate_new_path() -> PathBuf {
+    let tmp_dir = tempfile::tempdir().expect("Cannot create temp dir");
+    let dir = tmp_dir.path().to_path_buf();
+    std::fs::create_dir_all(dir.clone()).expect("Cannot create dir");
+    dir
 }
