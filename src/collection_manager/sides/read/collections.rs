@@ -213,7 +213,9 @@ impl CollectionsReader {
     ) -> Result<()> {
         info!(collection_id=?id, "ReadSide: Creating collection {:?}", id);
 
-        let collection_dir = self.indexes_config.data_dir
+        let collection_dir = self
+            .indexes_config
+            .data_dir
             .join("collections")
             .join(id.as_str());
 

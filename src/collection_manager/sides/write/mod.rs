@@ -9,10 +9,14 @@ use thiserror::Error;
 pub mod jwt_manager;
 
 use std::{
-    collections::HashMap, ops::Deref, path::PathBuf, sync::{
+    collections::HashMap,
+    ops::Deref,
+    path::PathBuf,
+    sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
-    }, time::Duration
+    },
+    time::Duration,
 };
 
 use super::{
@@ -1172,9 +1176,7 @@ impl WriteSide {
         let collection = self
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
-        Ok(HookWriterLock {
-            collection,
-        })
+        Ok(HookWriterLock { collection })
     }
 
     pub async fn get_tools_manager(
@@ -1325,7 +1327,7 @@ fn default_insert_batch_commit_size() -> u64 {
 }
 
 pub struct HookWriterLock<'guard> {
-    collection: CollectionReadLock<'guard>
+    collection: CollectionReadLock<'guard>,
 }
 impl<'guard> Deref for HookWriterLock<'guard> {
     type Target = HookWriter;

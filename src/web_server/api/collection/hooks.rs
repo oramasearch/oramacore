@@ -1,15 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    Json, Router,
+use axum::{extract::State, response::IntoResponse, Json, Router};
+use axum_openapi3::utoipa;
+use axum_openapi3::{
+    utoipa::{PartialSchema, ToSchema},
+    *,
 };
-use axum_openapi3::{utoipa::{PartialSchema, ToSchema}, *};
 use hook_storage::HookType;
 use serde::Deserialize;
 use serde_json::json;
-use axum_openapi3::utoipa;
 
 use crate::{
     collection_manager::sides::write::{WriteError, WriteSide},
@@ -43,7 +42,9 @@ async fn set_hook_v0(
 ) -> Result<impl IntoResponse, WriteError> {
     let NewHookPostParams { name, code } = params;
 
-    let hook = write_side.get_hooks_storage(write_api_key, collection_id).await?;
+    let hook = write_side
+        .get_hooks_storage(write_api_key, collection_id)
+        .await?;
     hook.insert_hook(name.0, code).await?;
 
     Ok(Json(json!({ "success": true })))
@@ -67,7 +68,9 @@ async fn delete_hook_v0(
 ) -> Result<impl IntoResponse, WriteError> {
     let DeleteHookPostParams { name_to_delete } = params;
 
-    let hook = write_side.get_hooks_storage(write_api_key, collection_id).await?;
+    let hook = write_side
+        .get_hooks_storage(write_api_key, collection_id)
+        .await?;
     hook.delete_hook(name_to_delete.0).await?;
 
     Ok(Json(json!({ "success": true })))
@@ -83,15 +86,15 @@ async fn list_hook_v0(
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
 ) -> Result<impl IntoResponse, WriteError> {
-    let hook = write_side.get_hooks_storage(write_api_key, collection_id).await?;
+    let hook = write_side
+        .get_hooks_storage(write_api_key, collection_id)
+        .await?;
     let hooks = hook.list_hooks()?;
 
-    let output: HashMap<_, _> = hooks.into_iter()
-        .collect();
+    let output: HashMap<_, _> = hooks.into_iter().collect();
 
     Ok(Json(json!({ "hooks": output })))
 }
-
 
 #[derive(Deserialize)]
 struct HookTypeWrapper(HookType);

@@ -83,7 +83,7 @@ pub enum ReadError {
     #[error("Not found {0}")]
     NotFound(CollectionId),
     #[error("Hook error: {0:?}")]
-    Hook(#[from] HookReaderError)
+    Hook(#[from] HookReaderError),
 }
 
 pub struct ReadSide {
@@ -699,9 +699,7 @@ impl ReadSide {
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
-        Ok(HookReaderLock {
-            collection
-        })
+        Ok(HookReaderLock { collection })
     }
 }
 
@@ -883,7 +881,7 @@ enum ReadInfo {
 }
 
 pub struct HookReaderLock<'guard> {
-    collection: CollectionReadLock<'guard>
+    collection: CollectionReadLock<'guard>,
 }
 
 impl<'guard> Deref for HookReaderLock<'guard> {

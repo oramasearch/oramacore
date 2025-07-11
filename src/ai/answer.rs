@@ -163,7 +163,7 @@ impl Answer {
         self,
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
-        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         self.handle_gpu_overload(&mut interaction).await;
 
@@ -265,11 +265,10 @@ impl Answer {
                 indexes: None, // Search all indexes
             };
 
-            let hook_storage = self.read_side
-                .get_hook_storage(
-                    self.read_api_key,
-                    self.collection_id,
-                ).await?;
+            let hook_storage = self
+                .read_side
+                .get_hook_storage(self.read_api_key, self.collection_id)
+                .await?;
             let lock = hook_storage.read().await;
             let content = lock.get_hook_content(hook_storage::HookType::BeforeRetrieval)?;
 
@@ -279,14 +278,20 @@ impl Answer {
                     Some(vec![]),
                     Duration::from_millis(200),
                     true,
-                    "beforeRetrieval".to_string()
+                    "beforeRetrieval".to_string(),
                 )
-                    .await?;
+                .await?;
 
-                let output: Option<SearchParams> = a.exec(params.clone(), log_sender, ExecOption {
-                    allowed_hosts: Some(vec![]),
-                    timeout: Duration::from_millis(500),
-                }).await?;
+                let output: Option<SearchParams> = a
+                    .exec(
+                        params.clone(),
+                        log_sender,
+                        ExecOption {
+                            allowed_hosts: Some(vec![]),
+                            timeout: Duration::from_millis(500),
+                        },
+                    )
+                    .await?;
 
                 output.unwrap_or(params)
             } else {
@@ -296,11 +301,7 @@ impl Answer {
 
             let result = self
                 .read_side
-                .search(
-                    self.read_api_key,
-                    self.collection_id,
-                    params,
-                )
+                .search(self.read_api_key, self.collection_id, params)
                 .await?;
             result.hits
         };

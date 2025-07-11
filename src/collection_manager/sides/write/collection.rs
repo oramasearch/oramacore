@@ -66,7 +66,6 @@ impl CollectionWriter {
         nlp_service: Arc<NLPService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
-
         let a = op_sender.clone();
 
         Self {
@@ -87,12 +86,22 @@ impl CollectionWriter {
 
             created_at: Utc::now(),
 
-            hook: HookWriter::try_new(data_dir.join("hooks"), Box::new(move |op| {
-                let b = a.clone();
-                async move {
-                    let _ = b.send(WriteOperation::Collection(id, CollectionWriteOperation::Hook(op))).await;
-                }.boxed()
-            })).unwrap()
+            hook: HookWriter::try_new(
+                data_dir.join("hooks"),
+                Box::new(move |op| {
+                    let b = a.clone();
+                    async move {
+                        let _ = b
+                            .send(WriteOperation::Collection(
+                                id,
+                                CollectionWriteOperation::Hook(op),
+                            ))
+                            .await;
+                    }
+                    .boxed()
+                }),
+            )
+            .unwrap(),
         }
     }
 
@@ -165,12 +174,22 @@ impl CollectionWriter {
 
             created_at: dump.created_at,
 
-            hook: HookWriter::try_new(data_dir.join("hooks"), Box::new(move |op| {
-                let b = a.clone();
-                async move {
-                    let _ = b.send(WriteOperation::Collection(id, CollectionWriteOperation::Hook(op))).await;
-                }.boxed()
-            })).unwrap()
+            hook: HookWriter::try_new(
+                data_dir.join("hooks"),
+                Box::new(move |op| {
+                    let b = a.clone();
+                    async move {
+                        let _ = b
+                            .send(WriteOperation::Collection(
+                                id,
+                                CollectionWriteOperation::Hook(op),
+                            ))
+                            .await;
+                    }
+                    .boxed()
+                }),
+            )
+            .unwrap(),
         })
     }
 
@@ -567,7 +586,7 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub fn get_hook_storage<'s>(&'s self) -> &'s HookWriter {
+    pub fn get_hook_storage(&self) -> &HookWriter {
         &self.hook
     }
 }

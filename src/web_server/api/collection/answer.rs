@@ -6,18 +6,18 @@ use anyhow::Context;
 use axum::extract::{FromRef, Query};
 use axum::response::sse::Event;
 use axum::response::Sse;
-use axum::routing::{post, get};
+use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
 use orama_js_pool::OutputChannel;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::broadcast;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
@@ -27,7 +27,6 @@ struct AnswerReadSide {
     read_side: Arc<ReadSide>,
     channels: Arc<RwLock<HashMap<CollectionId, Arc<broadcast::Sender<(OutputChannel, String)>>>>>,
 }
-
 
 impl FromRef<AnswerReadSide> for Arc<ReadSide> {
     fn from_ref(app_state: &AnswerReadSide) -> Arc<ReadSide> {
@@ -47,7 +46,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             "/v1/collections/{collection_id}/planned_answer",
             post(planned_answer_v1),
         )
-        .route("/v1/collections/{collection_id}/answer-logs", get(answer_logs_v1))
+        .route(
+            "/v1/collections/{collection_id}/answer-logs",
+            get(answer_logs_v1),
+        )
         .with_state(answer_read_side)
 }
 
@@ -151,7 +153,10 @@ async fn answer_logs_v1(
     answer_read_side: State<AnswerReadSide>,
     Query(query): Query<AnswerQueryParams>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
-    answer_read_side.read_side.check_read_api_key(collection_id, query.api_key).await?;
+    answer_read_side
+        .read_side
+        .check_read_api_key(collection_id, query.api_key)
+        .await?;
 
     let mut lock = answer_read_side.channels.write().await;
     let mut answer_receiver = match lock.entry(collection_id) {
@@ -159,16 +164,16 @@ async fn answer_logs_v1(
             let (answer_sender, answer_receiver) = broadcast::channel(100);
             a.insert(Arc::new(answer_sender));
             answer_receiver
-        },
-        Entry::Occupied(o) => {
-            o.get().subscribe()
         }
+        Entry::Occupied(o) => o.get().subscribe(),
     };
     drop(lock);
 
     let (http_sender, http_receiver) = mpsc::channel(10);
 
-    http_sender.send(Ok(Event::default().data("Connected"))).await
+    http_sender
+        .send(Ok(Event::default().data("Connected")))
+        .await
         .context("Cannot send data")?;
 
     tokio::spawn(async move {

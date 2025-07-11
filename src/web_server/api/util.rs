@@ -282,10 +282,9 @@ impl IntoResponse for WriteError {
                 let body =
                     format!("Temporary index {index_id} not found in collection {collection_id}");
                 (StatusCode::BAD_REQUEST, body).into_response()
-            },
+            }
             Self::HookWriterError(e) => {
-                let body =
-                    format!("Invalid hook: {e:?}");
+                let body = format!("Invalid hook: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
         }
@@ -430,11 +429,9 @@ impl IntoResponse for ReadError {
                 format!("Collection {collection_id} not found"),
             )
                 .into_response(),
-            Self::Hook(e) => (
-                StatusCode::BAD_REQUEST,
-                format!("Hook error: {e:?}"),
-            )
-                .into_response(),
+            Self::Hook(e) => {
+                (StatusCode::BAD_REQUEST, format!("Hook error: {e:?}")).into_response()
+            }
         }
     }
 }
@@ -459,21 +456,17 @@ impl IntoResponse for AnswerError {
                     "Channel closed unexpectedly",
                 )
                     .into_response()
-            },
-            AnswerError::HookError(e) => {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Hook error",
-                )
-                    .into_response()
-            },
-            AnswerError::JSError(e) => {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Error running JS code: {e:?}"),
-                )
-                    .into_response()
             }
+            AnswerError::HookError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Hook error {e:?}"),
+            )
+                .into_response(),
+            AnswerError::JSError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error running JS code: {e:?}"),
+            )
+                .into_response(),
         }
     }
 }

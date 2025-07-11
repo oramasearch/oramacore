@@ -11,6 +11,12 @@ impl HookType {
             Self::BeforeRetrieval => "before_retrieval",
         }
     }
+
+    pub fn get_function_name(&self) -> &'static str {
+        match self {
+            Self::BeforeRetrieval => "beforeRetrieval",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +60,11 @@ mod communication_tests {
             HookReader::try_new(base_dir.clone()).expect("Failed to create HookReader");
 
         // Insert a hook via writer
-        let code = "console.log('from_channel');".to_string();
+        let code = r#"
+const beforeRetrieval = function (a) { return a; }
+export default { beforeRetrieval }
+        "#
+        .to_string();
         writer
             .insert_hook(HookType::BeforeRetrieval, code.clone())
             .await

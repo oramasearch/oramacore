@@ -73,7 +73,10 @@ async fn test_answer() {
 
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
 
-    answer.answer(interaction, answer_sender, None).await.unwrap();
+    answer
+        .answer(interaction, answer_sender, None)
+        .await
+        .unwrap();
 
     let lock = completition_req.read().await;
     let v = lock.clone();
@@ -172,9 +175,10 @@ async fn test_answer_before_retrieval() {
     let index_client = collection_client.create_index().await.unwrap();
 
     // Insert hook
-    collection_client.insert_hook(
-        HookType::BeforeRetrieval,
-        r#"
+    collection_client
+        .insert_hook(
+            HookType::BeforeRetrieval,
+            r#"
 async function beforeRetrieval(search_params) {
     console.log(search_params);
     await new Promise(r => setTimeout(r, 10)) // really async
@@ -187,8 +191,11 @@ async function beforeRetrieval(search_params) {
 }
 
 export default { beforeRetrieval }
-        "#.to_string(),
-    ).await.unwrap();
+        "#
+            .to_string(),
+        )
+        .await
+        .unwrap();
 
     sleep(Duration::from_millis(200)).await;
 
@@ -226,7 +233,10 @@ export default { beforeRetrieval }
 
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
 
-    answer.answer(interaction, answer_sender, None).await.unwrap();
+    answer
+        .answer(interaction, answer_sender, None)
+        .await
+        .unwrap();
 
     let lock = completition_req.read().await;
     let v = lock.clone();
@@ -286,12 +296,23 @@ export default { beforeRetrieval }
         .iter()
         .any(|i| matches!(&i, AnswerEvent::OptimizeingQuery(_))));
     let Some(AnswerEvent::SearchResults(search_result)) = buffer
-    .iter()
-    .find(|i| matches!(&i, AnswerEvent::SearchResults(_))) else {
+        .iter()
+        .find(|i| matches!(&i, AnswerEvent::SearchResults(_)))
+    else {
         panic!("No search result found")
     };
     assert_eq!(search_result.len(), 1);
-    assert_eq!(search_result[0].document.as_ref().unwrap().get("id").unwrap().as_str().unwrap(), "2");
+    assert_eq!(
+        search_result[0]
+            .document
+            .as_ref()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "2"
+    );
     let output = buffer
         .iter()
         .filter_map(|i| match i {
@@ -299,7 +320,10 @@ export default { beforeRetrieval }
             _ => None,
         })
         .join("");
-    assert_eq!(&output, "I'm Michele, a  very good software developer bla bla bla");
+    assert_eq!(
+        &output,
+        "I'm Michele, a  very good software developer bla bla bla"
+    );
 
     drop(test_context);
 }

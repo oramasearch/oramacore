@@ -6,11 +6,11 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.98"
-deno_ast = "0.48.1"
 futures = "0.3.31"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.12"
 fs = { path = "../fs" }
+orama-js-pool = "0.2.1"
 
 [dev-dependencies]
 tokio = { version = "1.46.1", features = ["full"] }

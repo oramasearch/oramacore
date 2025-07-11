@@ -607,8 +607,10 @@ impl TestCollectionClient {
     }
 
     pub async fn insert_hook(&self, hook_type: HookType, code: String) -> Result<()> {
-        let hook_storage = self.writer
-            .get_hooks_storage(self.write_api_key, self.collection_id).await?;
+        let hook_storage = self
+            .writer
+            .get_hooks_storage(self.write_api_key, self.collection_id)
+            .await?;
 
         hook_storage.insert_hook(hook_type, code).await?;
 

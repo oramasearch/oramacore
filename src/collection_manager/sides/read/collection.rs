@@ -244,6 +244,10 @@ impl CollectionReader {
         }
         drop(temp_indexes_lock);
 
+        let mut hook_lock = self.hook.write().await;
+        hook_lock.commit()?;
+        drop(hook_lock);
+
         let dump = Dump::V1(DumpV1 {
             id: self.id,
             description: self.description.clone(),
@@ -647,7 +651,10 @@ impl CollectionReader {
 
         let lock = self.hook.read().await;
         let hooks = lock.list()?;
-        let hooks = hooks.into_iter().filter_map(|(t, c)| c.map(|_| t)).collect();
+        let hooks = hooks
+            .into_iter()
+            .filter_map(|(t, c)| c.map(|_| t))
+            .collect();
         drop(lock);
 
         Ok(CollectionStats {

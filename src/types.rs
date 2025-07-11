@@ -962,7 +962,11 @@ impl Serialize for SearchMode {
     {
         use serde::ser::SerializeMap;
         let map = match self {
-            SearchMode::FullText(FulltextMode { term, threshold, exact }) => {
+            SearchMode::FullText(FulltextMode {
+                term,
+                threshold,
+                exact,
+            }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "fulltext")?;
                 map.serialize_entry("term", term)?;
@@ -983,7 +987,12 @@ impl Serialize for SearchMode {
                 }
                 map
             }
-            SearchMode::Hybrid(HybridMode { term, similarity, threshold, exact }) => {
+            SearchMode::Hybrid(HybridMode {
+                term,
+                similarity,
+                threshold,
+                exact,
+            }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "hybrid")?;
                 map.serialize_entry("term", term)?;
@@ -1004,7 +1013,11 @@ impl Serialize for SearchMode {
                 map.serialize_entry("term", term)?;
                 map
             }
-            SearchMode::Default(FulltextMode { term, threshold, exact }) => {
+            SearchMode::Default(FulltextMode {
+                term,
+                threshold,
+                exact,
+            }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "default")?;
                 map.serialize_entry("term", term)?;
@@ -1164,10 +1177,10 @@ impl Serialize for WhereFilter {
         use serde::ser::SerializeMap;
         // Count the number of entries for the map
         let mut num_entries = self.filter_on_fields.len();
-        if self.and.as_ref().map_or(false, |v| !v.is_empty()) {
+        if self.and.as_ref().is_some_and(|v| !v.is_empty()) {
             num_entries += 1;
         }
-        if self.or.as_ref().map_or(false, |v| !v.is_empty()) {
+        if self.or.as_ref().is_some_and(|v| !v.is_empty()) {
             num_entries += 1;
         }
         if self.not.is_some() {
@@ -1281,7 +1294,11 @@ pub struct SearchParams {
     pub offset: SearchOffset,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
-    #[serde(default, deserialize_with = "deserialize_properties", serialize_with = "serialize_properties")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_properties",
+        serialize_with = "serialize_properties"
+    )]
     pub properties: Properties,
     #[serde(default, rename = "where")]
     pub where_filter: WhereFilter,
@@ -2111,14 +2128,13 @@ impl<const N: usize> Display for StackString<N> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
+    use super::*;
     use chrono::SecondsFormat;
-    use nvml_wrapper::sys_exports::field_id;
+
     use serde_json::json;
     use std::cmp::Ordering;
-    use super::*;
 
     #[test]
     fn test_search_params_mode_deserialization() {
@@ -2846,16 +2862,28 @@ mod tests {
         let data: OramaDate = "2025-07-11T00:00:00Z".try_into().unwrap();
 
         let search_params = SearchParams {
-            boost: HashMap::from([ ("field_id".to_string(), 1.0)]),
+            boost: HashMap::from([("field_id".to_string(), 1.0)]),
             facets: HashMap::from([
-                ("field_id1".to_string(), FacetDefinition::Bool(BoolFacetDefinition { r#true: true, r#false: false })),
-                ("field_id2".to_string(), FacetDefinition::Number(NumberFacetDefinition { ranges: vec![
-                    NumberFacetDefinitionRange {
-                        from: Number::I32(2),
-                        to: Number::F32(42.0),
-                    }
-                ] })),
-                ("field_id3".to_string(), FacetDefinition::String(StringFacetDefinition)),
+                (
+                    "field_id1".to_string(),
+                    FacetDefinition::Bool(BoolFacetDefinition {
+                        r#true: true,
+                        r#false: false,
+                    }),
+                ),
+                (
+                    "field_id2".to_string(),
+                    FacetDefinition::Number(NumberFacetDefinition {
+                        ranges: vec![NumberFacetDefinitionRange {
+                            from: Number::I32(2),
+                            to: Number::F32(42.0),
+                        }],
+                    }),
+                ),
+                (
+                    "field_id3".to_string(),
+                    FacetDefinition::String(StringFacetDefinition),
+                ),
             ]),
             indexes: Some(vec![IndexId::try_new("my-index-id").unwrap()]),
             limit: Limit(42),
@@ -2864,9 +2892,15 @@ mod tests {
             where_filter: WhereFilter {
                 filter_on_fields: vec![
                     ("field_id1".to_string(), Filter::Bool(true)),
-                    ("field_id2".to_string(), Filter::Number(NumberFilter::Between((Number::I32(4), Number::I32(4))))),
+                    (
+                        "field_id2".to_string(),
+                        Filter::Number(NumberFilter::Between((Number::I32(4), Number::I32(4)))),
+                    ),
                     ("field_id3".to_string(), Filter::String("wow".to_string())),
-                    ("field_id4".to_string(), Filter::Date(DateFilter::Equal(data.clone()))),
+                    (
+                        "field_id4".to_string(),
+                        Filter::Date(DateFilter::Equal(data.clone())),
+                    ),
                 ],
                 and: None,
                 or: None,
@@ -2880,48 +2914,48 @@ mod tests {
         let search_params_value = serde_json::to_value(&search_params).unwrap();
 
         let expected = json!({
-            "mode": "vector",
-            "term": "the-term",
-            "similarity": 1.0,
-            "limit": 42,
-            "offset": 42,
-            "boost": {
-              "field_id": 1.0
+          "mode": "vector",
+          "term": "the-term",
+          "similarity": 1.0,
+          "limit": 42,
+          "offset": 42,
+          "boost": {
+            "field_id": 1.0
+          },
+          "properties": null,
+          "where": {
+            "field_id1": true,
+            "field_id2": {
+              "between": [
+                4,
+                4
+              ]
             },
-            "properties": null,
-            "where": {
-              "field_id1": true,
-              "field_id2": {
-                "between": [
-                  4,
-                  4
-                ]
-              },
-              "field_id3": "wow",
-              "field_id4": {
-                "eq": data.0.to_rfc3339_opts(SecondsFormat::Secs, true),
-              }
+            "field_id3": "wow",
+            "field_id4": {
+              "eq": data.0.to_rfc3339_opts(SecondsFormat::Secs, true),
+            }
+          },
+          "facets": {
+            "field_id2": {
+              "ranges": [
+                {
+                  "from": 2,
+                  "to": 42.0
+                }
+              ]
             },
-            "facets": {
-              "field_id2": {
-                "ranges": [
-                  {
-                    "from": 2,
-                    "to": 42.0
-                  }
-                ]
-              },
-              "field_id3": {},
-              "field_id1": {
-                "true": true,
-                "false": false
-              }
-            },
-            "indexes": [
-              "my-index-id"
-            ]
-          });
+            "field_id3": {},
+            "field_id1": {
+              "true": true,
+              "false": false
+            }
+          },
+          "indexes": [
+            "my-index-id"
+          ]
+        });
 
-          assert_eq!(search_params_value, expected);
+        assert_eq!(search_params_value, expected);
     }
 }
