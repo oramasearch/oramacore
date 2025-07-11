@@ -254,7 +254,7 @@ async fn test_delete_index_committed() {
 
     let config = test_context.config.reader_side.config.data_dir.clone();
 
-    println!("Deleting data dir {:?}", config);
+    println!("Deleting data dir {config:?}");
 
     // The index is deleted
     let path = config

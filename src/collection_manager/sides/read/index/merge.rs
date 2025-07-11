@@ -5,9 +5,9 @@ use anyhow::{bail, Context, Result};
 use fs_extra::copy_items;
 use fs_extra::dir::CopyOptions;
 
-use crate::file_utils::create_if_not_exists;
 use crate::merger::MergedIterator;
 use crate::types::{DocumentId, SerializableNumber};
+use fs::create_if_not_exists;
 
 use super::committed_field::*;
 use super::uncommitted_field::*;

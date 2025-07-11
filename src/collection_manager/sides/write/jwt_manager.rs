@@ -98,7 +98,7 @@ impl JwtManager {
         let output = match output {
             Ok(output) => output,
             Err(e) => {
-                println!("AuthError {:?}", e);
+                println!("AuthError {e:?}");
 
                 use jsonwebtoken::errors::ErrorKind;
 

@@ -30,7 +30,7 @@ async fn test_search_on_unknown_field() {
         )
         .await;
 
-    println!("result: {:?}", result);
+    println!("result: {result:?}");
 
     assert!(result.is_err());
     assert!(format!("{:?}", result.unwrap_err())
@@ -218,7 +218,7 @@ async fn test_filter_bool() {
         .await
         .unwrap();
 
-    println!("output: {:#?}", output);
+    println!("output: {output:#?}");
 
     assert_eq!(output.count, 50);
     assert_eq!(output.hits.len(), 10);

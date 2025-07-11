@@ -94,7 +94,7 @@ impl LocalGPUManager {
                         let memory = device.memory_info().context("Failed to get memory info")?;
 
                         result.insert(
-                            format!("{} (ID: {})", name, i),
+                            format!("{name} (ID: {i})"),
                             DeviceUtilization {
                                 gpu_util: utilization.gpu,
                                 memory_util: utilization.memory,
@@ -132,7 +132,7 @@ impl LocalGPUManager {
 
         println!("=== GPU Utilization ===");
         for (device_name, util) in utilization_data.iter() {
-            println!("Device: {}", device_name);
+            println!("Device: {device_name}");
             println!("  GPU Utilization: {}%", util.gpu_util);
             println!("  Memory Utilization: {}%", util.memory_util);
             println!(

@@ -19,7 +19,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
 
     let collection_router = if let Some(write_side) = write_side {
         collection_router
-            .merge(hooks::apis(write_side.clone()))
+            .merge(hooks::write_apis(write_side.clone()))
             .merge(admin::apis(write_side.clone()))
             .merge(segments::write_apis(write_side.clone()))
             .merge(triggers::write_apis(write_side.clone()))

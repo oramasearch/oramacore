@@ -4,10 +4,8 @@ use anyhow::{Context, Result};
 use bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    types::{DocumentId, GeoSearchFilter},
-};
+use crate::types::{DocumentId, GeoSearchFilter};
+use fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedGeoPointField {

@@ -1,5 +1,6 @@
 // mod old;
 
+mod answer;
 mod api_key_chain;
 mod bugs;
 mod commit;
@@ -10,6 +11,7 @@ mod facets;
 mod filter;
 mod fulltext_search;
 mod geosearch;
+mod hooks;
 // mod hurl;
 mod index_rebuild;
 mod list_documents;

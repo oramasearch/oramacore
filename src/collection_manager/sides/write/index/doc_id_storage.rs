@@ -2,10 +2,8 @@ use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    types::DocumentId,
-};
+use crate::types::DocumentId;
+use fs::{create_if_not_exists, BufferedFile};
 
 const DOC_ID_STORAGE_FILE_NAME: &str = "doc_id_storage.bin";
 

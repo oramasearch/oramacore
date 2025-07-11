@@ -2,7 +2,6 @@ use assert_approx_eq::assert_approx_eq;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
@@ -203,6 +202,7 @@ async fn test_vector_search_should_work_after_commit() {
     drop(test_context);
 }
 
+/*
 #[tokio::test(flavor = "multi_thread")]
 async fn test_commit_hooks() {
     init_log();
@@ -395,6 +395,8 @@ export default {
 
     drop(test_context);
 }
+
+*/
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_document_chunk_long_text_for_embedding_calculation() {

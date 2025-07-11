@@ -6,9 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    file_utils::create_if_not_exists, indexes::ordered_key::BoundedValue, types::DocumentId,
-};
+use crate::{indexes::ordered_key::BoundedValue, types::DocumentId};
+use fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedBoolField {

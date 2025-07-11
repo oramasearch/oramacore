@@ -4,11 +4,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{
-    file_utils::{create_if_not_exists, BufferedFile},
-    types::CollectionId,
-};
+use crate::types::CollectionId;
 use anyhow::{Context, Result};
+use fs::{create_if_not_exists, BufferedFile};
 use ptrie::Trie;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -207,7 +205,7 @@ impl KV {
             return Ok(());
         }
 
-        let new_path = self.data_dir.join(format!("kv-{}.bin", current_offset));
+        let new_path = self.data_dir.join(format!("kv-{current_offset}.bin"));
         BufferedFile::create_or_overwrite(new_path.clone())
             .context("Cannot create previous kv info")?
             .write_bincode_data(&*data)

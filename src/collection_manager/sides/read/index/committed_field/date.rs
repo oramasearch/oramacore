@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::index::committed_field::number::get_iter,
-    file_utils::create_if_not_exists,
     indexes::ordered_key::BoundedValue,
     types::{DateFilter, DocumentId, OramaDate},
 };
+use fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedDateField {

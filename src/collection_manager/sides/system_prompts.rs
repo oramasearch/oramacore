@@ -112,7 +112,7 @@ impl SystemPromptInterface {
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
-        let system_prompt_key = format!("system_prompt:{}", system_prompt_id);
+        let system_prompt_key = format!("system_prompt:{system_prompt_id}");
         let key = format_key(collection_id, &system_prompt_key);
 
         match self.kv.get(&key).await {
@@ -153,7 +153,7 @@ impl SystemPromptInterface {
         collection_id: CollectionId,
         system_prompt_id: String,
     ) -> Result<Option<SystemPrompt>> {
-        let system_prompt_key = format!("system_prompt:{}", system_prompt_id);
+        let system_prompt_key = format!("system_prompt:{system_prompt_id}");
         let key = format_key(collection_id, &system_prompt_key);
 
         match self.kv.remove_and_get(&key).await? {

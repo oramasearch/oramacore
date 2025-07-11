@@ -69,7 +69,7 @@ impl TryFrom<&str> for PartyPlannerPrompt {
             "IMPROVE_INPUT" => Ok(Self::ImproveInput),
             "CREATE_CODE" => Ok(Self::CreateCode),
             "GIVE_REPLY" => Ok(Self::GiveReply),
-            _ => Err(format!("Unknown prompt type: {}", s)),
+            _ => Err(format!("Unknown prompt type: {s}")),
         }
     }
 }
@@ -272,7 +272,7 @@ impl PartyPlannerPrompt {
 pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> String {
     let mut result = prompt.to_string();
     for (key, value) in variables {
-        result = result.replace(&format!("{{{}}}", key), &value);
+        result = result.replace(&format!("{{{key}}}"), &value);
     }
     result
 }
@@ -601,7 +601,7 @@ impl LLMService {
                         tx.send(Ok(chunk.to_string())).await.unwrap();
                     }
                     Err(e) => {
-                        let error_message = format!("An error occurred while processing the response from the remote LLM instance: {:?}", e);
+                        let error_message = format!("An error occurred while processing the response from the remote LLM instance: {e:?}");
                         tx.send(Err(anyhow::Error::msg(error_message)))
                             .await
                             .unwrap();
@@ -715,7 +715,7 @@ impl LLMService {
                         tx.send(Ok(chunk.to_string())).await.unwrap();
                     }
                     Err(e) => {
-                        let error_message = format!("An error occurred while processing the response from the remote Party Planner LLM instance: {:?}", e);
+                        let error_message = format!("An error occurred while processing the response from the remote Party Planner LLM instance: {e:?}");
                         tx.send(Err(anyhow::Error::msg(error_message)))
                             .await
                             .unwrap();

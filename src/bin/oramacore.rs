@@ -37,12 +37,12 @@ fn load_config() -> Result<OramacoreConfig> {
 
 fn main() -> anyhow::Result<()> {
     let build_info = oramacore::build_info::get_build_info();
-    println!("{}", build_info,);
+    println!("{build_info}",);
 
     let oramacore_config = match load_config() {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Failed to load configuration: {:?}", e);
+            eprintln!("Failed to load configuration: {e:?}");
             return Err(anyhow!("Failed to load configuration"));
         }
     };
@@ -79,7 +79,7 @@ async fn run(oramacore_config: OramacoreConfig) -> anyhow::Result<()> {
     }
     let levels = levels
         .into_iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{k}={v}"))
         .join(",");
     let env = EnvFilter::builder()
         .with_default_directive(LevelFilter::WARN.into())
@@ -99,7 +99,7 @@ async fn run(oramacore_config: OramacoreConfig) -> anyhow::Result<()> {
             tracing::subscriber::set_global_default(subscriber).unwrap();
         }
         (false, Some(file_path)) => {
-            println!("Logging to file: {:?}", file_path);
+            println!("Logging to file: {file_path:?}");
             let debug_file = OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -112,7 +112,7 @@ async fn run(oramacore_config: OramacoreConfig) -> anyhow::Result<()> {
             tracing::subscriber::set_global_default(subscriber).unwrap();
         }
         (true, Some(file_path)) => {
-            println!("Logging to file: {:?}", file_path);
+            println!("Logging to file: {file_path:?}");
             let debug_file = OpenOptions::new()
                 .write(true)
                 .create(true)

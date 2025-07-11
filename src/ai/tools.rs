@@ -2,11 +2,10 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
-use orama_js_pool::{JSExecutor, JSExecutorConfig, JSExecutorError};
+use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::{runtime::Builder, task::LocalSet};
 
 use crate::{
     code_parser::tool_parser::validate_js_exports,
@@ -53,7 +52,7 @@ pub enum ToolError {
     #[error("Tool {1} from collection {1} goes in timeout")]
     ExecutionTimeout(CollectionId, String),
     #[error("Tool {1} from collection {1} exited with this error: {2:?}")]
-    ExecutionError(CollectionId, String, JSExecutorError),
+    ExecutionError(CollectionId, String, JSRunnerError),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -275,63 +274,34 @@ impl ToolsRuntime {
                                 )
                             })?;
 
-                        // Deno is not thread-safe, so we need to spawn a new thread for each tool execution.
-                        // We need to use a oneshot channel to send the result back to the main thread.
-                        let (sx, rx) = tokio::sync::oneshot::channel();
                         let function_name = full_tool.id.clone();
+                        let mut executor = JSExecutor::try_new(
+                            code,
+                            Some(vec![]),
+                            Duration::from_millis(500), // @todo: make this configurable
+                            true,
+                            function_name.clone(),
+                        )
+                        .await
+                        .map_err(|e| ToolError::ExecutionError(collection_id, function_name, e))?;
 
-                        std::thread::spawn(|| {
-                            // LocalSet is used to run the async code in a thread.
-                            let local = LocalSet::new();
-
-                            local.spawn_local(async move {
-                                match JSExecutor::try_new(
-                                    JSExecutorConfig {
-                                        allowed_hosts: vec![],
-                                        max_startup_time: Duration::from_millis(500), // @todo: make this configurable
-                                        max_execution_time: Duration::from_secs(3), // @todo: make this configurable
-                                        function_name: function_name.clone(),
-                                        is_async: true,
-                                    },
-                                    code,
-                                )
-                                .await
-                                {
-                                    // The JSExecutor call can easily fail under different circumstances.
-                                    // We need to handle this error and send it back to the main thread.
-                                    Ok(mut tools_js_runtime) => {
-                                        // Let's call the function with the deserialized arguments.
-                                        // We should assume that it'll always return a JSON object or a valid JSON string.
-                                        let function_call: Result<Value, JSExecutorError> =
-                                            tools_js_runtime.exec(arguments_as_json_value).await;
-
-                                        sx.send(function_call)
-                                            .expect("Failed to send function call result");
-                                    }
-                                    Err(e) => {
-                                        sx.send(Err(e))
-                                            .expect("Failed to send function call error");
-                                    }
-                                }
-                            });
-
-                            // Let's tell the local set to run the async code and wait for it to finish.
-                            Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .unwrap()
-                                .block_on(local)
-                        });
-
-                        // We need to wait for the function call to finish and get the result.
-                        let function_call = rx.await.map_err(|_| {
-                            ToolError::ExecutionTimeout(collection_id, full_tool.id)
-                        })?;
+                        // The JSExecutor call can easily fail under different circumstances.
+                        // We need to handle this error and send it back to the main thread.
+                        let output: Result<Value, JSRunnerError> = executor
+                            .exec(
+                                arguments_as_json_value,
+                                None,
+                                ExecOption {
+                                    timeout: Duration::from_secs(3), // @todo: make this configurable
+                                    allowed_hosts: Some(vec![]), // @todo: make this configurable
+                                },
+                            )
+                            .await;
 
                         // If the function call was successful, we push the result to the results vector.
                         // For now, we'll bail if the function call fails.
                         // @todo: handle this error more gracefully.
-                        match function_call {
+                        match output {
                             Ok(result) => {
                                 results.push(ToolExecutionReturnType::FunctionResult(
                                     ToolExecutionResult {
@@ -365,7 +335,7 @@ impl ToolsRuntime {
     }
 
     fn format_key(&self, collection_id: CollectionId, tool_id: &str) -> String {
-        format!("{}:tool:{}", collection_id, tool_id)
+        format!("{collection_id}:tool:{tool_id}")
     }
 }
 

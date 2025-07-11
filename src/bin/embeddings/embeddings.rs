@@ -7,7 +7,7 @@ use tonic::Request;
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: &str = "50051";
 async fn create_embeddings_service_client() -> Result<LlmServiceClient<tonic::transport::Channel>> {
-    let addr = format!("http://{}:{}", DEFAULT_HOST, DEFAULT_PORT,);
+    let addr = format!("http://{DEFAULT_HOST}:{DEFAULT_PORT}",);
 
     let mut embeddings_service_client = LlmServiceClient::connect(addr.clone()).await?;
 
@@ -29,10 +29,7 @@ async fn main() -> Result<()> {
     let mut embeddings_service_client = create_embeddings_service_client().await?;
 
     let init_duration = start_init.elapsed();
-    println!(
-        "Service initialization with health check took: {:?}",
-        init_duration
-    );
+    println!("Service initialization with health check took: {init_duration:?}");
 
     let input_text = r"
         /**
@@ -68,7 +65,7 @@ async fn main() -> Result<()> {
 
     println!("\nPerformance Metrics:");
     println!("-------------------");
-    println!("Embedding generation took: {:?}", embedding_duration);
+    println!("Embedding generation took: {embedding_duration:?}");
 
     Ok(())
 }

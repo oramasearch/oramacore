@@ -1,6 +1,8 @@
 use anyhow::Context;
 use futures::{Stream, TryFutureExt};
-use std::{collections::HashMap, sync::Arc};
+use hook_storage::HookReaderError;
+use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError, OutputChannel};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -35,6 +37,10 @@ pub enum AnswerError {
     SegmentError(#[from] SegmentError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
+    #[error("Hook read error: {0:?}")]
+    HookError(#[from] HookReaderError),
+    #[error("JS run error: {0:?}")]
+    JSError(#[from] JSRunnerError),
 }
 
 pub struct Answer {
@@ -157,6 +163,7 @@ impl Answer {
         self,
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         self.handle_gpu_overload(&mut interaction).await;
 
@@ -218,8 +225,7 @@ impl Answer {
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
-        let mut search_results = Vec::<SearchResultHit>::new();
-        if let Some(ref notation) = interaction.ragat_notation {
+        let search_results = if let Some(ref notation) = interaction.ragat_notation {
             let parsed = RAGAtParser::parse(notation);
 
             let components = self
@@ -231,7 +237,7 @@ impl Answer {
                 .merge_component_results(components)
                 .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
                 .await?;
-            search_results = results;
+            results
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
@@ -248,25 +254,57 @@ impl Answer {
                 mode => SearchMode::from_str(mode, interaction.query.clone()),
             };
 
-            let result = self
+            let params = SearchParams {
+                mode: search_mode,
+                limit: max_documents,
+                offset: SearchOffset(0),
+                where_filter: Default::default(),
+                boost: HashMap::new(),
+                facets: HashMap::new(),
+                properties: Properties::Star,
+                indexes: None, // Search all indexes
+            };
+
+            let hook_storage = self
                 .read_side
-                .search(
-                    self.read_api_key,
-                    self.collection_id,
-                    SearchParams {
-                        mode: search_mode,
-                        limit: max_documents,
-                        offset: SearchOffset(0),
-                        where_filter: Default::default(),
-                        boost: HashMap::new(),
-                        facets: HashMap::new(),
-                        properties: Properties::Star,
-                        indexes: None, // Search all indexes
-                    },
+                .get_hook_storage(self.read_api_key, self.collection_id)
+                .await?;
+            let lock = hook_storage.read().await;
+            let content = lock.get_hook_content(hook_storage::HookType::BeforeRetrieval)?;
+
+            let params = if let Some(code) = content {
+                let mut a: JSExecutor<SearchParams, Option<SearchParams>> = JSExecutor::try_new(
+                    code,
+                    Some(vec![]),
+                    Duration::from_millis(200),
+                    true,
+                    "beforeRetrieval".to_string(),
                 )
                 .await?;
-            search_results = result.hits;
-        }
+
+                let output: Option<SearchParams> = a
+                    .exec(
+                        params.clone(),
+                        log_sender,
+                        ExecOption {
+                            allowed_hosts: Some(vec![]),
+                            timeout: Duration::from_millis(500),
+                        },
+                    )
+                    .await?;
+
+                output.unwrap_or(params)
+            } else {
+                params
+            };
+            drop(lock);
+
+            let result = self
+                .read_side
+                .search(self.read_api_key, self.collection_id, params)
+                .await?;
+            result.hits
+        };
 
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
@@ -616,6 +654,7 @@ async fn select_triggers_and_segments(
     ReceiverStream::new(rx)
 }
 
+#[derive(Debug)]
 pub enum AnswerEvent {
     Acknowledged,
     SelectedLLM(InteractionLLMConfig),

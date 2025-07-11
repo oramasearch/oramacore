@@ -29,10 +29,10 @@ impl fmt::Display for Segment {
         );
 
         if let Some(goal) = &self.goal {
-            displayed.push_str(&format!("\n**goal**: {}", goal));
+            displayed.push_str(&format!("\n**goal**: {goal}"));
         }
 
-        write!(f, "{}", displayed)
+        write!(f, "{displayed}")
     }
 }
 
@@ -81,7 +81,7 @@ impl SegmentInterface {
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>, SegmentError> {
-        let segment_key = format!("segment:{}", segment_id);
+        let segment_key = format!("segment:{segment_id}");
         let key = format_key(collection_id, &segment_key);
 
         match self.kv.get(&key).await {
@@ -96,7 +96,7 @@ impl SegmentInterface {
         collection_id: CollectionId,
         segment_id: String,
     ) -> Result<Option<Segment>, SegmentError> {
-        let segment_key = format!("segment:{}", segment_id);
+        let segment_key = format!("segment:{segment_id}");
         let key = format_key(collection_id, &segment_key);
 
         match self.kv.remove_and_get(&key).await? {
