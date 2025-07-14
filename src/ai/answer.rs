@@ -1,6 +1,8 @@
 use anyhow::Context;
 use futures::{Stream, TryFutureExt};
-use std::{collections::HashMap, sync::Arc};
+use hook_storage::HookReaderError;
+use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -11,6 +13,7 @@ use crate::{
         llms,
         party_planner::PartyPlanner,
         ragat::{ContextComponent, GeneralRagAtError, RAGAtParser},
+        run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
         read::{ReadError, ReadSide},
@@ -35,6 +38,10 @@ pub enum AnswerError {
     SegmentError(#[from] SegmentError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
+    #[error("Hook read error: {0:?}")]
+    HookError(#[from] HookReaderError),
+    #[error("JS run error: {0:?}")]
+    JSError(#[from] JSRunnerError),
 }
 
 pub struct Answer {
@@ -157,7 +164,9 @@ impl Answer {
         self,
         mut interaction: Interaction,
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
+        info!("Answering interaction...");
         self.handle_gpu_overload(&mut interaction).await;
 
         let llm_config = self.get_llm_config(&interaction);
@@ -168,6 +177,7 @@ impl Answer {
         let system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id.clone())
             .await?;
+        info!("With system prompt: {:?}", system_prompt.is_some());
 
         // Always make sure that the conversation is not empty, or else the AI will not be able to
         // determine the segment and trigger.
@@ -202,6 +212,8 @@ impl Answer {
                 }
             }
         }
+        info!("With segment: {:?}", segment.is_some());
+        info!("With trigger: {:?}", trigger.is_some());
 
         sender.send(AnswerEvent::GetSegment(segment.clone()))?;
 
@@ -215,11 +227,11 @@ impl Answer {
             )
             .await
             .unwrap_or_else(|_| interaction.query.clone()); // fallback to the original query if the optimization fails
+        info!("Optimized query: {}", optimized_query);
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
-        let mut search_results = Vec::<SearchResultHit>::new();
-        if let Some(ref notation) = interaction.ragat_notation {
+        let search_results = if let Some(ref notation) = interaction.ragat_notation {
             let parsed = RAGAtParser::parse(notation);
 
             let components = self
@@ -231,7 +243,7 @@ impl Answer {
                 .merge_component_results(components)
                 .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
                 .await?;
-            search_results = results;
+            results
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
@@ -248,25 +260,40 @@ impl Answer {
                 mode => SearchMode::from_str(mode, interaction.query.clone()),
             };
 
+            let params = SearchParams {
+                mode: search_mode,
+                limit: max_documents,
+                offset: SearchOffset(0),
+                where_filter: Default::default(),
+                boost: HashMap::new(),
+                facets: HashMap::new(),
+                properties: Properties::Star,
+                indexes: None, // Search all indexes
+            };
+
+            let hook_storage = self
+                .read_side
+                .get_hook_storage(self.read_api_key, self.collection_id)
+                .await?;
+            let lock = hook_storage.read().await;
+            let params = run_before_retrieval(
+                &lock,
+                params.clone(),
+                log_sender.clone(),
+                ExecOption {
+                    allowed_hosts: Some(vec![]),
+                    timeout: Duration::from_millis(500),
+                },
+            )
+            .await?;
+            drop(lock);
+
             let result = self
                 .read_side
-                .search(
-                    self.read_api_key,
-                    self.collection_id,
-                    SearchParams {
-                        mode: search_mode,
-                        limit: max_documents,
-                        offset: SearchOffset(0),
-                        where_filter: Default::default(),
-                        boost: HashMap::new(),
-                        facets: HashMap::new(),
-                        properties: Properties::Star,
-                        indexes: None, // Search all indexes
-                    },
-                )
+                .search(self.read_api_key, self.collection_id, params)
                 .await?;
-            search_results = result.hits;
-        }
+            result.hits
+        };
 
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
@@ -282,6 +309,24 @@ impl Answer {
             variables.push(("trigger".to_string(), full_trigger.response));
         }
 
+        let hook_storage = self
+            .read_side
+            .get_hook_storage(self.read_api_key, self.collection_id)
+            .await?;
+        let lock = hook_storage.read().await;
+        let (variables, system_prompt) = run_before_answer(
+            &lock,
+            (variables, system_prompt),
+            log_sender,
+            ExecOption {
+                allowed_hosts: Some(vec![]),
+                timeout: Duration::from_millis(500),
+            },
+        )
+        .await?;
+        drop(lock);
+
+        info!("Variables for LLM: {:?}", variables);
         let answer_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::Answer,
@@ -616,6 +661,7 @@ async fn select_triggers_and_segments(
     ReceiverStream::new(rx)
 }
 
+#[derive(Debug)]
 pub enum AnswerEvent {
     Acknowledged,
     SelectedLLM(InteractionLLMConfig),

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use fst::{automaton::StartsWith, Automaton, IntoStreamer, Map, MapBuilder, Streamer};
 use memmap::Mmap;
 
-use crate::file_utils::BufferedFile;
+use fs::BufferedFile;
 
 pub struct FSTIndex {
     inner: Map<Mmap>,

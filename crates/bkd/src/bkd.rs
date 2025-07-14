@@ -54,7 +54,7 @@ impl<T: Copy + PartialOrd> std::ops::Index<usize> for Coord<T> {
         match idx {
             0 => &self.lat,
             1 => &self.lon,
-            _ => panic!("Coord index out of bounds: {}", idx),
+            _ => panic!("Coord index out of bounds: {idx}"),
         }
     }
 }
@@ -83,6 +83,12 @@ pub enum BKDTree<T: Copy + PartialOrd, D> {
         right: Box<BKDTree<T, D>>,
         count: usize,
     },
+}
+
+impl<T: Copy + PartialOrd + Debug, D: Debug> Default for BKDTree<T, D> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
@@ -259,7 +265,7 @@ impl<T: Copy + PartialOrd + std::fmt::Debug, D: std::fmt::Debug> BKDTree<T, D> {
                 right,
                 ..
             } => {
-                println!("{}Node: axis={}, split={:?}", indent, axis, split);
+                println!("{indent}Node: axis={axis}, split={split:?}");
                 left.display(depth + 1);
                 right.display(depth + 1);
             }
@@ -286,9 +292,8 @@ pub fn haversine_distance<T: num_traits::Float + Copy + PartialOrd + Debug>(
     let dlon = lon2 - lon1;
     let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    let d = EARTH_RADIUS_M * c;
 
-    d
+    EARTH_RADIUS_M * c
 }
 
 // Iterator for radius query

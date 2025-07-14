@@ -32,18 +32,18 @@ use crate::{
             Offset,
         },
     },
-    file_utils::{create_if_not_exists, BufferedFile},
     metrics::{
         search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
         CollectionLabels,
     },
-    nlp::{locales::Locale, NLPService, TextParser},
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
         Threshold, VectorMode, WhereFilter,
     },
 };
+use fs::{create_if_not_exists, BufferedFile};
+use nlp::{locales::Locale, NLPService, TextParser};
 
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 mod committed_field;

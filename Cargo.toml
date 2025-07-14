@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "1.1.56"
+version = "1.1.57"
 edition = "2021"
 
 [dependencies]
@@ -103,7 +103,7 @@ dedent = "0.1.1"
 hnsw2 = { path = "./crates/hnsw2" }
 async-openai = "0.28.0"
 
-orama-js-pool = "0.1.1"
+orama-js-pool = { version = "0.2.1" }
 sentry = "0.37.0"
 sentry-tracing = "0.37.0"
 arrayvec = "0.7.6"
@@ -116,6 +116,9 @@ rustls = "0.23.26"
 
 filters = { path = "./crates/filters" }
 bkd = { path = "./crates/bkd" }
+nlp = { path = "crates/nlp" }
+hook_storage = { path = "./crates/hook_storage" }
+fs = { path = "./crates/fs" }
 
 zebo = "0.3.0"
 llm_json = "1.0.2"
@@ -123,9 +126,6 @@ dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
 jwt-authorizer = "0.15"
 jsonwebtoken = "9.3.1"
-
-# [patch.crates-io]
-# jsonwebtoken = { path = "../jsonwebtoken" }
 
 [build-dependencies]
 cc = "1"
@@ -175,4 +175,7 @@ members = [
     "crates/hnsw2",
     "crates/filters",
     "crates/bkd",
+    "crates/nlp",
+    "crates/hook_storage",
+    "crates/fs",
 ]

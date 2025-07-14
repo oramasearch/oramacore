@@ -1,6 +1,6 @@
 use std::{
     fmt::Debug,
-    io::{BufWriter, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -58,16 +58,22 @@ pub fn create_if_not_exists<P: AsRef<Path>>(p: P) -> Result<()> {
 pub async fn read_file<T: serde::de::DeserializeOwned>(path: PathBuf) -> Result<T> {
     let vec = tokio::fs::read(&path)
         .await
-        .with_context(|| format!("Cannot open file at {:?}", path))?;
+        .with_context(|| format!("Cannot open file at {path:?}"))?;
     serde_json::from_slice(&vec)
-        .with_context(|| format!("Cannot deserialize json data from {:?}", path))
+        .with_context(|| format!("Cannot deserialize json data from {path:?}"))
 }
 
 pub struct BufferedFile;
 impl BufferedFile {
+    pub fn exists_as_file(path: &PathBuf) -> bool {
+        std::fs::metadata(path)
+            .map(|m| m.is_file())
+            .unwrap_or(false)
+    }
+
     pub fn create_or_overwrite(path: PathBuf) -> Result<WriteBufferedFile> {
         let buf = AtomicWriteFile::open(&path)
-            .with_context(|| format!("Cannot create file at {:?}", path))?;
+            .with_context(|| format!("Cannot create file at {path:?}"))?;
         // let file = std::fs::File::create(&path)
         //     .with_context(|| format!("Cannot create file at {:?}", path))?;
         let buf = BufWriter::new(buf);
@@ -96,6 +102,17 @@ impl ReadBufferedFile {
         Ok(data)
     }
 
+    pub fn read_text_data(self) -> Result<String> {
+        let file = std::fs::File::open(&self.path)
+            .with_context(|| format!("Cannot open file at {:?}", self.path))?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut b = String::new();
+        reader
+            .read_to_string(&mut b)
+            .with_context(|| format!("Cannot read text data from {:?}", self.path))?;
+        Ok(b)
+    }
+
     pub fn read_bincode_data<T: serde::de::DeserializeOwned>(self) -> Result<T> {
         let file = std::fs::File::open(&self.path)
             .with_context(|| format!("Cannot open file at {:?}", self.path))?;
@@ -115,6 +132,15 @@ impl WriteBufferedFile {
         if let Some(buf) = self.buf.as_mut() {
             serde_json::to_writer(buf, data)
                 .with_context(|| format!("Cannot write json data to {:?}", self.path))?;
+        }
+
+        self.close()
+    }
+
+    pub fn write_text_data<T: AsRef<[u8]>>(mut self, data: &T) -> Result<()> {
+        if let Some(buf) = self.buf.as_mut() {
+            buf.write_all(data.as_ref())
+                .with_context(|| format!("Cannot write text data to {:?}", self.path))?;
         }
 
         self.close()
@@ -215,4 +241,12 @@ impl Drop for WriteBufferedFile {
             error!("Error while dropping buffered file: {:?}", e);
         });
     }
+}
+
+#[cfg(feature = "generate_new_path")]
+pub fn generate_new_path() -> PathBuf {
+    let tmp_dir = tempfile::tempdir().expect("Cannot create temp dir");
+    let dir = tmp_dir.path().to_path_buf();
+    std::fs::create_dir_all(dir.clone()).expect("Cannot create dir");
+    dir
 }

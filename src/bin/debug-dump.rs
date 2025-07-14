@@ -9,10 +9,11 @@ use oramacore::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
         Index,
     },
-    nlp::NLPService,
     types::{DocumentId, IndexId},
     OramacoreConfig,
 };
+
+use nlp::NLPService;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -120,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
                     for (d, doc_id) in output.into_iter().zip(document_ids) {
                         match d {
                             None => {
-                                println!("{:?}: not found", doc_id);
+                                println!("{doc_id:?}: not found");
                             }
                             Some(doc) => {
                                 println!("{:?}: {:?} -> {}", doc_id, doc.id, doc.inner.get());
@@ -153,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("Found {} documents", document_ids.len());
 
                     for doc_id in document_ids {
-                        println!("{:?}", doc_id);
+                        println!("{doc_id:?}");
                     }
                 }
                 OpenReadDocumentStorage::GetDocuments { document_ids } => {
@@ -166,7 +167,7 @@ async fn main() -> anyhow::Result<()> {
                     for (d, doc_id) in output.into_iter().zip(document_ids) {
                         match d {
                             None => {
-                                println!("{:?}: not found", doc_id);
+                                println!("{doc_id:?}: not found");
                             }
                             Some(doc) => {
                                 println!("{:?}: {:?} -> {}", doc_id, doc.id, doc.inner.get());
@@ -180,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
                         .await
                         .context("Failed to get Zebo info")?;
 
-                    println!("Zebo Info: {:#?}", zebo_info);
+                    println!("Zebo Info: {zebo_info:#?}");
                 }
             }
         }

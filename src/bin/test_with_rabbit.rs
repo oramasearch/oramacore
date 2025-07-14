@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use nlp::locales::Locale;
 use oramacore::{
     collection_manager::sides::{
         channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
         OutputSideChannelType, RabbitMQConsumerConfig, RabbitMQProducerConfig, WriteOperation,
     },
-    nlp::locales::Locale,
     types::{ApiKey, CollectionId},
 };
 use rabbitmq_stream_client::ClientOptions;
@@ -63,7 +63,7 @@ async fn main2() -> Result<()> {
 
     println!("Receiving message");
     let a = consumer.recv().await;
-    println!("{:?}", a);
+    println!("{a:?}");
 
     println!("Done");
 

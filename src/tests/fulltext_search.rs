@@ -99,7 +99,7 @@ async fn test_fulltext_search_should_work_after_commit() {
         .unwrap();
     assert_eq!(output2.count, 1);
     assert_eq!(output2.hits.len(), 1);
-    println!("output2: {:#?}", output2);
+    println!("output2: {output2:#?}");
     assert_eq!(
         output2.hits[0].id,
         format!("{}:{}", index_client.index_id, "1")

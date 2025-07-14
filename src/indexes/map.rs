@@ -5,8 +5,8 @@ use std::{
     path::PathBuf,
 };
 
-use crate::file_utils::{create_if_not_exists, BufferedFile};
 use anyhow::{Context, Result};
+use fs::{create_if_not_exists, BufferedFile};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub struct Map<Key, Value> {

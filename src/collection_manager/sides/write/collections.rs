@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -9,16 +10,15 @@ use tracing::{error, info};
 
 use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::ai::OramaModel;
-use crate::collection_manager::sides::hooks::HooksRuntime;
 use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
-use crate::file_utils::{create_if_not_exists, BufferedFile};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
-use crate::nlp::locales::Locale;
-use crate::nlp::NLPService;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
+use fs::{create_if_not_exists, BufferedFile};
+use nlp::locales::Locale;
+use nlp::NLPService;
 
 use super::collection::CollectionWriter;
 use super::embedding::MultiEmbeddingCalculationRequest;
@@ -29,17 +29,16 @@ pub struct CollectionsWriter {
     config: CollectionsWriterConfig,
     embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
     op_sender: OperationSender,
-    hooks_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     default_model: OramaModel,
+    data_dir: PathBuf,
 }
 
 impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
         embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
-        hooks_runtime: Arc<HooksRuntime>,
         nlp_service: Arc<NLPService>,
         op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
@@ -47,8 +46,8 @@ impl CollectionsWriter {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
         let default_model = config.default_embedding_model.0;
 
-        let data_dir = &config.data_dir.join("collections");
-        create_if_not_exists(data_dir).context("Cannot create data directory")?;
+        let data_dir = config.data_dir.join("collections");
+        create_if_not_exists(&data_dir).context("Cannot create data directory")?;
 
         let info_path = data_dir.join("info.json");
         info!("Loading collections from disk from {:?}", info_path);
@@ -67,10 +66,10 @@ impl CollectionsWriter {
                     config,
                     embedding_sender,
                     op_sender,
-                    hooks_runtime,
                     nlp_service,
                     automatic_embeddings_selector,
                     default_model,
+                    data_dir,
                 });
             }
         };
@@ -84,10 +83,8 @@ impl CollectionsWriter {
             // TODO: think about it
             let collection = CollectionWriter::try_load(
                 collection_dir,
-                hooks_runtime.clone(),
                 nlp_service.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 op_sender.clone(),
                 automatic_embeddings_selector.clone(),
             )
@@ -100,10 +97,10 @@ impl CollectionsWriter {
             config,
             embedding_sender,
             op_sender,
-            hooks_runtime,
             nlp_service,
             automatic_embeddings_selector,
             default_model,
+            data_dir,
         };
 
         Ok(writer)
@@ -141,17 +138,17 @@ impl CollectionsWriter {
 
         let collection = CollectionWriter::empty(
             id,
+            self.data_dir.join(id.as_str()),
             description.clone(),
             write_api_key,
             read_api_key,
             default_locale,
             embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
             self.embedding_sender.clone(),
-            self.hooks_runtime.clone(),
             self.op_sender.clone(),
             self.nlp_service.clone(),
             self.automatic_embeddings_selector.clone(),
-        );
+        )?;
 
         let mut collections = self.collections.write().await;
 

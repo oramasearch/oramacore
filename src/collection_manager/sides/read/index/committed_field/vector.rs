@@ -9,12 +9,10 @@ use filters::FilterResult;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ai::OramaModel,
-    collection_manager::sides::write::OramaModelSerializable,
-    file_utils::{create_if_not_exists, BufferedFile},
-    indexes::hnsw2::HNSW2Index,
-    types::DocumentId,
+    ai::OramaModel, collection_manager::sides::write::OramaModelSerializable,
+    indexes::hnsw2::HNSW2Index, types::DocumentId,
 };
+use fs::{create_if_not_exists, BufferedFile};
 
 pub struct CommittedVectorField {
     field_path: Box<[String]>,

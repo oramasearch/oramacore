@@ -120,11 +120,11 @@ impl PartyPlanner {
         let mut full_input = format!("### User Input\n{}", input.clone());
 
         if let Some(segment) = segment {
-            full_input.push_str(&format!("\n\n### Segment\n{}", segment));
+            full_input.push_str(&format!("\n\n### Segment\n{segment}"));
         }
 
         if let Some(trigger) = trigger {
-            full_input.push_str(&format!("\n\n### Trigger\n{}", trigger));
+            full_input.push_str(&format!("\n\n### Trigger\n{trigger}"));
         }
 
         history.push(InteractionMessage {
@@ -146,7 +146,7 @@ impl PartyPlanner {
                     Err(e) => {
                         tx.send(PartyPlannerMessage {
                             action: "PARTY_PLANNER_ERROR".to_string(),
-                            result: format!("{:?}", e),
+                            result: format!("{e:?}"),
                             done: true,
                         })
                         .await
@@ -282,7 +282,7 @@ impl PartyPlanner {
                             Err(e) => {
                                 tx.send(PartyPlannerMessage {
                                     action: step.name.clone(),
-                                    result: format!("{:?}", e),
+                                    result: format!("{e:?}"),
                                     done: true,
                                 })
                                 .await
@@ -367,8 +367,7 @@ impl PartyPlanner {
         let as_md = json_to_md(&plan_as_value, 0);
 
         format!(
-            "Alright! Here's the action plan I've come up with based on your request:\n\n{}\n\nAsk me to proceed with the next step, one step at a time when you're ready.",
-            as_md
+            "Alright! Here's the action plan I've come up with based on your request:\n\n{as_md}\n\nAsk me to proceed with the next step, one step at a time when you're ready."
         )
         .to_string()
     }
@@ -435,7 +434,7 @@ fn json_to_md(data: &Value, level: usize) -> String {
             if let Ok(parsed) = serde_json::from_str::<Value>(s) {
                 return json_to_md(&parsed, level);
             } else {
-                return format!("{}`{}`\n", indent, s);
+                return format!("{indent}`{s}`\n");
             }
         }
         Value::Array(arr) => {
@@ -447,23 +446,23 @@ fn json_to_md(data: &Value, level: usize) -> String {
                 if item.is_object() || item.is_array() {
                     md.push_str(&json_to_md(item, level));
                 } else {
-                    md.push_str(&format!("{}- `{}`\n", indent, item));
+                    md.push_str(&format!("{indent}- `{item}`\n"));
                 }
             }
         }
         Value::Object(map) => {
             for (key, value) in map {
-                md.push_str(&format!("{}- **{}**: ", indent, key));
+                md.push_str(&format!("{indent}- **{key}**: "));
                 if value.is_object() || value.is_array() {
                     md.push('\n');
                     md.push_str(&json_to_md(value, level + 1));
                 } else {
-                    md.push_str(&format!("`{}`\n", value));
+                    md.push_str(&format!("`{value}`\n"));
                 }
             }
         }
         _ => {
-            md.push_str(&format!("{}`{}`\n", indent, data));
+            md.push_str(&format!("{indent}`{data}`\n"));
         }
     }
 

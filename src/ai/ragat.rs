@@ -31,14 +31,14 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::InvalidSyntax(msg) => write!(f, "Invalid syntax: {}", msg),
-            ParseError::InvalidThreshold(val) => write!(f, "Invalid threshold value: {}", val),
-            ParseError::InvalidMaxDocuments(val) => write!(f, "Invalid max documents: {}", val),
+            ParseError::InvalidSyntax(msg) => write!(f, "Invalid syntax: {msg}"),
+            ParseError::InvalidThreshold(val) => write!(f, "Invalid threshold value: {val}"),
+            ParseError::InvalidMaxDocuments(val) => write!(f, "Invalid max documents: {val}"),
             ParseError::EmptySourceList => write!(f, "Source list cannot be empty"),
             ParseError::MissingAtSymbol => write!(f, "Missing @ symbol for threshold"),
             ParseError::MissingColon => write!(f, "Missing : symbol for max documents"),
             ParseError::UnexpectedCharacter(ch, pos) => {
-                write!(f, "Unexpected character '{}' at position {}", ch, pos)
+                write!(f, "Unexpected character '{ch}' at position {pos}")
             }
         }
     }
@@ -168,8 +168,7 @@ impl RAGAtParser {
             for source_id in &component.source_ids {
                 if !available_indexes.contains(source_id) {
                     return Err(format!(
-                        "Component {}: Source ID '{}' not found in available indexes",
-                        i, source_id
+                        "Component {i}: Source ID '{source_id}' not found in available indexes"
                     ));
                 }
             }

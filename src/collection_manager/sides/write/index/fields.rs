@@ -15,16 +15,15 @@ use crate::{
         OramaModel,
     },
     collection_manager::sides::{
-        hooks::{HooksRuntime, SelectEmbeddingPropertiesReturnType},
-        write::embedding::MultiEmbeddingCalculationRequest,
-        Term, TermStringField,
-    },
-    nlp::{
-        chunker::{Chunker, ChunkerConfig},
-        locales::Locale,
-        TextParser,
+        write::embedding::MultiEmbeddingCalculationRequest, Term, TermStringField,
     },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
+};
+
+use nlp::{
+    chunker::{Chunker, ChunkerConfig},
+    locales::Locale,
+    TextParser,
 };
 
 use super::{get_value, EmbeddingStringCalculation};
@@ -608,9 +607,6 @@ impl IndexScoreField {
                     EmbeddingStringCalculation::Properties(v) => {
                         SerializedEmbeddingStringCalculation::Properties(v.clone())
                     }
-                    EmbeddingStringCalculation::Hook(_) => {
-                        SerializedEmbeddingStringCalculation::Hook
-                    }
                     EmbeddingStringCalculation::Automatic => {
                         SerializedEmbeddingStringCalculation::Automatic
                     }
@@ -623,7 +619,6 @@ impl IndexScoreField {
         dump: SerializedScoreFieldType,
         collection_id: CollectionId,
         index_id: IndexId,
-        hooks_runtime: Arc<HooksRuntime>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
@@ -660,7 +655,7 @@ impl IndexScoreField {
                         EmbeddingStringCalculation::Properties(v)
                     }
                     SerializedEmbeddingStringCalculation::Hook => {
-                        EmbeddingStringCalculation::Hook(hooks_runtime)
+                        EmbeddingStringCalculation::AllProperties // Removed from v1.1.56 Fallback to AllProperties
                     }
                     SerializedEmbeddingStringCalculation::Automatic => {
                         EmbeddingStringCalculation::Automatic
@@ -821,10 +816,6 @@ impl EmbeddingField {
         self.model
     }
 
-    pub fn switch_to_embedding_hook(&mut self, hooks_runtime: Arc<HooksRuntime>) {
-        self.calculation = EmbeddingStringCalculation::Hook(hooks_runtime);
-    }
-
     pub fn get_embedding_calculation(&self) -> &EmbeddingStringCalculation {
         &self.calculation
     }
@@ -919,7 +910,7 @@ impl EmbeddingField {
                     let mut current_size: usize = 0;
 
                     for path_group in paths.iter() {
-                        println!("  - {:?}", path_group);
+                        println!("  - {path_group:?}");
                     }
 
                     // Process each path group
@@ -1004,31 +995,6 @@ impl EmbeddingField {
 
                 // Extract and join the values safely
                 extract_values_at_paths(doc, v, MAX_RESULT_SIZE)
-            }
-            EmbeddingStringCalculation::Hook(hooks_runtime) => {
-                let a = hooks_runtime
-                    .calculate_text_for_embedding(self.collection_id, self.index_id, doc.clone())
-                    .await;
-                match a {
-                    Some(Ok(input)) => match input {
-                        SelectEmbeddingPropertiesReturnType::Properties(v) => v
-                            .iter()
-                            .filter_map(|field_name| {
-                                let value = doc.get(field_name).and_then(|v| v.as_str());
-                                value
-                            })
-                            .collect(),
-                        SelectEmbeddingPropertiesReturnType::Text(v) => v,
-                    },
-                    Some(Err(e)) => {
-                        tracing::error!(error = ?e, "Error calculating text for embedding. Ignored");
-                        return Ok(vec![]);
-                    }
-                    None => {
-                        // Nothing to calculate
-                        return Ok(vec![]);
-                    }
-                }
             }
         };
 
