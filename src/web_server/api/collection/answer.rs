@@ -26,7 +26,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             post(planned_answer_v1),
         )
         .route(
-            "/v1/collections/{collection_id}/answer-logs",
+            "/v1/collections/{collection_id}/logs",
             get(answer_logs_v1),
         )
         .with_state(read_side)
