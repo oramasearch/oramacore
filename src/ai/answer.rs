@@ -166,6 +166,7 @@ impl Answer {
         sender: tokio::sync::mpsc::UnboundedSender<AnswerEvent>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
+        info!("Answering interaction...");
         self.handle_gpu_overload(&mut interaction).await;
 
         let llm_config = self.get_llm_config(&interaction);
@@ -176,6 +177,7 @@ impl Answer {
         let system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id.clone())
             .await?;
+        info!("With system prompt: {:?}", system_prompt.is_some());
 
         // Always make sure that the conversation is not empty, or else the AI will not be able to
         // determine the segment and trigger.
@@ -210,6 +212,8 @@ impl Answer {
                 }
             }
         }
+        info!("With segment: {:?}", segment.is_some());
+        info!("With trigger: {:?}", trigger.is_some());
 
         sender.send(AnswerEvent::GetSegment(segment.clone()))?;
 
@@ -223,6 +227,7 @@ impl Answer {
             )
             .await
             .unwrap_or_else(|_| interaction.query.clone()); // fallback to the original query if the optimization fails
+        info!("Optimized query: {}", optimized_query);
 
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
@@ -321,6 +326,7 @@ impl Answer {
         .await?;
         drop(lock);
 
+        info!("Variables for LLM: {:?}", variables);
         let answer_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::Answer,
