@@ -1,13 +1,11 @@
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
+use hook_storage::HookOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::{
-    collection_manager::sides::{
-        hooks::HookName,
-        write::{index::IndexedValue, OramaModelSerializable},
-    },
+    collection_manager::sides::write::{index::IndexedValue, OramaModelSerializable},
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
@@ -171,6 +169,7 @@ pub enum CollectionWriteOperation {
     },
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
     */
+    Hook(HookOperation),
     CreateIndex2 {
         index_id: IndexId,
         locale: Locale,
@@ -221,7 +220,7 @@ impl Serialize for DocumentFieldsWrapper {
         let (id, opt) = match self.0 {
             DocumentFields::AllStringProperties => (1_u8, None),
             DocumentFields::Properties(ref props) => (2, Some(props.clone())),
-            DocumentFields::Hook(ref hook) => (3, Some(vec![hook.to_string()])),
+            // DocumentFields::Hook(ref hook) => (3, Some(vec![hook.to_string()])),
             DocumentFields::Automatic => (4, None),
         };
         seq.serialize_element(&id)?;
@@ -238,7 +237,7 @@ impl<'de> Deserialize<'de> for DocumentFieldsWrapper {
         let doc = match a.0 {
             1 => DocumentFields::AllStringProperties,
             2 => DocumentFields::Properties(a.1.unwrap()),
-            3 => DocumentFields::Hook(HookName::from_str(&a.1.unwrap()[0]).unwrap()),
+            // 3 => DocumentFields::Hook(HookName::from_str(&a.1.unwrap()[0]).unwrap()),
             4 => DocumentFields::Automatic,
             _ => {
                 return Err(serde::de::Error::custom(format!(
@@ -333,6 +332,14 @@ impl WriteOperation {
             }
             WriteOperation::Collection(
                 _,
+                CollectionWriteOperation::Hook(HookOperation::Delete(_)),
+            ) => "delete_hook",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::Hook(HookOperation::Insert(_, _)),
+            ) => "insert_hook",
+            WriteOperation::Collection(
+                _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },
             ) => "create_temp_index",
             WriteOperation::Collection(_, CollectionWriteOperation::ReplaceIndex { .. }) => {
@@ -372,8 +379,7 @@ where
     D: serde::de::Deserializer<'de>,
 {
     String::deserialize(deserializer).and_then(|s| {
-        ApiKey::try_new(s)
-            .map_err(|e| serde::de::Error::custom(format!("Invalid API key: {:?}", e)))
+        ApiKey::try_new(s).map_err(|e| serde::de::Error::custom(format!("Invalid API key: {e:?}")))
     })
 }
 

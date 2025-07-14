@@ -1,11 +1,6 @@
 use std::{collections::HashMap, env, fs, path::Path};
 
 fn main() {
-    let vars = std::env::vars();
-    for v in vars {
-        println!("{:?}", v);
-    }
-
     let base_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let base_dir = Path::new(&base_dir).to_path_buf();
 
@@ -41,7 +36,7 @@ fn main() {
         let dest_path = Path::new(&out_dir).join(format!("stop_words_gen/{lang}.rs"));
         let stop_words = stop_words.lines();
         let stop_words = stop_words
-            .map(|word| format!("\"{}\"", word))
+            .map(|word| format!("\"{word}\""))
             .collect::<Vec<String>>();
         let stop_words = format!(
             "pub const {}_STOP_WORDS: [&str; {}] = [\n{}\n];",
@@ -51,7 +46,7 @@ fn main() {
         );
         fs::write(&dest_path, stop_words).unwrap();
 
-        modules.push_str(&format!("pub mod {};\n", lang));
+        modules.push_str(&format!("pub mod {lang};\n"));
         hash_map_insert.push_str(&format!("hash_map.insert(\"{}\".to_lowercase().parse().unwrap(), Some({lang}::{}_STOP_WORDS.into_iter().collect()));\n", lang.to_uppercase(), lang.to_uppercase()));
     }
 

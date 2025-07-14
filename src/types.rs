@@ -2,14 +2,13 @@ use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
-use crate::collection_manager::sides::hooks::HookName;
 use crate::collection_manager::sides::write::index::{FieldType, GeoPoint};
 use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
-use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
+use axum_openapi3::utoipa::{self, PartialSchema, ToSchema};
 use nlp::locales::Locale;
 
 use async_openai::types::{
@@ -124,7 +123,7 @@ impl Document {
             .flat_map(|(key, value)| match value {
                 Value::Object(map) => map
                     .into_iter()
-                    .map(|(sub_key, sub_value)| (format!("{}.{}", key, sub_key), sub_value.clone()))
+                    .map(|(sub_key, sub_value)| (format!("{key}.{sub_key}"), sub_value.clone()))
                     .collect::<Map<_, _>>(),
                 _ => {
                     let mut map = Map::new();
@@ -524,7 +523,6 @@ impl From<Locale> for LanguageDTO {
 #[serde(untagged)]
 pub enum DocumentFields {
     Properties(Vec<String>),
-    Hook(HookName),
     AllStringProperties,
     Automatic,
 }
@@ -764,7 +762,7 @@ pub struct BoolFacetDefinition {
     pub r#false: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct StringFacetDefinition;
 impl<'de> Deserialize<'de> for StringFacetDefinition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -791,9 +789,18 @@ impl<'de> Deserialize<'de> for StringFacetDefinition {
         deserializer.deserialize_any(StringFacetDefinitionVisitor)
     }
 }
+impl Serialize for StringFacetDefinition {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let map = serializer.serialize_map(Some(0))?;
+        map.end()
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-
 pub enum FacetDefinition {
     #[serde(untagged)]
     Number(NumberFacetDefinition),
@@ -884,7 +891,7 @@ pub struct SearchModeResult {
     pub mode: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub enum SearchMode {
     FullText(FulltextMode),
     Vector(VectorMode),
@@ -942,10 +949,88 @@ impl<'de> Deserialize<'de> for SearchMode {
             })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
-                "Invalid search mode: {}",
-                m
+                "Invalid search mode: {m}"
             ))),
         }
+    }
+}
+
+impl Serialize for SearchMode {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let map = match self {
+            SearchMode::FullText(FulltextMode {
+                term,
+                threshold,
+                exact,
+            }) => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("mode", "fulltext")?;
+                map.serialize_entry("term", term)?;
+                if let Some(threshold) = threshold {
+                    map.serialize_entry("threshold", threshold)?;
+                }
+                if *exact {
+                    map.serialize_entry("exact", exact)?;
+                }
+                map
+            }
+            SearchMode::Vector(VectorMode { term, similarity }) => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("mode", "vector")?;
+                map.serialize_entry("term", term)?;
+                if similarity.0 != 0.8 {
+                    map.serialize_entry("similarity", similarity)?;
+                }
+                map
+            }
+            SearchMode::Hybrid(HybridMode {
+                term,
+                similarity,
+                threshold,
+                exact,
+            }) => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("mode", "hybrid")?;
+                map.serialize_entry("term", term)?;
+                if similarity.0 != 0.8 {
+                    map.serialize_entry("similarity", similarity)?;
+                }
+                if let Some(threshold) = threshold {
+                    map.serialize_entry("threshold", threshold)?;
+                }
+                if *exact {
+                    map.serialize_entry("exact", exact)?;
+                }
+                map
+            }
+            SearchMode::Auto(AutoMode { term }) => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("mode", "auto")?;
+                map.serialize_entry("term", term)?;
+                map
+            }
+            SearchMode::Default(FulltextMode {
+                term,
+                threshold,
+                exact,
+            }) => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("mode", "default")?;
+                map.serialize_entry("term", term)?;
+                if let Some(threshold) = threshold {
+                    map.serialize_entry("threshold", threshold)?;
+                }
+                if *exact {
+                    map.serialize_entry("exact", exact)?;
+                }
+                map
+            }
+        };
+        map.end()
     }
 }
 
@@ -1017,7 +1102,7 @@ pub struct FilterOnField {
     pub filter: Filter,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default)]
 pub struct WhereFilter {
     pub filter_on_fields: Vec<(String, Filter)>,
     pub and: Option<Vec<WhereFilter>>,
@@ -1065,8 +1150,7 @@ impl<'de> Deserialize<'de> for WhereFilter {
                         }
                         (_, value) => {
                             return Err(de::Error::custom(format!(
-                                "Invalid where filter for key {}: {:?}",
-                                key, value
+                                "Invalid where filter for key {key}: {value:?}"
                             )))
                         }
                     }
@@ -1082,6 +1166,54 @@ impl<'de> Deserialize<'de> for WhereFilter {
         }
 
         deserializer.deserialize_map(HiddenWhereFilterVisitor)
+    }
+}
+
+impl Serialize for WhereFilter {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        // Count the number of entries for the map
+        let mut num_entries = self.filter_on_fields.len();
+        if self.and.as_ref().is_some_and(|v| !v.is_empty()) {
+            num_entries += 1;
+        }
+        if self.or.as_ref().is_some_and(|v| !v.is_empty()) {
+            num_entries += 1;
+        }
+        if self.not.is_some() {
+            num_entries += 1;
+        }
+
+        let mut map = serializer.serialize_map(Some(num_entries))?;
+
+        // Serialize filter_on_fields
+        for (key, filter) in &self.filter_on_fields {
+            map.serialize_entry(key, filter)?;
+        }
+
+        // Serialize and
+        if let Some(and_vec) = &self.and {
+            if !and_vec.is_empty() {
+                map.serialize_entry("and", and_vec)?;
+            }
+        }
+
+        // Serialize or
+        if let Some(or_vec) = &self.or {
+            if !or_vec.is_empty() {
+                map.serialize_entry("or", or_vec)?;
+            }
+        }
+
+        // Serialize not
+        if let Some(not_val) = &self.not {
+            map.serialize_entry("not", not_val.as_ref())?;
+        }
+
+        map.end()
     }
 }
 
@@ -1162,7 +1294,11 @@ pub struct SearchParams {
     pub offset: SearchOffset,
     #[serde(default)]
     pub boost: HashMap<String, f32>,
-    #[serde(default, deserialize_with = "deserialize_properties")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_properties",
+        serialize_with = "serialize_properties"
+    )]
     pub properties: Properties,
     #[serde(default, rename = "where")]
     pub where_filter: WhereFilter,
@@ -1219,6 +1355,17 @@ where
 
     // use our visitor to deserialize an `ActualValue`
     deserializer.deserialize_any(PropertiesVisitor)
+}
+
+fn serialize_properties<S>(props: &Properties, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    match props {
+        Properties::None => serializer.serialize_unit(),
+        Properties::Star => serializer.serialize_str("*"),
+        Properties::Specified(vec) => vec.serialize(serializer),
+    }
 }
 
 impl TryFrom<serde_json::Value> for SearchParams {
@@ -1362,22 +1509,6 @@ pub struct Interaction {
     pub search_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct NewHookPostParams {
-    pub name: HookName,
-    pub code: String,
-}
-
-#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
-pub struct GetHookQueryParams {
-    pub name: HookName,
-}
-
-#[derive(Deserialize, Clone, Serialize, IntoParams, ToSchema)]
-pub struct DeleteHookParams {
-    pub name: HookName,
-}
-
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]
@@ -1484,7 +1615,6 @@ pub enum IndexEmbeddingsCalculation {
     Automatic,
     AllProperties,
     Properties(Vec<String>),
-    Hook,
 }
 
 impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
@@ -1506,7 +1636,6 @@ impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
                     "none" => Ok(IndexEmbeddingsCalculation::None),
                     "automatic" => Ok(IndexEmbeddingsCalculation::Automatic),
                     "all_properties" => Ok(IndexEmbeddingsCalculation::AllProperties),
-                    "hook" => Ok(IndexEmbeddingsCalculation::Hook),
                     _ => Err(de::Error::custom(
                         "Invalid value for index embeddings calculation. Expected 'none', 'automatic', 'all_properties', or 'hook' or an array of strings",
                     )),
@@ -1564,11 +1693,448 @@ pub struct RunToolsParams {
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
-#[cfg(test)]
-mod test {
-    use serde_json::json;
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Number {
+    I32(i32),
+    F32(f32),
+}
 
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Number::I32(value) => write!(f, "{value}"),
+            Number::F32(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl From<i32> for Number {
+    fn from(value: i32) -> Self {
+        Number::I32(value)
+    }
+}
+impl From<f32> for Number {
+    fn from(value: f32) -> Self {
+        Number::F32(value)
+    }
+}
+impl TryFrom<&Value> for Number {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Ok(Number::I32(i as i32))
+                } else if let Some(f) = n.as_f64() {
+                    Ok(Number::F32(f as f32))
+                } else {
+                    Err(serde_json::Error::custom("Not a number"))
+                }
+            }
+            _ => Err(serde_json::Error::custom("Not a number")),
+        }
+    }
+}
+
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Number::I32(a), Number::I32(b)) => a == b,
+            (Number::I32(a), Number::F32(b)) => *a as f32 == *b,
+            (Number::F32(a), Number::F32(b)) => {
+                // This is against the IEEE 754-2008 standard,
+                // But we don't care here.
+                if a.is_nan() && b.is_nan() {
+                    return true;
+                }
+                a == b
+            }
+            (Number::F32(a), Number::I32(b)) => *a == *b as f32,
+        }
+    }
+}
+impl Eq for Number {}
+
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Number {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // f32 is implemented as "binary32" type defined in IEEE 754-2008
+        // So, it means, it can represent also +/- Infinity and NaN
+        // Threat NaN as "more" the Infinity
+        // See `total_cmp` method in f32
+        match (self, other) {
+            (Number::I32(a), Number::I32(b)) => a.cmp(b),
+            (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
+            (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
+            (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
+        }
+    }
+}
+
+impl std::ops::Add for Number {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Number::I32(a), Number::I32(b)) => (a + b).into(),
+            (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
+            (Number::F32(a), Number::F32(b)) => (a + b).into(),
+            (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct SerializableNumber(pub Number);
+
+impl Serialize for SerializableNumber {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        use serde::ser::SerializeTuple;
+
+        match &self.0 {
+            Number::F32(v) => {
+                let mut tuple = serializer.serialize_tuple(2)?;
+
+                if v.is_infinite() && v.is_sign_positive() {
+                    tuple.serialize_element(&3_u8)?;
+                    return tuple.end();
+                }
+                if v.is_infinite() && v.is_sign_negative() {
+                    tuple.serialize_element(&4_u8)?;
+                    return tuple.end();
+                }
+
+                tuple.serialize_element(&1_u8)?;
+                tuple.serialize_element(v)?;
+                tuple.end()
+            }
+            Number::I32(v) => {
+                let mut tuple = serializer.serialize_tuple(2)?;
+                tuple.serialize_element(&2_u8)?;
+                tuple.serialize_element(v)?;
+                tuple.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SerializableNumber {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Visitor};
+
+        struct SerializableNumberVisitor;
+
+        impl<'de> Visitor<'de> for SerializableNumberVisitor {
+            type Value = SerializableNumber;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(
+                    formatter,
+                    "a tuple of size 2 consisting of a u64 discriminant and a value"
+                )
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let discriminant: u8 = seq
+                    .next_element()?
+                    .ok_or_else(|| A::Error::invalid_length(0, &self))?;
+                match discriminant {
+                    1_u8 => {
+                        let x = seq
+                            .next_element()?
+                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
+                        Ok(SerializableNumber(Number::F32(x)))
+                    }
+                    2 => {
+                        let y = seq
+                            .next_element()?
+                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
+                        Ok(SerializableNumber(Number::I32(y)))
+                    }
+                    3 => Ok(SerializableNumber(Number::F32(f32::INFINITY))),
+                    4 => Ok(SerializableNumber(Number::F32(f32::NEG_INFINITY))),
+                    d => Err(A::Error::invalid_value(
+                        serde::de::Unexpected::Unsigned(d.into()),
+                        &"1, 2, 3, 4",
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_tuple(2, SerializableNumberVisitor)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum NumberFilter {
+    #[serde(rename = "eq")]
+    Equal(Number),
+    #[serde(rename = "gt")]
+    GreaterThan(Number),
+    #[serde(rename = "gte")]
+    GreaterThanOrEqual(Number),
+    #[serde(rename = "lt")]
+    LessThan(Number),
+    #[serde(rename = "lte")]
+    LessThanOrEqual(Number),
+    #[serde(rename = "between")]
+    Between((Number, Number)),
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct OramaDate(DateTime<Utc>);
+
+impl OramaDate {
+    pub fn try_from_i64(millisec_timestamp: i64) -> Option<Self> {
+        chrono::DateTime::from_timestamp_millis(millisec_timestamp).map(OramaDate)
+    }
+    pub fn as_i64(&self) -> i64 {
+        self.0.timestamp_millis()
+    }
+}
+
+impl<'de> Deserialize<'de> for OramaDate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        OramaDate::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<String> for OramaDate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&String> for OramaDate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
+    }
+}
+
+impl TryFrom<&str> for OramaDate {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        use dateparser::parse_with_timezone;
+
+        parse_with_timezone(value, &Utc).map(OramaDate)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum DateFilter {
+    #[serde(rename = "eq")]
+    Equal(OramaDate),
+    #[serde(rename = "gt")]
+    GreaterThan(OramaDate),
+    #[serde(rename = "gte")]
+    GreaterThanOrEqual(OramaDate),
+    #[serde(rename = "lt")]
+    LessThan(OramaDate),
+    #[serde(rename = "lte")]
+    LessThanOrEqual(OramaDate),
+    #[serde(rename = "between")]
+    Between((OramaDate, OramaDate)),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeoSearchRadiusValue(f32);
+
+impl PartialEq for GeoSearchRadiusValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl Eq for GeoSearchRadiusValue {}
+
+impl GeoSearchRadiusValue {
+    pub fn to_meter(&self, in_unit: GeoSearchRadiusUnit) -> f32 {
+        match in_unit {
+            GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01, // 1 cm = 0.01 m
+            GeoSearchRadiusUnit::Meter => self.0,             // already in meters
+            GeoSearchRadiusUnit::KiloMeter => self.0 * 1000.0, // 1 km = 1000 m
+            GeoSearchRadiusUnit::Feet => self.0 * 0.3048,     // 1 ft = 0.3048 m
+            GeoSearchRadiusUnit::Yard => self.0 * 0.9144,     // 1 yd = 0.9144 m
+            GeoSearchRadiusUnit::Mile => self.0 * 1609.344,   // 1 mi = 1609.344 m
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum GeoSearchRadiusUnit {
+    #[serde(rename = "cm")]
+    CentiMeter,
+    #[serde(rename = "m")]
+    Meter,
+    #[serde(rename = "km")]
+    KiloMeter,
+    #[serde(rename = "ft")]
+    Feet,
+    #[serde(rename = "yd")]
+    Yard,
+    #[serde(rename = "mi")]
+    Mile,
+}
+impl Default for GeoSearchRadiusUnit {
+    fn default() -> Self {
+        Self::Meter
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct GeoSearchRadiusFilter {
+    pub coordinates: GeoPoint,
+    #[serde(default)]
+    pub unit: GeoSearchRadiusUnit,
+    pub value: GeoSearchRadiusValue,
+    #[serde(default = "get_true")]
+    pub inside: bool,
+}
+
+fn get_true() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct GeoSearchPolygonFilter {
+    pub coordinates: Vec<GeoPoint>,
+    #[serde(default = "get_true")]
+    pub inside: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub enum GeoSearchFilter {
+    #[serde(rename = "radius")]
+    Radius(GeoSearchRadiusFilter),
+    #[serde(rename = "polygon")]
+    Polygon(GeoSearchPolygonFilter),
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct IndexId(StackString<64>);
+
+impl IndexId {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::<64>::try_new(key)
+            .map(IndexId)
+            .map_err(|e| anyhow::anyhow!("IndexId is too long. Max 64 char. {:?}", e))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl Display for IndexId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct IndexFieldType {
+    pub field_id: FieldId,
+    pub field_path: String,
+    pub is_array: bool,
+    pub field_type: FieldType,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DescribeCollectionIndexResponse {
+    pub id: IndexId,
+    pub document_count: usize,
+    pub fields: Vec<IndexFieldType>,
+    pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
+pub struct StackString<const N: usize>(ArrayString<N>);
+impl<const N: usize> PartialSchema for StackString<N> {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        // TODO: put a max length
+        String::schema()
+    }
+}
+impl<const N: usize> ToSchema for StackString<N> {}
+impl<const N: usize> Serialize for StackString<N> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
+    }
+}
+impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
+    }
+}
+impl<const N: usize> StackString<N> {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        let key = key.as_ref();
+        if key.is_empty() {
+            bail!("StackString cannot be empty");
+        }
+
+        let mut s = ArrayString::<N>::new();
+        let r = s.try_push_str(key);
+        if let Err(e) = r {
+            bail!("Parameter is too long. Max {} char. {:?}", N, e);
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl<const N: usize> Display for StackString<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
+    use chrono::SecondsFormat;
+
+    use serde_json::json;
+    use std::cmp::Ordering;
 
     #[test]
     fn test_search_params_mode_deserialization() {
@@ -1621,7 +2187,7 @@ mod test {
         });
         let j = serde_json::to_string(&j).unwrap();
         let p = serde_json::from_str::<SearchParams>(&j).unwrap_err();
-        assert!(format!("{}", p).contains("Invalid search mode: unknown_value"));
+        assert!(format!("{p}").contains("Invalid search mode: unknown_value"));
 
         let j = json!({
             "mode": "vector",
@@ -2170,352 +2736,6 @@ mod test {
         assert!(p.or.is_none());
         assert!(p.not.is_none());
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Number {
-    I32(i32),
-    F32(f32),
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Number::I32(value) => write!(f, "{}", value),
-            Number::F32(value) => write!(f, "{}", value),
-        }
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Number::I32(value)
-    }
-}
-impl From<f32> for Number {
-    fn from(value: f32) -> Self {
-        Number::F32(value)
-    }
-}
-impl TryFrom<&Value> for Number {
-    type Error = serde_json::Error;
-
-    fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Ok(Number::I32(i as i32))
-                } else if let Some(f) = n.as_f64() {
-                    Ok(Number::F32(f as f32))
-                } else {
-                    Err(serde_json::Error::custom("Not a number"))
-                }
-            }
-            _ => Err(serde_json::Error::custom("Not a number")),
-        }
-    }
-}
-
-impl PartialEq for Number {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Number::I32(a), Number::I32(b)) => a == b,
-            (Number::I32(a), Number::F32(b)) => *a as f32 == *b,
-            (Number::F32(a), Number::F32(b)) => {
-                // This is against the IEEE 754-2008 standard,
-                // But we don't care here.
-                if a.is_nan() && b.is_nan() {
-                    return true;
-                }
-                a == b
-            }
-            (Number::F32(a), Number::I32(b)) => *a == *b as f32,
-        }
-    }
-}
-impl Eq for Number {}
-
-impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for Number {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // f32 is implemented as "binary32" type defined in IEEE 754-2008
-        // So, it means, it can represent also +/- Infinity and NaN
-        // Threat NaN as "more" the Infinity
-        // See `total_cmp` method in f32
-        match (self, other) {
-            (Number::I32(a), Number::I32(b)) => a.cmp(b),
-            (Number::I32(a), Number::F32(b)) => (*a as f32).total_cmp(b),
-            (Number::F32(a), Number::F32(b)) => a.total_cmp(b),
-            (Number::F32(a), Number::I32(b)) => a.total_cmp(&(*b as f32)),
-        }
-    }
-}
-
-impl std::ops::Add for Number {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
-            (Number::I32(a), Number::I32(b)) => (a + b).into(),
-            (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
-            (Number::F32(a), Number::F32(b)) => (a + b).into(),
-            (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct SerializableNumber(pub Number);
-
-impl Serialize for SerializableNumber {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        use serde::ser::SerializeTuple;
-
-        match &self.0 {
-            Number::F32(v) => {
-                let mut tuple = serializer.serialize_tuple(2)?;
-
-                if v.is_infinite() && v.is_sign_positive() {
-                    tuple.serialize_element(&3_u8)?;
-                    return tuple.end();
-                }
-                if v.is_infinite() && v.is_sign_negative() {
-                    tuple.serialize_element(&4_u8)?;
-                    return tuple.end();
-                }
-
-                tuple.serialize_element(&1_u8)?;
-                tuple.serialize_element(v)?;
-                tuple.end()
-            }
-            Number::I32(v) => {
-                let mut tuple = serializer.serialize_tuple(2)?;
-                tuple.serialize_element(&2_u8)?;
-                tuple.serialize_element(v)?;
-                tuple.end()
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for SerializableNumber {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{Error, Visitor};
-
-        struct SerializableNumberVisitor;
-
-        impl<'de> Visitor<'de> for SerializableNumberVisitor {
-            type Value = SerializableNumber;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(
-                    formatter,
-                    "a tuple of size 2 consisting of a u64 discriminant and a value"
-                )
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let discriminant: u8 = seq
-                    .next_element()?
-                    .ok_or_else(|| A::Error::invalid_length(0, &self))?;
-                match discriminant {
-                    1_u8 => {
-                        let x = seq
-                            .next_element()?
-                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
-                        Ok(SerializableNumber(Number::F32(x)))
-                    }
-                    2 => {
-                        let y = seq
-                            .next_element()?
-                            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
-                        Ok(SerializableNumber(Number::I32(y)))
-                    }
-                    3 => Ok(SerializableNumber(Number::F32(f32::INFINITY))),
-                    4 => Ok(SerializableNumber(Number::F32(f32::NEG_INFINITY))),
-                    d => Err(A::Error::invalid_value(
-                        serde::de::Unexpected::Unsigned(d.into()),
-                        &"1, 2, 3, 4",
-                    )),
-                }
-            }
-        }
-
-        deserializer.deserialize_tuple(2, SerializableNumberVisitor)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum NumberFilter {
-    #[serde(rename = "eq")]
-    Equal(Number),
-    #[serde(rename = "gt")]
-    GreaterThan(Number),
-    #[serde(rename = "gte")]
-    GreaterThanOrEqual(Number),
-    #[serde(rename = "lt")]
-    LessThan(Number),
-    #[serde(rename = "lte")]
-    LessThanOrEqual(Number),
-    #[serde(rename = "between")]
-    Between((Number, Number)),
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct OramaDate(DateTime<Utc>);
-
-impl OramaDate {
-    pub fn try_from_i64(millisec_timestamp: i64) -> Option<Self> {
-        chrono::DateTime::from_timestamp_millis(millisec_timestamp).map(OramaDate)
-    }
-    pub fn as_i64(&self) -> i64 {
-        self.0.timestamp_millis()
-    }
-}
-
-impl<'de> Deserialize<'de> for OramaDate {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        OramaDate::try_from(s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl TryFrom<String> for OramaDate {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        (&value).try_into()
-    }
-}
-
-impl TryFrom<&String> for OramaDate {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        use dateparser::parse_with_timezone;
-
-        parse_with_timezone(value.as_str(), &Utc).map(OramaDate)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum DateFilter {
-    #[serde(rename = "eq")]
-    Equal(OramaDate),
-    #[serde(rename = "gt")]
-    GreaterThan(OramaDate),
-    #[serde(rename = "gte")]
-    GreaterThanOrEqual(OramaDate),
-    #[serde(rename = "lt")]
-    LessThan(OramaDate),
-    #[serde(rename = "lte")]
-    LessThanOrEqual(OramaDate),
-    #[serde(rename = "between")]
-    Between((OramaDate, OramaDate)),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GeoSearchRadiusValue(f32);
-
-impl PartialEq for GeoSearchRadiusValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-impl Eq for GeoSearchRadiusValue {}
-
-impl GeoSearchRadiusValue {
-    pub fn to_meter(&self, in_unit: GeoSearchRadiusUnit) -> f32 {
-        match in_unit {
-            GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01, // 1 cm = 0.01 m
-            GeoSearchRadiusUnit::Meter => self.0,             // already in meters
-            GeoSearchRadiusUnit::KiloMeter => self.0 * 1000.0, // 1 km = 1000 m
-            GeoSearchRadiusUnit::Feet => self.0 * 0.3048,     // 1 ft = 0.3048 m
-            GeoSearchRadiusUnit::Yard => self.0 * 0.9144,     // 1 yd = 0.9144 m
-            GeoSearchRadiusUnit::Mile => self.0 * 1609.344,   // 1 mi = 1609.344 m
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum GeoSearchRadiusUnit {
-    #[serde(rename = "cm")]
-    CentiMeter,
-    #[serde(rename = "m")]
-    Meter,
-    #[serde(rename = "km")]
-    KiloMeter,
-    #[serde(rename = "ft")]
-    Feet,
-    #[serde(rename = "yd")]
-    Yard,
-    #[serde(rename = "mi")]
-    Mile,
-}
-impl Default for GeoSearchRadiusUnit {
-    fn default() -> Self {
-        Self::Meter
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct GeoSearchRadiusFilter {
-    pub coordinates: GeoPoint,
-    #[serde(default)]
-    pub unit: GeoSearchRadiusUnit,
-    pub value: GeoSearchRadiusValue,
-    #[serde(default = "get_true")]
-    pub inside: bool,
-}
-
-fn get_true() -> bool {
-    true
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub struct GeoSearchPolygonFilter {
-    pub coordinates: Vec<GeoPoint>,
-    #[serde(default = "get_true")]
-    pub inside: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub enum GeoSearchFilter {
-    #[serde(rename = "radius")]
-    Radius(GeoSearchRadiusFilter),
-    #[serde(rename = "polygon")]
-    Polygon(GeoSearchPolygonFilter),
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cmp::Ordering;
-
-    use super::*;
 
     #[test]
     fn test_number_eq() {
@@ -2636,92 +2856,106 @@ mod tests {
             }
         }
     }
-}
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
-pub struct IndexId(StackString<64>);
+    #[test]
+    fn test_serialize_search_params() {
+        let data: OramaDate = "2025-07-11T00:00:00Z".try_into().unwrap();
 
-impl IndexId {
-    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
-        StackString::<64>::try_new(key)
-            .map(IndexId)
-            .map_err(|e| anyhow::anyhow!("IndexId is too long. Max 64 char. {:?}", e))
-    }
+        let search_params = SearchParams {
+            boost: HashMap::from([("field_id".to_string(), 1.0)]),
+            facets: HashMap::from([
+                (
+                    "field_id1".to_string(),
+                    FacetDefinition::Bool(BoolFacetDefinition {
+                        r#true: true,
+                        r#false: false,
+                    }),
+                ),
+                (
+                    "field_id2".to_string(),
+                    FacetDefinition::Number(NumberFacetDefinition {
+                        ranges: vec![NumberFacetDefinitionRange {
+                            from: Number::I32(2),
+                            to: Number::F32(42.0),
+                        }],
+                    }),
+                ),
+                (
+                    "field_id3".to_string(),
+                    FacetDefinition::String(StringFacetDefinition),
+                ),
+            ]),
+            indexes: Some(vec![IndexId::try_new("my-index-id").unwrap()]),
+            limit: Limit(42),
+            offset: SearchOffset(42),
+            properties: Properties::None,
+            where_filter: WhereFilter {
+                filter_on_fields: vec![
+                    ("field_id1".to_string(), Filter::Bool(true)),
+                    (
+                        "field_id2".to_string(),
+                        Filter::Number(NumberFilter::Between((Number::I32(4), Number::I32(4)))),
+                    ),
+                    ("field_id3".to_string(), Filter::String("wow".to_string())),
+                    (
+                        "field_id4".to_string(),
+                        Filter::Date(DateFilter::Equal(data.clone())),
+                    ),
+                ],
+                and: None,
+                or: None,
+                not: None,
+            },
+            mode: SearchMode::Vector(VectorMode {
+                term: "the-term".to_string(),
+                similarity: Similarity(1.0),
+            }),
+        };
+        let search_params_value = serde_json::to_value(&search_params).unwrap();
 
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-impl Display for IndexId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+        let expected = json!({
+          "mode": "vector",
+          "term": "the-term",
+          "similarity": 1.0,
+          "limit": 42,
+          "offset": 42,
+          "boost": {
+            "field_id": 1.0
+          },
+          "properties": null,
+          "where": {
+            "field_id1": true,
+            "field_id2": {
+              "between": [
+                4,
+                4
+              ]
+            },
+            "field_id3": "wow",
+            "field_id4": {
+              "eq": data.0.to_rfc3339_opts(SecondsFormat::Secs, true),
+            }
+          },
+          "facets": {
+            "field_id2": {
+              "ranges": [
+                {
+                  "from": 2,
+                  "to": 42.0
+                }
+              ]
+            },
+            "field_id3": {},
+            "field_id1": {
+              "true": true,
+              "false": false
+            }
+          },
+          "indexes": [
+            "my-index-id"
+          ]
+        });
 
-#[derive(Debug, Serialize)]
-pub struct IndexFieldType {
-    pub field_id: FieldId,
-    pub field_path: String,
-    pub is_array: bool,
-    pub field_type: FieldType,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DescribeCollectionIndexResponse {
-    pub id: IndexId,
-    pub document_count: usize,
-    pub fields: Vec<IndexFieldType>,
-    pub automatically_chosen_properties: Option<HashMap<String, ChosenProperties>>,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
-pub struct StackString<const N: usize>(ArrayString<N>);
-impl<const N: usize> PartialSchema for StackString<N> {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        // TODO: put a max length
-        String::schema()
-    }
-}
-impl<const N: usize> ToSchema for StackString<N> {}
-impl<const N: usize> Serialize for StackString<N> {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        String::from_utf8_lossy(self.0.as_bytes()).serialize(serializer)
-    }
-}
-impl<'de, const N: usize> Deserialize<'de> for StackString<N> {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(StackString(ArrayString::<N>::try_from(s.as_str()).unwrap()))
-    }
-}
-impl<const N: usize> StackString<N> {
-    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
-        let key = key.as_ref();
-        if key.is_empty() {
-            bail!("StackString cannot be empty");
-        }
-
-        let mut s = ArrayString::<N>::new();
-        let r = s.try_push_str(key);
-        if let Err(e) = r {
-            bail!("Parameter is too long. Max {} char. {:?}", N, e);
-        }
-        Ok(Self(s))
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-impl<const N: usize> Display for StackString<N> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.as_str())
+        assert_eq!(search_params_value, expected);
     }
 }

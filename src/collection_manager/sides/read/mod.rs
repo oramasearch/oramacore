@@ -2,15 +2,19 @@ mod collection;
 mod collections;
 pub mod document_storage;
 mod index;
+mod logs;
 pub mod notify;
 
 use axum::extract::State;
 use futures::Stream;
+use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
+use orama_js_pool::OutputChannel;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
@@ -31,9 +35,9 @@ use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
+use crate::collection_manager::sides::read::logs::Logs;
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
 use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
-use crate::file_utils::BufferedFile;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
@@ -47,6 +51,7 @@ use crate::{
     capped_heap::CappedHeap,
     types::{CollectionId, DocumentId},
 };
+use fs::BufferedFile;
 use nlp::NLPService;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
@@ -80,6 +85,8 @@ pub enum ReadError {
     Generic(#[from] anyhow::Error),
     #[error("Not found {0}")]
     NotFound(CollectionId),
+    #[error("Hook error: {0:?}")]
+    Hook(#[from] HookReaderError),
 }
 
 pub struct ReadSide {
@@ -101,6 +108,8 @@ pub struct ReadSide {
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
+
+    logs: Logs,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -183,6 +192,9 @@ impl ReadSide {
             kv,
             llm_service,
             local_gpu_manager,
+
+            logs: Logs::new(),
+
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
         };
@@ -455,6 +467,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>, ReadError> {
         let collection = self
             .collections
@@ -478,6 +491,7 @@ impl ReadSide {
                 collection_id,
                 &search_params,
                 collection_stats,
+                log_sender,
             )
             .await?;
 
@@ -490,6 +504,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let collection = self
             .collections
@@ -513,6 +528,7 @@ impl ReadSide {
                 collection_id,
                 &search_params,
                 collection_stats,
+                log_sender,
             )
             .await
     }
@@ -682,6 +698,25 @@ impl ReadSide {
             collection_id,
         ))
     }
+
+    pub async fn get_hook_storage<'s>(
+        &'s self,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Result<HookReaderLock<'s>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        Ok(HookReaderLock { collection })
+    }
+
+    pub fn get_logs(&self) -> &Logs {
+        &self.logs
+    }
 }
 
 fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
@@ -802,7 +837,7 @@ fn start_receive_operations(
                     error!(error = ?e, "Cannot update read side");
                     e.chain()
                         .skip(1)
-                        .for_each(|cause| eprintln!("because: {}", cause));
+                        .for_each(|cause| eprintln!("because: {cause}"));
                 }
 
                 trace!("Operation applied");
@@ -859,6 +894,18 @@ struct ReadInfoV1 {
 #[derive(Deserialize, Serialize, Debug)]
 enum ReadInfo {
     V1(ReadInfoV1),
+}
+
+pub struct HookReaderLock<'guard> {
+    collection: CollectionReadLock<'guard>,
+}
+
+impl<'guard> Deref for HookReaderLock<'guard> {
+    type Target = RwLock<HookReader>;
+
+    fn deref(&self) -> &Self::Target {
+        self.collection.get_hook_storage()
+    }
 }
 
 #[cfg(test)]

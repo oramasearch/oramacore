@@ -1,5 +1,4 @@
 pub mod generic_kv;
-pub mod hooks;
 mod operation;
 pub mod read;
 pub mod segments;

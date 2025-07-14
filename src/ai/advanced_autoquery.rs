@@ -2,14 +2,16 @@ use anyhow::{Context, Result};
 use axum::extract::State;
 use futures::{future::join_all, Stream, StreamExt};
 use llm_json::repair_json;
+use orama_js_pool::{ExecOption, OutputChannel};
 use regex::Regex;
 use serde::{self, Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
+use crate::ai::run_hooks::run_before_retrieval;
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
@@ -307,7 +309,7 @@ impl AdvancedAutoQuery {
         conversation: Vec<InteractionMessage>,
     ) -> Result<Vec<SearchResult>> {
         let mapped_results = self
-            .run(read_side, read_api_key, collection_id, conversation)
+            .run(read_side, read_api_key, collection_id, conversation, None)
             .await?;
 
         // Flatten all results into a single Vec<SearchResult>
@@ -324,9 +326,16 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let mut stream = self
-            .run_stream(read_side.clone(), read_api_key, collection_id, conversation)
+            .run_stream(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                conversation,
+                log_sender,
+            )
             .await;
 
         let mut query_mapped_results = Vec::new();
@@ -339,7 +348,7 @@ impl AdvancedAutoQuery {
                 }
                 Ok(_step) => {}
                 Err(e) => {
-                    eprintln!("Error during auto-query processing: {}", e);
+                    eprintln!("Error during auto-query processing: {e}");
                     return Err(e);
                 }
             }
@@ -355,6 +364,7 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
         let (tx, rx) = mpsc::channel(100);
 
@@ -411,6 +421,7 @@ impl AdvancedAutoQuery {
                         read_api_key,
                         collection_id,
                         tracked_queries,
+                        log_sender,
                     )
                     .await?;
 
@@ -489,13 +500,13 @@ impl AdvancedAutoQuery {
                 Ok(response) => {
                     let cleaned = repair_json(&response, &Default::default())?;
                     let parsed = parse_properties_response(&cleaned).unwrap_or_else(|e| {
-                        eprintln!("Failed to parse LLM response at index {}: {}", index, e);
+                        eprintln!("Failed to parse LLM response at index {index}: {e}");
                         HashMap::new()
                     });
                     parsed_results.push(parsed);
                 }
                 Err(e) => {
-                    eprintln!("LLM call failed at index {}: {}", index, e);
+                    eprintln!("LLM call failed at index {index}: {e}");
                     parsed_results.push(HashMap::new());
                 }
             }
@@ -555,7 +566,7 @@ impl AdvancedAutoQuery {
             .enumerate()
             .map(|(index, result)| {
                 result
-                    .with_context(|| format!("LLM call failed for query {}", index))
+                    .with_context(|| format!("LLM call failed for query {index}"))
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .context("Failed to clean LLM response")?;
@@ -582,20 +593,33 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         tracked_queries: Vec<TrackedQuery>,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let search_futures = tracked_queries.iter().map(|tracked_query| {
             let read_side = read_side.clone();
-            let read_api_key = read_api_key;
-            let collection_id = collection_id;
             let tracked_query = tracked_query.clone();
+            let log_sender = log_sender.clone();
 
             async move {
+                let search_params = tracked_query.search_params.clone();
+                let hook_storage = read_side
+                    .get_hook_storage(read_api_key, collection_id)
+                    .await?;
+                let lock = hook_storage.read().await;
+                let search_params = run_before_retrieval(
+                    &lock,
+                    search_params.clone(),
+                    log_sender,
+                    ExecOption {
+                        allowed_hosts: Some(vec![]),
+                        timeout: Duration::from_millis(500),
+                    },
+                )
+                .await?;
+                drop(lock);
+
                 let search_result = read_side
-                    .search(
-                        read_api_key,
-                        collection_id,
-                        tracked_query.search_params.clone(),
-                    )
+                    .search(read_api_key, collection_id, search_params)
                     .await
                     .context("Failed to execute search")?;
 
@@ -615,7 +639,7 @@ impl AdvancedAutoQuery {
             .filter_map(|result| match result {
                 Ok(mapped_result) => Some(mapped_result),
                 Err(e) => {
-                    eprintln!("Search execution failed: {}", e);
+                    eprintln!("Search execution failed: {e}");
                     None
                 }
             })

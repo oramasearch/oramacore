@@ -67,8 +67,17 @@ async fn nlp_search(
 ) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
+    let logs = read_side.get_logs();
+    let log_sender = logs.get_sender(&collection_id);
+
     read_side
-        .nlp_search(read_side.clone(), read_api_key, collection_id, json)
+        .nlp_search(
+            read_side.clone(),
+            read_api_key,
+            collection_id,
+            json,
+            log_sender,
+        )
         .await
         .map(Json)
 }
@@ -88,9 +97,18 @@ async fn nlp_search_streamed(
     let (tx, rx) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(rx);
 
+    let logs = read_side.get_logs();
+    let log_sender = logs.get_sender(&collection_id);
+
     tokio::spawn(async move {
         match read_side
-            .nlp_search_stream(read_side.clone(), read_api_key, collection_id, json)
+            .nlp_search_stream(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                json,
+                log_sender,
+            )
             .await
         {
             Ok(mut stream) => {

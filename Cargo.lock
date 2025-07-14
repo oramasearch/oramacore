@@ -2319,6 +2319,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb540cf7bc4fe6df9d8f7f0c974cfd0dce8ed4e9e8884e73433b503ee78b4e7d"
 
 [[package]]
+name = "fs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "atomic-write-file",
+ "bincode",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "fs3"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2741,6 +2755,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
 dependencies = [
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "hook_storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fs",
+ "futures",
+ "orama-js-pool",
+ "serde",
+ "thiserror 2.0.12",
+ "tokio",
 ]
 
 [[package]]
@@ -3183,6 +3210,17 @@ name = "invocation-counter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95527be09cc8c06ee0ef1e5b23ad9064ef545ea23ff8be3bbcb59dfd8b0f9dc0"
+
+[[package]]
+name = "io-uring"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b86e202f00093dcba4275d4636b93ef9dd75d025ae560d2521b45ea28ab49013"
+dependencies = [
+ "bitflags 2.9.0",
+ "cfg-if",
+ "libc",
+]
 
 [[package]]
 name = "ipconfig"
@@ -4220,9 +4258,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orama-js-pool"
-version = "0.1.1"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c61e13eba29c646930daa9cef1ea2a52b1de5f3552d1ec8d8968fe47ed79234b"
+checksum = "2b7839d60fe3ed2111aa8fe49ce130f97cdbed798e5df6febea0c3e089e21405"
 dependencies = [
  "async-channel",
  "deno_console",
@@ -4276,11 +4314,13 @@ dependencies = [
  "fake",
  "fastembed",
  "filters",
+ "fs",
  "fs_extra",
  "fst",
  "futures",
  "glob",
  "hnsw2",
+ "hook_storage",
  "http",
  "http-body-util",
  "invocation-counter",
@@ -6929,17 +6969,19 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.44.2"
+version = "1.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6b88822cbe49de4185e3a4cbf8321dd487cf5fe0c5c65695fef6346371e9c48"
+checksum = "0cc3a2344dafbe23a245241fe8b09735b521110d30fcefbbd5feb1797ca35d17"
 dependencies = [
  "backtrace",
  "bytes",
+ "io-uring",
  "libc",
  "mio",
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
+ "slab",
  "socket2",
  "tokio-macros",
  "windows-sys 0.52.0",

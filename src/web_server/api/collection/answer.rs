@@ -2,10 +2,11 @@ use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
 use crate::types::CollectionId;
 use crate::types::{ApiKey, Interaction};
+use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -15,13 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
-
-#[derive(Serialize, Deserialize, Debug)]
-struct MessageChunk {
-    text: String,
-    is_final: bool,
-}
+use tracing::{debug, error};
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
@@ -30,6 +25,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             "/v1/collections/{collection_id}/planned_answer",
             post(planned_answer_v1),
         )
+        .route("/v1/collections/{collection_id}/logs", get(answer_logs_v1))
         .with_state(read_side)
 }
 
@@ -41,12 +37,12 @@ struct AnswerQueryParams {
 
 async fn planned_answer_v1(
     collection_id: CollectionId,
-    read_side: State<Arc<ReadSide>>,
+    State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
-    let answer = Answer::try_new(read_side.0.clone(), collection_id, query_params.api_key).await?;
+    let answer = Answer::try_new(read_side.clone(), collection_id, query_params.api_key).await?;
 
     tokio::spawn(async {
         let r = answer.planned_answer(interaction, answer_sender).await;
@@ -82,15 +78,18 @@ async fn planned_answer_v1(
 
 async fn answer_v1(
     collection_id: CollectionId,
-    read_side: State<Arc<ReadSide>>,
+    State(read_side): State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
-    let answer = Answer::try_new(read_side.0.clone(), collection_id, query.api_key).await?;
 
-    tokio::spawn(async {
-        let r = answer.answer(interaction, answer_sender).await;
+    let answer = Answer::try_new(read_side.clone(), collection_id, query.api_key).await?;
+
+    let logs = read_side.get_logs();
+    let log_sender = logs.get_sender(&collection_id);
+    tokio::spawn(async move {
+        let r = answer.answer(interaction, answer_sender, log_sender).await;
         if let Err(e) = r {
             error!(error = ?e, "Failed to run answer");
         }
@@ -118,6 +117,43 @@ async fn answer_v1(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
+    ))
+}
+
+async fn answer_logs_v1(
+    collection_id: CollectionId,
+    State(read_side): State<Arc<ReadSide>>,
+    Query(query): Query<AnswerQueryParams>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
+    read_side
+        .check_read_api_key(collection_id, query.api_key)
+        .await?;
+
+    let logs = read_side.get_logs();
+    let mut answer_receiver = logs.get_or_create_receiver(collection_id);
+    let (http_sender, http_receiver) = mpsc::channel(10);
+
+    http_sender
+        .send(Ok(Event::default().data("Connected")))
+        .await
+        .context("Cannot send data")?;
+
+    tokio::spawn(async move {
+        while let Ok(event) = answer_receiver.recv().await {
+            let ev = Event::default().data(event.1);
+            if let Err(err) = http_sender.send(Ok(ev)).await {
+                // FE is disconnected. Don't care about it.
+                debug!(error = ?err, "Cannot stream to FE");
+                break; // Clean up the pending tokio task
+            }
+        }
+    });
+
+    let rx_stream = ReceiverStream::new(http_receiver);
+    Ok(Sse::new(rx_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("# keepalive"),
     ))
 }
 
@@ -176,7 +212,7 @@ impl Serialize for AnswerEvent {
             AnswerEvent::FailedToRunRelatedQuestion(err) => {
                 s.serialize_field(
                     "message",
-                    &format!("Failed to run related questions stream, {:?}", err),
+                    &format!("Failed to run related questions stream, {err:?}"),
                 )?;
             }
             AnswerEvent::RelatedQueries(chunk) => {
@@ -190,7 +226,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToFetchRelatedQuestion(err) => {
-                s.serialize_field("message", &format!("Error during streaming, {:?}", err))?;
+                s.serialize_field("message", &format!("Error during streaming, {err:?}"))?;
             }
             AnswerEvent::OptimizeingQuery(query) => {
                 s.serialize_field(
@@ -213,7 +249,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToRunPrompt(err) => {
-                s.serialize_field("message", &format!("Failed to run prompt: {:?}", err))?;
+                s.serialize_field("message", &format!("Failed to run prompt: {err:?}"))?;
             }
             AnswerEvent::AnswerResponse(chunk) => {
                 s.serialize_field(
@@ -226,7 +262,7 @@ impl Serialize for AnswerEvent {
                 )?;
             }
             AnswerEvent::FailedToFetchAnswer(err) => {
-                s.serialize_field("message", &format!("Failed to fetch answer: {:?}", err))?;
+                s.serialize_field("message", &format!("Failed to fetch answer: {err:?}"))?;
             }
         }
 

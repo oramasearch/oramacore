@@ -39,14 +39,14 @@ impl ChosenProperties {
                         }
 
                         if self.include_keys.contains(property) {
-                            format!("{} {}", display_name, s)
+                            format!("{display_name} {s}")
                         } else {
                             s.clone()
                         }
                     }
                     Value::Number(n) => {
                         if self.include_keys.contains(property) {
-                            format!("{} {}", display_name, n)
+                            format!("{display_name} {n}")
                         } else {
                             n.to_string()
                         }
@@ -193,10 +193,8 @@ impl AutomaticEmbeddingsSelector {
             {
                 Ok(res) => res,
                 Err(err) => {
-                    let error_msg = format!(
-                        "LLM request failed (attempt {}/{}): {}",
-                        attempts, MAX_RETRIES, err
-                    );
+                    let error_msg =
+                        format!("LLM request failed (attempt {attempts}/{MAX_RETRIES}): {err}");
 
                     tracing::error!(error_msg);
                     last_error = Some(anyhow::anyhow!(error_msg));
@@ -220,8 +218,7 @@ impl AutomaticEmbeddingsSelector {
                 }
                 Err(err) => {
                     let error_msg = format!(
-                        "Failed to parse LLM response (attempt {}/{}): {}",
-                        attempts, MAX_RETRIES, err
+                        "Failed to parse LLM response (attempt {attempts}/{MAX_RETRIES}): {err}"
                     );
 
                     tracing::error!(error_msg);

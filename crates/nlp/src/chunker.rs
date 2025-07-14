@@ -3,6 +3,7 @@ use text_splitter::{Characters, ChunkConfig, MarkdownSplitter, TextSplitter};
 use tiktoken_rs::*;
 
 pub struct Chunker {
+    #[allow(dead_code)]
     max_tokens: usize,
     text_splitter: TextSplitter<CoreBPE>,
     markdown_splitter: MarkdownSplitter<Characters>,

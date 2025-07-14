@@ -1,13 +1,12 @@
 use std::{
     net::{SocketAddr, TcpListener},
     path::PathBuf,
-    str::FromStr,
     sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use anyhow::{bail, Result};
-use duration_string::DurationString;
+use axum::{response::sse::Event, Json};
 use fake::Fake;
 use fake::Faker;
 use fastembed::{
@@ -16,8 +15,13 @@ use fastembed::{
 };
 use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
+use hook_storage::HookType;
 use http::uri::Scheme;
-use tokio::time::sleep;
+use tokio::{
+    sync::{mpsc, RwLock},
+    time::sleep,
+};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
@@ -25,7 +29,6 @@ use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        hooks::{HooksRuntimeConfig, SelectEmbeddingsPropertiesHooksRuntimeConfig},
         read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
         triggers::Trigger,
         write::{
@@ -62,6 +65,7 @@ pub fn generate_new_path() -> PathBuf {
     dir
 }
 
+/*
 pub fn hooks_runtime_config() -> HooksRuntimeConfig {
     HooksRuntimeConfig {
         select_embeddings_properties: SelectEmbeddingsPropertiesHooksRuntimeConfig {
@@ -74,6 +78,7 @@ pub fn hooks_runtime_config() -> HooksRuntimeConfig {
         },
     }
 }
+*/
 
 pub fn create_oramacore_config() -> OramacoreConfig {
     OramacoreConfig {
@@ -101,7 +106,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
         writer_side: WriteSideConfig {
             master_api_key: ApiKey::try_new("my-master-api-key").unwrap(),
             output: OutputSideChannelType::InMemory { capacity: 100 },
-            hooks: hooks_runtime_config(),
+            // hooks: hooks_runtime_config(),
             config: CollectionsWriterConfig {
                 data_dir: generate_new_path(),
                 embedding_queue_limit: 50,
@@ -221,13 +226,89 @@ pub async fn create_grpc_server() -> Result<SocketAddr> {
 
     // Waiting for the server to start
     loop {
-        let c = grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{}", addr))
-            .await;
+        let c =
+            grpc_def::llm_service_client::LlmServiceClient::connect(format!("http://{addr}")).await;
         if c.is_ok() {
             break;
         }
         sleep(Duration::from_millis(100)).await;
     }
+
+    Ok(addr)
+}
+
+pub async fn create_ai_server_mock(
+    completitions_mock: Arc<RwLock<Vec<Vec<String>>>>,
+    completitions_req_mock: Arc<RwLock<Vec<serde_json::Value>>>,
+) -> Result<SocketAddr> {
+    use axum::routing::post;
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    tokio::task::spawn(async {
+        use axum::Router;
+        use std::net::*;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(|r: Json<serde_json::Value>| async move {
+                use axum::response::Sse;
+                use serde_json::json;
+
+                let mut lock = completitions_req_mock.write().await;
+                lock.push(r.0);
+                drop(lock);
+
+                let (http_sender, http_receiver) = mpsc::channel::<Result<Event, &str>>(10);
+                tokio::spawn(async move {
+                    let mut lock = completitions_mock.write().await;
+                    let first = lock.remove(0);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    let model = "gpt-3.5-turbo-0301";
+                    let id = "chatcmpl-mock";
+                    let mut idx = 0;
+                    for s in first {
+                        let chunk = json!({
+                            "id": id,
+                            "object": "chat.completion.chunk",
+                            "created": now,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "delta": { "content": s },
+                                    "index": idx,
+                                    "finish_reason": null
+                                }
+                            ]
+                        });
+                        let ev = Event::default().json_data(chunk).unwrap();
+                        http_sender.send(Ok(ev)).await.unwrap();
+                        idx += 1;
+                    }
+                    let ev = Event::default().data("[DONE]");
+                    http_sender.send(Ok(ev)).await.unwrap();
+                });
+
+                let rx_stream = ReceiverStream::new(http_receiver);
+                Sse::new(rx_stream).keep_alive(
+                    axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
+        let _ = sender.send(addr);
+
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let addr = receiver.await.unwrap();
 
     Ok(addr)
 }
@@ -305,7 +386,7 @@ where
 
 pub struct TestContext {
     pub config: OramacoreConfig,
-    reader: Arc<ReadSide>,
+    pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
     pub master_api_key: ApiKey,
 }
@@ -523,6 +604,17 @@ impl TestCollectionClient {
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
+    }
+
+    pub async fn insert_hook(&self, hook_type: HookType, code: String) -> Result<()> {
+        let hook_storage = self
+            .writer
+            .get_hooks_storage(self.write_api_key, self.collection_id)
+            .await?;
+
+        hook_storage.insert_hook(hook_type, code).await?;
+
+        Ok(())
     }
 
     pub async fn insert_trigger(

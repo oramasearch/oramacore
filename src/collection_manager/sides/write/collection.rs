@@ -2,6 +2,8 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use futures::FutureExt;
+use hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -10,17 +12,16 @@ use crate::{
     ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
     collection_manager::sides::{
         field_name_to_path,
-        hooks::HooksRuntime,
         write::{OramaModelSerializable, WriteError},
         CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
         ReplaceIndexReason, WriteOperation,
     },
-    file_utils::BufferedFile,
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
         IndexId, WriteApiKey,
     },
 };
+use fs::BufferedFile;
 
 use nlp::{locales::Locale, NLPService, TextParser};
 
@@ -43,28 +44,31 @@ pub struct CollectionWriter {
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
     op_sender: OperationSender,
-    hook_runtime: Arc<HooksRuntime>,
     nlp_service: Arc<NLPService>,
     automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 
     created_at: DateTime<Utc>,
+
+    hook: HookWriter,
 }
 
 impl CollectionWriter {
     pub fn empty(
         id: CollectionId,
+        data_dir: PathBuf,
         description: Option<String>,
         write_api_key: ApiKey,
         read_api_key: ApiKey,
         default_locale: Locale,
         embeddings_model: OramaModel,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
         nlp_service: Arc<NLPService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let a = op_sender.clone();
+
+        Ok(Self {
             id,
             description,
             write_api_key,
@@ -77,24 +81,38 @@ impl CollectionWriter {
             indexes: Default::default(),
             temp_indexes: Default::default(),
             op_sender,
-            hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
 
             created_at: Utc::now(),
-        }
+
+            hook: HookWriter::try_new(
+                data_dir.join("hooks"),
+                Box::new(move |op| {
+                    let b = a.clone();
+                    async move {
+                        let _ = b
+                            .send(WriteOperation::Collection(
+                                id,
+                                CollectionWriteOperation::Hook(op),
+                            ))
+                            .await;
+                    }
+                    .boxed()
+                }),
+            )
+            .context("Cannot create hook writer")?,
+        })
     }
 
     pub async fn try_load(
-        path: PathBuf,
-        hooks_runtime: Arc<HooksRuntime>,
+        data_dir: PathBuf,
         nlp_service: Arc<NLPService>,
         embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        hook_runtime: Arc<HooksRuntime>,
         op_sender: OperationSender,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Result<Self> {
-        let dump: CollectionDump = BufferedFile::open(path.join("info.json"))
+        let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
             .context("Cannot deserialize collection info")?;
@@ -114,11 +132,9 @@ impl CollectionWriter {
             let index = Index::try_load(
                 id,
                 index_id,
-                path.join("indexes").join(index_id.as_str()),
+                data_dir.join("indexes").join(index_id.as_str()),
                 op_sender.clone(),
-                hooks_runtime.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
@@ -129,16 +145,16 @@ impl CollectionWriter {
             let index = Index::try_load(
                 id,
                 temp_index_id,
-                path.join("temp_indexes").join(temp_index_id.as_str()),
+                data_dir.join("temp_indexes").join(temp_index_id.as_str()),
                 op_sender.clone(),
-                hooks_runtime.clone(),
                 embedding_sender.clone(),
-                hooks_runtime.clone(),
                 automatic_embeddings_selector.clone(),
             )
             .context("Cannot load index")?;
             temp_indexes.insert(temp_index_id, index);
         }
+
+        let a = op_sender.clone();
 
         Ok(Self {
             id,
@@ -153,11 +169,27 @@ impl CollectionWriter {
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
             op_sender,
-            hook_runtime,
             nlp_service,
             automatic_embeddings_selector,
 
             created_at: dump.created_at,
+
+            hook: HookWriter::try_new(
+                data_dir.join("hooks"),
+                Box::new(move |op| {
+                    let b = a.clone();
+                    async move {
+                        let _ = b
+                            .send(WriteOperation::Collection(
+                                id,
+                                CollectionWriteOperation::Hook(op),
+                            ))
+                            .await;
+                    }
+                    .boxed()
+                }),
+            )
+            .context("Cannot create hook writer")?,
         })
     }
 
@@ -232,7 +264,6 @@ impl CollectionWriter {
             self.embedding_sender.clone(),
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
-            self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
             None,
         )
@@ -307,7 +338,6 @@ impl CollectionWriter {
             self.embedding_sender.clone(),
             self.get_text_parser(default_locale),
             self.op_sender.clone(),
-            self.hook_runtime.clone(),
             self.automatic_embeddings_selector.clone(),
             Some(copy_from),
         )
@@ -554,6 +584,10 @@ impl CollectionWriter {
             .context("Cannot send operation")?;
 
         Ok(())
+    }
+
+    pub fn get_hook_storage(&self) -> &HookWriter {
+        &self.hook
     }
 }
 

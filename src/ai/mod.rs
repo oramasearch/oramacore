@@ -27,6 +27,7 @@ pub mod gpu;
 pub mod llms;
 pub mod party_planner;
 pub mod ragat;
+mod run_hooks;
 pub mod tools;
 
 tonic::include_proto!("orama_ai_service");
@@ -238,7 +239,7 @@ impl Manager for GrpcManager {
                 let channel: Channel = endpoint
                     .connect()
                     .await
-                    .with_context(move || format!("Cannot connect to {:?}", uri))
+                    .with_context(move || format!("Cannot connect to {uri:?}"))
                     .map_err(Error::transient)?;
 
                 Ok(channel)
