@@ -1,7 +1,7 @@
 use anyhow::Context;
 use futures::{Stream, TryFutureExt};
 use hook_storage::HookReaderError;
-use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError, OutputChannel};
+use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -13,6 +13,7 @@ use crate::{
         llms,
         party_planner::PartyPlanner,
         ragat::{ContextComponent, GeneralRagAtError, RAGAtParser},
+        run_hooks::run_before_retrieval,
     },
     collection_manager::sides::{
         read::{ReadError, ReadSide},
@@ -270,33 +271,16 @@ impl Answer {
                 .get_hook_storage(self.read_api_key, self.collection_id)
                 .await?;
             let lock = hook_storage.read().await;
-            let content = lock.get_hook_content(hook_storage::HookType::BeforeRetrieval)?;
-
-            let params = if let Some(code) = content {
-                let mut a: JSExecutor<SearchParams, Option<SearchParams>> = JSExecutor::try_new(
-                    code,
-                    Some(vec![]),
-                    Duration::from_millis(200),
-                    true,
-                    "beforeRetrieval".to_string(),
-                )
-                .await?;
-
-                let output: Option<SearchParams> = a
-                    .exec(
-                        params.clone(),
-                        log_sender,
-                        ExecOption {
-                            allowed_hosts: Some(vec![]),
-                            timeout: Duration::from_millis(500),
-                        },
-                    )
-                    .await?;
-
-                output.unwrap_or(params)
-            } else {
-                params
-            };
+            let params = run_before_retrieval(
+                &lock,
+                params.clone(),
+                log_sender,
+                ExecOption {
+                    allowed_hosts: Some(vec![]),
+                    timeout: Duration::from_millis(500),
+                },
+            )
+            .await?;
             drop(lock);
 
             let result = self

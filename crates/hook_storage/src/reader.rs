@@ -1,17 +1,22 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use fs::*;
+use orama_js_pool::{
+    ExecOption, JSExecutor, JSRunnerError, OutputChannel, TryIntoFunctionParameters,
+};
 use thiserror::Error;
 
 use crate::{HookOperation, HookType};
 
 #[derive(Error, Debug)]
 pub enum HookReaderError {
-    #[error("")]
+    #[error("Io error {0:?}")]
     Io(std::io::Error),
-    #[error("")]
+    #[error("generic {0:?}")]
     Generic(#[from] anyhow::Error),
+    #[error("generic {0:?}")]
+    JSError(#[from] JSRunnerError),
 }
 
 pub struct HookReader {

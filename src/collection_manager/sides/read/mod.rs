@@ -2,6 +2,7 @@ mod collection;
 mod collections;
 pub mod document_storage;
 mod index;
+mod logs;
 pub mod notify;
 
 use axum::extract::State;
@@ -12,6 +13,7 @@ pub use index::*;
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;
 use notify::NotifierConfig;
+use orama_js_pool::OutputChannel;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +35,7 @@ use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
+use crate::collection_manager::sides::read::logs::Logs;
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
 use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
 use crate::metrics::operations::OPERATION_COUNT;
@@ -105,6 +108,8 @@ pub struct ReadSide {
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
+
+    logs: Logs,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -187,6 +192,9 @@ impl ReadSide {
             kv,
             llm_service,
             local_gpu_manager,
+
+            logs: Logs::new(),
+
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
         };
@@ -459,6 +467,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>, ReadError> {
         let collection = self
             .collections
@@ -482,6 +491,7 @@ impl ReadSide {
                 collection_id,
                 &search_params,
                 collection_stats,
+                log_sender,
             )
             .await?;
 
@@ -494,6 +504,7 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: NLPSearchRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<impl Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let collection = self
             .collections
@@ -517,6 +528,7 @@ impl ReadSide {
                 collection_id,
                 &search_params,
                 collection_stats,
+                log_sender,
             )
             .await
     }
@@ -700,6 +712,10 @@ impl ReadSide {
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         Ok(HookReaderLock { collection })
+    }
+
+    pub fn get_logs(&self) -> &Logs {
+        &self.logs
     }
 }
 

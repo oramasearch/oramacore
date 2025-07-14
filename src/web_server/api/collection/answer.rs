@@ -3,43 +3,22 @@ use crate::collection_manager::sides::read::ReadSide;
 use crate::types::CollectionId;
 use crate::types::{ApiKey, Interaction};
 use anyhow::Context;
-use axum::extract::{FromRef, Query};
+use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
-use orama_js_pool::OutputChannel;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
-
-#[derive(Clone)]
-struct AnswerReadSide {
-    read_side: Arc<ReadSide>,
-    channels: Arc<RwLock<HashMap<CollectionId, Arc<broadcast::Sender<(OutputChannel, String)>>>>>,
-}
-
-impl FromRef<AnswerReadSide> for Arc<ReadSide> {
-    fn from_ref(app_state: &AnswerReadSide) -> Arc<ReadSide> {
-        app_state.read_side.clone()
-    }
-}
+use tracing::{debug, error};
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
-    let answer_read_side = AnswerReadSide {
-        read_side,
-        channels: Arc::new(RwLock::new(HashMap::new())),
-    };
-
     Router::new()
         .route("/v1/collections/{collection_id}/answer", post(answer_v1))
         .route(
@@ -50,7 +29,7 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             "/v1/collections/{collection_id}/answer-logs",
             get(answer_logs_v1),
         )
-        .with_state(answer_read_side)
+        .with_state(read_side)
 }
 
 #[derive(Deserialize)]
@@ -61,12 +40,12 @@ struct AnswerQueryParams {
 
 async fn planned_answer_v1(
     collection_id: CollectionId,
-    read_side: State<Arc<ReadSide>>,
+    State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
-    let answer = Answer::try_new(read_side.0.clone(), collection_id, query_params.api_key).await?;
+    let answer = Answer::try_new(read_side.clone(), collection_id, query_params.api_key).await?;
 
     tokio::spawn(async {
         let r = answer.planned_answer(interaction, answer_sender).await;
@@ -102,25 +81,21 @@ async fn planned_answer_v1(
 
 async fn answer_v1(
     collection_id: CollectionId,
-    answer_read_side: State<AnswerReadSide>,
+    State(read_side): State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
     Json(interaction): Json<Interaction>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
-    let read_side = answer_read_side.read_side.clone();
     let (answer_sender, mut answer_receiver) = mpsc::unbounded_channel();
 
-    let answer = Answer::try_new(read_side, collection_id, query.api_key).await?;
+    let answer = Answer::try_new(read_side.clone(), collection_id, query.api_key).await?;
 
-    let channels = answer_read_side.channels.clone();
+    let logs = read_side.get_logs();
+    let log_sender = logs.get_sender(&collection_id);
     tokio::spawn(async move {
-        let lock = channels.read().await;
-        let log_sender = lock.get(&collection_id);
-        let log_sender = log_sender.cloned();
         let r = answer.answer(interaction, answer_sender, log_sender).await;
         if let Err(e) = r {
             error!(error = ?e, "Failed to run answer");
         }
-        drop(lock);
     });
 
     let (http_sender, http_receiver) = mpsc::channel(10);
@@ -150,25 +125,15 @@ async fn answer_v1(
 
 async fn answer_logs_v1(
     collection_id: CollectionId,
-    answer_read_side: State<AnswerReadSide>,
+    State(read_side): State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AnswerError> {
-    answer_read_side
-        .read_side
+    read_side
         .check_read_api_key(collection_id, query.api_key)
         .await?;
 
-    let mut lock = answer_read_side.channels.write().await;
-    let mut answer_receiver = match lock.entry(collection_id) {
-        Entry::Vacant(a) => {
-            let (answer_sender, answer_receiver) = broadcast::channel(100);
-            a.insert(Arc::new(answer_sender));
-            answer_receiver
-        }
-        Entry::Occupied(o) => o.get().subscribe(),
-    };
-    drop(lock);
-
+    let logs = read_side.get_logs();
+    let mut answer_receiver = logs.get_or_create_receiver(collection_id);
     let (http_sender, http_receiver) = mpsc::channel(10);
 
     http_sender
@@ -180,7 +145,9 @@ async fn answer_logs_v1(
         while let Ok(event) = answer_receiver.recv().await {
             let ev = Event::default().data(event.1);
             if let Err(err) = http_sender.send(Ok(ev)).await {
-                error!(error = ?err, "Cannot stream to FE");
+                // FE is disconnected. Don't care about it.
+                debug!(error = ?err, "Cannot stream to FE");
+                break; // Clean up the pending tokio task
             }
         }
     });

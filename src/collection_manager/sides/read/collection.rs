@@ -12,6 +12,7 @@ use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use hook_storage::{HookReader, HookType};
+use orama_js_pool::OutputChannel;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
@@ -356,6 +357,7 @@ impl CollectionReader {
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
@@ -368,7 +370,13 @@ impl CollectionReader {
         }];
 
         let search_results = advanced_autoquery
-            .run(read_side.clone(), read_api_key, collection_id, conversation)
+            .run(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                conversation,
+                log_sender,
+            )
             .await?;
 
         Ok(search_results)
@@ -381,6 +389,7 @@ impl CollectionReader {
         collection_id: CollectionId,
         search_params: &NLPSearchRequest,
         collection_stats: CollectionStats,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
         let llm_service = self.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
@@ -393,7 +402,13 @@ impl CollectionReader {
         }];
 
         Ok(advanced_autoquery
-            .run_stream(read_side.clone(), read_api_key, collection_id, conversation)
+            .run_stream(
+                read_side.clone(),
+                read_api_key,
+                collection_id,
+                conversation,
+                log_sender,
+            )
             .await)
     }
 
