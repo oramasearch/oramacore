@@ -180,8 +180,9 @@ mod tests {
 
         // Initially, no hook file should exist
         let hooks = writer.list_hooks().expect("list_hooks failed");
-        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks.len(), 2);
         assert!(hooks[0].1.is_none());
+        assert!(hooks[1].1.is_none());
 
         // Insert a hook
         let code = r#"
@@ -196,8 +197,9 @@ export default { beforeRetrieval }
 
         // list_hooks should return the code
         let hooks = writer.list_hooks().expect("list_hooks failed");
-        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks.len(), 2);
         assert_eq!(hooks[0].1.as_deref(), Some(code.as_str()));
+        assert!(hooks[1].1.is_none());
 
         // Delete the hook
         writer
@@ -207,8 +209,9 @@ export default { beforeRetrieval }
 
         // list_hooks should return None for content
         let hooks = writer.list_hooks().expect("list_hooks failed");
-        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks.len(), 2);
         assert!(hooks[0].1.is_none());
+        assert!(hooks[1].1.is_none());
 
         // Assert closure invocations at the end
         let ops = ops.read().unwrap();
@@ -223,7 +226,7 @@ export default { beforeRetrieval }
     }
 
     #[tokio::test]
-    async fn test_hook_writer_error() {
+    async fn test_hook_writer_errors() {
         let base_dir = generate_new_path();
 
         let dummy_f = Box::new(move |_: HookOperation| async move {}.boxed());
