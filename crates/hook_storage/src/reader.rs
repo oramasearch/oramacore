@@ -1,10 +1,8 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use fs::*;
-use orama_js_pool::{
-    ExecOption, JSExecutor, JSRunnerError, OutputChannel, TryIntoFunctionParameters,
-};
+use orama_js_pool::JSRunnerError;
 use thiserror::Error;
 
 use crate::{HookOperation, HookType};
@@ -26,6 +24,7 @@ pub struct HookReader {
 
 struct Status {
     before_retrieval: (Option<String>, bool),
+    before_answer: (Option<String>, bool),
 }
 
 impl Status {
@@ -35,8 +34,14 @@ impl Status {
                 HookOperation::Insert(HookType::BeforeRetrieval, code) => {
                     self.before_retrieval = (Some(code.clone()), true);
                 }
+                HookOperation::Insert(HookType::BeforeAnswer, code) => {
+                    self.before_answer = (Some(code.clone()), true);
+                }
                 HookOperation::Delete(HookType::BeforeRetrieval) => {
                     self.before_retrieval = (None, true);
+                }
+                HookOperation::Delete(HookType::BeforeAnswer) => {
+                    self.before_answer = (None, true);
                 }
             }
         }
@@ -61,6 +66,7 @@ impl HookReader {
     pub fn commit(&mut self) -> Result<(), HookReaderError> {
         let mut status = Status {
             before_retrieval: (None, false),
+            before_answer: (None, false),
         };
 
         status.apply_operations(&self.pending_operations);
@@ -103,6 +109,7 @@ impl HookReader {
     pub fn list(&self) -> Result<Vec<(HookType, Option<String>)>, HookReaderError> {
         let mut status = Status {
             before_retrieval: (None, false),
+            before_answer: (None, false),
         };
         status.apply_operations(&self.pending_operations);
 
@@ -126,6 +133,24 @@ impl HookReader {
             result.push((HookType::BeforeRetrieval, content));
         } else {
             result.push((HookType::BeforeRetrieval, status.before_retrieval.0));
+        }
+
+        if !status.before_answer.1 {
+            // if not touched
+            let file_path = self.data_dir.join(HookType::BeforeAnswer.get_file_name());
+            let content = if BufferedFile::exists_as_file(&file_path) {
+                let content = BufferedFile::open(file_path)
+                    .context("Cannot open file")?
+                    .read_text_data()
+                    .context("Cannot write code to file")?;
+                Some(content)
+            } else {
+                None
+            };
+
+            result.push((HookType::BeforeAnswer, content));
+        } else {
+            result.push((HookType::BeforeAnswer, status.before_answer.0));
         }
 
         Ok(result)

@@ -3,18 +3,21 @@ use serde::{Deserialize, Serialize};
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone, Copy, Hash)]
 pub enum HookType {
     BeforeRetrieval,
+    BeforeAnswer,
 }
 
 impl HookType {
     fn get_file_name(&self) -> &'static str {
         match self {
             Self::BeforeRetrieval => "before_retrieval",
+            Self::BeforeAnswer => "before_answer",
         }
     }
 
     pub fn get_function_name(&self) -> &'static str {
         match self {
             Self::BeforeRetrieval => "beforeRetrieval",
+            Self::BeforeAnswer => "beforeAnswer",
         }
     }
 }

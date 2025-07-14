@@ -30,6 +30,7 @@ pub type HookOperationCallback =
 pub struct HookWriter {
     base_dir: PathBuf,
     before_retrieval_presence: AtomicBool,
+    before_answer_presence: AtomicBool,
     f: HookOperationCallback,
 }
 
@@ -40,9 +41,13 @@ impl HookWriter {
         let before_retrieval_file = base_dir.join(HookType::BeforeRetrieval.get_file_name());
         let before_retrieval_presence = BufferedFile::exists_as_file(&before_retrieval_file);
 
+        let before_answer_file = base_dir.join(HookType::BeforeAnswer.get_file_name());
+        let before_answer_presence = BufferedFile::exists_as_file(&before_answer_file);
+
         Ok(Self {
             base_dir,
             before_retrieval_presence: AtomicBool::new(before_retrieval_presence),
+            before_answer_presence: AtomicBool::new(before_answer_presence),
             f,
         })
     }
@@ -94,6 +99,9 @@ impl HookWriter {
                 self.before_retrieval_presence
                     .store(true, Ordering::Relaxed);
             }
+            HookType::BeforeAnswer => {
+                self.before_answer_presence.store(true, Ordering::Relaxed);
+            }
         };
         let path = self.base_dir.join(hook_type.get_file_name());
         BufferedFile::create_or_overwrite(path)?.write_text_data(&code)?;
@@ -111,6 +119,9 @@ impl HookWriter {
                     self.before_retrieval_presence
                         .store(false, Ordering::Relaxed);
                 }
+                HookType::BeforeAnswer => {
+                    self.before_answer_presence.store(false, Ordering::Relaxed);
+                }
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // File does not exist, treat as success
@@ -126,14 +137,19 @@ impl HookWriter {
     pub fn list_hooks(&self) -> Result<Vec<(HookType, Option<String>)>, HookWriterError> {
         // For each HookType variant, check if the corresponding file exists
         // Currently only BeforeRetrieval exists, but this is future-proofed
-        let hook_type = HookType::BeforeRetrieval;
-        let path = self.base_dir.join(hook_type.get_file_name());
+        let types = vec![HookType::BeforeRetrieval, HookType::BeforeAnswer];
 
-        let before_retrieval_content = BufferedFile::open(path)
-            .and_then(|f| f.read_text_data())
-            .ok();
+        let mut ret = Vec::with_capacity(types.len());
+        for hook_type in types {
+            let path = self.base_dir.join(hook_type.get_file_name());
 
-        Ok(vec![(HookType::BeforeRetrieval, before_retrieval_content)])
+            let content = BufferedFile::open(path)
+                .and_then(|f| f.read_text_data())
+                .ok();
+            ret.push((hook_type, content));
+        }
+
+        Ok(ret)
     }
 }
 

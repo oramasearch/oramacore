@@ -13,7 +13,7 @@ use crate::{
         llms,
         party_planner::PartyPlanner,
         ragat::{ContextComponent, GeneralRagAtError, RAGAtParser},
-        run_hooks::run_before_retrieval,
+        run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
         read::{ReadError, ReadSide},
@@ -274,7 +274,7 @@ impl Answer {
             let params = run_before_retrieval(
                 &lock,
                 params.clone(),
-                log_sender,
+                log_sender.clone(),
                 ExecOption {
                     allowed_hosts: Some(vec![]),
                     timeout: Duration::from_millis(500),
@@ -303,6 +303,23 @@ impl Answer {
         if let Some(full_trigger) = trigger {
             variables.push(("trigger".to_string(), full_trigger.response));
         }
+
+        let hook_storage = self
+            .read_side
+            .get_hook_storage(self.read_api_key, self.collection_id)
+            .await?;
+        let lock = hook_storage.read().await;
+        let (variables, system_prompt) = run_before_answer(
+            &lock,
+            (variables, system_prompt),
+            log_sender,
+            ExecOption {
+                allowed_hosts: Some(vec![]),
+                timeout: Duration::from_millis(500),
+            },
+        )
+        .await?;
+        drop(lock);
 
         let answer_stream = llm_service
             .run_known_prompt_stream(
