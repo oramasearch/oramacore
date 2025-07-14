@@ -88,8 +88,8 @@ impl CollectionReader {
         nlp_service: Arc<NLPService>,
         llm_service: Arc<LLMService>,
         notifier: Option<Arc<Notifier>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             id,
             description,
             default_locale,
@@ -105,7 +105,7 @@ impl CollectionReader {
             temp_indexes: Default::default(),
             notifier,
 
-            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks")).unwrap()),
+            hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
 
             created_at: Utc::now(),
             updated_at: RwLock::new(Utc::now()),
@@ -113,7 +113,7 @@ impl CollectionReader {
             document_count_estimation: AtomicU64::new(0),
 
             data_dir,
-        }
+        })
     }
 
     pub fn try_load(

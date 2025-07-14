@@ -230,7 +230,7 @@ impl CollectionsReader {
             self.nlp_service.clone(),
             self.llm_service.clone(),
             self.notifier.clone(),
-        );
+        )?;
 
         let mut guard = self.collections.write().await;
 

@@ -148,7 +148,7 @@ impl CollectionsWriter {
             self.op_sender.clone(),
             self.nlp_service.clone(),
             self.automatic_embeddings_selector.clone(),
-        );
+        )?;
 
         let mut collections = self.collections.write().await;
 

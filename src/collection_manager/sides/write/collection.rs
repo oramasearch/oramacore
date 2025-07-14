@@ -65,10 +65,10 @@ impl CollectionWriter {
         op_sender: OperationSender,
         nlp_service: Arc<NLPService>,
         automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-    ) -> Self {
+    ) -> Result<Self> {
         let a = op_sender.clone();
 
-        Self {
+        Ok(Self {
             id,
             description,
             write_api_key,
@@ -101,8 +101,8 @@ impl CollectionWriter {
                     .boxed()
                 }),
             )
-            .unwrap(),
-        }
+            .context("Cannot create hook writer")?,
+        })
     }
 
     pub async fn try_load(
@@ -189,7 +189,7 @@ impl CollectionWriter {
                     .boxed()
                 }),
             )
-            .unwrap(),
+            .context("Cannot create hook writer")?,
         })
     }
 
