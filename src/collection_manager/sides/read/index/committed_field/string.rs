@@ -239,15 +239,16 @@ impl CommittedStringField {
         &self,
         context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
     ) -> Result<()> {
         if context.tokens.is_empty() {
             return Ok(());
         }
 
         if context.tokens.len() == 1 {
-            self.search_without_phrase_match(context, scorer)
+            self.search_without_phrase_match(context, scorer, tolerance)
         } else {
-            self.search_with_phrase_match(context, scorer)
+            self.search_with_phrase_match(context, scorer, tolerance)
         }
     }
 
@@ -255,6 +256,7 @@ impl CommittedStringField {
         &self,
         context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;
         let total_documents_with_field = context.global_info.total_documents as f32;
@@ -270,7 +272,9 @@ impl CommittedStringField {
                     Box::new(std::iter::empty())
                 }
             } else {
-                Box::new(self.index.search(token))
+                self.index
+                    .search(token, tolerance)
+                    .context("Cannot search in index")?
             };
 
             let matches = iter
@@ -340,6 +344,7 @@ impl CommittedStringField {
         &self,
         context: &mut FullTextSearchContext<'_, '_>,
         scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
     ) -> Result<()> {
         let total_field_length = context.global_info.total_document_length as f32;
         let total_documents_with_field = context.global_info.total_documents as f32;
@@ -362,7 +367,9 @@ impl CommittedStringField {
                     Box::new(std::iter::empty())
                 }
             } else {
-                Box::new(self.index.search(token))
+                self.index
+                    .search(token, tolerance)
+                    .context("Cannot search in index")?
             };
 
             let iter = iter

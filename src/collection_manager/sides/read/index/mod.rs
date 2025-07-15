@@ -304,6 +304,7 @@ impl Index {
                 "",
                 None,
                 false,
+                None,
                 properties,
                 Default::default(),
                 None,
@@ -967,12 +968,14 @@ impl Index {
                         term: mode_result.term.clone(),
                         threshold: None,
                         exact: false,
+                        tolerance: None,
                     }),
                     "hybrid" => SearchMode::Hybrid(HybridMode {
                         term: mode_result.term.clone(),
                         similarity: Similarity(0.8),
                         threshold: None,
                         exact: false,
+                        tolerance: None,
                     }),
                     "vector" => SearchMode::Vector(VectorMode {
                         term: mode_result.term.clone(),
@@ -996,6 +999,7 @@ impl Index {
                         &search_mode.term,
                         search_mode.threshold,
                         search_mode.exact,
+                        search_mode.tolerance,
                         properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -1037,6 +1041,7 @@ impl Index {
                         &search_mode.term,
                         search_mode.threshold,
                         search_mode.exact,
+                        search_mode.tolerance,
                         string_properties,
                         boost,
                         filtered_doc_ids.as_ref(),
@@ -1782,6 +1787,7 @@ impl Index {
         term: &str,
         threshold: Option<Threshold>,
         exact: bool,
+        tolerance: Option<u8>,
         properties: Vec<FieldId>,
         boost: HashMap<FieldId, f32>,
         filtered_doc_ids: Option<&FilterResult<DocumentId>>,
@@ -1849,7 +1855,7 @@ impl Index {
             if let Some(committed) = committed {
                 scorer.reset_term();
                 committed
-                    .search(&mut context, &mut scorer)
+                    .search(&mut context, &mut scorer, tolerance)
                     .context("Cannot perform search")?;
             }
         }

@@ -1,7 +1,10 @@
 use std::{fmt::Debug, fs::File, path::PathBuf};
 
 use anyhow::{Context, Result};
-use fst::{automaton::StartsWith, Automaton, IntoStreamer, Map, MapBuilder, Streamer};
+use fst::{
+    automaton::{Levenshtein, StartsWith},
+    Automaton, IntoStreamer, Map, MapBuilder, Streamer,
+};
 use memmap::Mmap;
 
 use fs::BufferedFile;
@@ -68,16 +71,31 @@ impl FSTIndex {
         self.file_path.clone()
     }
 
-    pub fn search<'s, 'input>(&'s self, token: &'input str) -> FTSIter<'s, 'input>
+    pub fn search<'s, 'input>(
+        &'s self,
+        token: &'input str,
+        tolerance: Option<u8>,
+    ) -> Result<Box<dyn Iterator<Item = u64> + 's>>
     where
         'input: 's,
     {
-        let automaton = fst::automaton::Str::new(token).starts_with();
-        let stream: fst::map::Stream<'_, StartsWith<fst::automaton::Str<'_>>> =
-            self.inner.search(automaton).into_stream();
+        if let Some(tolerance) = tolerance {
+            let automaton = fst::automaton::Levenshtein::new(token, u32::from(tolerance))
+                .context("Cannot create Levenshtein automaton")?;
+            let stream: fst::map::Stream<'_, Levenshtein> =
+                self.inner.search(automaton).into_stream();
 
-        FTSIter {
-            stream: Some(stream),
+            Ok(Box::new(FTSLevenshteinIter {
+                stream: Some(stream),
+            }))
+        } else {
+            let automaton = fst::automaton::Str::new(token).starts_with();
+            let stream: fst::map::Stream<'_, StartsWith<fst::automaton::Str<'_>>> =
+                self.inner.search(automaton).into_stream();
+
+            Ok(Box::new(FTSIter {
+                stream: Some(stream),
+            }))
         }
     }
 
@@ -110,8 +128,21 @@ pub struct FTSIter<'stream, 'input> {
     stream: Option<fst::map::Stream<'stream, StartsWith<fst::automaton::Str<'input>>>>,
 }
 impl Iterator for FTSIter<'_, '_> {
-    // The Item allocate memory, but we could avoid it by using a reference
-    // TODO: resolve lifetime issue with reference here
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let stream = match &mut self.stream {
+            Some(stream) => stream,
+            None => return None,
+        };
+        stream.next().map(|(_, value)| value)
+    }
+}
+
+pub struct FTSLevenshteinIter<'stream> {
+    stream: Option<fst::map::Stream<'stream, fst::automaton::Levenshtein>>,
+}
+impl Iterator for FTSLevenshteinIter<'_> {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -161,7 +192,10 @@ mod tests {
         test(&paged_index)?;
 
         fn test(paged_index: &FSTIndex) -> Result<()> {
-            assert_eq!(paged_index.search("f").collect::<Vec<_>>(), vec![2, 1]);
+            assert_eq!(
+                paged_index.search("f", None).unwrap().collect::<Vec<_>>(),
+                vec![2, 1]
+            );
             Ok(())
         }
 
@@ -197,6 +231,33 @@ mod tests {
 
         let output = paged_index.search_exact("foof");
         assert_eq!(output, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fst_index_tolerance() -> Result<()> {
+        let data = vec![
+            ("first".as_bytes(), 1),
+            ("main".as_bytes(), 2),
+            ("street".as_bytes(), 3),
+        ];
+        let data_dir = generate_new_path();
+        let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
+
+        // No tolerance
+        let output: Vec<u64> = paged_index.search("firt", Some(0))?.collect();
+        assert_eq!(output, Vec::<u64>::new());
+        // No tolerance
+        let output: Vec<u64> = paged_index.search("firt", None)?.collect();
+        assert_eq!(output, Vec::<u64>::new());
+
+        // With tolerance 1
+        let output: Vec<_> = paged_index.search("firt", Some(1))?.collect();
+        assert_eq!(output, vec![1]);
+
+        let output: Vec<_> = paged_index.search("firsta", Some(1))?.collect();
+        assert_eq!(output, vec![1]);
 
         Ok(())
     }
