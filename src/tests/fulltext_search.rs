@@ -949,3 +949,68 @@ async fn test_fulltext_empty_term() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_tolerance() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+    let docs = vec![
+        json!({
+            "id": "1",
+            "text": "Main Street"
+        }),
+        json!({
+            "id": "2",
+            "text": "Maple Avenue",
+        }),
+        json!({
+            "id": "3",
+            "text": "Another Street",
+        }),
+    ];
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Mxin",
+                "tolerance": 1,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(
+        output.hits[0].document.as_ref().unwrap().get("id").unwrap(),
+        "1"
+    );
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "Msple",
+                "tolerance": 1,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.hits.len(), 1);
+    assert_eq!(
+        output.hits[0].document.as_ref().unwrap().get("id").unwrap(),
+        "2"
+    );
+
+    drop(test_context);
+}

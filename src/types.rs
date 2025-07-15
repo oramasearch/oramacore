@@ -815,6 +815,7 @@ pub struct FulltextMode {
     pub term: String,
     pub threshold: Option<Threshold>,
     pub exact: bool,
+    pub tolerance: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -879,6 +880,7 @@ pub struct HybridMode {
     pub similarity: Similarity,
     pub threshold: Option<Threshold>,
     pub exact: bool,
+    pub tolerance: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -917,6 +919,7 @@ impl<'de> Deserialize<'de> for SearchMode {
             similarity: Option<Similarity>,
             threshold: Option<Threshold>,
             exact: Option<bool>,
+            tolerance: Option<u8>,
         }
 
         let mode = match HiddenSearchMode::deserialize(deserializer) {
@@ -931,6 +934,7 @@ impl<'de> Deserialize<'de> for SearchMode {
                 term: mode.term,
                 threshold: mode.threshold,
                 exact: mode.exact.unwrap_or(false),
+                tolerance: mode.tolerance,
             })),
             "vector" => Ok(SearchMode::Vector(VectorMode {
                 term: mode.term,
@@ -941,11 +945,13 @@ impl<'de> Deserialize<'de> for SearchMode {
                 similarity: mode.similarity.unwrap_or_default(),
                 threshold: mode.threshold,
                 exact: mode.exact.unwrap_or(false),
+                tolerance: mode.tolerance,
             })),
             "default" => Ok(SearchMode::Default(FulltextMode {
                 term: mode.term,
                 threshold: mode.threshold,
                 exact: mode.exact.unwrap_or(false),
+                tolerance: mode.tolerance,
             })),
             "auto" => Ok(SearchMode::Auto(AutoMode { term: mode.term })),
             m => Err(serde::de::Error::custom(format!(
@@ -966,6 +972,7 @@ impl Serialize for SearchMode {
                 term,
                 threshold,
                 exact,
+                tolerance,
             }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "fulltext")?;
@@ -975,6 +982,9 @@ impl Serialize for SearchMode {
                 }
                 if *exact {
                     map.serialize_entry("exact", exact)?;
+                }
+                if let Some(tolerance) = tolerance {
+                    map.serialize_entry("tolerance", tolerance)?;
                 }
                 map
             }
@@ -992,6 +1002,7 @@ impl Serialize for SearchMode {
                 similarity,
                 threshold,
                 exact,
+                tolerance,
             }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "hybrid")?;
@@ -1005,6 +1016,9 @@ impl Serialize for SearchMode {
                 if *exact {
                     map.serialize_entry("exact", exact)?;
                 }
+                if let Some(tolerance) = tolerance {
+                    map.serialize_entry("tolerance", tolerance)?;
+                }
                 map
             }
             SearchMode::Auto(AutoMode { term }) => {
@@ -1017,6 +1031,7 @@ impl Serialize for SearchMode {
                 term,
                 threshold,
                 exact,
+                tolerance,
             }) => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("mode", "default")?;
@@ -1026,6 +1041,9 @@ impl Serialize for SearchMode {
                 }
                 if *exact {
                     map.serialize_entry("exact", exact)?;
+                }
+                if let Some(tolerance) = tolerance {
+                    map.serialize_entry("tolerance", tolerance)?;
                 }
                 map
             }
@@ -1040,6 +1058,7 @@ impl Default for SearchMode {
             term: "".to_string(),
             threshold: None,
             exact: false,
+            tolerance: None,
         })
     }
 }
@@ -1061,6 +1080,7 @@ impl SearchMode {
                 term,
                 threshold: None,
                 exact: false,
+                tolerance: None,
             }),
             "vector" => SearchMode::Vector(VectorMode {
                 similarity: Similarity(0.8),
@@ -1071,12 +1091,14 @@ impl SearchMode {
                 term,
                 threshold: None,
                 exact: false,
+                tolerance: None,
             }),
             "auto" => SearchMode::Auto(AutoMode { term }),
             _ => SearchMode::Default(FulltextMode {
                 term,
                 threshold: None,
                 exact: false,
+                tolerance: None,
             }),
         }
     }
