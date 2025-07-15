@@ -107,8 +107,6 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
     where
         T: num_traits::Float,
     {
-        println!("insert {:?}", point.coords);
-
         const LEAF_SIZE: usize = 16;
         match self {
             BKDTree::Leaf(ref mut points) => {

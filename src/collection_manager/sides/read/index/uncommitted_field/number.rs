@@ -52,7 +52,7 @@ impl UncommittedNumberField {
         inner_filter(&self.inner, filter_number)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (Number, HashSet<DocumentId>)> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Number, HashSet<DocumentId>)> + '_ {
         self.inner
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))

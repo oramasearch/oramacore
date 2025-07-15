@@ -51,7 +51,7 @@ impl UncommittedDateFilterField {
         inner_filter(&self.inner, filter_date)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (i64, HashSet<DocumentId>)> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.inner
             .iter()
             .map(|(number, doc_ids)| (*number, doc_ids.clone()))

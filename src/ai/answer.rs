@@ -269,6 +269,7 @@ impl Answer {
                 facets: HashMap::new(),
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
+                sort_by: None,
             };
 
             let hook_storage = self
@@ -515,6 +516,7 @@ impl Answer {
                     facets: HashMap::new(),
                     properties: Properties::Star,
                     indexes: Some(index_ids),
+                    sort_by: None,
                 },
             )
             .map_err(|_| GeneralRagAtError::ReadError)
