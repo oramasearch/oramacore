@@ -109,6 +109,113 @@ async fn tests_sort_on_number() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn tests_sort_on_date() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    index_client
+        .insert_documents(
+            json!([
+                {
+                    "id": "1",
+                    "name": "Tommaso",
+                    // The date is not correct, otherwise we leak personal data
+                    "birthday": "1990-01-01T00:00:00Z",
+                },
+                {
+                    "id": "2",
+                    "name": "Michele",
+                    // The date is not correct, otherwise we leak personal data
+                    "birthday": "1994-01-01T00:00:00Z",
+                }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "sortBy": {
+                    "property": "birthday",
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.hits.len(), 2);
+    assert_eq!(
+        output.hits[0].id,
+        format!("{}:{}", index_client.index_id, "1")
+    );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:{}", index_client.index_id, "2")
+    );
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "sortBy": {
+                    "property": "birthday",
+                    "order": "ASC"
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.hits.len(), 2);
+    assert_eq!(
+        output.hits[0].id,
+        format!("{}:{}", index_client.index_id, "1")
+    );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:{}", index_client.index_id, "2")
+    );
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "sortBy": {
+                    "property": "birthday",
+                    "order": "DESC"
+                },
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.hits.len(), 2);
+    assert_eq!(
+        output.hits[0].id,
+        format!("{}:{}", index_client.index_id, "2")
+    );
+    assert_eq!(
+        output.hits[1].id,
+        format!("{}:{}", index_client.index_id, "1")
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn tests_sort_on_unknown_field() {
     init_log();
 

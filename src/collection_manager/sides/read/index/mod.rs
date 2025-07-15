@@ -945,14 +945,11 @@ impl Index {
                 field_name
             ));
         };
+        let (uncommitted_lock, committed_lock) =
+            join!(self.uncommitted_fields.read(), self.committed_fields.read(),);
 
-        match &field_type {
+        let sorted_stream: Box<dyn Iterator<Item = DocumentId>> = match &field_type {
             FieldType::Number => {
-                let (uncommitted_lock, committed_lock) = join!(
-                    self.uncommitted_fields.read(),
-                    self.committed_fields.read(),
-                );
-
                 let Some(field) = uncommitted_lock.number_fields.get(&field_id) else {
                     return Err(anyhow::anyhow!(
                         "Field {} is not a number field",
@@ -979,30 +976,59 @@ impl Index {
                 } else {
                     Box::new(std::iter::empty())
                 };
-                let iter = SortIterator::new(iter1, iter2, order);
-
-                let mut ret = Vec::with_capacity(size);
-                for doc in iter {
-                    // Reach the end
-                    if ret.len() >= size {
-                        break;
-                    }
-                    if scores.contains_key(&doc) {
-                        ret.push(TokenScore {
-                            document_id: doc,
-                            score: scores[&doc],
-                        });
-                    }
-                }
-
-                Ok(ret)
+                Box::new(SortIterator::new(iter1, iter2, order))
             },
-            // FieldType::Date => {},
-            _ => Err(anyhow::anyhow!(
+            FieldType::Date => {
+                let Some(field) = uncommitted_lock.date_fields.get(&field_id) else {
+                    return Err(anyhow::anyhow!(
+                        "Field {} is not a number field",
+                        field_name
+                    ));
+                };
+
+                let iter1 = field.iter();
+                let iter1: Box<dyn Iterator<Item = (i64, DocumentId)>> = match order {
+                    SortOrder::Ascending => Box::new(iter1
+                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
+                    SortOrder::Descending => Box::new(iter1.rev()
+                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
+                };
+
+                let iter2: Box<dyn Iterator<Item = (i64, DocumentId)>> = if let Some(field) = committed_lock.date_fields.get(&field_id) {
+                    let iter1 = field.iter();
+                    match order {
+                        SortOrder::Ascending => Box::new(iter1
+                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
+                        SortOrder::Descending => Box::new(iter1.rev()
+                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
+                    }
+                } else {
+                    Box::new(std::iter::empty())
+                };
+
+                Box::new(SortIterator::new(iter1, iter2, order))
+            },
+            _ => return Err(anyhow::anyhow!(
                 "Only number or date field are supported for sorting, but got {:?} for property {:?}",
                 field_type, field_name
             )),
+        };
+
+        let mut ret = Vec::with_capacity(size);
+        for doc in sorted_stream {
+            // Reach the end
+            if ret.len() >= size {
+                break;
+            }
+            if scores.contains_key(&doc) {
+                ret.push(TokenScore {
+                    document_id: doc,
+                    score: scores[&doc],
+                });
+            }
         }
+
+        Ok(ret)
     }
 
     // Since we only have one embedding model for all indexes in a collection,
