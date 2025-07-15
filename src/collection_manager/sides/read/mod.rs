@@ -24,7 +24,6 @@ use anyhow::{Context, Result};
 pub use collection::IndexFieldStatsType;
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
-use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, trace, warn};
@@ -46,11 +45,7 @@ use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
-use crate::{
-    ai::AIService,
-    capped_heap::CappedHeap,
-    types::{CollectionId, DocumentId},
-};
+use crate::{ai::AIService, types::CollectionId};
 use fs::BufferedFile;
 use nlp::NLPService;
 
@@ -421,7 +416,9 @@ impl ReadSide {
 
         let count = token_scores.len();
 
-        let top_results: Vec<TokenScore> = top_n(token_scores, limit.0 + offset.0);
+        let top_results: Vec<TokenScore> = collection
+            .sort_and_truncate(token_scores, limit, offset, search_params.sort_by)
+            .await?;
         trace!("Top results: {:?}", top_results);
 
         let result = top_results
@@ -719,29 +716,6 @@ impl ReadSide {
     }
 }
 
-fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    let mut capped_heap = CappedHeap::new(n);
-
-    for (key, value) in map {
-        let k = match NotNan::new(value) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        let v = key;
-        capped_heap.insert(k, v);
-    }
-
-    let result: Vec<TokenScore> = capped_heap
-        .into_top()
-        .map(|(value, key)| TokenScore {
-            document_id: key,
-            score: value.into_inner(),
-        })
-        .collect();
-
-    result
-}
-
 fn default_insert_batch_commit_size() -> u64 {
     300
 }
@@ -919,57 +893,5 @@ mod tests {
         fn assert_sync_send<T: Sync + Send>() {}
         assert_sync_send::<CollectionsReader>();
         assert_sync_send::<CollectionReader>();
-    }
-
-    #[test]
-    fn test_top_n() {
-        let search_result = HashMap::from([
-            (DocumentId(1), 0.1),
-            (DocumentId(2), 0.2),
-            (DocumentId(3), 0.3),
-            (DocumentId(4), 0.4),
-            (DocumentId(5), 0.5),
-            (DocumentId(6), 0.6),
-            (DocumentId(7), 0.7),
-            (DocumentId(8), 0.8),
-            (DocumentId(9), 0.9),
-            (DocumentId(10), 1.0),
-            (DocumentId(11), 1.1),
-            (DocumentId(12), 1.2),
-            (DocumentId(13), 1.3),
-            (DocumentId(14), 1.4),
-            (DocumentId(15), 1.5),
-        ]);
-
-        let r1 = top_n(search_result.clone(), 5);
-        assert_eq!(r1.len(), 5);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-            ],
-            r1.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
-
-        let r2 = top_n(search_result.clone(), 10);
-        assert_eq!(r2.len(), 10);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-                DocumentId(10),
-                DocumentId(9),
-                DocumentId(8),
-                DocumentId(7),
-                DocumentId(6),
-            ],
-            r2.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
     }
 }

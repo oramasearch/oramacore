@@ -134,7 +134,7 @@ impl CommittedDateField {
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (i64, HashSet<DocumentId>)> + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
 }
