@@ -149,7 +149,9 @@ impl CommittedNumberField {
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (SerializableNumber, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
     }
 }

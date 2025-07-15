@@ -384,7 +384,7 @@ export default { beforeAnswer }
         .await
         .unwrap();
 
-    sleep(Duration::from_millis(1_000)).await;
+    sleep(Duration::from_millis(2_000)).await;
 
     let interaction = Interaction {
         conversation_id: "the-conversation-id".to_string(),

@@ -391,6 +391,7 @@ impl PartyPlanner {
                     properties: Properties::Star,
                     where_filter: Default::default(),
                     indexes: None, // Search all indexes.
+                    sort_by: None,
                 },
             )
             .await?;

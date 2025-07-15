@@ -1284,6 +1284,22 @@ pub struct NLPSearchRequest {
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+pub enum SortOrder {
+    #[serde(rename = "ASC")]
+    #[default]
+    Ascending,
+    #[serde(rename = "DESC")]
+    Descending,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SortBy {
+    pub property: String,
+    #[serde(default)]
+    pub order: SortOrder,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchParams {
     #[serde(flatten)]
@@ -1306,6 +1322,8 @@ pub struct SearchParams {
     pub facets: HashMap<String, FacetDefinition>,
     #[serde(default)]
     pub indexes: Option<Vec<IndexId>>,
+    #[serde(default, rename = "sortBy")]
+    pub sort_by: Option<SortBy>,
 }
 impl PartialSchema for SearchParams {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
@@ -2910,6 +2928,7 @@ mod tests {
                 term: "the-term".to_string(),
                 similarity: Similarity(1.0),
             }),
+            sort_by: None,
         };
         let search_params_value = serde_json::to_value(&search_params).unwrap();
 
@@ -2953,9 +2972,66 @@ mod tests {
           },
           "indexes": [
             "my-index-id"
-          ]
+          ],
+          "sortBy": null,
         });
 
         assert_eq!(search_params_value, expected);
+    }
+
+    #[test]
+    fn test_serialize_sort_by() {
+        let params = json!({
+            "term": "hello",
+        });
+        let search_params: SearchParams = serde_json::from_value(params).unwrap();
+        assert_eq!(search_params.sort_by, None);
+
+        let params = json!({
+            "term": "hello",
+            "sortBy": {
+                "property": "name",
+            },
+        });
+        let search_params: SearchParams = serde_json::from_value(params).unwrap();
+        assert_eq!(
+            search_params.sort_by,
+            Some(SortBy {
+                property: "name".to_string(),
+                order: SortOrder::Ascending,
+            })
+        );
+
+        let params = json!({
+            "term": "hello",
+            "sortBy": {
+                "property": "name",
+                "order": "ASC",
+            },
+        });
+        let search_params: SearchParams = serde_json::from_value(params).unwrap();
+        assert_eq!(
+            search_params.sort_by,
+            Some(SortBy {
+                property: "name".to_string(),
+                order: SortOrder::Ascending,
+            })
+        );
+
+        let params = json!({
+            "term": "hello",
+            "sortBy": {
+                "property": "name",
+                "order": "DESC",
+            },
+        });
+        let search_params: SearchParams = serde_json::from_value(params).unwrap();
+        assert_eq!(
+            search_params.sort_by,
+            Some(SortBy {
+                property: "name".to_string(),
+                order: SortOrder::Descending,
+            })
+        );
     }
 }
