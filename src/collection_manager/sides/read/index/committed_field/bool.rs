@@ -167,6 +167,13 @@ impl CommittedBoolField {
 
         Ok((true_docs, false_docs))
     }
+
+    pub fn get_inner(&self) -> Result<(&HashSet<DocumentId>, &HashSet<DocumentId>)> {
+        let false_docs: &HashSet<_> = self.map.get(&false).unwrap();
+        let true_docs: &HashSet<_> = self.map.get(&true).unwrap();
+
+        Ok((true_docs, false_docs))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

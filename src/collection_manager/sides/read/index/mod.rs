@@ -1009,8 +1009,59 @@ impl Index {
 
                 Box::new(SortIterator::new(iter1, iter2, order))
             },
+            FieldType::Bool => {
+                let Some(field) = uncommitted_lock.bool_fields.get(&field_id) else {
+                    return Err(anyhow::anyhow!(
+                        "Field {} is not a number field",
+                        field_name
+                    ));
+                };
+
+                let (uncommitted_true_document_ids, uncommitted_false_document_ids) = field.get_inner();
+                if let Some(field) = committed_lock.bool_fields.get(&field_id) {
+                    let (committed_true_document_ids, committed_false_document_ids) = field.get_inner()?;
+
+                    match order {
+                        SortOrder::Ascending => {
+                            Box::new(
+                                uncommitted_false_document_ids
+                                    .iter()
+                                    .chain(committed_false_document_ids.iter())
+                                    .chain(uncommitted_true_document_ids.iter())
+                                    .chain(committed_true_document_ids.iter())
+                                    .copied()
+                            )
+                        },
+                        SortOrder::Descending => {
+                            Box::new(
+                                uncommitted_true_document_ids
+                                    .iter()
+                                    .chain(committed_true_document_ids.iter())
+                                    .chain(uncommitted_false_document_ids.iter())
+                                    .chain(committed_false_document_ids.iter())
+                                    .copied()
+                            )
+                        }
+                    }
+                } else {
+                    match order {
+                        SortOrder::Ascending => Box::new(
+                            uncommitted_false_document_ids
+                                .iter()
+                                .chain(uncommitted_true_document_ids.iter())
+                                .copied(),
+                        ),
+                        SortOrder::Descending => Box::new(
+                            uncommitted_true_document_ids
+                                .iter()
+                                .chain(uncommitted_false_document_ids.iter())
+                                .copied(),
+                        ),
+                    }
+                }
+            },
             _ => return Err(anyhow::anyhow!(
-                "Only number or date field are supported for sorting, but got {:?} for property {:?}",
+                "Only number, date or boolean fields are supported for sorting, but got {:?} for property {:?}",
                 field_type, field_name
             )),
         };
