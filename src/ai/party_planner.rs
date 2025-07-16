@@ -9,9 +9,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    collection_manager::sides::{
-        read::ReadSide, segments::Segment, system_prompts::SystemPrompt, triggers::Trigger,
-    },
+    collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt},
     types::{
         ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
         Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResult,
@@ -86,8 +84,6 @@ impl PartyPlanner {
         api_key: ApiKey,
         input: String,
         mut history: Vec<InteractionMessage>,
-        segment: Option<Segment>,
-        trigger: Option<Trigger>,
         custom_system_prompt: Option<SystemPrompt>,
     ) -> impl Stream<Item = PartyPlannerMessage> {
         let llm_service = read_side.get_llm_service();
@@ -118,14 +114,6 @@ impl PartyPlanner {
 
         // Create the full user input. If possible, add trigger and segment information.
         let mut full_input = format!("### User Input\n{}", input.clone());
-
-        if let Some(segment) = segment {
-            full_input.push_str(&format!("\n\n### Segment\n{segment}"));
-        }
-
-        if let Some(trigger) = trigger {
-            full_input.push_str(&format!("\n\n### Trigger\n{trigger}"));
-        }
 
         history.push(InteractionMessage {
             role: Role::User,
