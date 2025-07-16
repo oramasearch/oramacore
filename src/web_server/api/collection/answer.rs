@@ -5,7 +5,7 @@ use crate::types::{ApiKey, Interaction};
 use anyhow::Context;
 use axum::extract::Query;
 use axum::response::sse::Event;
-use axum::response::Sse;
+use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error};
+use axum::http::StatusCode;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
@@ -24,6 +25,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/planned_answer",
             post(planned_answer_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/suggestions",
+            post(answer_suggestions_v1),
         )
         .route("/v1/collections/{collection_id}/logs", get(answer_logs_v1))
         .with_state(read_side)
@@ -118,6 +123,47 @@ async fn answer_v1(
             .interval(Duration::from_secs(15))
             .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
     ))
+}
+
+async fn answer_suggestions_v1(
+    collection_id: CollectionId,
+    State(read_side): State<Arc<ReadSide>>,
+    Query(query): Query<AnswerQueryParams>,
+    Json(interaction): Json<Interaction>,
+) -> impl IntoResponse {
+    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key)
+        .await {
+            Ok(answer) => answer,
+            Err(e) => {
+                error!(error = ?e, "Failed to create Answer instance");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to initialize answer service"
+                    }))
+                );
+            }
+        };
+
+    let logs = read_side.get_logs();
+    let log_sender = logs.get_sender(&collection_id);
+
+    let response = match answer.suggestions(interaction, log_sender).await {
+        Ok(response) => response,
+        Err(e) => {
+            error!(error = ?e, "Failed to generate suggestions");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to generate suggestions"
+                }))
+            );
+        }
+    };
+
+    (StatusCode::OK, Json(json!({
+        "suggestions": response
+    })))
 }
 
 async fn answer_logs_v1(
