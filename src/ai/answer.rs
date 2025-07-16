@@ -1,11 +1,10 @@
-use anyhow::Context;
-use futures::{Stream, TryFutureExt};
+use futures::TryFutureExt;
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
 use crate::{
@@ -83,17 +82,6 @@ impl Answer {
         let system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id)
             .await?;
-
-        // Always make sure that the conversation is not empty, or else the AI will not be able to
-        // determine the segment and trigger.
-        let segments_and_triggers_conversation = if interaction.messages.is_empty() {
-            vec![InteractionMessage {
-                role: Role::User,
-                content: interaction.query.clone(),
-            }]
-        } else {
-            interaction.messages.clone()
-        };
 
         let party_planner = PartyPlanner::new(self.read_side.clone(), Some(llm_config.clone()));
 
