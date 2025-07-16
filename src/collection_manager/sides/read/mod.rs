@@ -35,8 +35,6 @@ use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::logs::Logs;
-use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
-use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
@@ -50,7 +48,6 @@ use fs::BufferedFile;
 use nlp::NLPService;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
-use super::triggers::TriggerInterface;
 use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
@@ -93,11 +90,7 @@ pub struct ReadSide {
     live_offset: RwLock<Offset>,
     // This offset will update everytime a change is made to the read side.
     commit_insert_mutex: Mutex<Offset>,
-
     master_api_key: Option<ApiKey>,
-
-    triggers: TriggerInterface,
-    segments: SegmentInterface,
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
@@ -161,8 +154,6 @@ impl ReadSide {
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
         let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
@@ -180,8 +171,6 @@ impl ReadSide {
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
             master_api_key: config.master_api_key,
-            segments,
-            triggers,
             system_prompts,
             tools,
             kv,
@@ -585,38 +574,6 @@ impl ReadSide {
         self.check_read_api_key(collection_id, read_api_key).await?;
 
         self.system_prompts.list_by_collection(collection_id).await
-    }
-
-    pub async fn get_segments_manager(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<CollectionSegmentInterface> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-
-        Ok(CollectionSegmentInterface::new(
-            self.segments.clone(),
-            collection_id,
-        ))
-    }
-
-    pub async fn get_triggers_manager(
-        &self,
-        read_api_key: ApiKey,
-        collection_id: CollectionId,
-    ) -> Result<ReadCollectionTriggerInterface, ReadError> {
-        self.check_read_api_key(collection_id, read_api_key).await?;
-
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| ReadError::NotFound(collection_id))?;
-
-        Ok(ReadCollectionTriggerInterface::new(
-            self.triggers.clone(),
-            collection,
-        ))
     }
 
     pub async fn get_search_mode(
