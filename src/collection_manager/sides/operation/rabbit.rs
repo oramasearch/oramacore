@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result};
 use futures::{Stream, StreamExt};
 use rabbitmq_stream_client::{
-    error::{ProducerPublishError, StreamCreateError},
+    error::{ProducerCreateError, ProducerPublishError, StreamCreateError},
     types::{ByteCapacity, Message, OffsetSpecification, ResponseCode},
     ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
@@ -33,6 +33,9 @@ struct MyHAProducer(Arc<MyHAProducerInner>);
 #[async_trait::async_trait]
 impl OnClosed for MyHAProducer {
     async fn on_closed(&self, unconfirmed: Vec<Message>) {
+        use backoff::future::retry;
+        use backoff::ExponentialBackoff;
+
         info!("Producer is closed. Creating new one");
 
         self.0
@@ -41,13 +44,28 @@ impl OnClosed for MyHAProducer {
 
         let mut producer = self.0.producer.write().await;
 
-        let new_producer = self
-            .0
-            .environment
-            .producer()
-            .build(&self.0.stream)
-            .await
-            .unwrap();
+        let inner = self.0.clone();
+        let new_producer: std::result::Result<Producer<NoDedup>, ProducerCreateError> =
+            retry(ExponentialBackoff::default(), move || {
+                let inner = inner.clone();
+                async move {
+                    inner
+                        .environment
+                        .producer()
+                        .build(&self.0.stream)
+                        .await
+                        .map_err(backoff::Error::transient)
+                }
+            })
+            .await;
+
+        let new_producer = match new_producer {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to create new producer: {:?}", e);
+                return;
+            }
+        };
 
         new_producer.set_on_closed(Box::new(self.clone())).await;
 
