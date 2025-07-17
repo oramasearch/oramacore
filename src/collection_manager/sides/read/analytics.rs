@@ -4,12 +4,17 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use fs::create_if_not_exists;
 use futures::StreamExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tokio_util::io::ReaderStream;
 use tracing::{error, info};
 
-use crate::types::{CollectionId, SearchParams, SearchResult};
+use crate::types::{ApiKey, CollectionId, SearchParams, SearchResult};
+
+#[derive(Deserialize, Clone)]
+pub struct AnalyticConfig {
+    pub api_key: ApiKey,
+}
 
 #[derive(Serialize, Clone, Copy)]
 pub enum AnalyticSearchEventInvocationType {
@@ -101,18 +106,22 @@ pub enum AnalyticEvent {
 }
 
 pub struct AnalyticsStorage {
+    api_key: ApiKey,
     sender: tokio::sync::mpsc::Sender<InternalEvent>,
 }
 
 impl AnalyticsStorage {
-    pub fn try_new(data_dir: PathBuf) -> Result<Self> {
+    pub fn try_new(data_dir: PathBuf, config: AnalyticConfig) -> Result<Self> {
         create_if_not_exists(&data_dir)?;
 
         let (sender, receiver) = tokio::sync::mpsc::channel::<InternalEvent>(100);
 
         tokio::task::spawn(store_event_loop(data_dir, receiver));
 
-        Ok(Self { sender })
+        Ok(Self {
+            sender,
+            api_key: config.api_key,
+        })
     }
 
     pub fn add_event<EV: Into<AnalyticEvent>>(&self, event: EV) -> Result<()> {
@@ -124,7 +133,11 @@ impl AnalyticsStorage {
         Ok(())
     }
 
-    pub async fn get_and_erase(&self) -> Result<AnalyticLogStream> {
+    pub async fn get_and_erase(&self, api_key: ApiKey) -> Result<AnalyticLogStream> {
+        if self.api_key != api_key {
+            return Err(anyhow::anyhow!("Invalid analytics API key"));
+        }
+
         let (sender, receiver) = tokio::sync::oneshot::channel::<PathBuf>();
         let internal_event = InternalEvent::Rotate(sender);
         if let Err(e) = self.sender.try_send(internal_event) {
@@ -279,13 +292,21 @@ mod tests {
     async fn test_analytics_storage_lifecycle() {
         init_log();
 
+        let analytics_api_key = ApiKey::try_new("test_api_key").unwrap();
+
         let data_dir = generate_new_path();
-        let storage = AnalyticsStorage::try_new(data_dir.clone()).unwrap();
+        let storage = AnalyticsStorage::try_new(
+            data_dir.clone(),
+            AnalyticConfig {
+                api_key: analytics_api_key,
+            },
+        )
+        .unwrap();
 
         let event = AnalyticEvent::Search(AnalyticSearchEvent {
             at: Utc::now().timestamp(),
             collection_id: CollectionId::try_new("test_collection").unwrap(),
-            search_time: Duration::from_secs(1),
+            search_time: Duration::from_secs(1).into(),
             search_params: json!({
                 "term": "test",
             })
@@ -316,7 +337,7 @@ mod tests {
         let file_content = std::fs::read_to_string(&old_file).unwrap();
         assert_eq!(file_content.lines().count(), 2);
 
-        let mut stream = storage.get_and_erase().await.unwrap();
+        let mut stream = storage.get_and_erase(analytics_api_key).await.unwrap();
 
         storage.add_event(event.clone()).unwrap();
 

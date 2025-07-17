@@ -133,6 +133,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 commit_interval: Duration::from_secs(3_000),
                 notifier: None,
             },
+            analytics: None,
         },
     }
 }

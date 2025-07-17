@@ -36,7 +36,9 @@ use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
-use crate::collection_manager::sides::read::analytics::{AnalyticSearchEvent, AnalyticsStorage};
+use crate::collection_manager::sides::read::analytics::{
+    AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
+};
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::segments::{CollectionSegmentInterface, SegmentInterface};
 use crate::collection_manager::sides::triggers::ReadCollectionTriggerInterface;
@@ -64,6 +66,7 @@ use thiserror::Error;
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub master_api_key: Option<ApiKey>,
+    pub analytics: Option<AnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
@@ -110,7 +113,7 @@ pub struct ReadSide {
 
     hook_logs: HookLogs,
 
-    analytics_storage: AnalyticsStorage,
+    analytics_storage: Option<AnalyticsStorage>,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -177,6 +180,15 @@ impl ReadSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        let analytics_storage = if let Some(config) = config.analytics {
+            Some(
+                AnalyticsStorage::try_new(data_dir.join("analytics"), config)
+                    .context("Cannot create analytics storage")?,
+            )
+        } else {
+            None
+        };
+
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
@@ -194,7 +206,7 @@ impl ReadSide {
             local_gpu_manager,
 
             hook_logs: HookLogs::new(),
-            analytics_storage: AnalyticsStorage::try_new(data_dir.join("analytics"))?,
+            analytics_storage,
 
             data_dir,
 
@@ -471,17 +483,19 @@ impl ReadSide {
 
         let search_time = start.elapsed();
 
-        if let Err(e) = self.analytics_storage.add_event(AnalyticSearchEvent {
-            at: Utc::now().timestamp(),
-            collection_id,
-            full_results_json: Some(result_for_analytics),
-            invocation_type,
-            results_count: count,
-            search_time: search_time.into(),
-            user_id: search_params.user_id.clone(),
-            search_params,
-        }) {
-            error!(?e, "Failed to add search event to analytics storage");
+        if let Some(analytics_storage) = self.analytics_storage.as_ref() {
+            if let Err(e) = analytics_storage.add_event(AnalyticSearchEvent {
+                at: Utc::now().timestamp(),
+                collection_id,
+                full_results_json: Some(result_for_analytics),
+                invocation_type,
+                results_count: count,
+                search_time: search_time.into(),
+                user_id: search_params.user_id.clone(),
+                search_params,
+            }) {
+                error!(?e, "Failed to add search event to analytics storage");
+            }
         }
 
         Ok(result)
@@ -744,8 +758,8 @@ impl ReadSide {
         &self.hook_logs
     }
 
-    pub fn get_analytics_logs(&self) -> &AnalyticsStorage {
-        &self.analytics_storage
+    pub fn get_analytics_logs(&self) -> Option<&AnalyticsStorage> {
+        self.analytics_storage.as_ref()
     }
 }
 

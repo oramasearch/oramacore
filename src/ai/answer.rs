@@ -2,11 +2,7 @@ use anyhow::Context;
 use futures::{Stream, TryFutureExt};
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -20,7 +16,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType, ReadError, ReadSide},
+        read::{AnalyticSearchEventInvocationType, ReadError, ReadSide},
         segments::{Segment, SegmentError},
         system_prompts::SystemPrompt,
         triggers::Trigger,
