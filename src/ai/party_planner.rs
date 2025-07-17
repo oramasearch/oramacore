@@ -9,7 +9,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt},
+    collection_manager::sides::{
+        read::{AnalyticSearchEventInvocationType, ReadSide},
+        system_prompts::SystemPrompt,
+    },
     types::{
         ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
         Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResult,
@@ -113,7 +116,7 @@ impl PartyPlanner {
         }
 
         // Create the full user input. If possible, add trigger and segment information.
-        let mut full_input = format!("### User Input\n{}", input.clone());
+        let full_input = format!("### User Input\n{}", input.clone());
 
         history.push(InteractionMessage {
             role: Role::User,
@@ -380,7 +383,9 @@ impl PartyPlanner {
                     where_filter: Default::default(),
                     indexes: None, // Search all indexes.
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::PartyPlanner,
             )
             .await?;
 

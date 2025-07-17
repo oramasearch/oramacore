@@ -813,8 +813,10 @@ pub enum FacetDefinition {
 #[derive(Debug, Clone, Serialize)]
 pub struct FulltextMode {
     pub term: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<Threshold>,
     pub exact: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tolerance: Option<u8>,
 }
 
@@ -878,8 +880,10 @@ impl<'de> Deserialize<'de> for Similarity {
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<Threshold>,
     pub exact: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tolerance: Option<u8>,
 }
 
@@ -1117,6 +1121,12 @@ impl Default for Properties {
     }
 }
 
+impl Properties {
+    fn is_none(&self) -> bool {
+        matches!(self, Properties::None)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct FilterOnField {
     #[serde(rename = "$key$")]
@@ -1304,9 +1314,11 @@ impl WhereFilter {
 pub struct NLPSearchRequest {
     pub query: String,
     pub llm_config: Option<InteractionLLMConfig>,
+    #[serde(default, rename = "userID")]
+    pub user_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 pub enum SortOrder {
     #[serde(rename = "ASC")]
     #[default]
@@ -1330,22 +1342,25 @@ pub struct SearchParams {
     pub limit: Limit,
     #[serde(default)]
     pub offset: SearchOffset,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub boost: HashMap<String, f32>,
     #[serde(
         default,
         deserialize_with = "deserialize_properties",
-        serialize_with = "serialize_properties"
+        serialize_with = "serialize_properties",
+        skip_serializing_if = "Properties::is_none"
     )]
     pub properties: Properties,
     #[serde(default, rename = "where")]
     pub where_filter: WhereFilter,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub facets: HashMap<String, FacetDefinition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub indexes: Option<Vec<IndexId>>,
-    #[serde(default, rename = "sortBy")]
+    #[serde(default, rename = "sortBy", skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<SortBy>,
+    #[serde(default, rename = "userID", skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 impl PartialSchema for SearchParams {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
@@ -2925,6 +2940,7 @@ mod tests {
                     FacetDefinition::String(StringFacetDefinition),
                 ),
             ]),
+            user_id: Some("user-id".to_string()),
             indexes: Some(vec![IndexId::try_new("my-index-id").unwrap()]),
             limit: Limit(42),
             offset: SearchOffset(42),
@@ -2963,7 +2979,6 @@ mod tests {
           "boost": {
             "field_id": 1.0
           },
-          "properties": null,
           "where": {
             "field_id1": true,
             "field_id2": {
@@ -2995,7 +3010,7 @@ mod tests {
           "indexes": [
             "my-index-id"
           ],
-          "sortBy": null,
+          "userID": "user-id",
         });
 
         assert_eq!(search_params_value, expected);

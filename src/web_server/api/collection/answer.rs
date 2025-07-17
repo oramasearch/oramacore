@@ -86,7 +86,7 @@ async fn answer_v1(
 
     let answer = Answer::try_new(read_side.clone(), collection_id, query.api_key).await?;
 
-    let logs = read_side.get_logs();
+    let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
     tokio::spawn(async move {
         let r = answer.answer(interaction, answer_sender, log_sender).await;
@@ -129,7 +129,7 @@ async fn answer_logs_v1(
         .check_read_api_key(collection_id, query.api_key)
         .await?;
 
-    let logs = read_side.get_logs();
+    let logs = read_side.get_hook_logs();
     let mut answer_receiver = logs.get_or_create_receiver(collection_id);
     let (http_sender, http_receiver) = mpsc::channel(10);
 

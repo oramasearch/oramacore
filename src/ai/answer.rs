@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     ai::{
@@ -15,13 +15,12 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{ReadError, ReadSide},
+        read::{AnalyticSearchEventInvocationType, ReadError, ReadSide},
         system_prompts::SystemPrompt,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
-        Similarity, VectorMode,
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
+        SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
     },
 };
 
@@ -189,6 +188,7 @@ impl Answer {
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
                 sort_by: None,
+                user_id: None, // @todo: handle user_id if needed
             };
 
             let hook_storage = self
@@ -210,7 +210,12 @@ impl Answer {
 
             let result = self
                 .read_side
-                .search(self.read_api_key, self.collection_id, params)
+                .search(
+                    self.read_api_key,
+                    self.collection_id,
+                    params,
+                    AnalyticSearchEventInvocationType::Answer,
+                )
                 .await?;
             result.hits
         };
@@ -218,7 +223,7 @@ impl Answer {
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];
@@ -257,9 +262,11 @@ impl Answer {
             }
         };
 
+        // let mut whole_response: Vec<String> = vec![];
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
+                    // whole_response.push(chunk.clone());
                     sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
@@ -283,6 +290,26 @@ impl Answer {
             .await?;
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
+
+        /*
+        if let Err(e) = self
+            .read_side
+            .get_analytics_logs()
+            .add_event(
+                AnalyticAnswerEvent {
+                    at: chrono::Utc::now().timestamp_millis(),
+                    user_id: None, // @todo: handle user_id if needed
+                    collection_id: self.collection_id,
+                    full_conversation: (),
+                    question: interaction.query,
+                    context: (),
+                    response: whole_response.join(""),
+                },
+            )
+        {
+            error!(error = ?e, "Failed to log analytic event");
+        }
+        */
 
         Ok(())
     }
@@ -430,7 +457,9 @@ impl Answer {
                     properties: Properties::Star,
                     indexes: Some(index_ids),
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::Answer,
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;
