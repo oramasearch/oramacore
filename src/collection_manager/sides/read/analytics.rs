@@ -84,9 +84,13 @@ pub struct AnalyticAnswerEvent {
     pub collection_id: CollectionId,
     #[serde(rename = "dms")]
     pub answer_time: Dur,
+    #[serde(rename = "fc")]
     pub full_conversation: Vec<InteractionMessage>,
+    #[serde(rename = "q")]
     pub question: String,
+    #[serde(rename = "c")]
     pub context: Vec<SearchResultHit>,
+    #[serde(rename = "r")]
     pub response: Vec<String>,
     #[serde(rename = "uid", skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
