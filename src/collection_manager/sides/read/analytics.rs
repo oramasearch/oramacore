@@ -9,7 +9,9 @@ use tokio::time::sleep;
 use tokio_util::io::ReaderStream;
 use tracing::{error, info};
 
-use crate::types::{ApiKey, CollectionId, SearchParams, SearchResult};
+use crate::types::{
+    ApiKey, CollectionId, InteractionMessage, SearchParams, SearchResult, SearchResultHit,
+};
 
 #[derive(Deserialize, Clone)]
 pub struct AnalyticConfig {
@@ -80,11 +82,12 @@ pub struct AnalyticAnswerEvent {
     pub at: i64,
     #[serde(rename = "cid")]
     pub collection_id: CollectionId,
-    pub full_conversation: (),
+    #[serde(rename = "dms")]
+    pub answer_time: Dur,
+    pub full_conversation: Vec<InteractionMessage>,
     pub question: String,
-    pub context: (),
-    pub response: String,
-
+    pub context: Vec<SearchResultHit>,
+    pub response: Vec<String>,
     #[serde(rename = "uid", skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
 }

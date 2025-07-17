@@ -15,7 +15,7 @@ async fn test_temp_index_double_creation() {
 
     let copy_from = index_client.index_id;
 
-    let index_id = IndexId::try_new(Faker.fake::<String>().to_string()).unwrap();
+    let index_id = IndexId::try_new(&Faker.fake::<String>()).unwrap();
     collection_client
         .writer
         .create_temp_index(
