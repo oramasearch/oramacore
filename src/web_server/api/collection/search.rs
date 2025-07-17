@@ -13,7 +13,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use utoipa::IntoParams;
 
-use crate::types::NLPSearchRequest;
+use crate::{
+    collection_manager::sides::read::AnalyticSearchEventInvocationType, types::NLPSearchRequest,
+};
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
@@ -49,7 +51,12 @@ async fn search(
     let read_api_key = query.api_key;
 
     read_side
-        .search(read_api_key, collection_id, json)
+        .search(
+            read_api_key,
+            collection_id,
+            json,
+            AnalyticSearchEventInvocationType::Direct,
+        )
         .await
         .map(Json)
 }
@@ -67,7 +74,7 @@ async fn nlp_search(
 ) -> impl IntoResponse {
     let read_api_key = query.api_key;
 
-    let logs = read_side.get_logs();
+    let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
 
     read_side
@@ -97,7 +104,7 @@ async fn nlp_search_streamed(
     let (tx, rx) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(rx);
 
-    let logs = read_side.get_logs();
+    let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
 
     tokio::spawn(async move {

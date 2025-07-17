@@ -29,7 +29,10 @@ use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
+        read::{
+            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, ReadSide,
+            ReadSideConfig,
+        },
         triggers::Trigger,
         write::{
             CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
@@ -757,7 +760,12 @@ impl TestCollectionClient {
 
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
-            .search(self.read_api_key, self.collection_id, search_params)
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                search_params,
+                AnalyticSearchEventInvocationType::Direct,
+            )
             .await
             .context("")
     }

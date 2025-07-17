@@ -2,11 +2,15 @@ use anyhow::Context;
 use futures::{Stream, TryFutureExt};
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     ai::{
@@ -16,7 +20,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{ReadError, ReadSide},
+        read::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType, ReadError, ReadSide},
         segments::{Segment, SegmentError},
         system_prompts::SystemPrompt,
         triggers::Trigger,
@@ -270,6 +274,7 @@ impl Answer {
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
                 sort_by: None,
+                user_id: None, // @todo: handle user_id if needed
             };
 
             let hook_storage = self
@@ -291,7 +296,12 @@ impl Answer {
 
             let result = self
                 .read_side
-                .search(self.read_api_key, self.collection_id, params)
+                .search(
+                    self.read_api_key,
+                    self.collection_id,
+                    params,
+                    AnalyticSearchEventInvocationType::Answer,
+                )
                 .await?;
             result.hits
         };
@@ -344,9 +354,11 @@ impl Answer {
             }
         };
 
+        // let mut whole_response: Vec<String> = vec![];
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
+                    // whole_response.push(chunk.clone());
                     sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
@@ -370,6 +382,26 @@ impl Answer {
             .await?;
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
+
+        /*
+        if let Err(e) = self
+            .read_side
+            .get_analytics_logs()
+            .add_event(
+                AnalyticAnswerEvent {
+                    at: chrono::Utc::now().timestamp_millis(),
+                    user_id: None, // @todo: handle user_id if needed
+                    collection_id: self.collection_id,
+                    full_conversation: (),
+                    question: interaction.query,
+                    context: (),
+                    response: whole_response.join(""),
+                },
+            )
+        {
+            error!(error = ?e, "Failed to log analytic event");
+        }
+        */
 
         Ok(())
     }
@@ -517,7 +549,9 @@ impl Answer {
                     properties: Properties::Star,
                     indexes: Some(index_ids),
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::Answer,
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

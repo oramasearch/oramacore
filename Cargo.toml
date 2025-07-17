@@ -126,6 +126,7 @@ dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
 jwt-authorizer = "0.15"
 jsonwebtoken = "9.3.1"
+tokio-util = { version = "0.7.15", features = ["io"] }
 
 [build-dependencies]
 cc = "1"

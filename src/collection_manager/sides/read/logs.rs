@@ -15,17 +15,17 @@ struct ChannelEntry {
     last_used: Instant,
 }
 
-pub struct Logs {
+pub struct HookLogs {
     channels: Arc<RwLock<HashMap<CollectionId, ChannelEntry>>>,
 }
 
-impl Default for Logs {
+impl Default for HookLogs {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Logs {
+impl HookLogs {
     pub fn new() -> Self {
         let channels: Arc<RwLock<HashMap<CollectionId, ChannelEntry>>> = Default::default();
         let s = Self {

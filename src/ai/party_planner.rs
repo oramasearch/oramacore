@@ -10,7 +10,10 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
     collection_manager::sides::{
-        read::ReadSide, segments::Segment, system_prompts::SystemPrompt, triggers::Trigger,
+        read::{AnalyticSearchEventInvocationType, ReadSide},
+        segments::Segment,
+        system_prompts::SystemPrompt,
+        triggers::Trigger,
     },
     types::{
         ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
@@ -392,7 +395,9 @@ impl PartyPlanner {
                     where_filter: Default::default(),
                     indexes: None, // Search all indexes.
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::PartyPlanner,
             )
             .await?;
 

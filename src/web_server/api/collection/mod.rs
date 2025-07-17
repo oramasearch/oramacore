@@ -6,6 +6,7 @@ use crate::collection_manager::sides::{read::ReadSide, write::WriteSide};
 
 mod actions;
 mod admin;
+mod analytics;
 mod answer;
 mod hooks;
 mod search;
@@ -31,6 +32,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
 
     if let Some(read_side) = read_side {
         collection_router
+            .merge(analytics::read_apis(read_side.clone()))
             .merge(search::apis(read_side.clone()))
             .merge(actions::apis(read_side.clone()))
             .merge(answer::apis(read_side.clone()))
