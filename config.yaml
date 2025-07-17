@@ -82,6 +82,10 @@ reader_side:
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
 
+    # Uncomment to allow analytics
+    # analytics:
+    #     api_key: my-analytics-api-key
+
 ai_server:
     scheme: http
     host: 0.0.0.0

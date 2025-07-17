@@ -9,7 +9,7 @@ use axum_openapi3::{endpoint, utoipa::IntoParams, AddRoute};
 use serde::Deserialize;
 
 use crate::{
-    collection_manager::sides::read::ReadSide,
+    collection_manager::sides::read::{AnalyticSearchEventInvocationType, ReadSide},
     types::{ApiKey, CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, SearchParams},
 };
 
@@ -44,7 +44,12 @@ async fn execute_action_v0(
         ExecuteActionPayloadName::Search => {
             let search_context: SearchParams = serde_json::from_str(&context).unwrap(); // @todo: handle error
             read_side
-                .search(read_api_key, collection_id, search_context)
+                .search(
+                    read_api_key,
+                    collection_id,
+                    search_context,
+                    AnalyticSearchEventInvocationType::Action,
+                )
                 .await
                 .map(Json)
         }

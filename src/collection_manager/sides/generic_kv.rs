@@ -163,7 +163,7 @@ impl KV {
         data.into_iter()
             .map(|value| {
                 serde_json::from_str(value)
-                    .context("Cannot deserialize prefix value in segments scan")
+                    .context("Cannot deserialize prefix value in prefix scan")
             })
             .collect()
     }

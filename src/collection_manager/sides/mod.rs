@@ -1,9 +1,7 @@
 pub mod generic_kv;
 mod operation;
 pub mod read;
-pub mod segments;
 pub mod system_prompts;
-pub mod triggers;
 pub mod write;
 
 pub use operation::*;

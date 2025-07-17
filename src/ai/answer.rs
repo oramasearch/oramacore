@@ -1,12 +1,11 @@
-use anyhow::Context;
-use futures::{Stream, TryFutureExt};
+use futures::TryFutureExt;
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-use tracing::{info, warn};
+use tokio_stream::StreamExt;
+use tracing::{error, info, warn};
 
 use crate::{
     ai::{
@@ -16,15 +15,12 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{ReadError, ReadSide},
-        segments::{Segment, SegmentError},
+        read::{AnalyticSearchEventInvocationType, ReadError, ReadSide},
         system_prompts::SystemPrompt,
-        triggers::Trigger,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
-        Similarity, VectorMode,
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
+        SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
     },
 };
 
@@ -34,8 +30,6 @@ pub enum AnswerError {
     Generic(#[from] anyhow::Error),
     #[error("read error: {0}")]
     ReadError(#[from] ReadError),
-    #[error("segment error: {0}")]
-    SegmentError(#[from] SegmentError),
     #[error("channel is closed: {0}")]
     ChannelClosed(#[from] SendError<AnswerEvent>),
     #[error("Hook read error: {0:?}")]
@@ -88,42 +82,6 @@ impl Answer {
             .handle_system_prompt(interaction.system_prompt_id)
             .await?;
 
-        // Always make sure that the conversation is not empty, or else the AI will not be able to
-        // determine the segment and trigger.
-        let segments_and_triggers_conversation = if interaction.messages.is_empty() {
-            vec![InteractionMessage {
-                role: Role::User,
-                content: interaction.query.clone(),
-            }]
-        } else {
-            interaction.messages.clone()
-        };
-
-        let mut segments_and_triggers_stream = select_triggers_and_segments(
-            self.read_side.clone(),
-            self.read_api_key,
-            self.collection_id,
-            Some(segments_and_triggers_conversation),
-            Some(llm_config.clone()),
-        )
-        .await;
-
-        let mut trigger: Option<Trigger> = None;
-        let mut segment: Option<Segment> = None;
-
-        while let Some(result) = segments_and_triggers_stream.next().await {
-            match result {
-                AudienceManagementResult::Segment(s) => {
-                    segment = s.clone();
-                    sender.send(AnswerEvent::GetSegment(s))?;
-                }
-                AudienceManagementResult::Trigger(t) => {
-                    trigger = t.clone();
-                    sender.send(AnswerEvent::GetTrigger(t))?;
-                }
-            }
-        }
-
         let party_planner = PartyPlanner::new(self.read_side.clone(), Some(llm_config.clone()));
 
         let mut party_planner_stream = party_planner.run(
@@ -132,8 +90,6 @@ impl Answer {
             self.read_api_key,
             interaction.query.clone(),
             interaction.messages.clone(),
-            segment.clone(),
-            trigger.clone(),
             system_prompt,
         );
 
@@ -178,44 +134,6 @@ impl Answer {
             .handle_system_prompt(interaction.system_prompt_id.clone())
             .await?;
         info!("With system prompt: {:?}", system_prompt.is_some());
-
-        // Always make sure that the conversation is not empty, or else the AI will not be able to
-        // determine the segment and trigger.
-        let segments_and_triggers_conversation = if interaction.messages.is_empty() {
-            vec![InteractionMessage {
-                role: Role::User,
-                content: interaction.query.clone(),
-            }]
-        } else {
-            interaction.messages.clone()
-        };
-
-        let mut segments_and_triggers_stream = select_triggers_and_segments(
-            self.read_side.clone(),
-            self.read_api_key,
-            self.collection_id,
-            Some(segments_and_triggers_conversation),
-            Some(llm_config.clone()),
-        )
-        .await;
-
-        let mut trigger: Option<Trigger> = None;
-        let mut segment: Option<Segment> = None;
-
-        while let Some(result) = segments_and_triggers_stream.next().await {
-            match result {
-                AudienceManagementResult::Segment(s) => {
-                    segment = s;
-                }
-                AudienceManagementResult::Trigger(t) => {
-                    trigger = t;
-                }
-            }
-        }
-        info!("With segment: {:?}", segment.is_some());
-        info!("With trigger: {:?}", trigger.is_some());
-
-        sender.send(AnswerEvent::GetSegment(segment.clone()))?;
 
         let llm_service = self.read_side.get_llm_service();
         let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
@@ -270,6 +188,7 @@ impl Answer {
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
                 sort_by: None,
+                user_id: None, // @todo: handle user_id if needed
             };
 
             let hook_storage = self
@@ -291,7 +210,12 @@ impl Answer {
 
             let result = self
                 .read_side
-                .search(self.read_api_key, self.collection_id, params)
+                .search(
+                    self.read_api_key,
+                    self.collection_id,
+                    params,
+                    AnalyticSearchEventInvocationType::Answer,
+                )
                 .await?;
             result.hits
         };
@@ -299,16 +223,10 @@ impl Answer {
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];
-        if let Some(full_segment) = segment {
-            variables.push(("segment".to_string(), full_segment.to_string()));
-        }
-        if let Some(full_trigger) = trigger {
-            variables.push(("trigger".to_string(), full_trigger.response));
-        }
 
         let hook_storage = self
             .read_side
@@ -344,9 +262,11 @@ impl Answer {
             }
         };
 
+        // let mut whole_response: Vec<String> = vec![];
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
+                    // whole_response.push(chunk.clone());
                     sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
@@ -370,6 +290,26 @@ impl Answer {
             .await?;
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
+
+        /*
+        if let Err(e) = self
+            .read_side
+            .get_analytics_logs()
+            .add_event(
+                AnalyticAnswerEvent {
+                    at: chrono::Utc::now().timestamp_millis(),
+                    user_id: None, // @todo: handle user_id if needed
+                    collection_id: self.collection_id,
+                    full_conversation: (),
+                    question: interaction.query,
+                    context: (),
+                    response: whole_response.join(""),
+                },
+            )
+        {
+            error!(error = ?e, "Failed to log analytic event");
+        }
+        */
 
         Ok(())
     }
@@ -517,7 +457,9 @@ impl Answer {
                     properties: Properties::Star,
                     indexes: Some(index_ids),
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::Answer,
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;
@@ -541,134 +483,10 @@ impl Answer {
     }
 }
 
-enum AudienceManagementResult {
-    Segment(Option<crate::collection_manager::sides::segments::Segment>),
-    Trigger(Option<crate::collection_manager::sides::triggers::Trigger>),
-}
-
-async fn select_triggers_and_segments(
-    read_side: Arc<ReadSide>,
-    read_api_key: ApiKey,
-    collection_id: CollectionId,
-    conversation: Option<Vec<InteractionMessage>>,
-    mut llm_config: Option<InteractionLLMConfig>,
-) -> impl Stream<Item = AudienceManagementResult> {
-    let segment_interface = read_side
-        .get_segments_manager(read_api_key, collection_id)
-        .await
-        .expect("Failed to get segments for the collection");
-    let all_segments = segment_interface
-        .list()
-        .await
-        .expect("Failed to get segments for the collection");
-
-    if read_side.is_gpu_overloaded() {
-        match read_side.select_random_remote_llm_service() {
-            Some((provider, model)) => {
-                info!("GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.", provider);
-                llm_config = Some(InteractionLLMConfig { model, provider });
-            }
-            None => {
-                warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
-            }
-        }
-    }
-
-    let (tx, rx) = tokio::sync::mpsc::channel(100);
-
-    // Move to another task to notify the FE without waiting all the LLM responses
-    tokio::spawn(async move {
-        if all_segments.is_empty() {
-            tx.send(AudienceManagementResult::Segment(None))
-                .await
-                .unwrap();
-            return;
-        };
-
-        let chosen_segment = segment_interface
-            .perform_segment_selection(conversation.clone(), llm_config.clone())
-            .await
-            .expect("Failed to choose a segment.");
-
-        let trigger_interface = read_side
-            .get_triggers_manager(read_api_key, collection_id)
-            .await
-            .expect("Failed to get triggers manager");
-
-        match chosen_segment {
-            None => {
-                tx.send(AudienceManagementResult::Segment(None))
-                    .await
-                    .unwrap();
-
-                tx.send(AudienceManagementResult::Trigger(None))
-                    .await
-                    .unwrap();
-            }
-            Some(segment) => {
-                let full_segment = segment_interface
-                    .get(segment.clone().id.clone())
-                    .await
-                    .expect("Failed to get full segment");
-
-                tx.send(AudienceManagementResult::Segment(full_segment.clone()))
-                    .await
-                    .unwrap();
-
-                let all_segments_triggers = trigger_interface
-                    .get_all_triggers_by_segment(full_segment.unwrap().id.clone())
-                    .await
-                    .expect("Failed to get triggers for the segment");
-
-                if all_segments_triggers.is_empty() {
-                    tx.send(AudienceManagementResult::Trigger(None))
-                        .await
-                        .unwrap();
-                    return;
-                }
-
-                let chosen_trigger = trigger_interface
-                    .perform_trigger_selection(
-                        conversation,
-                        all_segments_triggers,
-                        llm_config.clone(),
-                    )
-                    .await
-                    .context(
-                        "Failed to choose a trigger for the given segment. Will fall back to None.",
-                    )
-                    .unwrap_or(None);
-
-                match chosen_trigger {
-                    None => {
-                        tx.send(AudienceManagementResult::Trigger(None))
-                            .await
-                            .unwrap();
-                    }
-                    Some(chosen_trigger) => {
-                        let full_trigger = trigger_interface
-                            .get_trigger(chosen_trigger.id.clone())
-                            .await
-                            .expect("Failed to get full trigger");
-
-                        tx.send(AudienceManagementResult::Trigger(full_trigger))
-                            .await
-                            .unwrap();
-                    }
-                }
-            }
-        }
-    });
-
-    ReceiverStream::new(rx)
-}
-
 #[derive(Debug)]
 pub enum AnswerEvent {
     Acknowledged,
     SelectedLLM(InteractionLLMConfig),
-    GetSegment(Option<Segment>),
-    GetTrigger(Option<Trigger>),
     ResultAction { action: String, result: String },
     FailedToRunRelatedQuestion(anyhow::Error),
     RelatedQueries(String),

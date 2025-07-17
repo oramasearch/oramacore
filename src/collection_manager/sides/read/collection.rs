@@ -27,8 +27,9 @@ use crate::{
     capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
-            UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
+            UncommittedGeoPointFieldStats,
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
@@ -378,6 +379,8 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
+                AnalyticSearchEventInvocationType::NLPSearch,
+                search_params.user_id.clone(),
             )
             .await?;
 
@@ -410,6 +413,8 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
+                AnalyticSearchEventInvocationType::NLPSearch,
+                search_params.user_id.clone(),
             )
             .await)
     }
@@ -474,7 +479,7 @@ impl CollectionReader {
         token_scores: HashMap<DocumentId, f32>,
         limit: Limit,
         offset: SearchOffset,
-        sort_by: Option<SortBy>,
+        sort_by: Option<&SortBy>,
     ) -> Result<Vec<TokenScore>> {
         info!(
             "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",

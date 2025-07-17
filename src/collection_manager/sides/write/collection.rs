@@ -457,28 +457,6 @@ impl CollectionWriter {
         Ok(())
     }
 
-    async fn get_current_document_count(&self, with_tmp: bool) -> usize {
-        let mut document_count = 0_usize;
-
-        let indexes = self.indexes.read().await;
-        for index in indexes.values() {
-            let index_desc = index.describe().await;
-            document_count += index_desc.document_count;
-        }
-        drop(indexes);
-
-        if with_tmp {
-            let temp_indexs = self.temp_indexes.read().await;
-            for index in temp_indexs.values() {
-                let index_desc = index.describe().await;
-                document_count += index_desc.document_count;
-            }
-            drop(temp_indexs);
-        }
-
-        document_count
-    }
-
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;

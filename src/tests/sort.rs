@@ -395,7 +395,7 @@ async fn tests_sort_on_unsupported_field() {
         .await;
 
     let err = output.unwrap_err();
-    assert!(format!("{err:?}").contains("Only number or date field are supported for sorting, but got GeoPoint for property \"position\""));
+    assert!(format!("{err:?}").contains("Only number, date or boolean fields are supported for sorting, but got GeoPoint for property \"position\""));
 
     drop(test_context);
 }

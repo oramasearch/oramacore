@@ -12,6 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::ai::run_hooks::run_before_retrieval;
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
@@ -307,9 +308,19 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
+        invocation_type: AnalyticSearchEventInvocationType,
+        user_id: Option<String>,
     ) -> Result<Vec<SearchResult>> {
         let mapped_results = self
-            .run(read_side, read_api_key, collection_id, conversation, None)
+            .run(
+                read_side,
+                read_api_key,
+                collection_id,
+                conversation,
+                None,
+                invocation_type,
+                user_id,
+            )
             .await?;
 
         // Flatten all results into a single Vec<SearchResult>
@@ -327,6 +338,8 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+        invocation_type: AnalyticSearchEventInvocationType,
+        user_id: Option<String>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let mut stream = self
             .run_stream(
@@ -335,6 +348,8 @@ impl AdvancedAutoQuery {
                 collection_id,
                 conversation,
                 log_sender,
+                invocation_type,
+                user_id,
             )
             .await;
 
@@ -365,6 +380,8 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+        invocation_type: AnalyticSearchEventInvocationType,
+        user_id: Option<String>,
     ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
         let (tx, rx) = mpsc::channel(100);
 
@@ -406,7 +423,7 @@ impl AdvancedAutoQuery {
                 // Step 5: Generate queries with tracking
                 send_step!(tx, AdvancedAutoQuerySteps::GeneratingQueries);
                 let tracked_queries = self
-                    .generate_tracked_search_queries(queries_and_properties)
+                    .generate_tracked_search_queries(queries_and_properties, user_id)
                     .await?;
                 send_step!(
                     tx,
@@ -422,6 +439,7 @@ impl AdvancedAutoQuery {
                         collection_id,
                         tracked_queries,
                         log_sender,
+                        invocation_type,
                     )
                     .await?;
 
@@ -536,6 +554,7 @@ impl AdvancedAutoQuery {
     async fn generate_tracked_search_queries(
         &mut self,
         mut query_plan: Vec<QueryAndProperties>,
+        user_id: Option<String>,
     ) -> Result<Vec<TrackedQuery>> {
         // Extract filter properties for all queries
         let filter_properties = self.extract_filter_properties(&query_plan)?;
@@ -570,8 +589,9 @@ impl AdvancedAutoQuery {
                     .and_then(|response| {
                         let cleaned = repair_json(&response, &Default::default())
                             .context("Failed to clean LLM response")?;
-                        let search_params = serde_json::from_str::<SearchParams>(&cleaned)
+                        let mut search_params = serde_json::from_str::<SearchParams>(&cleaned)
                             .context("Failed to parse search params")?;
+                        search_params.user_id = user_id.clone();
 
                         Ok(TrackedQuery {
                             index,
@@ -594,6 +614,7 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         tracked_queries: Vec<TrackedQuery>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+        invocation_type: AnalyticSearchEventInvocationType,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let search_futures = tracked_queries.iter().map(|tracked_query| {
             let read_side = read_side.clone();
@@ -619,7 +640,7 @@ impl AdvancedAutoQuery {
                 drop(lock);
 
                 let search_result = read_side
-                    .search(read_api_key, collection_id, search_params)
+                    .search(read_api_key, collection_id, search_params, invocation_type)
                     .await
                     .context("Failed to execute search")?;
 
