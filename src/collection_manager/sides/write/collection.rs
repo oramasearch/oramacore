@@ -327,6 +327,10 @@ impl CollectionWriter {
 
         let mut temp_indexes_lock = self.temp_indexes.write().await;
 
+        if temp_indexes_lock.contains_key(&new_index_id) {
+            return Err(WriteError::IndexAlreadyExists(self.id, new_index_id));
+        }
+
         let runtime_config = self.runtime_config.read().await;
         let default_locale = runtime_config.default_locale;
         let embeddings_model = runtime_config.embeddings_model;
