@@ -180,26 +180,6 @@ impl Serialize for AnswerEvent {
                     }),
                 )?;
             }
-            AnswerEvent::GetSegment(segment) => {
-                s.serialize_field(
-                    "message",
-                    &json!({
-                        "action": "GET_SEGMENT",
-                        "result": serde_json::to_string(segment).unwrap(),
-                        "done": true,
-                    }),
-                )?;
-            }
-            AnswerEvent::GetTrigger(trigger) => {
-                s.serialize_field(
-                    "message",
-                    &json!({
-                        "action": "GET_TRIGGER",
-                        "result": serde_json::to_string(trigger).unwrap(),
-                        "done": true,
-                    }),
-                )?;
-            }
             AnswerEvent::ResultAction { action, result } => {
                 s.serialize_field(
                     "message",

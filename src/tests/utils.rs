@@ -33,7 +33,6 @@ use crate::{
             AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, ReadSide,
             ReadSideConfig,
         },
-        triggers::Trigger,
         write::{
             CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
         },
@@ -619,54 +618,6 @@ impl TestCollectionClient {
         hook_storage.insert_hook(hook_type, code).await?;
 
         Ok(())
-    }
-
-    pub async fn insert_trigger(
-        &self,
-        trigger: Trigger,
-        trigger_id: Option<String>,
-    ) -> Result<Trigger> {
-        let trigger_interface = self
-            .writer
-            .get_triggers_manager(self.write_api_key, self.collection_id)
-            .await?;
-
-        let trigger = trigger_interface
-            .insert_trigger(trigger, trigger_id.clone())
-            .await?;
-
-        wait_for(self, |coll| {
-            let reader = coll.reader.clone();
-            let read_api_key = coll.read_api_key;
-            let collection_id = coll.collection_id;
-            let trigger_id = trigger_id.clone();
-            async move {
-                let trigger_interface = reader
-                    .get_triggers_manager(read_api_key, collection_id)
-                    .await?;
-
-                let trigger = trigger_interface.get_trigger(trigger_id.unwrap()).await?;
-
-                if trigger.is_none() {
-                    bail!("Trigger not found");
-                }
-
-                Ok(())
-            }
-            .boxed()
-        })
-        .await?;
-
-        Ok(trigger)
-    }
-
-    pub async fn get_trigger(&self, trigger_id: String) -> Result<Option<Trigger>> {
-        let trigger_interface = self
-            .reader
-            .get_triggers_manager(self.read_api_key, self.collection_id)
-            .await?;
-
-        trigger_interface.get_trigger(trigger_id).await.context("")
     }
 
     pub async fn replace_index(

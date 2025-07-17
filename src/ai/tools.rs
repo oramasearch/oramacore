@@ -180,12 +180,12 @@ impl ToolsRuntime {
     ) -> Result<Vec<Tool>, ToolError> {
         let prefix = format!("{}:tool:", collection_id.as_str());
 
-        let segments = self.kv.prefix_scan(&prefix).await.context(format!(
+        let tools = self.kv.prefix_scan(&prefix).await.context(format!(
             "Cannot scan tools for collection {}",
             collection_id.as_str()
         ))?;
 
-        Ok(segments)
+        Ok(tools)
     }
 
     pub async fn execute_tools(
