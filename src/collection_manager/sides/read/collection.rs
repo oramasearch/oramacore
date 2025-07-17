@@ -565,8 +565,9 @@ impl CollectionReader {
                 if contains {
                     warn!("Index {} already exists", index_id);
                     debug_panic!("Index {} already exists", index_id);
+                } else {
+                    indexes_lock.push(index);
                 }
-                indexes_lock.push(index);
                 drop(indexes_lock);
             }
             CollectionWriteOperation::CreateTemporaryIndex2 { index_id, locale } => {
@@ -581,8 +582,9 @@ impl CollectionReader {
                 if contains {
                     warn!("Temp index {} already exists", index_id);
                     debug_panic!("Temp index {} already exists", index_id);
+                } else {
+                    temp_indexes_lock.push(index);
                 }
-                temp_indexes_lock.push(index);
                 drop(temp_indexes_lock);
             }
             CollectionWriteOperation::DeleteIndex2 { index_id } => {
