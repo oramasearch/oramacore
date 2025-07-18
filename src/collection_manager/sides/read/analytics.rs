@@ -2,14 +2,16 @@ use std::{io::Write, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use fs::create_if_not_exists;
+use fs::{create_if_not_exists, BufferedFile};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tokio_util::io::ReaderStream;
 use tracing::{error, info};
 
-use crate::types::{ApiKey, CollectionId, SearchParams, SearchResult};
+use crate::types::{
+    ApiKey, CollectionId, InteractionMessage, SearchParams, SearchResult, SearchResultHit,
+};
 
 #[derive(Deserialize, Clone)]
 pub struct AnalyticConfig {
@@ -80,11 +82,16 @@ pub struct AnalyticAnswerEvent {
     pub at: i64,
     #[serde(rename = "cid")]
     pub collection_id: CollectionId,
-    pub full_conversation: (),
+    #[serde(rename = "dms")]
+    pub answer_time: Dur,
+    #[serde(rename = "fc")]
+    pub full_conversation: Vec<InteractionMessage>,
+    #[serde(rename = "q")]
     pub question: String,
-    pub context: (),
-    pub response: String,
-
+    #[serde(rename = "c")]
+    pub context: Vec<SearchResultHit>,
+    #[serde(rename = "r")]
+    pub response: Vec<String>,
     #[serde(rename = "uid", skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
 }
@@ -106,6 +113,7 @@ pub enum AnalyticEvent {
 }
 
 pub struct AnalyticsStorage {
+    data_dir: PathBuf,
     api_key: ApiKey,
     sender: tokio::sync::mpsc::Sender<InternalEvent>,
 }
@@ -114,11 +122,30 @@ impl AnalyticsStorage {
     pub fn try_new(data_dir: PathBuf, config: AnalyticConfig) -> Result<Self> {
         create_if_not_exists(&data_dir)?;
 
+        let init_file_name: String =
+            if BufferedFile::exists_as_file(&data_dir.join("analytics.index")) {
+                let content = BufferedFile::open(data_dir.join("analytics.index"))
+                    .with_context(|| {
+                        format!("Cannot open analytics file at {}", data_dir.display())
+                    })?
+                    .read_text_data()?;
+                content
+            } else {
+                // Default file name is based on the current timestamp
+                let now = Utc::now().timestamp();
+                format!("analytics_{now}.log")
+            };
+
+        BufferedFile::create_or_overwrite(data_dir.join("analytics.index"))
+            .with_context(|| format!("Cannot open analytics file at {}", data_dir.display()))?
+            .write_text_data(&init_file_name)?;
+
         let (sender, receiver) = tokio::sync::mpsc::channel::<InternalEvent>(100);
 
-        tokio::task::spawn(store_event_loop(data_dir, receiver));
+        tokio::task::spawn(store_event_loop(data_dir.clone(), receiver, init_file_name));
 
         Ok(Self {
+            data_dir,
             sender,
             api_key: config.api_key,
         })
@@ -138,21 +165,25 @@ impl AnalyticsStorage {
             return Err(anyhow::anyhow!("Invalid analytics API key"));
         }
 
-        let (sender, receiver) = tokio::sync::oneshot::channel::<PathBuf>();
+        let (sender, receiver) = tokio::sync::oneshot::channel::<(PathBuf, String)>();
         let internal_event = InternalEvent::Rotate(sender);
         if let Err(e) = self.sender.try_send(internal_event) {
             error!(error = ?e, "Failed to send rotate signal");
             return Err(anyhow::anyhow!("Failed to send rotate signal"));
         }
 
-        let file_name = receiver
+        let (previous_file_path, new_file_name) = receiver
             .await
             .map_err(|_| anyhow::anyhow!("Failed to receive rotate signal"))?;
-        let file = tokio::fs::File::open(&file_name).await?;
+        let file = tokio::fs::File::open(&previous_file_path).await?;
+
+        BufferedFile::create_or_overwrite(self.data_dir.join("analytics.index"))
+            .with_context(|| format!("Cannot open analytics file at {}", self.data_dir.display()))?
+            .write_text_data(&new_file_name)?;
 
         let stream: ReaderStream<tokio::fs::File> = ReaderStream::new(file);
         let stream = AnalyticLogStream {
-            file_path: file_name.clone(),
+            file_path: previous_file_path.clone(),
             stream,
             already_deleted: false,
         };
@@ -192,16 +223,17 @@ impl futures::Stream for AnalyticLogStream {
 async fn store_event_loop(
     base_dir: PathBuf,
     mut receiver: tokio::sync::mpsc::Receiver<InternalEvent>,
+    init_file_name: String,
 ) -> Result<()> {
-    let now = Utc::now().timestamp();
-    let mut file_name = base_dir.join(format!("analytics_{now}.log"));
+    let mut file_path = base_dir.join(init_file_name);
+
     let mut file = std::fs::File::options()
         .create(true)
         .write(true)
         .read(true)
         .truncate(false)
-        .open(&file_name)
-        .with_context(|| format!("Cannot open file at {file_name:?}"))?;
+        .open(&file_path)
+        .with_context(|| format!("Cannot open file at {file_path:?}"))?;
 
     // 100 is an arbitrary limit for the number of events to process at once
     let limit = 100;
@@ -222,30 +254,32 @@ async fn store_event_loop(
             match event {
                 InternalEvent::NewEvent(ev) => {
                     write_to_file(&mut file, &ev)
-                        .with_context(|| format!("Cannot write event to file at {file_name:?}"))?;
+                        .with_context(|| format!("Cannot write event to file at {file_path:?}"))?;
                 }
                 InternalEvent::Rotate(sender) => {
-                    let previous_file_name = file_name;
-                    file_name = loop {
+                    let previous_file_path = file_path;
+                    let (new_file_path, file_name) = loop {
                         let now = Utc::now().timestamp();
-                        let new_file_name = base_dir.join(format!("analytics_{now}.log"));
-                        if new_file_name != previous_file_name {
-                            break new_file_name;
+                        let file_name = format!("analytics_{now}.log");
+                        let new_file_path = base_dir.join(&file_name);
+                        if new_file_path != previous_file_path {
+                            break (new_file_path, file_name);
                         }
                         sleep(Duration::from_millis(100)).await; // Force a new timestamp
                     };
+                    file_path = new_file_path;
 
                     file = std::fs::File::options()
                         .create(true)
                         .write(true)
                         .read(true)
                         .truncate(false)
-                        .open(&file_name)
-                        .with_context(|| format!("Cannot open file at {file_name:?}"))?;
+                        .open(&file_path)
+                        .with_context(|| format!("Cannot open file at {file_path:?}"))?;
 
-                    info!("Analytics file rotated: old_file {previous_file_name:?} new_file {file_name:?}");
+                    info!("Analytics file rotated: old_file {previous_file_path:?} new_file {file_path:?}");
 
-                    if let Err(e) = sender.send(previous_file_name) {
+                    if let Err(e) = sender.send((previous_file_path, file_name)) {
                         error!(error = ?e, "Failed to send rotate signal");
                     }
                 }
@@ -275,7 +309,7 @@ fn write_to_file<T: Serialize>(file: &mut std::fs::File, data: &T) -> Result<()>
 
 enum InternalEvent {
     NewEvent(AnalyticEvent),
-    Rotate(tokio::sync::oneshot::Sender<PathBuf>),
+    Rotate(tokio::sync::oneshot::Sender<(PathBuf, String)>),
 }
 
 #[cfg(test)]
@@ -303,30 +337,36 @@ mod tests {
         )
         .unwrap();
 
-        let event = AnalyticEvent::Search(AnalyticSearchEvent {
-            at: Utc::now().timestamp(),
-            collection_id: CollectionId::try_new("test_collection").unwrap(),
-            search_time: Duration::from_secs(1).into(),
-            search_params: json!({
-                "term": "test",
+        let create_event = |id: i64| {
+            AnalyticEvent::Search(AnalyticSearchEvent {
+                at: id,
+                collection_id: CollectionId::try_new("test_collection").unwrap(),
+                search_time: Duration::from_secs(1).into(),
+                search_params: json!({
+                    "term": "test",
+                })
+                .try_into()
+                .unwrap(),
+                user_id: Some("user123".to_string()),
+                results_count: 10,
+                full_results_json: None,
+                invocation_type: AnalyticSearchEventInvocationType::Direct,
             })
-            .try_into()
-            .unwrap(),
-            user_id: Some("user123".to_string()),
-            results_count: 10,
-            full_results_json: None,
-            invocation_type: AnalyticSearchEventInvocationType::Direct,
-        });
-        storage.add_event(event.clone()).unwrap();
-        storage.add_event(event.clone()).unwrap();
+        };
+        storage.add_event(create_event(1)).unwrap();
+        storage.add_event(create_event(2)).unwrap();
 
         let old_file: PathBuf = wait_for(&data_dir, |data_dir| {
             let data_dir = data_dir.clone();
             async move {
-                let entry: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
-                if entry.len() == 1 {
-                    // Only the new file should remain
-                    return Ok(entry[0].as_ref().unwrap().path());
+                let entries: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
+                if entries.len() == 2 {
+                    // Only the new file should exist + the index file
+                    let entry = entries
+                        .into_iter()
+                        .find(|e| e.as_ref().unwrap().file_name() != "analytics.index")
+                        .ok_or_else(|| anyhow::anyhow!("No index file found"))??;
+                    return Ok(entry.path());
                 }
                 Err(anyhow::anyhow!("No file found"))
             }
@@ -339,15 +379,17 @@ mod tests {
 
         let mut stream = storage.get_and_erase(analytics_api_key).await.unwrap();
 
-        storage.add_event(event.clone()).unwrap();
+        storage.add_event(create_event(3)).unwrap();
 
         wait_for(&data_dir, |data_dir| {
             let data_dir = data_dir.clone();
             async move {
-                let entry: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
-                if entry.len() == 2 {
-                    // Old file and new file should exist
-                    return Ok(entry[0].as_ref().unwrap().path());
+                let entries: Vec<_> = std::fs::read_dir(data_dir)
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()?;
+                if entries.len() == 3 {
+                    // The old file + new file should exist + the index file
+                    return Ok(entries[2].path());
                 }
                 Err(anyhow::anyhow!("No file found"))
             }
@@ -366,14 +408,16 @@ mod tests {
             3,
             "There should be two lines in the analytics log + 1 for the newline"
         );
+        assert!(stream_content.contains("\"at\":1"));
+        assert!(stream_content.contains("\"at\":2"));
 
         let new_file: PathBuf = wait_for(&data_dir, |data_dir| {
             let data_dir = data_dir.clone();
             async move {
                 let entry: Vec<_> = std::fs::read_dir(data_dir).unwrap().collect();
-                if entry.len() == 1 {
-                    // Only the new file should remain
-                    return Ok(entry[0].as_ref().unwrap().path());
+                if entry.len() == 2 {
+                    // Only the new file should remain + the index file
+                    return Ok(entry[1].as_ref().unwrap().path());
                 }
                 Err(anyhow::anyhow!("No file found"))
             }
@@ -386,6 +430,32 @@ mod tests {
             old_file, new_file,
             "Old file should be different from new file"
         );
+
+        // Simulate a server restart
+        drop(storage);
+        // Reload the storage with the same data directory
+        let storage = AnalyticsStorage::try_new(
+            data_dir.clone(),
+            AnalyticConfig {
+                api_key: analytics_api_key,
+            },
+        )
+        .unwrap();
+
+        let mut stream = storage.get_and_erase(analytics_api_key).await.unwrap();
+        let mut stream_content = String::new();
+        while let Some(Ok(bytes)) = stream.next().await {
+            // Process the bytes as needed
+            stream_content.push_str(&String::from_utf8_lossy(&bytes));
+        }
+        assert_eq!(
+            stream_content.split('\n').count(),
+            2,
+            "There should be one line in the analytics log + 1 for the newline"
+        );
+        assert!(!stream_content.contains("\"at\":1"));
+        assert!(!stream_content.contains("\"at\":2"));
+        assert!(stream_content.contains("\"at\":3"));
     }
 
     #[tokio::test]

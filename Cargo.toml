@@ -1,6 +1,6 @@
 [package]
 name = "oramacore"
-version = "1.1.60"
+version = "1.1.61"
 edition = "2021"
 
 [dependencies]

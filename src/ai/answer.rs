@@ -1,7 +1,11 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
@@ -15,7 +19,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{AnalyticSearchEventInvocationType, ReadError, ReadSide},
+        read::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType, ReadError, ReadSide},
         system_prompts::SystemPrompt,
     },
     types::{
@@ -123,6 +127,9 @@ impl Answer {
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         info!("Answering interaction...");
+
+        let start = Instant::now();
+
         self.handle_gpu_overload(&mut interaction).await;
 
         let llm_config = self.get_llm_config(&interaction);
@@ -262,11 +269,17 @@ impl Answer {
             }
         };
 
-        // let mut whole_response: Vec<String> = vec![];
+        let mut response: Option<Vec<String>> = if self.read_side.get_analytics_logs().is_some() {
+            Some(vec![])
+        } else {
+            None
+        };
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
-                    // whole_response.push(chunk.clone());
+                    if let Some(r) = response.as_mut() {
+                        r.push(chunk.clone())
+                    }
                     sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
@@ -291,25 +304,20 @@ impl Answer {
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
 
-        /*
-        if let Err(e) = self
-            .read_side
-            .get_analytics_logs()
-            .add_event(
-                AnalyticAnswerEvent {
-                    at: chrono::Utc::now().timestamp_millis(),
-                    user_id: None, // @todo: handle user_id if needed
-                    collection_id: self.collection_id,
-                    full_conversation: (),
-                    question: interaction.query,
-                    context: (),
-                    response: whole_response.join(""),
-                },
-            )
-        {
-            error!(error = ?e, "Failed to log analytic event");
+        if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
+            if let Err(e) = analytics_logs.add_event(AnalyticAnswerEvent {
+                at: chrono::Utc::now().timestamp_millis(),
+                collection_id: self.collection_id,
+                answer_time: start.elapsed().into(),
+                context: search_results,
+                full_conversation: interaction.messages,
+                question: interaction.query,
+                response: response.unwrap_or_default(),
+                user_id: None,
+            }) {
+                error!(error = ?e, "Failed to log analytic event");
+            }
         }
-        */
 
         Ok(())
     }
