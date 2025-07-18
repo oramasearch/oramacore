@@ -9,6 +9,7 @@ mod admin;
 mod analytics;
 mod answer;
 mod hooks;
+mod mpc;
 mod search;
 mod system_prompts;
 mod tools;
@@ -21,6 +22,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(hooks::write_apis(write_side.clone()))
             .merge(admin::apis(write_side.clone()))
             .merge(tools::write_apis(write_side.clone()))
+            .merge(mpc::write_apis(write_side.clone()))
             .merge(system_prompts::write_apis(write_side))
     } else {
         collection_router
@@ -33,6 +35,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(actions::apis(read_side.clone()))
             .merge(answer::apis(read_side.clone()))
             .merge(tools::read_apis(read_side.clone()))
+            .merge(mpc::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side))
     } else {
         collection_router
