@@ -40,7 +40,7 @@ use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{
     AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
 };
-use crate::collection_manager::sides::read::context::ReadSideContext;
+pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
