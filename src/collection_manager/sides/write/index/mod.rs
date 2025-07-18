@@ -130,15 +130,7 @@ impl Index {
         let score_fields = dump
             .score_fields
             .into_iter()
-            .map(|d| {
-                IndexScoreField::load_from(
-                    d,
-                    collection_id,
-                    index_id,
-                    context.embedding_sender.clone(),
-                    context.automatic_embeddings_selector.clone(),
-                )
-            })
+            .map(|d| IndexScoreField::load_from(d, collection_id, index_id, context.clone()))
             .collect();
 
         let doc_id_storage = DocIdStorage::load(data_dir)?;
@@ -185,7 +177,7 @@ impl Index {
         field_path: Box<[String]>,
     ) -> Result<IndexEmbeddingsCalculation> {
         let score_fields = self.score_fields.read().await;
-        let field = match get_field_by_path(&field_path, &*score_fields) {
+        let field = match get_field_by_path(&field_path, &score_fields) {
             Some(field) => field,
             None => {
                 return Err(anyhow::anyhow!("Field not found"));
@@ -238,9 +230,8 @@ impl Index {
             field_id,
             field_path.clone(),
             model,
+            self.context.clone(),
             string_calculation,
-            self.context.embedding_sender.clone(),
-            self.context.automatic_embeddings_selector.clone(),
         );
 
         let mut field_lock = self.score_fields.write().await;
@@ -787,9 +778,9 @@ fn calculate_fields_for(
     (filter_field, score_field)
 }
 
-fn get_field_by_path<'doc, 'index, X: AsRef<str>, T: GenericField>(
+fn get_field_by_path<'index, X: AsRef<str>, T: GenericField>(
     field_path: &[X],
-    fields: &'index Vec<T>,
+    fields: &'index [T],
 ) -> Option<&'index T> {
     fields
         .iter()

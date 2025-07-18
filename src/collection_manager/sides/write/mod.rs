@@ -1010,8 +1010,8 @@ impl WriteSide {
         Ok(doc_ids)
     }
 
-    async fn inner_process_documents<'s>(
-        &'s self,
+    async fn inner_process_documents(
+        &self,
         collection_id: CollectionId,
         index_id: IndexId,
         document_list: DocumentList,

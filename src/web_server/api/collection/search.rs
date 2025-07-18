@@ -136,9 +136,11 @@ async fn nlp_search_streamed(
                 }
             }
             Err(e) => {
-                let _ = tx.send(Ok(
-                    Event::default().data(json!({ "error": e.to_string() }).to_string())
-                ));
+                let _ = tx
+                    .send(Ok(
+                        Event::default().data(json!({ "error": e.to_string() }).to_string())
+                    ))
+                    .await;
             }
         }
     });
