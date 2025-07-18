@@ -72,7 +72,7 @@ pub struct AnalyticSearchEvent {
 
 impl From<AnalyticSearchEvent> for AnalyticEvent {
     fn from(val: AnalyticSearchEvent) -> Self {
-        AnalyticEvent::Search(val)
+        AnalyticEvent::Search(Box::new(val))
     }
 }
 
@@ -98,7 +98,7 @@ pub struct AnalyticAnswerEvent {
 
 impl From<AnalyticAnswerEvent> for AnalyticEvent {
     fn from(val: AnalyticAnswerEvent) -> Self {
-        AnalyticEvent::Answer(val)
+        AnalyticEvent::Answer(Box::new(val))
     }
 }
 
@@ -107,9 +107,9 @@ impl From<AnalyticAnswerEvent> for AnalyticEvent {
 #[cfg_attr(test, derive(Clone))]
 pub enum AnalyticEvent {
     #[serde(rename = "s")]
-    Search(AnalyticSearchEvent),
+    Search(Box<AnalyticSearchEvent>),
     #[serde(rename = "a")]
-    Answer(AnalyticAnswerEvent),
+    Answer(Box<AnalyticAnswerEvent>),
 }
 
 pub struct AnalyticsStorage {
@@ -315,7 +315,6 @@ enum InternalEvent {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
-    use futures::TryStreamExt;
     use serde_json::json;
 
     use crate::tests::utils::{generate_new_path, init_log, wait_for};
@@ -338,7 +337,7 @@ mod tests {
         .unwrap();
 
         let create_event = |id: i64| {
-            AnalyticEvent::Search(AnalyticSearchEvent {
+            AnalyticEvent::Search(Box::new(AnalyticSearchEvent {
                 at: id,
                 collection_id: CollectionId::try_new("test_collection").unwrap(),
                 search_time: Duration::from_secs(1).into(),
@@ -351,7 +350,7 @@ mod tests {
                 results_count: 10,
                 full_results_json: None,
                 invocation_type: AnalyticSearchEventInvocationType::Direct,
-            })
+            }))
         };
         storage.add_event(create_event(1)).unwrap();
         storage.add_event(create_event(2)).unwrap();

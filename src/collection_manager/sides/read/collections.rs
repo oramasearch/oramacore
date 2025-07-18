@@ -5,15 +5,15 @@ use std::{
 };
 
 use crate::{
-    ai::{llms::LLMService, AIService},
-    collection_manager::sides::{read::notify::Notifier, Offset},
+    ai::AIService,
+    collection_manager::sides::{read::context::ReadSideContext, Offset},
     metrics::{commit::COMMIT_CALCULATION_TIME, Empty},
     types::{ApiKey, CollectionId},
 };
 
 use fs::{create_if_not_exists, create_if_not_exists_async, BufferedFile};
 
-use nlp::{locales::Locale, NLPService};
+use nlp::locales::Locale;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -33,10 +33,7 @@ use super::{collection::CollectionReader, IndexesConfig};
 /// NB: `get_collection` will return `None`.
 ///
 pub struct CollectionsReader {
-    ai_service: Arc<AIService>,
-    nlp_service: Arc<NLPService>,
-    llm_service: Arc<LLMService>,
-    notifier: Option<Arc<Notifier>>,
+    context: ReadSideContext,
 
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
@@ -44,22 +41,11 @@ pub struct CollectionsReader {
 }
 
 impl CollectionsReader {
-    pub async fn try_load(
-        ai_service: Arc<AIService>,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<LLMService>,
-        indexes_config: IndexesConfig,
-    ) -> Result<Self> {
+    pub async fn try_load(context: ReadSideContext, indexes_config: IndexesConfig) -> Result<Self> {
         let data_dir = &indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
-
-        let mut notifier = None;
-        if let Some(notifier_config) = &indexes_config.notifier {
-            let n = Notifier::try_new(notifier_config).context("Cannot create notifier")?;
-            notifier = Some(n);
-        }
 
         let collections_info: CollectionsInfo =
             match BufferedFile::open(data_dir.join("info.json")).and_then(|f| f.read_json_data()) {
@@ -67,10 +53,7 @@ impl CollectionsReader {
                 Err(_) => {
                     warn!("Cannot read info.json file. Skip loading collections",);
                     return Ok(Self {
-                        ai_service,
-                        nlp_service,
-                        llm_service,
-                        notifier,
+                        context,
 
                         collections: Default::default(),
                         indexes_config,
@@ -94,14 +77,8 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(collection_id.as_str());
             info!("Loading collection {:?}", collection_dir);
 
-            let collection = CollectionReader::try_load(
-                ai_service.clone(),
-                nlp_service.clone(),
-                llm_service.clone(),
-                notifier.clone(),
-                collection_dir,
-            )
-            .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
+            let collection = CollectionReader::try_load(context.clone(), collection_dir)
+                .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 
             collections.insert(collection_id, collection);
         }
@@ -109,10 +86,7 @@ impl CollectionsReader {
         info!("Collections loaded from disk.");
 
         Ok(Self {
-            ai_service,
-            nlp_service,
-            llm_service,
-            notifier,
+            context,
 
             collections: RwLock::new(collections),
             indexes_config,
@@ -126,7 +100,7 @@ impl CollectionsReader {
     }
 
     pub fn get_ai_service(&self) -> Arc<AIService> {
-        self.ai_service.clone()
+        self.context.ai_service.clone()
     }
 
     pub async fn get_collection<'s, 'coll>(
@@ -226,10 +200,7 @@ impl CollectionsReader {
             default_locale,
             read_api_key,
             write_api_key,
-            self.ai_service.clone(),
-            self.nlp_service.clone(),
-            self.llm_service.clone(),
-            self.notifier.clone(),
+            self.context.clone(),
         )?;
 
         let mut guard = self.collections.write().await;
@@ -253,6 +224,7 @@ impl CollectionsReader {
         Ok(())
     }
 
+    /*
     pub async fn remove_collection(&self, id: CollectionId) -> Result<()> {
         let mut guard = self.collections.write().await;
         if let Some(collection) = guard.get_mut(&id) {
@@ -262,6 +234,7 @@ impl CollectionsReader {
 
         Ok(())
     }
+    */
 
     pub async fn clean_fs_for_collection(&self, collection: &CollectionReader) -> Result<()> {
         info!(collection_id=?collection.id(), "Cleaning FS collection");

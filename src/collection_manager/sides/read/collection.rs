@@ -19,15 +19,11 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
-    ai::{
-        advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
-        llms::LLMService,
-        AIService,
-    },
+    ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
         },
@@ -41,7 +37,6 @@ use crate::{
 
 use super::{
     index::{Index, IndexStats},
-    notify::Notifier,
     CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
     CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, ReadSide,
     UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
@@ -50,7 +45,7 @@ use super::{
 
 use crate::types::NLPSearchRequest;
 use fs::*;
-use nlp::{locales::Locale, NLPService};
+use nlp::locales::Locale;
 
 pub struct CollectionReader {
     data_dir: PathBuf,
@@ -61,17 +56,13 @@ pub struct CollectionReader {
 
     read_api_key: ApiKey,
     write_api_key: Option<ApiKey>,
-    ai_service: Arc<AIService>,
-    nlp_service: Arc<NLPService>,
-    llm_service: Arc<LLMService>,
+    context: ReadSideContext,
 
     indexes: RwLock<Vec<Index>>,
 
     temp_indexes: RwLock<Vec<Index>>,
 
     hook: RwLock<HookReader>,
-
-    notifier: Option<Arc<Notifier>>,
 
     created_at: DateTime<Utc>,
     updated_at: RwLock<DateTime<Utc>>,
@@ -87,10 +78,7 @@ impl CollectionReader {
         default_locale: Locale,
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
-        ai_service: Arc<AIService>,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<LLMService>,
-        notifier: Option<Arc<Notifier>>,
+        context: ReadSideContext,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -100,13 +88,11 @@ impl CollectionReader {
 
             read_api_key,
             write_api_key,
-            ai_service,
-            nlp_service,
-            llm_service,
+
+            context,
 
             indexes: Default::default(),
             temp_indexes: Default::default(),
-            notifier,
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
 
@@ -119,13 +105,7 @@ impl CollectionReader {
         })
     }
 
-    pub fn try_load(
-        ai_service: Arc<AIService>,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<LLMService>,
-        notifier: Option<Arc<Notifier>>,
-        data_dir: PathBuf,
-    ) -> Result<Self> {
+    pub fn try_load(context: ReadSideContext, data_dir: PathBuf) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
@@ -137,9 +117,7 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
-                nlp_service.clone(),
-                llm_service.clone(),
-                ai_service.clone(),
+                context.clone(),
             )?;
             indexes.push(index);
         }
@@ -149,9 +127,7 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
-                nlp_service.clone(),
-                llm_service.clone(),
-                ai_service.clone(),
+                context.clone(),
             )?;
             temp_indexes.push(index);
         }
@@ -166,16 +142,13 @@ impl CollectionReader {
 
             read_api_key: dump.read_api_key,
             write_api_key: dump.write_api_key,
-            ai_service,
-            nlp_service,
-            llm_service,
+
+            context,
 
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
-
-            notifier,
 
             created_at: dump.created_at,
             updated_at: RwLock::new(dump.updated_at),
@@ -322,6 +295,7 @@ impl CollectionReader {
     }
 
     #[inline]
+    #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
         &self,
         api_key: ApiKey,
@@ -362,7 +336,7 @@ impl CollectionReader {
         collection_stats: CollectionStats,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
-        let llm_service = self.llm_service.clone();
+        let llm_service = self.context.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
 
@@ -396,7 +370,7 @@ impl CollectionReader {
         collection_stats: CollectionStats,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<impl tokio_stream::Stream<Item = Result<AdvancedAutoQuerySteps>>, ReadError> {
-        let llm_service = self.llm_service.clone();
+        let llm_service = self.context.llm_service.clone();
         let llm_config = search_params.llm_config.clone();
         let query = search_params.query.clone();
 
@@ -557,9 +531,8 @@ impl CollectionReader {
                 let mut indexes_lock = self.indexes.write().await;
                 let index = Index::new(
                     index_id,
-                    self.nlp_service.get(locale),
-                    self.llm_service.clone(),
-                    self.ai_service.clone(),
+                    self.context.nlp_service.get(locale),
+                    self.context.clone(),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -574,9 +547,8 @@ impl CollectionReader {
                 let mut temp_indexes_lock = self.temp_indexes.write().await;
                 let index = Index::new(
                     index_id,
-                    self.nlp_service.get(locale),
-                    self.llm_service.clone(),
-                    self.ai_service.clone(),
+                    self.context.nlp_service.get(locale),
+                    self.context.clone(),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
@@ -655,7 +627,7 @@ impl CollectionReader {
                 drop(temp_index_lock);
                 drop(runtime_index_lock);
 
-                if let Some(notifier) = self.notifier.as_ref() {
+                if let Some(notifier) = self.context.notifier.as_ref() {
                     match notifier
                         .notify_collection_substitution(
                             self.id,

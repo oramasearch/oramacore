@@ -275,8 +275,7 @@ pub async fn create_ai_server_mock(
                         .as_secs();
                     let model = "gpt-3.5-turbo-0301";
                     let id = "chatcmpl-mock";
-                    let mut idx = 0;
-                    for s in first {
+                    for (idx, s) in first.into_iter().enumerate() {
                         let chunk = json!({
                             "id": id,
                             "object": "chat.completion.chunk",
@@ -292,7 +291,6 @@ pub async fn create_ai_server_mock(
                         });
                         let ev = Event::default().json_data(chunk).unwrap();
                         http_sender.send(Ok(ev)).await.unwrap();
-                        idx += 1;
                     }
                     let ev = Event::default().data("[DONE]");
                     http_sender.send(Ok(ev)).await.unwrap();

@@ -1,6 +1,7 @@
 mod analytics;
 mod collection;
 mod collections;
+mod context;
 pub mod document_storage;
 mod index;
 mod logs;
@@ -39,7 +40,9 @@ use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{
     AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
 };
+pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
+use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
@@ -133,14 +136,22 @@ impl ReadSide {
         let commit_interval = config.config.commit_interval;
         let data_dir = config.config.data_dir.clone();
 
-        let collections_reader = CollectionsReader::try_load(
-            ai_service.clone(),
-            nlp_service,
-            llm_service.clone(),
-            config.config,
-        )
-        .await
-        .context("Cannot load collections")?;
+        let mut notifier = None;
+        if let Some(notifier_config) = &config.config.notifier {
+            let n = Notifier::try_new(notifier_config).context("Cannot create notifier")?;
+            notifier = Some(n);
+        }
+
+        let context = ReadSideContext {
+            ai_service: ai_service.clone(),
+            nlp_service: nlp_service.clone(),
+            llm_service: llm_service.clone(),
+            notifier,
+        };
+
+        let collections_reader = CollectionsReader::try_load(context, config.config)
+            .await
+            .context("Cannot load collections")?;
         document_storage
             .load()
             .context("Cannot load document storage")?;

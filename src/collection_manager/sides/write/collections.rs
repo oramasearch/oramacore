@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info};
 
-use crate::ai::automatic_embeddings_selector::AutomaticEmbeddingsSelector;
 use crate::ai::OramaModel;
+use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
+use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
@@ -18,19 +18,14 @@ use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use fs::{create_if_not_exists, BufferedFile};
 use nlp::locales::Locale;
-use nlp::NLPService;
 
 use super::collection::CollectionWriter;
-use super::embedding::MultiEmbeddingCalculationRequest;
 use super::CollectionsWriterConfig;
 
 pub struct CollectionsWriter {
     collections: RwLock<HashMap<CollectionId, CollectionWriter>>,
     config: CollectionsWriterConfig,
-    embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
-    op_sender: OperationSender,
-    nlp_service: Arc<NLPService>,
-    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+    context: WriteSideContext,
     default_model: OramaModel,
     data_dir: PathBuf,
 }
@@ -38,10 +33,7 @@ pub struct CollectionsWriter {
 impl CollectionsWriter {
     pub async fn try_load(
         config: CollectionsWriterConfig,
-        embedding_sender: tokio::sync::mpsc::Sender<MultiEmbeddingCalculationRequest>,
-        nlp_service: Arc<NLPService>,
-        op_sender: OperationSender,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        context: WriteSideContext,
     ) -> Result<Self> {
         let mut collections: HashMap<CollectionId, CollectionWriter> = Default::default();
         let default_model = config.default_embedding_model.0;
@@ -64,10 +56,7 @@ impl CollectionsWriter {
                     // collection_options: Default::default(),
                     collections: Default::default(),
                     config,
-                    embedding_sender,
-                    op_sender,
-                    nlp_service,
-                    automatic_embeddings_selector,
+                    context,
                     default_model,
                     data_dir,
                 });
@@ -81,24 +70,14 @@ impl CollectionsWriter {
             // and we abort the start up process
             // Should we instead ignore it?
             // TODO: think about it
-            let collection = CollectionWriter::try_load(
-                collection_dir,
-                nlp_service.clone(),
-                embedding_sender.clone(),
-                op_sender.clone(),
-                automatic_embeddings_selector.clone(),
-            )
-            .await?;
+            let collection = CollectionWriter::try_load(collection_dir, context.clone()).await?;
             collections.insert(collection_id, collection);
         }
 
         let writer = CollectionsWriter {
             collections: RwLock::new(collections),
             config,
-            embedding_sender,
-            op_sender,
-            nlp_service,
-            automatic_embeddings_selector,
+            context,
             default_model,
             data_dir,
         };
@@ -136,19 +115,16 @@ impl CollectionsWriter {
         let language = language.unwrap_or(LanguageDTO::English);
         let default_locale: Locale = language.into();
 
-        let collection = CollectionWriter::empty(
+        let req = CreateEmptyCollection {
             id,
-            self.data_dir.join(id.as_str()),
-            description.clone(),
+            description: description.clone(),
+            default_locale,
+            embeddings_model: embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
             write_api_key,
             read_api_key,
-            default_locale,
-            embeddings_model.map(|m| m.0).unwrap_or(self.default_model),
-            self.embedding_sender.clone(),
-            self.op_sender.clone(),
-            self.nlp_service.clone(),
-            self.automatic_embeddings_selector.clone(),
-        )?;
+        };
+        let collection =
+            CollectionWriter::empty(self.data_dir.join(id.as_str()), req, self.context.clone())?;
 
         let mut collections = self.collections.write().await;
 
@@ -243,6 +219,7 @@ impl CollectionsWriter {
         collection.remove_from_fs(collection_dir).await;
 
         if let Err(error) = self
+            .context
             .op_sender
             .send(WriteOperation::DeleteCollection(collection_id))
             .await

@@ -48,6 +48,9 @@ impl TotalDocumentsWithTermInField {
 #[derive(Debug, Clone)]
 pub struct Positions(pub Vec<usize>);
 
+// (exact positions, stemmed positions)
+type PostingPositions = (Positions, Positions);
+
 #[derive(Debug)]
 pub struct UncommittedStringField {
     field_path: Box<[String]>,
@@ -62,7 +65,7 @@ pub struct UncommittedStringField {
     inner: RadixIndex<(
         TotalDocumentsWithTermInField,
         // doc_id => (exact positions, stemmed positions)
-        HashMap<DocumentId, (Positions, Positions)>,
+        HashMap<DocumentId, PostingPositions>,
     )>,
 }
 
@@ -245,7 +248,7 @@ impl UncommittedStringField {
             Vec<u8>,
             (
                 TotalDocumentsWithTermInField,
-                HashMap<DocumentId, (Positions, Positions)>,
+                HashMap<DocumentId, PostingPositions>,
             ),
         ),
     > + '_ {

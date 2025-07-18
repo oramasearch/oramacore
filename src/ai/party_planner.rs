@@ -234,11 +234,13 @@ impl PartyPlanner {
                         false => result,
                     };
 
-                    let _ = tx.send(PartyPlannerMessage {
-                        action: step.name.clone(),
-                        result: value.clone(),
-                        done: true,
-                    });
+                    let _ = tx
+                        .send(PartyPlannerMessage {
+                            action: step.name.clone(),
+                            result: value.clone(),
+                            done: true,
+                        })
+                        .await;
 
                     history.push(InteractionMessage {
                         role: Role::Assistant,
@@ -331,19 +333,14 @@ impl PartyPlanner {
     }
 
     fn create_step(action: Action) -> Step {
-        let returns_json = match action.step.as_str() {
-            "ASK_FOLLOWUP" => false,
-            "IMPROVE_INPUT" => false,
-            "GIVE_REPLY" => false,
-            _ => true,
-        };
-
-        let should_stream = match action.step.as_str() {
-            "OPTIMIZE_QUERY" => false,
-            "GENERATE_QUERIES" => false,
-            "PERFORM_ORAMA_SEARCH" => false,
-            _ => true,
-        };
+        let returns_json = !matches!(
+            action.step.as_str(),
+            "ASK_FOLLOWUP" | "IMPROVE_INPUT" | "GIVE_REPLY"
+        );
+        let should_stream = !matches!(
+            action.step.as_str(),
+            "OPTIMIZE_QUERY" | "GENERATE_QUERIES" | "PERFORM_ORAMA_SEARCH"
+        );
 
         Step {
             name: action.step.clone(),

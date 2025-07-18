@@ -129,16 +129,20 @@ async fn nlp_search_streamed(
                         }
                         Err(e) => {
                             print_error(&e, "Error in NLP search stream");
-                            let _ = tx.send(Ok(Event::default()
-                                .data(json!({ "error": e.to_string() }).to_string())));
+                            let _ = tx
+                                .send(Ok(Event::default()
+                                    .data(json!({ "error": e.to_string() }).to_string())))
+                                .await;
                         }
                     }
                 }
             }
             Err(e) => {
-                let _ = tx.send(Ok(
-                    Event::default().data(json!({ "error": e.to_string() }).to_string())
-                ));
+                let _ = tx
+                    .send(Ok(
+                        Event::default().data(json!({ "error": e.to_string() }).to_string())
+                    ))
+                    .await;
             }
         }
     });

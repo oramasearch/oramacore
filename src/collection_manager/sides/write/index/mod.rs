@@ -18,14 +18,15 @@ use fields::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
-    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
+    ai::OramaModel,
     collection_manager::sides::{
-        field_names_to_paths, CollectionWriteOperation, DocumentStorageWriteOperation,
-        IndexWriteOperation, IndexWriteOperationFieldType, OperationSender, WriteOperation,
+        field_names_to_paths, write::context::WriteSideContext, CollectionWriteOperation,
+        DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
+        WriteOperation,
     },
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
@@ -35,7 +36,6 @@ use crate::{
 use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
-use super::embedding::MultiEmbeddingCalculationRequest;
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]
@@ -58,9 +58,7 @@ pub struct Index {
 
     field_id_generator: AtomicU16,
 
-    op_sender: OperationSender,
-    embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-    automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
+    context: WriteSideContext,
 
     created_at: DateTime<Utc>,
 
@@ -71,11 +69,9 @@ impl Index {
     pub async fn empty(
         index_id: IndexId,
         collection_id: CollectionId,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        text_parser: Arc<TextParser>,
-        op_sender: OperationSender,
-        automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
         runtime_index_id: Option<IndexId>,
+        text_parser: Arc<TextParser>,
+        context: WriteSideContext,
     ) -> Result<Self> {
         let field_id = 0;
         let score_fields = vec![];
@@ -95,9 +91,7 @@ impl Index {
 
             field_id_generator: AtomicU16::new(field_id),
 
-            op_sender,
-            embedding_sender,
-            automatically_chosen_properties,
+            context,
 
             created_at: Utc::now(),
 
@@ -109,9 +103,7 @@ impl Index {
         collection_id: CollectionId,
         index_id: IndexId,
         data_dir: PathBuf,
-        op_sender: OperationSender,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        automatically_chosen_properties: Arc<AutomaticEmbeddingsSelector>,
+        context: WriteSideContext,
     ) -> Result<Self> {
         let dump: IndexDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot create info.json file")?
@@ -138,15 +130,7 @@ impl Index {
         let score_fields = dump
             .score_fields
             .into_iter()
-            .map(|d| {
-                IndexScoreField::load_from(
-                    d,
-                    collection_id,
-                    index_id,
-                    embedding_sender.clone(),
-                    automatically_chosen_properties.clone(),
-                )
-            })
+            .map(|d| IndexScoreField::load_from(d, collection_id, index_id, context.clone()))
             .collect();
 
         let doc_id_storage = DocIdStorage::load(data_dir)?;
@@ -164,9 +148,7 @@ impl Index {
 
             field_id_generator: AtomicU16::new(0),
 
-            op_sender,
-            embedding_sender,
-            automatically_chosen_properties,
+            context,
 
             created_at: dump.created_at,
 
@@ -195,7 +177,7 @@ impl Index {
         field_path: Box<[String]>,
     ) -> Result<IndexEmbeddingsCalculation> {
         let score_fields = self.score_fields.read().await;
-        let field = match get_field_by_path(&field_path, &*score_fields) {
+        let field = match get_field_by_path(&field_path, &score_fields) {
             Some(field) => field,
             None => {
                 return Err(anyhow::anyhow!("Field not found"));
@@ -248,16 +230,16 @@ impl Index {
             field_id,
             field_path.clone(),
             model,
+            self.context.clone(),
             string_calculation,
-            self.embedding_sender.clone(),
-            self.automatically_chosen_properties.clone(),
         );
 
         let mut field_lock = self.score_fields.write().await;
         field_lock.push(field);
         drop(field_lock);
 
-        self.op_sender
+        self.context
+            .op_sender
             .send(WriteOperation::Collection(
                 self.collection_id,
                 CollectionWriteOperation::IndexWriteOperation(
@@ -453,7 +435,8 @@ impl Index {
         let doc_ids = doc_id_storage.remove_document_ids(doc_ids);
 
         if !doc_ids.is_empty() {
-            self.op_sender
+            self.context
+                .op_sender
                 .send(WriteOperation::Collection(
                     self.collection_id,
                     CollectionWriteOperation::IndexWriteOperation(
@@ -465,7 +448,8 @@ impl Index {
                 ))
                 .await
                 .context("Cannot send operation")?;
-            self.op_sender
+            self.context
+                .op_sender
                 .send(WriteOperation::DocumentStorage(
                     DocumentStorageWriteOperation::DeleteDocuments {
                         doc_ids: doc_ids.clone(),
@@ -692,7 +676,8 @@ impl Index {
         drop(score_fields);
         drop(filter_fields);
 
-        self.op_sender
+        self.context
+            .op_sender
             .send_batch(index_operation_batch)
             .await
             .context("Cannot send add fields operation")?;
@@ -793,9 +778,9 @@ fn calculate_fields_for(
     (filter_field, score_field)
 }
 
-fn get_field_by_path<'doc, 'index, X: AsRef<str>, T: GenericField>(
+fn get_field_by_path<'index, X: AsRef<str>, T: GenericField>(
     field_path: &[X],
-    fields: &'index Vec<T>,
+    fields: &'index [T],
 ) -> Option<&'index T> {
     fields
         .iter()
