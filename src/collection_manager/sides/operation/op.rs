@@ -139,12 +139,14 @@ pub enum IndexWriteOperation {
         indexed_values: Vec<IndexedValue>,
     },
     IndexEmbedding {
-        data: Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>,
+        data: EmbeddingIndexData,
     },
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
 }
+
+pub type EmbeddingIndexData = Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplaceIndexReason {

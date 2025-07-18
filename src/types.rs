@@ -610,6 +610,7 @@ pub struct Claims {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::large_enum_variant)]
 pub enum WriteApiKey {
     ApiKey(ApiKey),
     Claims(Claims),

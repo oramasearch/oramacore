@@ -27,9 +27,7 @@ use crate::{
     capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
-            CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
-            UncommittedGeoPointFieldStats,
+            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
@@ -87,10 +85,7 @@ impl CollectionReader {
         default_locale: Locale,
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
-        ai_service: Arc<AIService>,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<LLMService>,
-        notifier: Option<Arc<Notifier>>,
+        context: ReadSideContext,   
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -100,13 +95,14 @@ impl CollectionReader {
 
             read_api_key,
             write_api_key,
-            ai_service,
-            nlp_service,
-            llm_service,
+
+            ai_service: context.ai_service,
+            nlp_service: context.nlp_service,
+            llm_service: context.llm_service,
+            notifier: context.notifier,
 
             indexes: Default::default(),
             temp_indexes: Default::default(),
-            notifier,
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
 
@@ -120,10 +116,7 @@ impl CollectionReader {
     }
 
     pub fn try_load(
-        ai_service: Arc<AIService>,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<LLMService>,
-        notifier: Option<Arc<Notifier>>,
+        context: ReadSideContext,
         data_dir: PathBuf,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
@@ -137,9 +130,9 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
-                nlp_service.clone(),
-                llm_service.clone(),
-                ai_service.clone(),
+                context.nlp_service.clone(),
+                context.llm_service.clone(),
+                context.ai_service.clone(),
             )?;
             indexes.push(index);
         }
@@ -149,9 +142,9 @@ impl CollectionReader {
             let index = Index::try_load(
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
-                nlp_service.clone(),
-                llm_service.clone(),
-                ai_service.clone(),
+                context.nlp_service.clone(),
+                context.llm_service.clone(),
+                context.ai_service.clone(),
             )?;
             temp_indexes.push(index);
         }
@@ -166,16 +159,15 @@ impl CollectionReader {
 
             read_api_key: dump.read_api_key,
             write_api_key: dump.write_api_key,
-            ai_service,
-            nlp_service,
-            llm_service,
+            ai_service: context.ai_service,
+            nlp_service: context.nlp_service,
+            llm_service: context.llm_service,
+            notifier: context.notifier,
 
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
-
-            notifier,
 
             created_at: dump.created_at,
             updated_at: RwLock::new(dump.updated_at),
