@@ -27,7 +27,9 @@ use crate::{
     capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats
+            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
+            UncommittedGeoPointFieldStats,
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
@@ -85,7 +87,7 @@ impl CollectionReader {
         default_locale: Locale,
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
-        context: ReadSideContext,   
+        context: ReadSideContext,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -115,10 +117,7 @@ impl CollectionReader {
         })
     }
 
-    pub fn try_load(
-        context: ReadSideContext,
-        data_dir: PathBuf,
-    ) -> Result<Self> {
+    pub fn try_load(context: ReadSideContext, data_dir: PathBuf) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
@@ -314,6 +313,7 @@ impl CollectionReader {
     }
 
     #[inline]
+    #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
         &self,
         api_key: ApiKey,

@@ -5,7 +5,9 @@ mod embedding;
 pub mod index;
 use hook_storage::{HookWriter, HookWriterError};
 pub use index::OramaModelSerializable;
+use nlp::NLPService;
 use thiserror::Error;
+mod context;
 pub mod jwt_manager;
 
 use std::{
@@ -41,6 +43,8 @@ pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
+pub use context::WriteSideContext;
+
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -62,7 +66,6 @@ use crate::{
     },
 };
 use fs::BufferedFile;
-use nlp::NLPService;
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -124,8 +127,9 @@ pub struct WriteSide {
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
-    llm_service: Arc<LLMService>,
     master_api_key: ApiKey,
+
+    context: WriteSideContext,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
@@ -188,24 +192,28 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        let context = WriteSideContext {
+            ai_service,
+            embedding_sender: sx,
+            op_sender: op_sender.clone(),
+            nlp_service,
+            automatic_embeddings_selector,
+            llm_service,
+        };
+
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
             sender: Some(op_sender.clone()),
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
-        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), context.llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
 
-        let collections_writer = CollectionsWriter::try_load(
-            collections_writer_config,
-            sx,
-            nlp_service.clone(),
-            op_sender.clone(),
-            automatic_embeddings_selector.clone(),
-        )
-        .await
-        .context("Cannot load collections")?;
+        let collections_writer =
+            CollectionsWriter::try_load(collections_writer_config, context.clone())
+                .await
+                .context("Cannot load collections")?;
 
         let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
             .await
@@ -232,7 +240,7 @@ impl WriteSide {
             system_prompts,
             tools,
             kv,
-            llm_service,
+            context: context.clone(),
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -248,7 +256,7 @@ impl WriteSide {
             stop_done_sender.clone(),
         );
         start_calculate_embedding_loop(
-            ai_service,
+            context.ai_service.clone(),
             rx,
             op_sender,
             embedding_queue_limit,
@@ -1143,7 +1151,7 @@ impl WriteSide {
     }
 
     pub fn llm_service(&self) -> &LLMService {
-        &self.llm_service
+        &self.context.llm_service
     }
 
     pub async fn get_system_prompts_manager(

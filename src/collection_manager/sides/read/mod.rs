@@ -1,11 +1,11 @@
 mod analytics;
 mod collection;
 mod collections;
+mod context;
 pub mod document_storage;
 mod index;
 mod logs;
 pub mod notify;
-mod context;
 
 use axum::extract::State;
 use chrono::Utc;
@@ -149,12 +149,9 @@ impl ReadSide {
             notifier,
         };
 
-        let collections_reader = CollectionsReader::try_load(
-            context,
-            config.config,
-        )
-        .await
-        .context("Cannot load collections")?;
+        let collections_reader = CollectionsReader::try_load(context, config.config)
+            .await
+            .context("Cannot load collections")?;
         document_storage
             .load()
             .context("Cannot load document storage")?;

@@ -1358,19 +1358,14 @@ impl Index {
                     })
                 }),
         );
-        fields_stats.extend(
-            committed_fields
-                .string_filter_fields
-                .iter()
-                .filter_map(|(k, v)| {
-                    let path = v.field_path().join(".");
-                    Some(IndexFieldStats {
-                        field_id: *k,
-                        field_path: path,
-                        stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
-                    })
-                }),
-        );
+        fields_stats.extend(committed_fields.string_filter_fields.iter().map(|(k, v)| {
+            let path = v.field_path().join(".");
+            IndexFieldStats {
+                field_id: *k,
+                field_path: path,
+                stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
+            }
+        }));
         fields_stats.extend(committed_fields.string_fields.iter().filter_map(|(k, v)| {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
