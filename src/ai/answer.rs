@@ -19,9 +19,8 @@ use crate::{
         system_prompts::SystemPrompt,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
-        Similarity, VectorMode,
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
+        SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
     },
 };
 

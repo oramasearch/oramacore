@@ -39,6 +39,7 @@ pub enum KnownPrompts {
     ValidateSystemPrompt,
     Followup,
     GenerateRelatedQueries,
+    DetermineQueryStrategy,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +150,11 @@ impl KnownPrompts {
                     .to_string(),
                 user: include_str!("../prompts/v1/advanced_autoquery/query_composer/user.md")
                     .to_string(),
+            },
+            KnownPrompts::DetermineQueryStrategy => KnownPrompt {
+                system: include_str!("../prompts/v1/determine_query_strategy/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/determine_query_strategy/user.md").to_string(),
             },
         }
     }
