@@ -5,12 +5,14 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::{join_all, Future};
+use futures::StreamExt;
 use llm_json::repair_json;
 use orama_js_pool::ExecOption;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{error, info, warn};
 
 use crate::ai::llms::{KnownPrompts, LLMService};
@@ -21,6 +23,37 @@ use crate::types::{
 
 use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
+
+// ==== SSE Event Types ====
+
+#[derive(Debug, Clone, Serialize)]
+pub enum AdvancedAutoqueryEvent {
+    #[serde(rename = "state_changed")]
+    StateChanged {
+        state: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<serde_json::Value>,
+    },
+    #[serde(rename = "error")]
+    Error { error: String, state: String },
+    #[serde(rename = "progress")]
+    Progress {
+        current_step: String,
+        total_steps: usize,
+        message: String,
+    },
+    #[serde(rename = "search_results")]
+    SearchResults {
+        results: Vec<QueryMappedSearchResult>,
+    },
+    #[serde(rename = "answer_generated")]
+    AnswerGenerated { answer: GeneratedAnswer },
+    #[serde(rename = "answer_token")]
+    AnswerToken { token: String },
+    #[serde(rename = "completed")]
+    Completed { answer: GeneratedAnswer },
+}
 
 // ==== Data Models ====
 
@@ -70,6 +103,29 @@ pub struct QueryMappedSearchResult {
     pub query_index: usize,
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub struct AnswerContext {
+    pub conversation: Vec<InteractionMessage>,
+    pub search_results: Vec<QueryMappedSearchResult>,
+    pub system_prompt: Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ProcessedAnswerContext {
+    pub conversation: Vec<InteractionMessage>,
+    pub search_results: Vec<QueryMappedSearchResult>,
+    pub original_system_prompt:
+        Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
+    pub processed_system_prompt:
+        Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct GeneratedAnswer {
+    pub answer: String,
+    pub context: ProcessedAnswerContext,
+}
+
 // ==== Error Types ====
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -88,6 +144,10 @@ pub enum AdvancedAutoqueryError {
     ExecuteBeforeRetrievalHookError(String),
     #[error("Failed to execute searches: {0}")]
     ExecuteSearchesError(String),
+    #[error("Failed to execute before answer hook: {0}")]
+    ExecuteBeforeAnswerHookError(String),
+    #[error("Failed to generate answer: {0}")]
+    GenerateAnswerError(String),
     #[error("LLM service error: {0}")]
     LLMServiceError(String),
     #[error("JSON parsing error: {0}")]
@@ -165,6 +225,30 @@ pub enum AdvancedAutoqueryFlow {
     SearchResults {
         results: Vec<QueryMappedSearchResult>,
     },
+    PrepareAnswerContext {
+        search_results: Vec<QueryMappedSearchResult>,
+        conversation: Vec<InteractionMessage>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    ExecuteBeforeAnswerHook {
+        answer_context: AnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    AnswerContextProcessed {
+        processed_context: ProcessedAnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    GenerateAnswer {
+        processed_context: ProcessedAnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    AnswerGenerated {
+        answer: GeneratedAnswer,
+    },
     Error(AdvancedAutoqueryError),
 }
 
@@ -203,6 +287,8 @@ pub struct AdvancedAutoqueryStateMachine {
     llm_config: Option<InteractionLLMConfig>,
     collection_stats: CollectionStats,
     read_side: Arc<ReadSide>,
+    original_conversation: Arc<Mutex<Vec<InteractionMessage>>>,
+    event_sender: Option<mpsc::UnboundedSender<AdvancedAutoqueryEvent>>,
 }
 
 impl AdvancedAutoqueryStateMachine {
@@ -227,6 +313,23 @@ impl AdvancedAutoqueryStateMachine {
             llm_config,
             collection_stats,
             read_side,
+            original_conversation: Arc::new(Mutex::new(vec![])),
+            event_sender: None,
+        }
+    }
+
+    pub fn with_event_sender(
+        mut self,
+        event_sender: mpsc::UnboundedSender<AdvancedAutoqueryEvent>,
+    ) -> Self {
+        self.event_sender = Some(event_sender);
+        self
+    }
+
+    /// Send an event if the event sender is available
+    async fn send_event(&self, event: AdvancedAutoqueryEvent) {
+        if let Some(sender) = &self.event_sender {
+            let _ = sender.send(event);
         }
     }
 
@@ -236,8 +339,22 @@ impl AdvancedAutoqueryStateMachine {
         conversation: Vec<InteractionMessage>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<Vec<QueryMappedSearchResult>, AdvancedAutoqueryError> {
+    ) -> Result<GeneratedAnswer, AdvancedAutoqueryError> {
         info!("Starting advanced search for collection: {}", collection_id);
+
+        // Send initial event
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "initializing".to_string(),
+            message: "Starting advanced autoquery".to_string(),
+            data: None,
+        })
+        .await;
+
+        // Store the original conversation
+        {
+            let mut conv = self.original_conversation.lock().await;
+            *conv = conversation.clone();
+        }
 
         // Initialize state
         {
@@ -249,11 +366,23 @@ impl AdvancedAutoqueryStateMachine {
             };
         }
 
+        let total_steps = 12; // Total number of states in the flow
+        let mut current_step = 0;
+
         loop {
+            current_step += 1;
             let current_state = {
                 let state = self.state.lock().await;
                 state.clone()
             };
+
+            // Send progress event
+            self.send_event(AdvancedAutoqueryEvent::Progress {
+                current_step: format!("{:?}", current_state),
+                total_steps,
+                message: format!("Processing step {}/{}", current_step, total_steps),
+            })
+            .await;
 
             match current_state {
                 AdvancedAutoqueryFlow::Initialize {
@@ -261,6 +390,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "analyzing_input".to_string(),
+                        message: "Analyzing user input".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_analyze_input(conversation, collection_id, read_api_key)
                         .await?;
                 }
@@ -269,6 +404,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "query_optimized".to_string(),
+                        message: "Optimizing queries".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_query_optimized(
                         conversation_json,
                         collection_id,
@@ -281,6 +422,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "select_properties".to_string(),
+                        message: "Selecting properties".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_select_properties(
                         optimized_queries,
                         collection_id,
@@ -293,6 +440,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "properties_selected".to_string(),
+                        message: "Properties selected".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_properties_selected(queries, collection_id, read_api_key)
                         .await?;
                 }
@@ -302,6 +455,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "combine_queries".to_string(),
+                        message: "Combining queries and properties".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_combine_queries(
                         queries,
                         selected_properties,
@@ -316,6 +475,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "queries_combined".to_string(),
+                        message: "Queries combined".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_queries_combined(
                         queries,
                         properties,
@@ -329,6 +494,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "generate_tracked_queries".to_string(),
+                        message: "Generating tracked queries".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_generate_tracked_queries(
                         queries_and_properties,
                         collection_id,
@@ -341,6 +512,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "tracked_queries_generated".to_string(),
+                        message: "Tracked queries generated".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_tracked_queries_generated(
                         queries_and_properties,
                         collection_id,
@@ -353,6 +530,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "execute_before_retrieval_hook".to_string(),
+                        message: "Executing before retrieval hook".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_execute_before_retrieval_hook(
                         tracked_queries,
                         collection_id,
@@ -365,6 +548,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "hooks_executed".to_string(),
+                        message: "Hooks executed".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_hooks_executed(tracked_queries, collection_id, read_api_key)
                         .await?;
                 }
@@ -373,6 +562,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "execute_searches".to_string(),
+                        message: "Executing searches".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_execute_searches(
                         processed_queries,
                         collection_id,
@@ -385,6 +580,12 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "search_results".to_string(),
+                        message: "Search results obtained".to_string(),
+                        data: None,
+                    })
+                    .await;
                     self.transition_to_search_results(
                         processed_queries,
                         collection_id,
@@ -397,14 +598,160 @@ impl AdvancedAutoqueryStateMachine {
                         "Advanced search completed successfully with {} results",
                         results.len()
                     );
-                    return Ok(results);
+                    // Send search results event
+                    self.send_event(AdvancedAutoqueryEvent::SearchResults {
+                        results: results.clone(),
+                    })
+                    .await;
+                    // Get the original conversation
+                    let conversation = {
+                        let conv = self.original_conversation.lock().await;
+                        conv.clone()
+                    };
+                    // Transition to answer generation instead of returning
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "prepare_answer_context".to_string(),
+                        message: "Preparing answer context".to_string(),
+                        data: None,
+                    })
+                    .await;
+                    self.transition_to_prepare_answer_context(
+                        results,
+                        conversation,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::PrepareAnswerContext {
+                    search_results,
+                    conversation,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "execute_before_answer_hook".to_string(),
+                        message: "Executing before answer hook".to_string(),
+                        data: None,
+                    })
+                    .await;
+                    self.transition_to_prepare_answer_context(
+                        search_results,
+                        conversation,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::ExecuteBeforeAnswerHook {
+                    answer_context,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "answer_context_processed".to_string(),
+                        message: "Answer context processed".to_string(),
+                        data: None,
+                    })
+                    .await;
+                    self.transition_to_execute_before_answer_hook(
+                        answer_context,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::AnswerContextProcessed {
+                    processed_context,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "generate_answer".to_string(),
+                        message: "Generating answer".to_string(),
+                        data: None,
+                    })
+                    .await;
+                    self.transition_to_generate_answer(
+                        processed_context,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::GenerateAnswer {
+                    processed_context,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "answer_generated".to_string(),
+                        message: "Answer generated".to_string(),
+                        data: None,
+                    })
+                    .await;
+                    self.transition_to_answer_generated(
+                        processed_context,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::AnswerGenerated { answer } => {
+                    info!("Answer generation completed successfully");
+                    self.send_event(AdvancedAutoqueryEvent::Completed {
+                        answer: answer.clone(),
+                    })
+                    .await;
+                    return Ok(answer);
                 }
                 AdvancedAutoqueryFlow::Error(error) => {
                     error!("Advanced search failed: {:?}", error);
+                    self.send_event(AdvancedAutoqueryEvent::Error {
+                        error: error.to_string(),
+                        state: format!("{:?}", error),
+                    })
+                    .await;
                     return Err(error);
                 }
             }
         }
+    }
+
+    /// Run the state machine with streaming support
+    pub async fn run_stream(
+        mut self,
+        conversation: Vec<InteractionMessage>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<UnboundedReceiverStream<AdvancedAutoqueryEvent>, AdvancedAutoqueryError> {
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+
+        self.event_sender = Some(event_sender);
+
+        // Spawn the state machine in a separate task
+        let state_machine = self;
+        tokio::spawn(async move {
+            let result = state_machine
+                .run(conversation, collection_id, read_api_key)
+                .await;
+            match result {
+                Ok(_) => {
+                    // Success - the final event will be sent by the state machine
+                }
+                Err(e) => {
+                    // Error - send error event
+                    if let Some(sender) = &state_machine.event_sender {
+                        let _ = sender.send(AdvancedAutoqueryEvent::Error {
+                            error: e.to_string(),
+                            state: format!("{:?}", e),
+                        });
+                    }
+                }
+            }
+        });
+
+        Ok(UnboundedReceiverStream::new(event_receiver))
     }
 
     /// Transition with retry logic
@@ -685,6 +1032,100 @@ impl AdvancedAutoqueryStateMachine {
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::SearchResults { results };
+        Ok(())
+    }
+
+    async fn transition_to_prepare_answer_context(
+        &self,
+        search_results: Vec<QueryMappedSearchResult>,
+        conversation: Vec<InteractionMessage>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        // Get system prompt if available
+        let system_prompt = self.get_system_prompt(collection_id, read_api_key).await?;
+
+        let answer_context = AnswerContext {
+            conversation,
+            search_results,
+            system_prompt,
+        };
+
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::ExecuteBeforeAnswerHook {
+            answer_context,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
+    }
+
+    async fn transition_to_execute_before_answer_hook(
+        &self,
+        answer_context: AnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let processed_context = self
+            .transition_with_retry("execute_before_answer_hook", || {
+                self.execute_before_answer_hook(answer_context.clone(), collection_id, read_api_key)
+            })
+            .await?;
+
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::AnswerContextProcessed {
+            processed_context,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
+    }
+
+    async fn transition_to_generate_answer(
+        &self,
+        processed_context: ProcessedAnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let answer = self
+            .transition_with_retry("generate_answer", || {
+                self.generate_answer(processed_context.clone())
+            })
+            .await?;
+
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::AnswerGenerated { answer };
+        Ok(())
+    }
+
+    async fn transition_to_answer_generated(
+        &self,
+        processed_context: ProcessedAnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::AnswerGenerated {
+            answer: GeneratedAnswer {
+                answer: String::new(),
+                context: processed_context,
+            },
+        };
+        Ok(())
+    }
+
+    async fn transition_to_answer_context_processed(
+        &self,
+        processed_context: ProcessedAnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::AnswerContextProcessed {
+            processed_context,
+            collection_id,
+            read_api_key,
+        };
         Ok(())
     }
 
@@ -1332,6 +1773,148 @@ impl AdvancedAutoqueryStateMachine {
     pub async fn retry_stats(&self) -> HashMap<String, usize> {
         let counts = self.retry_count.lock().await;
         counts.clone()
+    }
+
+    async fn get_system_prompt(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<
+        Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
+        AdvancedAutoqueryError,
+    > {
+        // This is a placeholder - you would implement the actual system prompt retrieval logic
+        // based on your collection's system prompt management
+        Ok(None)
+    }
+
+    async fn execute_before_answer_hook(
+        &self,
+        answer_context: AnswerContext,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<ProcessedAnswerContext, AdvancedAutoqueryError> {
+        // Convert answer context to the format expected by run_before_answer
+        let context_variables = self.prepare_context_variables(&answer_context);
+
+        // Get hook storage and execute before_answer hook
+        let hook_storage = self
+            .read_side
+            .get_hook_storage(read_api_key, collection_id)
+            .await
+            .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeAnswerHookError(e.to_string()))?;
+
+        let lock = hook_storage.read().await;
+        let (processed_variables, processed_system_prompt) = run_before_answer(
+            &lock,
+            (context_variables, answer_context.system_prompt.clone()),
+            None, // log_sender
+            ExecOption {
+                allowed_hosts: Some(vec![]),
+                timeout: Duration::from_millis(500),
+            },
+        )
+        .await
+        .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeAnswerHookError(e.to_string()))?;
+        drop(lock);
+
+        // Convert processed variables back to conversation format if needed
+        let processed_conversation = self.convert_variables_to_conversation(processed_variables);
+
+        Ok(ProcessedAnswerContext {
+            conversation: processed_conversation,
+            search_results: answer_context.search_results,
+            original_system_prompt: answer_context.system_prompt,
+            processed_system_prompt,
+        })
+    }
+
+    async fn generate_answer(
+        &self,
+        processed_context: ProcessedAnswerContext,
+    ) -> Result<GeneratedAnswer, AdvancedAutoqueryError> {
+        // Prepare variables for the answer generation prompt
+        let variables = self.prepare_answer_variables(&processed_context);
+
+        // Generate answer using the LLM service with streaming
+        let mut stream = self
+            .llm_service
+            .run_known_prompt_stream(
+                KnownPrompts::Answer,
+                variables,
+                processed_context.processed_system_prompt.clone(),
+                self.llm_config.clone(),
+            )
+            .await
+            .map_err(|e| AdvancedAutoqueryError::GenerateAnswerError(e.to_string()))?;
+
+        let mut full_answer = String::new();
+
+        // Stream tokens and send them as SSE events
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(token) => {
+                    // Send the token as an SSE event
+                    self.send_event(AdvancedAutoqueryEvent::AnswerToken {
+                        token: token.clone(),
+                    })
+                    .await;
+
+                    // Accumulate the full answer
+                    full_answer.push_str(&token);
+                }
+                Err(e) => {
+                    return Err(AdvancedAutoqueryError::GenerateAnswerError(e.to_string()));
+                }
+            }
+        }
+
+        Ok(GeneratedAnswer {
+            answer: full_answer,
+            context: processed_context,
+        })
+    }
+
+    fn prepare_context_variables(&self, answer_context: &AnswerContext) -> Vec<(String, String)> {
+        let mut variables = Vec::new();
+
+        // Add conversation as JSON
+        if let Ok(conv_json) = serde_json::to_string(&answer_context.conversation) {
+            variables.push(("conversation".to_string(), conv_json));
+        }
+
+        // Add search results as JSON
+        if let Ok(results_json) = serde_json::to_string(&answer_context.search_results) {
+            variables.push(("search_results".to_string(), results_json));
+        }
+
+        variables
+    }
+
+    fn prepare_answer_variables(
+        &self,
+        processed_context: &ProcessedAnswerContext,
+    ) -> Vec<(String, String)> {
+        let mut variables = Vec::new();
+
+        // Add conversation as JSON
+        if let Ok(conv_json) = serde_json::to_string(&processed_context.conversation) {
+            variables.push(("conversation".to_string(), conv_json));
+        }
+
+        // Add search results as JSON
+        if let Ok(results_json) = serde_json::to_string(&processed_context.search_results) {
+            variables.push(("search_results".to_string(), results_json));
+        }
+
+        variables
+    }
+
+    fn convert_variables_to_conversation(
+        &self,
+        variables: Vec<(String, String)>,
+    ) -> Vec<InteractionMessage> {
+        vec![]
     }
 }
 
