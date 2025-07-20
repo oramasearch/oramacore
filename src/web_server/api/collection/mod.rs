@@ -7,6 +7,7 @@ use crate::collection_manager::sides::{read::ReadSide, write::WriteSide};
 mod actions;
 mod admin;
 mod answer;
+mod generate;
 mod hooks;
 mod search;
 mod system_prompts;
@@ -30,6 +31,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(search::apis(read_side.clone()))
             .merge(actions::apis(read_side.clone()))
             .merge(answer::apis(read_side.clone()))
+            .merge(generate::apis(read_side.clone()))
             .merge(tools::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side))
     } else {
