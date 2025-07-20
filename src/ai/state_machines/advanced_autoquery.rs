@@ -5,7 +5,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::{join_all, Future};
-use futures::StreamExt;
 use llm_json::repair_json;
 use orama_js_pool::ExecOption;
 use regex::Regex;
@@ -21,7 +20,7 @@ use crate::types::{
     SearchResult,
 };
 
-use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
+use crate::ai::run_hooks::run_before_retrieval;
 use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
 
 // ==== SSE Event Types ====
@@ -47,12 +46,6 @@ pub enum AdvancedAutoqueryEvent {
     SearchResults {
         results: Vec<QueryMappedSearchResult>,
     },
-    #[serde(rename = "answer_generated")]
-    AnswerGenerated { answer: GeneratedAnswer },
-    #[serde(rename = "answer_token")]
-    AnswerToken { token: String },
-    #[serde(rename = "completed")]
-    Completed { answer: GeneratedAnswer },
 }
 
 // ==== Data Models ====
@@ -104,10 +97,9 @@ pub struct QueryMappedSearchResult {
 }
 
 #[derive(Serialize, Debug, Clone)]
-pub struct AnswerContext {
-    pub conversation: Vec<InteractionMessage>,
-    pub search_results: Vec<QueryMappedSearchResult>,
-    pub system_prompt: Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
+pub struct GeneratedAnswer {
+    pub answer: String,
+    pub context: ProcessedAnswerContext,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -118,12 +110,6 @@ pub struct ProcessedAnswerContext {
         Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
     pub processed_system_prompt:
         Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct GeneratedAnswer {
-    pub answer: String,
-    pub context: ProcessedAnswerContext,
 }
 
 // ==== Error Types ====
@@ -144,10 +130,6 @@ pub enum AdvancedAutoqueryError {
     ExecuteBeforeRetrievalHookError(String),
     #[error("Failed to execute searches: {0}")]
     ExecuteSearchesError(String),
-    #[error("Failed to execute before answer hook: {0}")]
-    ExecuteBeforeAnswerHookError(String),
-    #[error("Failed to generate answer: {0}")]
-    GenerateAnswerError(String),
     #[error("LLM service error: {0}")]
     LLMServiceError(String),
     #[error("JSON parsing error: {0}")]
@@ -224,30 +206,6 @@ pub enum AdvancedAutoqueryFlow {
     },
     SearchResults {
         results: Vec<QueryMappedSearchResult>,
-    },
-    PrepareAnswerContext {
-        search_results: Vec<QueryMappedSearchResult>,
-        conversation: Vec<InteractionMessage>,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    },
-    ExecuteBeforeAnswerHook {
-        answer_context: AnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    },
-    AnswerContextProcessed {
-        processed_context: ProcessedAnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    },
-    GenerateAnswer {
-        processed_context: ProcessedAnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    },
-    AnswerGenerated {
-        answer: GeneratedAnswer,
     },
     Error(AdvancedAutoqueryError),
 }
@@ -366,7 +324,7 @@ impl AdvancedAutoqueryStateMachine {
             };
         }
 
-        let total_steps = 12; // Total number of states in the flow
+        let total_steps = 8; // Total number of states in the flow (removed answer generation steps)
         let mut current_step = 0;
 
         loop {
@@ -603,107 +561,16 @@ impl AdvancedAutoqueryStateMachine {
                         results: results.clone(),
                     })
                     .await;
-                    // Get the original conversation
-                    let conversation = {
-                        let conv = self.original_conversation.lock().await;
-                        conv.clone()
-                    };
-                    // Transition to answer generation instead of returning
-                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
-                        state: "prepare_answer_context".to_string(),
-                        message: "Preparing answer context".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_prepare_answer_context(
-                        results,
-                        conversation,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
-                }
-                AdvancedAutoqueryFlow::PrepareAnswerContext {
-                    search_results,
-                    conversation,
-                    collection_id,
-                    read_api_key,
-                } => {
-                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
-                        state: "execute_before_answer_hook".to_string(),
-                        message: "Executing before answer hook".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_prepare_answer_context(
-                        search_results,
-                        conversation,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
-                }
-                AdvancedAutoqueryFlow::ExecuteBeforeAnswerHook {
-                    answer_context,
-                    collection_id,
-                    read_api_key,
-                } => {
-                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
-                        state: "answer_context_processed".to_string(),
-                        message: "Answer context processed".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_execute_before_answer_hook(
-                        answer_context,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
-                }
-                AdvancedAutoqueryFlow::AnswerContextProcessed {
-                    processed_context,
-                    collection_id,
-                    read_api_key,
-                } => {
-                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
-                        state: "generate_answer".to_string(),
-                        message: "Generating answer".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_generate_answer(
-                        processed_context,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
-                }
-                AdvancedAutoqueryFlow::GenerateAnswer {
-                    processed_context,
-                    collection_id,
-                    read_api_key,
-                } => {
-                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
-                        state: "answer_generated".to_string(),
-                        message: "Answer generated".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_answer_generated(
-                        processed_context,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
-                }
-                AdvancedAutoqueryFlow::AnswerGenerated { answer } => {
-                    info!("Answer generation completed successfully");
-                    self.send_event(AdvancedAutoqueryEvent::Completed {
-                        answer: answer.clone(),
-                    })
-                    .await;
-                    return Ok(answer);
+                    // Return the search results instead of continuing to answer generation
+                    return Ok(GeneratedAnswer {
+                        answer: String::new(),
+                        context: ProcessedAnswerContext {
+                            conversation: vec![],
+                            search_results: results,
+                            original_system_prompt: None,
+                            processed_system_prompt: None,
+                        },
+                    });
                 }
                 AdvancedAutoqueryFlow::Error(error) => {
                     error!("Advanced search failed: {:?}", error);
@@ -1032,100 +899,6 @@ impl AdvancedAutoqueryStateMachine {
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::SearchResults { results };
-        Ok(())
-    }
-
-    async fn transition_to_prepare_answer_context(
-        &self,
-        search_results: Vec<QueryMappedSearchResult>,
-        conversation: Vec<InteractionMessage>,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
-        // Get system prompt if available
-        let system_prompt = self.get_system_prompt(collection_id, read_api_key).await?;
-
-        let answer_context = AnswerContext {
-            conversation,
-            search_results,
-            system_prompt,
-        };
-
-        let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::ExecuteBeforeAnswerHook {
-            answer_context,
-            collection_id,
-            read_api_key,
-        };
-        Ok(())
-    }
-
-    async fn transition_to_execute_before_answer_hook(
-        &self,
-        answer_context: AnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
-        let processed_context = self
-            .transition_with_retry("execute_before_answer_hook", || {
-                self.execute_before_answer_hook(answer_context.clone(), collection_id, read_api_key)
-            })
-            .await?;
-
-        let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::AnswerContextProcessed {
-            processed_context,
-            collection_id,
-            read_api_key,
-        };
-        Ok(())
-    }
-
-    async fn transition_to_generate_answer(
-        &self,
-        processed_context: ProcessedAnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
-        let answer = self
-            .transition_with_retry("generate_answer", || {
-                self.generate_answer(processed_context.clone())
-            })
-            .await?;
-
-        let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::AnswerGenerated { answer };
-        Ok(())
-    }
-
-    async fn transition_to_answer_generated(
-        &self,
-        processed_context: ProcessedAnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
-        let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::AnswerGenerated {
-            answer: GeneratedAnswer {
-                answer: String::new(),
-                context: processed_context,
-            },
-        };
-        Ok(())
-    }
-
-    async fn transition_to_answer_context_processed(
-        &self,
-        processed_context: ProcessedAnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
-        let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::AnswerContextProcessed {
-            processed_context,
-            collection_id,
-            read_api_key,
-        };
         Ok(())
     }
 
@@ -1786,135 +1559,6 @@ impl AdvancedAutoqueryStateMachine {
         // This is a placeholder - you would implement the actual system prompt retrieval logic
         // based on your collection's system prompt management
         Ok(None)
-    }
-
-    async fn execute_before_answer_hook(
-        &self,
-        answer_context: AnswerContext,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<ProcessedAnswerContext, AdvancedAutoqueryError> {
-        // Convert answer context to the format expected by run_before_answer
-        let context_variables = self.prepare_context_variables(&answer_context);
-
-        // Get hook storage and execute before_answer hook
-        let hook_storage = self
-            .read_side
-            .get_hook_storage(read_api_key, collection_id)
-            .await
-            .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeAnswerHookError(e.to_string()))?;
-
-        let lock = hook_storage.read().await;
-        let (processed_variables, processed_system_prompt) = run_before_answer(
-            &lock,
-            (context_variables, answer_context.system_prompt.clone()),
-            None, // log_sender
-            ExecOption {
-                allowed_hosts: Some(vec![]),
-                timeout: Duration::from_millis(500),
-            },
-        )
-        .await
-        .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeAnswerHookError(e.to_string()))?;
-        drop(lock);
-
-        // Convert processed variables back to conversation format if needed
-        let processed_conversation = self.convert_variables_to_conversation(processed_variables);
-
-        Ok(ProcessedAnswerContext {
-            conversation: processed_conversation,
-            search_results: answer_context.search_results,
-            original_system_prompt: answer_context.system_prompt,
-            processed_system_prompt,
-        })
-    }
-
-    async fn generate_answer(
-        &self,
-        processed_context: ProcessedAnswerContext,
-    ) -> Result<GeneratedAnswer, AdvancedAutoqueryError> {
-        // Prepare variables for the answer generation prompt
-        let variables = self.prepare_answer_variables(&processed_context);
-
-        // Generate answer using the LLM service with streaming
-        let mut stream = self
-            .llm_service
-            .run_known_prompt_stream(
-                KnownPrompts::Answer,
-                variables,
-                processed_context.processed_system_prompt.clone(),
-                self.llm_config.clone(),
-            )
-            .await
-            .map_err(|e| AdvancedAutoqueryError::GenerateAnswerError(e.to_string()))?;
-
-        let mut full_answer = String::new();
-
-        // Stream tokens and send them as SSE events
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(token) => {
-                    // Send the token as an SSE event
-                    self.send_event(AdvancedAutoqueryEvent::AnswerToken {
-                        token: token.clone(),
-                    })
-                    .await;
-
-                    // Accumulate the full answer
-                    full_answer.push_str(&token);
-                }
-                Err(e) => {
-                    return Err(AdvancedAutoqueryError::GenerateAnswerError(e.to_string()));
-                }
-            }
-        }
-
-        Ok(GeneratedAnswer {
-            answer: full_answer,
-            context: processed_context,
-        })
-    }
-
-    fn prepare_context_variables(&self, answer_context: &AnswerContext) -> Vec<(String, String)> {
-        let mut variables = Vec::new();
-
-        // Add conversation as JSON
-        if let Ok(conv_json) = serde_json::to_string(&answer_context.conversation) {
-            variables.push(("conversation".to_string(), conv_json));
-        }
-
-        // Add search results as JSON
-        if let Ok(results_json) = serde_json::to_string(&answer_context.search_results) {
-            variables.push(("search_results".to_string(), results_json));
-        }
-
-        variables
-    }
-
-    fn prepare_answer_variables(
-        &self,
-        processed_context: &ProcessedAnswerContext,
-    ) -> Vec<(String, String)> {
-        let mut variables = Vec::new();
-
-        // Add conversation as JSON
-        if let Ok(conv_json) = serde_json::to_string(&processed_context.conversation) {
-            variables.push(("conversation".to_string(), conv_json));
-        }
-
-        // Add search results as JSON
-        if let Ok(results_json) = serde_json::to_string(&processed_context.search_results) {
-            variables.push(("search_results".to_string(), results_json));
-        }
-
-        variables
-    }
-
-    fn convert_variables_to_conversation(
-        &self,
-        variables: Vec<(String, String)>,
-    ) -> Vec<InteractionMessage> {
-        vec![]
     }
 }
 

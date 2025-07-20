@@ -1,9 +1,8 @@
 use crate::ai::state_machines::advanced_autoquery::{
-    AdvancedAutoqueryConfig, AdvancedAutoqueryError, AdvancedAutoqueryEvent,
-    AdvancedAutoqueryStateMachine,
+    AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
 };
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{ApiKey, CollectionId, Interaction, InteractionLLMConfig};
+use crate::types::{ApiKey, CollectionId, InteractionLLMConfig};
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
@@ -17,36 +16,35 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::error;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/generate",
-            post(generate_v1),
+            "/v1/collections/{collection_id}/generate/nlp_query",
+            post(nlp_query_v1),
         )
         .with_state(read_side)
 }
 
 #[derive(Deserialize)]
-struct GenerateQueryParams {
+struct NlpQueryQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
 #[derive(Deserialize)]
-struct GenerateRequest {
+struct NlpQueryRequest {
     pub messages: Vec<crate::types::InteractionMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[axum::debug_handler]
-async fn generate_v1(
+async fn nlp_query_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
-    Query(query_params): Query<GenerateQueryParams>,
-    Json(request): Json<GenerateRequest>,
+    Query(query_params): Query<NlpQueryQueryParams>,
+    Json(request): Json<NlpQueryRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (event_sender, event_receiver) = mpsc::channel(100);
     let rx_stream = ReceiverStream::new(event_receiver);
