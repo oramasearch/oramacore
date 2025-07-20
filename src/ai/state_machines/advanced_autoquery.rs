@@ -53,6 +53,15 @@ pub struct TrackedQuery {
 }
 
 #[derive(Serialize, Debug, Clone)]
+pub struct ProcessedTrackedQuery {
+    pub index: usize,
+    pub original_query: String,
+    pub generated_query_text: String,
+    pub original_search_params: SearchParams,
+    pub processed_search_params: SearchParams,
+}
+
+#[derive(Serialize, Debug, Clone)]
 pub struct QueryMappedSearchResult {
     pub original_query: String,
     pub generated_query: String,
@@ -75,6 +84,8 @@ pub enum AdvancedAutoqueryError {
     CombineQueriesError(String),
     #[error("Failed to generate tracked queries: {0}")]
     GenerateTrackedQueriesError(String),
+    #[error("Failed to execute before retrieval hook: {0}")]
+    ExecuteBeforeRetrievalHookError(String),
     #[error("Failed to execute searches: {0}")]
     ExecuteSearchesError(String),
     #[error("LLM service error: {0}")]
@@ -136,8 +147,18 @@ pub enum AdvancedAutoqueryFlow {
         collection_id: CollectionId,
         read_api_key: ApiKey,
     },
-    ExecuteSearches {
+    ExecuteBeforeRetrievalHook {
         tracked_queries: Vec<TrackedQuery>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    HooksExecuted {
+        processed_queries: Vec<ProcessedTrackedQuery>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    ExecuteSearches {
+        processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
     },
@@ -332,20 +353,44 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
-                    self.transition_to_execute_searches(
+                    self.transition_to_execute_before_retrieval_hook(
                         tracked_queries,
                         collection_id,
                         read_api_key,
                     )
                     .await?;
                 }
-                AdvancedAutoqueryFlow::ExecuteSearches {
+                AdvancedAutoqueryFlow::ExecuteBeforeRetrievalHook {
                     tracked_queries,
                     collection_id,
                     read_api_key,
                 } => {
-                    self.transition_to_search_results(tracked_queries, collection_id, read_api_key)
+                    self.transition_to_hooks_executed(tracked_queries, collection_id, read_api_key)
                         .await?;
+                }
+                AdvancedAutoqueryFlow::HooksExecuted {
+                    processed_queries,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.transition_to_execute_searches(
+                        processed_queries,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
+                }
+                AdvancedAutoqueryFlow::ExecuteSearches {
+                    processed_queries,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    self.transition_to_search_results(
+                        processed_queries,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
                 }
                 AdvancedAutoqueryFlow::SearchResults { results } => {
                     info!(
@@ -567,15 +612,55 @@ impl AdvancedAutoqueryStateMachine {
         Ok(())
     }
 
-    async fn transition_to_execute_searches(
+    async fn transition_to_execute_before_retrieval_hook(
         &self,
         tracked_queries: Vec<TrackedQuery>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::ExecuteSearches {
+        *state = AdvancedAutoqueryFlow::ExecuteBeforeRetrievalHook {
             tracked_queries,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
+    }
+
+    async fn transition_to_hooks_executed(
+        &self,
+        tracked_queries: Vec<TrackedQuery>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let processed_queries = self
+            .transition_with_retry("execute_before_retrieval_hook", || {
+                self.execute_before_retrieval_hook(
+                    tracked_queries.clone(),
+                    collection_id,
+                    read_api_key,
+                )
+            })
+            .await?;
+
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::HooksExecuted {
+            processed_queries,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
+    }
+
+    async fn transition_to_execute_searches(
+        &self,
+        processed_queries: Vec<ProcessedTrackedQuery>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AdvancedAutoqueryError> {
+        let mut state = self.state.lock().await;
+        *state = AdvancedAutoqueryFlow::ExecuteSearches {
+            processed_queries,
             collection_id,
             read_api_key,
         };
@@ -584,14 +669,14 @@ impl AdvancedAutoqueryStateMachine {
 
     async fn transition_to_search_results(
         &self,
-        tracked_queries: Vec<TrackedQuery>,
+        processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
         let results = self
             .transition_with_retry("execute_searches", || {
                 self.execute_concurrent_searches(
-                    tracked_queries.clone(),
+                    processed_queries.clone(),
                     collection_id,
                     read_api_key,
                 )
@@ -754,9 +839,65 @@ impl AdvancedAutoqueryStateMachine {
         tracked_queries
     }
 
-    async fn execute_concurrent_searches(
+    async fn execute_before_retrieval_hook(
         &self,
         tracked_queries: Vec<TrackedQuery>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<Vec<ProcessedTrackedQuery>, AdvancedAutoqueryError> {
+        let (tx, mut rx) = mpsc::channel(self.config.max_concurrent_operations);
+
+        // Spawn tasks for concurrent hook execution
+        let mut handles = Vec::new();
+        for (i, query) in tracked_queries.into_iter().enumerate() {
+            let tx = tx.clone();
+            let read_side = self.read_side.clone();
+            let collection_id = collection_id.clone();
+            let read_api_key = read_api_key.clone();
+
+            let handle = tokio::spawn(async move {
+                let result = Self::execute_single_hook_with_retry(
+                    query,
+                    collection_id,
+                    read_api_key,
+                    read_side,
+                )
+                .await;
+                let _ = tx.send((i, result)).await;
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all tasks to complete
+        for handle in handles {
+            let _ = handle.await;
+        }
+        drop(tx);
+
+        // Collect results in order
+        let mut processed_queries = Vec::new();
+        while let Some((index, result)) = rx.recv().await {
+            match result {
+                Ok(processed_query) => {
+                    if processed_queries.len() <= index {
+                        processed_queries.resize(index + 1, processed_query);
+                    } else {
+                        processed_queries[index] = processed_query;
+                    }
+                }
+                Err(e) => {
+                    error!("Hook execution at index {} failed: {:?}", index, e);
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(processed_queries)
+    }
+
+    async fn execute_concurrent_searches(
+        &self,
+        processed_queries: Vec<ProcessedTrackedQuery>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<Vec<QueryMappedSearchResult>, AdvancedAutoqueryError> {
@@ -764,7 +905,7 @@ impl AdvancedAutoqueryStateMachine {
 
         // Spawn tasks for concurrent execution
         let mut handles = Vec::new();
-        for (i, query) in tracked_queries.into_iter().enumerate() {
+        for (i, query) in processed_queries.into_iter().enumerate() {
             let tx = tx.clone();
             let config = self.config.clone();
             let read_side = self.read_side.clone();
@@ -811,7 +952,7 @@ impl AdvancedAutoqueryStateMachine {
     }
 
     async fn execute_single_search_with_retry(
-        query: TrackedQuery,
+        query: ProcessedTrackedQuery,
         collection_id: CollectionId,
         read_api_key: ApiKey,
         read_side: Arc<ReadSide>,
@@ -866,19 +1007,95 @@ impl AdvancedAutoqueryStateMachine {
     }
 
     async fn execute_single_search(
-        tracked_query: TrackedQuery,
+        processed_query: ProcessedTrackedQuery,
         collection_id: CollectionId,
         read_api_key: ApiKey,
         read_side: Arc<ReadSide>,
     ) -> Result<QueryMappedSearchResult, AdvancedAutoqueryError> {
+        let search_params = processed_query.processed_search_params.clone();
+
+        let search_result = read_side
+            .search(read_api_key, collection_id, search_params)
+            .await
+            .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
+
+        Ok(QueryMappedSearchResult {
+            original_query: processed_query.original_query,
+            generated_query: processed_query.generated_query_text,
+            search_params: processed_query.processed_search_params,
+            results: vec![search_result],
+            query_index: processed_query.index,
+        })
+    }
+
+    async fn execute_single_hook_with_retry(
+        query: TrackedQuery,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+        read_side: Arc<ReadSide>,
+    ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
+        let mut backoff = ExponentialBackoffBuilder::new()
+            .with_initial_interval(Duration::from_millis(100))
+            .with_max_interval(Duration::from_secs(30))
+            .with_max_elapsed_time(Some(Duration::from_secs(60)))
+            .build();
+
+        let mut retry_count = 0;
+        loop {
+            match Self::execute_single_hook(
+                query.clone(),
+                collection_id,
+                read_api_key,
+                read_side.clone(),
+            )
+            .await
+            {
+                Ok(processed_query) => {
+                    if retry_count > 0 {
+                        info!(
+                            "Hook execution for query '{}' succeeded after {} retries",
+                            query.original_query, retry_count
+                        );
+                    }
+                    return Ok(processed_query);
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count > 3 {
+                        error!(
+                            "Hook execution for query '{}' failed after {} retries: {:?}",
+                            query.original_query, retry_count, e
+                        );
+                        return Err(e);
+                    }
+
+                    warn!(
+                        "Hook execution for query '{}' failed (attempt {}/{}), retrying: {:?}",
+                        query.original_query, retry_count, 3, e
+                    );
+
+                    if let Some(duration) = Backoff::next_backoff(&mut backoff) {
+                        sleep(duration).await;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn execute_single_hook(
+        tracked_query: TrackedQuery,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+        read_side: Arc<ReadSide>,
+    ) -> Result<ProcessedTrackedQuery, AdvancedAutoqueryError> {
         let search_params = tracked_query.search_params.clone();
         let hook_storage = read_side
             .get_hook_storage(read_api_key, collection_id)
             .await
-            .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
+            .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
 
         let lock = hook_storage.read().await;
-        let search_params = run_before_retrieval(
+        let processed_search_params = run_before_retrieval(
             &lock,
             search_params.clone(),
             None, // log_sender
@@ -888,20 +1105,15 @@ impl AdvancedAutoqueryStateMachine {
             },
         )
         .await
-        .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
+        .map_err(|e| AdvancedAutoqueryError::ExecuteBeforeRetrievalHookError(e.to_string()))?;
         drop(lock);
 
-        let search_result = read_side
-            .search(read_api_key, collection_id, search_params)
-            .await
-            .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
-
-        Ok(QueryMappedSearchResult {
+        Ok(ProcessedTrackedQuery {
+            index: tracked_query.index,
             original_query: tracked_query.original_query,
-            generated_query: tracked_query.generated_query_text,
-            search_params: tracked_query.search_params,
-            results: vec![search_result],
-            query_index: tracked_query.index,
+            generated_query_text: tracked_query.generated_query_text,
+            original_search_params: tracked_query.search_params,
+            processed_search_params,
         })
     }
 
