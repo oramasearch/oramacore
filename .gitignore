@@ -3,6 +3,7 @@
 posting_storage
 .idea
 .custom_models
+.dev
 
 .fastembed_cache
 ./src/bin/datasets/*.csv
@@ -15,7 +16,7 @@ posting_storage
 flamegraph.svg
 .direnv/
 .envrc
-
+.npm
 .env
 
 log.log

@@ -39,6 +39,7 @@ pub enum KnownPrompts {
     ValidateSystemPrompt,
     Followup,
     GenerateRelatedQueries,
+    DetermineQueryStrategy,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +150,11 @@ impl KnownPrompts {
                     .to_string(),
                 user: include_str!("../prompts/v1/advanced_autoquery/query_composer/user.md")
                     .to_string(),
+            },
+            KnownPrompts::DetermineQueryStrategy => KnownPrompt {
+                system: include_str!("../prompts/v1/determine_query_strategy/system.md")
+                    .to_string(),
+                user: include_str!("../prompts/v1/determine_query_strategy/user.md").to_string(),
             },
         }
     }
@@ -537,31 +543,11 @@ impl LLMService {
             .as_str();
         }
 
-        // Only for Answer prompts, add the trigger to the user prompt
-        if prompt == KnownPrompts::Answer {
-            if variables_map.contains_key("segment") {
-                prompts.user += "### Persona\n\n";
-                prompts.user += variables_map
-                    .get("segment")
-                    .context("Unable to retrieve segment from variable map")?;
-                prompts.user += "\n\n";
-            }
-
-            if variables_map.contains_key("trigger") {
-                prompts.user += "### Instructions\n\n";
-                prompts.user += variables_map
-                    .get("trigger")
-                    .context("Unable to retrieve trigger from variable map")?;
-                prompts.user += "\n\n";
-            }
-        }
-
         let chosen_model = self.get_chosen_model(llm_config.clone());
         let llm_client = self.get_chosen_llm_client(llm_config);
 
         let request = CreateChatCompletionRequestArgs::default()
             .model(chosen_model)
-            .max_tokens(512u32)
             .stream(true)
             .messages([
                 ChatCompletionRequestSystemMessageArgs::default()
@@ -589,6 +575,7 @@ impl LLMService {
             while let Some(result) = response_stream.next().await {
                 match result {
                     Ok(response) => {
+                        let empty_str = &String::new();
                         let chunk = response
                             .choices
                             .first()
@@ -596,12 +583,12 @@ impl LLMService {
                             .delta
                             .content
                             .as_ref()
-                            .unwrap();
+                            .unwrap_or(empty_str);
 
                         tx.send(Ok(chunk.to_string())).await.unwrap();
                     }
                     Err(e) => {
-                        let error_message = format!("An error occurred while processing the response from the remote LLM instance: {e:?}");
+                        let error_message = format!("An error occurred while processing prompt '{prompt:?}'. Response from the remote LLM instance: {e:?}");
                         tx.send(Err(anyhow::Error::msg(error_message)))
                             .await
                             .unwrap();
