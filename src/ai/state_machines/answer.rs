@@ -16,6 +16,9 @@ use crate::ai::llms::{KnownPrompts, LLMService};
 use crate::ai::party_planner::PartyPlanner;
 use crate::ai::ragat::{ContextComponent, GeneralRagAtError, RAGAtParser};
 use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
+use crate::ai::state_machines::advanced_autoquery::{
+    AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
+};
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
@@ -112,6 +115,8 @@ pub enum AnswerError {
     JSError(String),
     #[error("JSON parsing error: {0}")]
     JsonParsingError(String),
+    #[error("Advanced autoquery error: {0}")]
+    AdvancedAutoqueryError(String),
 }
 
 // ==== State Machine States ====
@@ -129,6 +134,12 @@ pub enum AnswerFlow {
         read_api_key: ApiKey,
     },
     GetLLMConfig {
+        interaction: Interaction,
+        llm_config: InteractionLLMConfig,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
+    DetermineQueryStrategy {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
@@ -357,13 +368,25 @@ impl AnswerStateMachine {
                     read_api_key,
                 } => {
                     self.send_event(AnswerEvent::StateChanged {
-                        state: "handle_system_prompt".to_string(),
-                        message: "Handling system prompt".to_string(),
+                        state: "determine_query_strategy".to_string(),
+                        message: "Determining query strategy".to_string(),
                         data: None,
                     })
                     .await;
-                    self.transition_to_handle_system_prompt(interaction, llm_config)
+                    self.transition_to_determine_query_strategy(interaction, llm_config)
                         .await?;
+                }
+                AnswerFlow::DetermineQueryStrategy {
+                    interaction,
+                    llm_config,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    // This state is handled by the transition method
+                    // The transition method will route to either SimpleRAG or AdvancedAutoquery
+                    unreachable!(
+                        "DetermineQueryStrategy state should be handled by transition method"
+                    );
                 }
                 AnswerFlow::HandleSystemPrompt {
                     interaction,
@@ -627,6 +650,124 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
+        Ok(())
+    }
+
+    async fn transition_to_determine_query_strategy(
+        &self,
+        interaction: Interaction,
+        llm_config: InteractionLLMConfig,
+    ) -> Result<(), AnswerError> {
+        let query_strategy = self
+            .transition_with_retry("determine_query_strategy", || {
+                self.determine_query_strategy(interaction.query.clone(), llm_config.clone())
+            })
+            .await?;
+
+        if query_strategy == "advanced_autoquery" {
+            // Execute advanced autoquery flow
+            self.send_event(AnswerEvent::StateChanged {
+                state: "advanced_autoquery".to_string(),
+                message: "Executing advanced autoquery".to_string(),
+                data: None,
+            })
+            .await;
+
+            // Get collection stats for advanced autoquery
+            let collection_stats = self
+                .read_side
+                .collection_stats(
+                    self.read_api_key.clone(),
+                    self.collection_id.clone(),
+                    crate::types::CollectionStatsRequest { with_keys: false },
+                )
+                .await
+                .map_err(|e| AnswerError::ReadError(e.to_string()))?;
+
+            // Create and run the advanced autoquery state machine with event streaming
+            let advanced_state_machine = AdvancedAutoqueryStateMachine::new(
+                AdvancedAutoqueryConfig::default(),
+                self.llm_service.clone(),
+                Some(llm_config.clone()),
+                collection_stats,
+                self.read_side.clone(),
+                self.collection_id.clone(),
+                self.read_api_key.clone(),
+            );
+
+            // Run the advanced autoquery with streaming and capture events
+            let advanced_event_stream = advanced_state_machine
+                .run_stream(interaction.messages.clone(), self.collection_id.clone(), self.read_api_key.clone())
+                .await
+                .map_err(|e| AnswerError::AdvancedAutoqueryError(e.to_string()))?;
+
+            // Forward advanced autoquery events to the client
+            let mut advanced_event_stream = advanced_event_stream;
+            while let Some(advanced_event) = advanced_event_stream.next().await {
+                // Convert advanced autoquery events to answer events
+                match advanced_event {
+                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::StateChanged { state, message, data } => {
+                        self.send_event(AnswerEvent::StateChanged {
+                            state: format!("advanced_autoquery_{}", state),
+                            message: format!("Advanced Autoquery: {}", message),
+                            data,
+                        })
+                        .await;
+                    }
+                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Progress { current_step, total_steps, message } => {
+                        self.send_event(AnswerEvent::Progress {
+                            current_step: format!("advanced_autoquery_{}", current_step),
+                            total_steps,
+                            message: format!("Advanced Autoquery: {}", message),
+                        })
+                        .await;
+                    }
+                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::SearchResults { results } => {
+                        // Convert to our search results format
+                        let search_hits = results.into_iter()
+                            .flat_map(|query_result| query_result.results.into_iter().flat_map(|search_result| search_result.hits))
+                            .collect::<Vec<_>>();
+                        
+                        self.send_event(AnswerEvent::SearchResults {
+                            results: search_hits,
+                        })
+                        .await;
+                    }
+                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Error { error, state } => {
+                        self.send_event(AnswerEvent::Error {
+                            error: format!("Advanced Autoquery Error: {}", error),
+                            state: format!("advanced_autoquery_{}", state),
+                        })
+                        .await;
+                    }
+                }
+            }
+
+            // Continue with system prompt handling
+            let mut state = self.state.lock().await;
+            *state = AnswerFlow::HandleSystemPrompt {
+                interaction,
+                llm_config,
+                collection_id: self.collection_id.clone(),
+                read_api_key: self.read_api_key.clone(),
+            };
+        } else {
+            // Simple RAG flow - go directly to system prompt handling
+            self.send_event(AnswerEvent::StateChanged {
+                state: "simple_rag".to_string(),
+                message: "Executing simple RAG".to_string(),
+                data: None,
+            })
+            .await;
+
+            let mut state = self.state.lock().await;
+            *state = AnswerFlow::HandleSystemPrompt {
+                interaction,
+                llm_config,
+                collection_id: self.collection_id.clone(),
+                read_api_key: self.read_api_key.clone(),
+            };
+        }
         Ok(())
     }
 
@@ -980,6 +1121,60 @@ impl AnswerStateMachine {
         Ok(optimized_query)
     }
 
+    async fn determine_query_strategy(
+        &self,
+        query: String,
+        llm_config: InteractionLLMConfig,
+    ) -> Result<String, AnswerError> {
+        let variables = vec![("query".to_string(), query)];
+
+        let result = self
+            .llm_service
+            .run_known_prompt(
+                KnownPrompts::DetermineQueryStrategy,
+                variables,
+                Some(llm_config),
+            )
+            .await
+            .map_err(|e| AnswerError::LLMServiceError(e.to_string()))?;
+
+        // Handle empty or invalid responses
+        if result.trim().is_empty() {
+            return Ok("simple_rag".to_string());
+        }
+
+        // Try to parse the JSON response to determine strategy
+        match serde_json::from_str::<Vec<String>>(&result) {
+            Ok(strategy_code) => {
+                if strategy_code.is_empty() {
+                    return Ok("simple_rag".to_string());
+                }
+
+                let code = &strategy_code[0];
+                match code.as_str() {
+                    "000" => Ok("simple_rag".to_string()),
+                    "001" | "011" | "100" => Ok("advanced_autoquery".to_string()),
+                    _ => Ok("simple_rag".to_string()), // Default to simple RAG
+                }
+            }
+            Err(_) => {
+                // If JSON parsing fails, try to extract the code from the response
+                let cleaned_result = result.trim();
+                if cleaned_result.contains("000") {
+                    Ok("simple_rag".to_string())
+                } else if cleaned_result.contains("001")
+                    || cleaned_result.contains("011")
+                    || cleaned_result.contains("100")
+                {
+                    Ok("advanced_autoquery".to_string())
+                } else {
+                    // Default to simple RAG if we can't determine
+                    Ok("simple_rag".to_string())
+                }
+            }
+        }
+    }
+
     async fn execute_search(
         &self,
         interaction: Interaction,
@@ -1068,7 +1263,7 @@ impl AnswerStateMachine {
         let search_result_str = serde_json::to_string(&vec![] as &Vec<SearchResultHit>)
             .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];
