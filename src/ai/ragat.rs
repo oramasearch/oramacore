@@ -86,8 +86,8 @@ impl RAGAtParser {
             return Err(ParseError::InvalidSyntax("Empty component".to_string()));
         }
 
-        let (is_exclusion, remaining) = if component_str.starts_with('!') {
-            (true, &component_str[1..])
+        let (is_exclusion, remaining) = if let Some(remaining) = component_str.strip_prefix('!') {
+            (true, remaining)
         } else {
             (false, component_str)
         };
@@ -146,8 +146,9 @@ impl RAGAtParser {
             .parse::<f32>()
             .map_err(|_| ParseError::InvalidThreshold(threshold_str.to_string()))?;
 
-        let (max_docs_str, fill_remaining) = if max_docs_str.ends_with('+') {
-            (&max_docs_str[..max_docs_str.len() - 1], true)
+        let (max_docs_str, fill_remaining) = if let Some(remaining) = max_docs_str.strip_suffix('+')
+        {
+            (remaining, true)
         } else {
             (max_docs_str, false)
         };

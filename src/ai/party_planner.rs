@@ -9,7 +9,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt},
+    collection_manager::sides::{
+        read::{AnalyticSearchEventInvocationType, ReadSide},
+        system_prompts::SystemPrompt,
+    },
     types::{
         ApiKey, AutoMode, CollectionId, InteractionLLMConfig, InteractionMessage, Limit,
         Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResult,
@@ -113,7 +116,7 @@ impl PartyPlanner {
         }
 
         // Create the full user input. If possible, add trigger and segment information.
-        let mut full_input = format!("### User Input\n{}", input.clone());
+        let full_input = format!("### User Input\n{}", input.clone());
 
         history.push(InteractionMessage {
             role: Role::User,
@@ -231,11 +234,13 @@ impl PartyPlanner {
                         false => result,
                     };
 
-                    let _ = tx.send(PartyPlannerMessage {
-                        action: step.name.clone(),
-                        result: value.clone(),
-                        done: true,
-                    });
+                    let _ = tx
+                        .send(PartyPlannerMessage {
+                            action: step.name.clone(),
+                            result: value.clone(),
+                            done: true,
+                        })
+                        .await;
 
                     history.push(InteractionMessage {
                         role: Role::Assistant,
@@ -328,19 +333,14 @@ impl PartyPlanner {
     }
 
     fn create_step(action: Action) -> Step {
-        let returns_json = match action.step.as_str() {
-            "ASK_FOLLOWUP" => false,
-            "IMPROVE_INPUT" => false,
-            "GIVE_REPLY" => false,
-            _ => true,
-        };
-
-        let should_stream = match action.step.as_str() {
-            "OPTIMIZE_QUERY" => false,
-            "GENERATE_QUERIES" => false,
-            "PERFORM_ORAMA_SEARCH" => false,
-            _ => true,
-        };
+        let returns_json = !matches!(
+            action.step.as_str(),
+            "ASK_FOLLOWUP" | "IMPROVE_INPUT" | "GIVE_REPLY"
+        );
+        let should_stream = !matches!(
+            action.step.as_str(),
+            "OPTIMIZE_QUERY" | "GENERATE_QUERIES" | "PERFORM_ORAMA_SEARCH"
+        );
 
         Step {
             name: action.step.clone(),
@@ -380,7 +380,9 @@ impl PartyPlanner {
                     where_filter: Default::default(),
                     indexes: None, // Search all indexes.
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::PartyPlanner,
             )
             .await?;
 

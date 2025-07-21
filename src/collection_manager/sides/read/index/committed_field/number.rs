@@ -167,7 +167,7 @@ impl BoundedValue for SerializableNumber {
 }
 
 pub fn get_iter<'s, K: Ord + Eq>(
-    vec: &'s Vec<(K, HashSet<DocumentId>)>,
+    vec: &'s [(K, HashSet<DocumentId>)],
     min: (bool, K),
     max: (bool, K),
 ) -> impl Iterator<Item = DocumentId> + 's {

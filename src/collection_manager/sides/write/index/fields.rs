@@ -15,7 +15,8 @@ use crate::{
         OramaModel,
     },
     collection_manager::sides::{
-        write::embedding::MultiEmbeddingCalculationRequest, Term, TermStringField,
+        write::{embedding::MultiEmbeddingCalculationRequest, WriteSideContext},
+        Term, TermStringField,
     },
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
@@ -565,9 +566,8 @@ impl IndexScoreField {
         field_id: FieldId,
         field_path: Box<[String]>,
         model: OramaModel,
+        context: WriteSideContext,
         calculation: EmbeddingStringCalculation,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
     ) -> Self {
         IndexScoreField::Embedding(Box::new(EmbeddingField::new(
             collection_id,
@@ -576,8 +576,7 @@ impl IndexScoreField {
             field_path,
             model,
             calculation,
-            embedding_sender,
-            automatic_embeddings_selector,
+            context,
         )))
     }
 
@@ -619,8 +618,7 @@ impl IndexScoreField {
         dump: SerializedScoreFieldType,
         collection_id: CollectionId,
         index_id: IndexId,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        context: WriteSideContext,
     ) -> Self {
         match dump {
             SerializedScoreFieldType::String(field, locale) => {
@@ -647,6 +645,7 @@ impl IndexScoreField {
                 field.field_id,
                 field.field_path,
                 model.0,
+                context,
                 match calc {
                     SerializedEmbeddingStringCalculation::AllProperties => {
                         EmbeddingStringCalculation::AllProperties
@@ -661,8 +660,6 @@ impl IndexScoreField {
                         EmbeddingStringCalculation::Automatic
                     }
                 },
-                embedding_sender,
-                automatic_embeddings_selector,
             ),
         }
     }
@@ -786,8 +783,7 @@ impl EmbeddingField {
         field_path: Box<[String]>,
         model: OramaModel,
         calculation: EmbeddingStringCalculation,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        context: WriteSideContext,
     ) -> Self {
         let max_tokens = model.senquence_length();
         let overlap = model.overlap();
@@ -806,9 +802,9 @@ impl EmbeddingField {
             model,
             chunker,
             calculation,
-            embedding_sender,
+            embedding_sender: context.embedding_sender,
             embeddings_selector_cache: RwLock::new(HashMap::new()),
-            automatic_embeddings_selector,
+            automatic_embeddings_selector: context.automatic_embeddings_selector,
         }
     }
 
@@ -903,7 +899,7 @@ impl EmbeddingField {
                 // error. Let's keep a non-recursive version for now.
                 fn extract_values_at_paths(
                     doc: &Map<String, Value>,
-                    paths: &Box<[Box<[String]>]>,
+                    paths: &[Box<[String]>],
                     max_result_size: usize,
                 ) -> String {
                     let mut result_strings: Vec<String> = Vec::new();

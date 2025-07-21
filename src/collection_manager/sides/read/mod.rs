@@ -1,11 +1,14 @@
+mod analytics;
 mod collection;
 mod collections;
+mod context;
 pub mod document_storage;
 mod index;
 mod logs;
 pub mod notify;
 
 use axum::extract::State;
+use chrono::Utc;
 use futures::Stream;
 use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
@@ -34,7 +37,12 @@ use crate::ai::llms::{self, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
-use crate::collection_manager::sides::read::logs::Logs;
+use crate::collection_manager::sides::read::analytics::{
+    AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
+};
+pub use crate::collection_manager::sides::read::context::ReadSideContext;
+use crate::collection_manager::sides::read::logs::HookLogs;
+use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
@@ -51,12 +59,14 @@ use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::{
     InputSideChannelType, Offset, OperationReceiver, OperationReceiverCreator, WriteOperation,
 };
+pub use analytics::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType};
 pub use collections::CollectionReadLock;
 use thiserror::Error;
 
 #[derive(Deserialize, Clone)]
 pub struct ReadSideConfig {
     pub master_api_key: Option<ApiKey>,
+    pub analytics: Option<AnalyticConfig>,
     pub input: InputSideChannelType,
     pub config: IndexesConfig,
 }
@@ -97,7 +107,9 @@ pub struct ReadSide {
     llm_service: Arc<LLMService>,
     local_gpu_manager: Arc<LocalGPUManager>,
 
-    logs: Logs,
+    hook_logs: HookLogs,
+
+    analytics_storage: Option<AnalyticsStorage>,
 
     // Handle to stop the read side
     // This is used to stop the read side when the server is shutting down
@@ -124,14 +136,22 @@ impl ReadSide {
         let commit_interval = config.config.commit_interval;
         let data_dir = config.config.data_dir.clone();
 
-        let collections_reader = CollectionsReader::try_load(
-            ai_service.clone(),
-            nlp_service,
-            llm_service.clone(),
-            config.config,
-        )
-        .await
-        .context("Cannot load collections")?;
+        let mut notifier = None;
+        if let Some(notifier_config) = &config.config.notifier {
+            let n = Notifier::try_new(notifier_config).context("Cannot create notifier")?;
+            notifier = Some(n);
+        }
+
+        let context = ReadSideContext {
+            ai_service: ai_service.clone(),
+            nlp_service: nlp_service.clone(),
+            llm_service: llm_service.clone(),
+            notifier,
+        };
+
+        let collections_reader = CollectionsReader::try_load(context, config.config)
+            .await
+            .context("Cannot load collections")?;
         document_storage
             .load()
             .context("Cannot load document storage")?;
@@ -162,12 +182,20 @@ impl ReadSide {
         let commit_loop_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
+        let analytics_storage = if let Some(config) = config.analytics {
+            Some(
+                AnalyticsStorage::try_new(data_dir.join("analytics"), config)
+                    .context("Cannot create analytics storage")?,
+            )
+        } else {
+            None
+        };
+
         let read_side = ReadSide {
             collections: collections_reader,
             document_storage,
             operation_counter: Default::default(),
             insert_batch_commit_size,
-            data_dir,
             live_offset: RwLock::new(last_offset),
             commit_insert_mutex: Mutex::new(last_offset),
             master_api_key: config.master_api_key,
@@ -177,7 +205,10 @@ impl ReadSide {
             llm_service,
             local_gpu_manager,
 
-            logs: Logs::new(),
+            hook_logs: HookLogs::new(),
+            analytics_storage,
+
+            data_dir,
 
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
@@ -370,7 +401,10 @@ impl ReadSide {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         search_params: SearchParams,
+        invocation_type: AnalyticSearchEventInvocationType,
     ) -> Result<SearchResult, ReadError> {
+        let start = Instant::now();
+
         let limit = search_params.limit;
         let offset = search_params.offset;
 
@@ -406,7 +440,7 @@ impl ReadSide {
         let count = token_scores.len();
 
         let top_results: Vec<TokenScore> = collection
-            .sort_and_truncate(token_scores, limit, offset, search_params.sort_by)
+            .sort_and_truncate(token_scores, limit, offset, search_params.sort_by.as_ref())
             .await?;
         trace!("Top results: {:?}", top_results);
 
@@ -440,11 +474,31 @@ impl ReadSide {
 
         drop(m);
 
-        Ok(SearchResult {
+        let result = SearchResult {
             count,
             hits,
             facets,
-        })
+        };
+        let result_for_analytics = result.clone();
+
+        let search_time = start.elapsed();
+
+        if let Some(analytics_storage) = self.analytics_storage.as_ref() {
+            if let Err(e) = analytics_storage.add_event(AnalyticSearchEvent {
+                at: Utc::now().timestamp(),
+                collection_id,
+                full_results_json: Some(result_for_analytics),
+                invocation_type,
+                results_count: count,
+                search_time: search_time.into(),
+                user_id: search_params.user_id.clone(),
+                search_params,
+            }) {
+                error!(?e, "Failed to add search event to analytics storage");
+            }
+        }
+
+        Ok(result)
     }
 
     pub async fn nlp_search(
@@ -668,8 +722,12 @@ impl ReadSide {
         Ok(HookReaderLock { collection })
     }
 
-    pub fn get_logs(&self) -> &Logs {
-        &self.logs
+    pub fn get_hook_logs(&self) -> &HookLogs {
+        &self.hook_logs
+    }
+
+    pub fn get_analytics_logs(&self) -> Option<&AnalyticsStorage> {
+        self.analytics_storage.as_ref()
     }
 }
 

@@ -189,6 +189,7 @@ pub async fn build_orama(
         )
         .await
         .context("Cannot create write side")?;
+
         Some(write_side)
     };
     #[cfg(not(feature = "writer"))]

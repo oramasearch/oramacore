@@ -54,7 +54,7 @@ impl CommittedStringField {
 
         create_if_not_exists(&data_dir)?;
 
-        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>> =
+        let mut delta_committed_storage: HashMap<u64, Vec<(DocumentId, PostingIdPosition)>> =
             Default::default();
         let iter = uncommitted_iter.map(|(key, value)| {
             let new_posting_list_id = posting_id_generator;
@@ -504,13 +504,16 @@ impl CommittedStringField {
     }
 }
 
+// (exact positions, stemmed positions)
+type PostingIdPosition = (Vec<usize>, Vec<usize>);
+
 #[derive(Debug)]
 struct PostingIdStorage {
     // id -> (doc_id, (exact positions, stemmed positions))
-    inner: Map<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>>,
+    inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>,
 }
 impl PostingIdStorage {
-    fn from_map(inner: Map<u64, Vec<(DocumentId, (Vec<usize>, Vec<usize>))>>) -> Self {
+    fn from_map(inner: Map<u64, Vec<(DocumentId, PostingIdPosition)>>) -> Self {
         Self { inner }
     }
 
@@ -524,10 +527,7 @@ impl PostingIdStorage {
         self.inner.commit()
     }
 
-    fn get_posting(
-        &self,
-        posting_id: &u64,
-    ) -> Option<&Vec<(DocumentId, (Vec<usize>, Vec<usize>))>> {
+    fn get_posting(&self, posting_id: &u64) -> Option<&Vec<(DocumentId, PostingIdPosition)>> {
         self.inner.get(posting_id)
     }
 
@@ -539,7 +539,7 @@ impl PostingIdStorage {
         self.inner.get_max_key().copied().unwrap_or(0)
     }
 
-    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, (Vec<usize>, Vec<usize>))>) {
+    fn insert(&mut self, posting_id: u64, posting: Vec<(DocumentId, PostingIdPosition)>) {
         self.inner.insert(posting_id, posting);
     }
 
@@ -550,7 +550,7 @@ impl PostingIdStorage {
     fn merge(
         &mut self,
         posting_id: u64,
-        posting: impl Iterator<Item = (DocumentId, (Vec<usize>, Vec<usize>))>,
+        posting: impl Iterator<Item = (DocumentId, PostingIdPosition)>,
         uncommitted_document_deletions: &HashSet<DocumentId>,
     ) {
         self.inner

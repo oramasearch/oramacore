@@ -1,11 +1,15 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::StreamExt;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     ai::{
@@ -15,7 +19,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{ReadError, ReadSide},
+        read::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType, ReadError, ReadSide},
         system_prompts::SystemPrompt,
     },
     types::{
@@ -123,6 +127,9 @@ impl Answer {
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         info!("Answering interaction...");
+
+        let start = Instant::now();
+
         self.handle_gpu_overload(&mut interaction).await;
 
         let llm_config = self.get_llm_config(&interaction);
@@ -188,6 +195,7 @@ impl Answer {
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
                 sort_by: None,
+                user_id: None, // @todo: handle user_id if needed
             };
 
             let hook_storage = self
@@ -209,7 +217,12 @@ impl Answer {
 
             let result = self
                 .read_side
-                .search(self.read_api_key, self.collection_id, params)
+                .search(
+                    self.read_api_key,
+                    self.collection_id,
+                    params,
+                    AnalyticSearchEventInvocationType::Answer,
+                )
                 .await?;
             result.hits
         };
@@ -217,7 +230,7 @@ impl Answer {
         let search_result_str = serde_json::to_string(&search_results).unwrap();
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];
@@ -256,9 +269,17 @@ impl Answer {
             }
         };
 
+        let mut response: Option<Vec<String>> = if self.read_side.get_analytics_logs().is_some() {
+            Some(vec![])
+        } else {
+            None
+        };
         while let Some(resp) = answer_stream.next().await {
             match resp {
                 Ok(chunk) => {
+                    if let Some(r) = response.as_mut() {
+                        r.push(chunk.clone())
+                    }
                     sender.send(AnswerEvent::AnswerResponse(chunk))?;
                 }
                 Err(e) => {
@@ -282,6 +303,21 @@ impl Answer {
             .await?;
 
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
+
+        if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
+            if let Err(e) = analytics_logs.add_event(AnalyticAnswerEvent {
+                at: chrono::Utc::now().timestamp_millis(),
+                collection_id: self.collection_id,
+                answer_time: start.elapsed().into(),
+                context: search_results,
+                full_conversation: interaction.messages,
+                question: interaction.query,
+                response: response.unwrap_or_default(),
+                user_id: None,
+            }) {
+                error!(error = ?e, "Failed to log analytic event");
+            }
+        }
 
         Ok(())
     }
@@ -429,7 +465,9 @@ impl Answer {
                     properties: Properties::Star,
                     indexes: Some(index_ids),
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::Answer,
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

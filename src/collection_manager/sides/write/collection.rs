@@ -5,16 +5,16 @@ use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard};
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
 
 use crate::{
-    ai::{automatic_embeddings_selector::AutomaticEmbeddingsSelector, OramaModel},
+    ai::OramaModel,
     collection_manager::sides::{
         field_name_to_path,
-        write::{OramaModelSerializable, WriteError},
-        CollectionWriteOperation, DocumentStorageWriteOperation, OperationSender,
-        ReplaceIndexReason, WriteOperation,
+        write::{context::WriteSideContext, OramaModelSerializable, WriteError},
+        CollectionWriteOperation, DocumentStorageWriteOperation, ReplaceIndexReason,
+        WriteOperation,
     },
     types::{
         ApiKey, CollectionId, DescribeCollectionResponse, DocumentId, IndexEmbeddingsCalculation,
@@ -23,9 +23,9 @@ use crate::{
 };
 use fs::BufferedFile;
 
-use nlp::{locales::Locale, NLPService, TextParser};
+use nlp::{locales::Locale, TextParser};
 
-use super::{embedding::MultiEmbeddingCalculationRequest, index::Index};
+use super::index::Index;
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
@@ -40,12 +40,11 @@ pub struct CollectionWriter {
     runtime_config: RwLock<CollectionRuntimeConfig>,
     write_api_key: ApiKey,
     read_api_key: ApiKey,
-    embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
+
+    context: WriteSideContext,
+
     indexes: RwLock<HashMap<IndexId, Index>>,
     temp_indexes: RwLock<HashMap<IndexId, Index>>,
-    op_sender: OperationSender,
-    nlp_service: Arc<NLPService>,
-    automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
 
     created_at: DateTime<Utc>,
 
@@ -54,64 +53,48 @@ pub struct CollectionWriter {
 
 impl CollectionWriter {
     pub fn empty(
-        id: CollectionId,
         data_dir: PathBuf,
-        description: Option<String>,
-        write_api_key: ApiKey,
-        read_api_key: ApiKey,
-        default_locale: Locale,
-        embeddings_model: OramaModel,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        op_sender: OperationSender,
-        nlp_service: Arc<NLPService>,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
+        req: CreateEmptyCollection,
+        context: WriteSideContext,
     ) -> Result<Self> {
-        let a = op_sender.clone();
+        let send_operation_cb_op_sender = context.op_sender.clone();
+        let id = req.id;
+
+        let send_operation_cb = Box::new(move |op| {
+            let op_sender = send_operation_cb_op_sender.clone();
+            async move {
+                let _ = op_sender
+                    .send(WriteOperation::Collection(
+                        id,
+                        CollectionWriteOperation::Hook(op),
+                    ))
+                    .await;
+            }
+            .boxed()
+        });
 
         Ok(Self {
             id,
-            description,
-            write_api_key,
-            read_api_key,
+            description: req.description,
+            write_api_key: req.write_api_key,
+            read_api_key: req.read_api_key,
             runtime_config: RwLock::new(CollectionRuntimeConfig {
-                default_locale,
-                embeddings_model,
+                default_locale: req.default_locale,
+                embeddings_model: req.embeddings_model,
             }),
-            embedding_sender,
+            context,
+
             indexes: Default::default(),
             temp_indexes: Default::default(),
-            op_sender,
-            nlp_service,
-            automatic_embeddings_selector,
 
             created_at: Utc::now(),
 
-            hook: HookWriter::try_new(
-                data_dir.join("hooks"),
-                Box::new(move |op| {
-                    let b = a.clone();
-                    async move {
-                        let _ = b
-                            .send(WriteOperation::Collection(
-                                id,
-                                CollectionWriteOperation::Hook(op),
-                            ))
-                            .await;
-                    }
-                    .boxed()
-                }),
-            )
-            .context("Cannot create hook writer")?,
+            hook: HookWriter::try_new(data_dir.join("hooks"), send_operation_cb)
+                .context("Cannot create hook writer")?,
         })
     }
 
-    pub async fn try_load(
-        data_dir: PathBuf,
-        nlp_service: Arc<NLPService>,
-        embedding_sender: Sender<MultiEmbeddingCalculationRequest>,
-        op_sender: OperationSender,
-        automatic_embeddings_selector: Arc<AutomaticEmbeddingsSelector>,
-    ) -> Result<Self> {
+    pub async fn try_load(data_dir: PathBuf, context: WriteSideContext) -> Result<Self> {
         let dump: CollectionDump = BufferedFile::open(data_dir.join("info.json"))
             .context("Cannot open info.json file")?
             .read_json_data()
@@ -133,9 +116,7 @@ impl CollectionWriter {
                 id,
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
-                op_sender.clone(),
-                embedding_sender.clone(),
-                automatic_embeddings_selector.clone(),
+                context.clone(),
             )
             .context("Cannot load index")?;
             indexes.insert(index_id, index);
@@ -146,15 +127,13 @@ impl CollectionWriter {
                 id,
                 temp_index_id,
                 data_dir.join("temp_indexes").join(temp_index_id.as_str()),
-                op_sender.clone(),
-                embedding_sender.clone(),
-                automatic_embeddings_selector.clone(),
+                context.clone(),
             )
             .context("Cannot load index")?;
             temp_indexes.insert(temp_index_id, index);
         }
 
-        let a = op_sender.clone();
+        let a = context.op_sender.clone();
 
         Ok(Self {
             id,
@@ -165,12 +144,9 @@ impl CollectionWriter {
                 default_locale,
                 embeddings_model: dump.embeddings_model.0,
             }),
-            embedding_sender,
+            context,
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
-            op_sender,
-            nlp_service,
-            automatic_embeddings_selector,
 
             created_at: dump.created_at,
 
@@ -261,16 +237,15 @@ impl CollectionWriter {
         let index = Index::empty(
             index_id,
             self.id,
-            self.embedding_sender.clone(),
-            self.get_text_parser(default_locale),
-            self.op_sender.clone(),
-            self.automatic_embeddings_selector.clone(),
             None,
+            self.get_text_parser(default_locale),
+            self.context.clone(),
         )
         .await
         .context("Cannot create index")?;
 
-        self.op_sender
+        self.context
+            .op_sender
             .send(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::CreateIndex2 {
@@ -327,6 +302,10 @@ impl CollectionWriter {
 
         let mut temp_indexes_lock = self.temp_indexes.write().await;
 
+        if temp_indexes_lock.contains_key(&new_index_id) {
+            return Err(WriteError::IndexAlreadyExists(self.id, new_index_id));
+        }
+
         let runtime_config = self.runtime_config.read().await;
         let default_locale = runtime_config.default_locale;
         let embeddings_model = runtime_config.embeddings_model;
@@ -335,16 +314,15 @@ impl CollectionWriter {
         let index = Index::empty(
             new_index_id,
             self.id,
-            self.embedding_sender.clone(),
-            self.get_text_parser(default_locale),
-            self.op_sender.clone(),
-            self.automatic_embeddings_selector.clone(),
             Some(copy_from),
+            self.get_text_parser(default_locale),
+            self.context.clone(),
         )
         .await
         .context("Cannot create index")?;
 
-        self.op_sender
+        self.context
+            .op_sender
             .send(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::CreateTemporaryIndex2 {
@@ -380,7 +358,8 @@ impl CollectionWriter {
         drop(indexes);
 
         let doc_ids = index.get_document_ids().await;
-        self.op_sender
+        self.context
+            .op_sender
             .send_batch(vec![
                 WriteOperation::Collection(
                     self.id,
@@ -457,28 +436,6 @@ impl CollectionWriter {
         Ok(())
     }
 
-    async fn get_current_document_count(&self, with_tmp: bool) -> usize {
-        let mut document_count = 0_usize;
-
-        let indexes = self.indexes.read().await;
-        for index in indexes.values() {
-            let index_desc = index.describe().await;
-            document_count += index_desc.document_count;
-        }
-        drop(indexes);
-
-        if with_tmp {
-            let temp_indexs = self.temp_indexes.read().await;
-            for index in temp_indexs.values() {
-                let index_desc = index.describe().await;
-                document_count += index_desc.document_count;
-            }
-            drop(temp_indexs);
-        }
-
-        document_count
-    }
-
     pub async fn as_dto(&self) -> DescribeCollectionResponse {
         let mut indexes_desc = vec![];
         let mut document_count = 0_usize;
@@ -526,7 +483,7 @@ impl CollectionWriter {
     }
 
     fn get_text_parser(&self, locale: Locale) -> Arc<TextParser> {
-        self.nlp_service.get(locale)
+        self.context.nlp_service.get(locale)
     }
 
     pub async fn remove_from_fs(self, path: PathBuf) {
@@ -570,7 +527,8 @@ impl CollectionWriter {
         }
         drop(temp_indexes_lock);
 
-        self.op_sender
+        self.context
+            .op_sender
             .send(WriteOperation::Collection(
                 self.id,
                 CollectionWriteOperation::ReplaceIndex {
@@ -640,4 +598,13 @@ impl Deref for IndexReadLock<'_> {
         // no one can remove the collection from the map because we hold a read lock
         self.lock.get(&self.id).unwrap()
     }
+}
+
+pub struct CreateEmptyCollection {
+    pub id: CollectionId,
+    pub description: Option<String>,
+    pub write_api_key: ApiKey,
+    pub read_api_key: ApiKey,
+    pub default_locale: Locale,
+    pub embeddings_model: OramaModel,
 }
