@@ -10,7 +10,7 @@ posting_storage
 .data
 .dataset
 .local-demo
-
+.dev
 .vscode
 flamegraph.svg
 .direnv/
