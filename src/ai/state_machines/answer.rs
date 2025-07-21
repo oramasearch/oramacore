@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
 use futures::future::Future;
-use orama_js_pool::ExecOption;
+use orama_js_pool::{ExecOption, OutputChannel};
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
@@ -24,6 +24,8 @@ use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
     SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
 };
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use futures::TryFutureExt;
 
 // ==== SSE Event Types ====
 
@@ -157,6 +159,7 @@ pub enum AnswerFlow {
         system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        optimized_query: String,
     },
     ExecuteSearch {
         interaction: Interaction,
@@ -165,6 +168,7 @@ pub enum AnswerFlow {
         optimized_query: String,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     },
     ExecuteBeforeAnswerHook {
         interaction: Interaction,
@@ -382,6 +386,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<GeneratedAnswer, AnswerError> {
         info!(
             "Starting answer generation for collection: {}",
@@ -511,6 +516,7 @@ impl AnswerStateMachine {
                     system_prompt,
                     collection_id,
                     read_api_key,
+                    optimized_query,
                 } => {
                     self.send_event(AnswerEvent::StateChanged {
                         state: "execute_search".to_string(),
@@ -524,6 +530,8 @@ impl AnswerStateMachine {
                         system_prompt,
                         collection_id,
                         read_api_key,
+                        optimized_query,
+                        log_sender.clone(),
                     )
                     .await?;
                 }
@@ -534,6 +542,7 @@ impl AnswerStateMachine {
                     optimized_query,
                     collection_id,
                     read_api_key,
+                    log_sender,
                 } => {
                     self.send_event(AnswerEvent::StateChanged {
                         state: "execute_before_answer_hook".to_string(),
@@ -548,6 +557,7 @@ impl AnswerStateMachine {
                         optimized_query,
                         collection_id,
                         read_api_key,
+                        log_sender,
                     )
                     .await?;
                 }
@@ -673,6 +683,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<UnboundedReceiverStream<AnswerEvent>, AnswerError> {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
@@ -682,7 +693,7 @@ impl AnswerStateMachine {
         let state_machine = self;
         tokio::spawn(async move {
             let result = state_machine
-                .run(interaction, collection_id, read_api_key)
+                .run(interaction, collection_id, read_api_key, log_sender)
                 .await;
             match result {
                 Ok(_) => {
@@ -911,11 +922,12 @@ impl AnswerStateMachine {
 
         let mut state = self.state.lock().await;
         *state = AnswerFlow::OptimizeQuery {
-            interaction,
-            llm_config,
-            system_prompt: None, // Will be populated in the next transition
+            interaction: interaction.clone(),
+            llm_config: llm_config.clone(),
+            system_prompt: None,
             collection_id,
             read_api_key,
+            optimized_query,
         };
         Ok(())
     }
@@ -927,6 +939,8 @@ impl AnswerStateMachine {
         system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        optimized_query: String,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         let search_results = self
             .transition_with_retry("execute_search", || {
@@ -935,6 +949,7 @@ impl AnswerStateMachine {
                     llm_config.clone(),
                     collection_id,
                     read_api_key,
+                    optimized_query.clone(),
                 )
             })
             .await?;
@@ -950,9 +965,10 @@ impl AnswerStateMachine {
             interaction,
             llm_config,
             system_prompt,
-            optimized_query: String::new(), // Will be populated
+            optimized_query,
             collection_id,
             read_api_key,
+            log_sender,
         };
         Ok(())
     }
@@ -965,6 +981,7 @@ impl AnswerStateMachine {
         optimized_query: String,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(), AnswerError> {
         let (variables, processed_system_prompt) = self
             .transition_with_retry("execute_before_answer_hook", || {
@@ -973,6 +990,7 @@ impl AnswerStateMachine {
                     system_prompt.clone(),
                     collection_id,
                     read_api_key,
+                    log_sender.clone(),
                 )
             })
             .await?;
@@ -1278,6 +1296,7 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        optimized_query: String,
     ) -> Result<Vec<SearchResultHit>, AnswerError> {
         let search_results = if let Some(ref notation) = interaction.ragat_notation {
             let parsed = RAGAtParser::parse(notation);
@@ -1318,6 +1337,7 @@ impl AnswerStateMachine {
                 properties: Properties::Star,
                 indexes: None, // Search all indexes
                 sort_by: None,
+                user_id: None,
             };
 
             let hook_storage = self
@@ -1341,7 +1361,7 @@ impl AnswerStateMachine {
 
             let result = self
                 .read_side
-                .search(read_api_key, collection_id, params)
+                .search(read_api_key, collection_id, params, AnalyticSearchEventInvocationType::Answer)
                 .await
                 .map_err(|e| AnswerError::SearchError(e.to_string()))?;
             result.hits
@@ -1356,6 +1376,7 @@ impl AnswerStateMachine {
         system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<(Vec<(String, String)>, Option<SystemPrompt>), AnswerError> {
         let search_result_str = serde_json::to_string(&vec![] as &Vec<SearchResultHit>)
             .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;
@@ -1374,7 +1395,7 @@ impl AnswerStateMachine {
         let (variables, system_prompt) = run_before_answer(
             &lock,
             (variables, system_prompt),
-            None, // log_sender
+            log_sender,
             ExecOption {
                 allowed_hosts: Some(vec![]),
                 timeout: self.config.hook_timeout,
@@ -1577,10 +1598,12 @@ impl AnswerStateMachine {
                     properties: Properties::Star,
                     indexes: Some(index_ids),
                     sort_by: None,
+                    user_id: None, // @todo: handle user_id if needed
                 },
+                AnalyticSearchEventInvocationType::Answer,
             )
-            .await
-            .map_err(|_| GeneralRagAtError::ReadError)?;
+            .map_err(|_| GeneralRagAtError::ReadError)
+            .await?;
 
         let all_hits = search_results.hits.clone();
 

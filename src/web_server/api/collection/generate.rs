@@ -150,8 +150,10 @@ async fn answer_v1(
             query_params.api_key,
         );
 
+        let log_sender = read_side.get_hook_logs().get_sender(&collection_id);
+
         let event_stream = match state_machine
-            .run_stream(interaction, collection_id, query_params.api_key)
+            .run_stream(interaction, collection_id, query_params.api_key, log_sender)
             .await
         {
             Ok(stream) => stream,

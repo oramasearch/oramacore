@@ -22,6 +22,7 @@ use crate::types::{
 
 use crate::ai::run_hooks::run_before_retrieval;
 use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 
 // ==== SSE Event Types ====
 
@@ -1345,7 +1346,7 @@ impl AdvancedAutoqueryStateMachine {
         let search_params = processed_query.processed_search_params.clone();
 
         let search_result = read_side
-            .search(read_api_key, collection_id, search_params)
+            .search(read_api_key, collection_id, search_params, AnalyticSearchEventInvocationType::NLPSearch)
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
 
