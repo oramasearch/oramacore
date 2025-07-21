@@ -1,4 +1,4 @@
-![OramaCore](/docs/public/oramacore.png)
+![OramaCore](/misc/oramacore.png)
 
 **OramaCore** is the AI runtime you need for your projects, answer engines,
 copilots, and search.
@@ -37,12 +37,12 @@ include four NVIDIA H100.
 
 Depending on your machine, you may want to use different Docker images.
 
-| Application   | CPU/GPU                              | Docker image                                                                                           |
-| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| **OramaCore** | X86_64                               | [`oramasearch/oramacore`](https://hub.docker.com/r/oramasearch/oramacore)                              |
-| **OramaCore** | ARM64 (Mac M series for example)     | [`oramasearch/oramacore-arm64`](https://hub.docker.com/r/oramasearch/oramacore-arm64)                  |
-| **AI Server** | Any CPU architecture, no CUDA access | [`oramasearch/oramacore-ai-server`](https://hub.docker.com/r/oramasearch/oramacore-ai-server)          |
-| **AI Server** | Any CPU architecture, CUDA available | [`oramasearch/oramacore-ai-server-cuda`](https://hub.docker.com/r/oramasearch/oramacore-ai-server-cuda)|
+| Application   | CPU/GPU                              | Docker image                                                                                            |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| **OramaCore** | X86_64                               | [`oramasearch/oramacore`](https://hub.docker.com/r/oramasearch/oramacore)                               |
+| **OramaCore** | ARM64 (Mac M series for example)     | [`oramasearch/oramacore-arm64`](https://hub.docker.com/r/oramasearch/oramacore-arm64)                   |
+| **AI Server** | Any CPU architecture, no CUDA access | [`oramasearch/oramacore-ai-server`](https://hub.docker.com/r/oramasearch/oramacore-ai-server)           |
+| **AI Server** | Any CPU architecture, CUDA available | [`oramasearch/oramacore-ai-server-cuda`](https://hub.docker.com/r/oramasearch/oramacore-ai-server-cuda) |
 
 ## Using the JavaScript SDK
 
@@ -135,13 +135,14 @@ const collection = new CollectionManager({
 
 const answerSession = collection.createAnswerSession({
     initialMessages: [
-        { 
+        {
             role: "user",
-            content: "How do I install OramaCore?"
+            content: "How do I install OramaCore?",
         },
         {
             role: "assistant",
-            content: "You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image",
+            content:
+                "You can install OramaCore by pulling the oramasearch/oramacore:latest Docker image",
         },
     ],
     events: {
