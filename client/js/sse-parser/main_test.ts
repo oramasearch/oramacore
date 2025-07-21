@@ -58,8 +58,8 @@ Deno.test('parseAnswerStream emits correct events to handlers', async () => {
     });
   }
 
-  // Wait for all events to be processed
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // Wait for stream processing to complete
+  await emitter.done;
 
   for (const e of events) {
     assert(received[e.type]?.length);
