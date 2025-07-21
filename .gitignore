@@ -16,7 +16,7 @@ posting_storage
 flamegraph.svg
 .direnv/
 .envrc
-
+.npm
 .env
 
 log.log
