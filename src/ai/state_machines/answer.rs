@@ -40,7 +40,7 @@ pub enum AnswerEvent {
     Error { error: String, state: String },
     #[serde(rename = "progress")]
     Progress {
-        current_step: String,
+        current_step: serde_json::Value,
         total_steps: usize,
         message: String,
     },
@@ -280,6 +280,102 @@ impl AnswerStateMachine {
         }
     }
 
+    /// Convert state to JSON for progress events
+    fn state_to_json(&self, state: &AnswerFlow) -> serde_json::Value {
+        match state {
+            AnswerFlow::Initialize { interaction, .. } => {
+                serde_json::json!({
+                    "type": "Initialize",
+                    "interaction_id": interaction.interaction_id
+                })
+            }
+            AnswerFlow::HandleGPUOverload { interaction, .. } => {
+                serde_json::json!({
+                    "type": "HandleGPUOverload", 
+                    "interaction_id": interaction.interaction_id
+                })
+            }
+            AnswerFlow::GetLLMConfig { interaction, llm_config, .. } => {
+                serde_json::json!({
+                    "type": "GetLLMConfig",
+                    "interaction_id": interaction.interaction_id,
+                    "llm_provider": llm_config.provider.to_string(),
+                    "llm_model": llm_config.model
+                })
+            }
+            AnswerFlow::DetermineQueryStrategy { interaction, .. } => {
+                serde_json::json!({
+                    "type": "DetermineQueryStrategy",
+                    "interaction_id": interaction.interaction_id,
+                    "query": interaction.query
+                })
+            }
+            AnswerFlow::HandleSystemPrompt { interaction, .. } => {
+                serde_json::json!({
+                    "type": "HandleSystemPrompt",
+                    "interaction_id": interaction.interaction_id,
+                    "system_prompt_id": interaction.system_prompt_id
+                })
+            }
+            AnswerFlow::OptimizeQuery { interaction, .. } => {
+                serde_json::json!({
+                    "type": "OptimizeQuery",
+                    "interaction_id": interaction.interaction_id,
+                    "original_query": interaction.query
+                })
+            }
+            AnswerFlow::ExecuteSearch { interaction, optimized_query, .. } => {
+                serde_json::json!({
+                    "type": "ExecuteSearch",
+                    "interaction_id": interaction.interaction_id,
+                    "optimized_query": optimized_query
+                })
+            }
+            AnswerFlow::ExecuteBeforeAnswerHook { interaction, search_results, .. } => {
+                serde_json::json!({
+                    "type": "ExecuteBeforeAnswerHook",
+                    "interaction_id": interaction.interaction_id,
+                    "search_results_count": search_results.len()
+                })
+            }
+            AnswerFlow::GenerateAnswer { interaction, search_results, variables, .. } => {
+                serde_json::json!({
+                    "type": "GenerateAnswer",
+                    "interaction_id": interaction.interaction_id,
+                    "search_results_count": search_results.len(),
+                    "variables_count": variables.len()
+                })
+            }
+            AnswerFlow::GenerateRelatedQueries { interaction, search_results, answer, .. } => {
+                serde_json::json!({
+                    "type": "GenerateRelatedQueries",
+                    "interaction_id": interaction.interaction_id,
+                    "search_results_count": search_results.len(),
+                    "answer_length": answer.len()
+                })
+            }
+            AnswerFlow::PartyPlanner { interaction, .. } => {
+                serde_json::json!({
+                    "type": "PartyPlanner",
+                    "interaction_id": interaction.interaction_id
+                })
+            }
+            AnswerFlow::Completed { search_results, related_queries, .. } => {
+                serde_json::json!({
+                    "type": "Completed",
+                    "search_results_count": search_results.len(),
+                    "has_related_queries": related_queries.is_some()
+                })
+            }
+            AnswerFlow::Error(error) => {
+                serde_json::json!({
+                    "type": "Error",
+                    "error": error.to_string()
+                })
+            }
+        }
+    }
+
     /// Run the state machine with the given input
     pub async fn run(
         &self,
@@ -320,9 +416,10 @@ impl AnswerStateMachine {
                 state.clone()
             };
 
-            // Send progress event
+            // Send progress event with JSON-formatted current_step
+            let current_step_json = self.state_to_json(&current_state);
             self.send_event(AnswerEvent::Progress {
-                current_step: format!("{:?}", current_state),
+                current_step: current_step_json,
                 total_steps,
                 message: format!("Processing step {}/{}", current_step, total_steps),
             })
@@ -716,7 +813,7 @@ impl AnswerStateMachine {
                     }
                     crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Progress { current_step, total_steps, message } => {
                         self.send_event(AnswerEvent::Progress {
-                            current_step: format!("advanced_autoquery_{}", current_step),
+                            current_step: serde_json::json!({"type": "advanced_autoquery", "step": current_step}),
                             total_steps,
                             message: format!("Advanced Autoquery: {}", message),
                         })

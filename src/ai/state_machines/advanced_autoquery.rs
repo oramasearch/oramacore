@@ -38,7 +38,7 @@ pub enum AdvancedAutoqueryEvent {
     Error { error: String, state: String },
     #[serde(rename = "progress")]
     Progress {
-        current_step: String,
+        current_step: serde_json::Value,
         total_steps: usize,
         message: String,
     },
@@ -291,6 +291,121 @@ impl AdvancedAutoqueryStateMachine {
         }
     }
 
+    /// Convert state to JSON for progress events
+    fn state_to_json(&self, state: &AdvancedAutoqueryFlow) -> serde_json::Value {
+        match state {
+            AdvancedAutoqueryFlow::Initialize { conversation, .. } => {
+                serde_json::json!({
+                    "type": "Initialize",
+                    "conversation_messages": conversation.len()
+                })
+            }
+            AdvancedAutoqueryFlow::AnalyzeInput { .. } => {
+                serde_json::json!({
+                    "type": "AnalyzeInput"
+                })
+            }
+            AdvancedAutoqueryFlow::QueryOptimized {
+                optimized_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "QueryOptimized",
+                    "queries_count": optimized_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::SelectProperties { queries, .. } => {
+                serde_json::json!({
+                    "type": "SelectProperties",
+                    "queries_count": queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::PropertiesSelected {
+                queries,
+                selected_properties,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "PropertiesSelected",
+                    "queries_count": queries.len(),
+                    "properties_count": selected_properties.len()
+                })
+            }
+            AdvancedAutoqueryFlow::CombineQueriesAndProperties {
+                queries,
+                properties,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "CombineQueriesAndProperties",
+                    "queries_count": queries.len(),
+                    "properties_count": properties.len()
+                })
+            }
+            AdvancedAutoqueryFlow::QueriesCombined {
+                queries_and_properties,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "QueriesCombined",
+                    "combined_count": queries_and_properties.len()
+                })
+            }
+            AdvancedAutoqueryFlow::GenerateTrackedQueries {
+                queries_and_properties,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "GenerateTrackedQueries",
+                    "queries_count": queries_and_properties.len()
+                })
+            }
+            AdvancedAutoqueryFlow::TrackedQueriesGenerated {
+                tracked_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "TrackedQueriesGenerated",
+                    "tracked_queries_count": tracked_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::ExecuteBeforeRetrievalHook {
+                tracked_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "ExecuteBeforeRetrievalHook",
+                    "queries_count": tracked_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::HooksExecuted {
+                processed_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "HooksExecuted",
+                    "processed_queries_count": processed_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::ExecuteSearches {
+                processed_queries, ..
+            } => {
+                serde_json::json!({
+                    "type": "ExecuteSearches",
+                    "queries_count": processed_queries.len()
+                })
+            }
+            AdvancedAutoqueryFlow::SearchResults { results } => {
+                serde_json::json!({
+                    "type": "SearchResults",
+                    "results_count": results.len()
+                })
+            }
+            AdvancedAutoqueryFlow::Error(error) => {
+                serde_json::json!({
+                    "type": "Error",
+                    "error": error.to_string()
+                })
+            }
+        }
+    }
+
     /// Run the state machine with the given input
     pub async fn run(
         &self,
@@ -324,7 +439,7 @@ impl AdvancedAutoqueryStateMachine {
             };
         }
 
-        let total_steps = 8; // Total number of states in the flow (removed answer generation steps)
+        let total_steps = 8; // Total number of states in the flow
         let mut current_step = 0;
 
         loop {
@@ -335,8 +450,9 @@ impl AdvancedAutoqueryStateMachine {
             };
 
             // Send progress event
+            let current_step_json = self.state_to_json(&current_state);
             self.send_event(AdvancedAutoqueryEvent::Progress {
-                current_step: format!("{:?}", current_state),
+                current_step: current_step_json,
                 total_steps,
                 message: format!("Processing step {}/{}", current_step, total_steps),
             })
@@ -1556,8 +1672,6 @@ impl AdvancedAutoqueryStateMachine {
         Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
         AdvancedAutoqueryError,
     > {
-        // This is a placeholder - you would implement the actual system prompt retrieval logic
-        // based on your collection's system prompt management
         Ok(None)
     }
 }
