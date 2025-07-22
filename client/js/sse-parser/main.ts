@@ -6,47 +6,47 @@ export type SSEEvent = {
 
 export type AdvancedAutoqueryEvent =
   | {
-    type: "state_changed";
+    type: 'state_changed';
     state: string;
     message: string;
     data?: unknown;
     is_terminal?: boolean;
   }
-  | { type: "error"; error: string; state: string; is_terminal?: boolean }
+  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
   | {
-    type: "progress";
+    type: 'progress';
     current_step: unknown;
     total_steps: number;
     message: string;
   }
-  | { type: "search_results"; results: unknown[] };
+  | { type: 'search_results'; results: unknown[] };
 
 export type AnswerEvent =
   | {
-    type: "state_changed";
+    type: 'state_changed';
     state: string;
     message: string;
     data?: unknown;
     is_terminal?: boolean;
   }
-  | { type: "error"; error: string; state: string; is_terminal?: boolean }
+  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
   | {
-    type: "progress";
+    type: 'progress';
     current_step: unknown;
     total_steps: number;
     message: string;
   }
-  | { type: "acknowledged" }
-  | { type: "selected_llm"; provider: string; model: string }
+  | { type: 'acknowledged' }
+  | { type: 'selected_llm'; provider: string; model: string }
   | {
-    type: "optimizing_query";
+    type: 'optimizing_query';
     original_query: string;
     optimized_query: string;
   }
-  | { type: "search_results"; results: unknown[] }
-  | { type: "answer_token"; token: string }
-  | { type: "related_queries"; queries: string }
-  | { type: "result_action"; action: string; result: string };
+  | { type: 'search_results'; results: unknown[] }
+  | { type: 'answer_token'; token: string }
+  | { type: 'related_queries'; queries: string }
+  | { type: 'result_action'; action: string; result: string };
 
 export type OramaSSEEvent = AdvancedAutoqueryEvent | AnswerEvent;
 
@@ -55,13 +55,13 @@ export class EventsStreamTransformer extends TransformStream<
   OramaSSEEvent
 > {
   constructor() {
-    const decoder = new TextDecoder("utf-8", { ignoreBOM: false });
-    let buffer = "";
+    const decoder = new TextDecoder('utf-8', { ignoreBOM: false });
+    let buffer = '';
     let currentEvent: Record<string, string> = {};
 
     super({
       start() {
-        buffer = "";
+        buffer = '';
         currentEvent = {};
       },
       transform(chunk, controller) {
@@ -69,14 +69,14 @@ export class EventsStreamTransformer extends TransformStream<
         buffer += chunkText;
 
         // Split on double newlines (end of SSE event)
-        let eventEnd = buffer.indexOf("\n\n");
-        while (eventEnd === -1 && buffer.indexOf("\r\n\r\n") !== -1) {
-          eventEnd = buffer.indexOf("\r\n\r\n");
+        let eventEnd = buffer.indexOf('\n\n');
+        while (eventEnd === -1 && buffer.indexOf('\r\n\r\n') !== -1) {
+          eventEnd = buffer.indexOf('\r\n\r\n');
         }
         while (eventEnd !== -1) {
           // Support both \n\n and \r\n\r\n as event delimiters
           let delimiterLength = 2;
-          if (buffer.slice(eventEnd, eventEnd + 4) === "\r\n\r\n") {
+          if (buffer.slice(eventEnd, eventEnd + 4) === '\r\n\r\n') {
             delimiterLength = 4;
           }
           const eventBlock = buffer.slice(0, eventEnd);
@@ -85,16 +85,16 @@ export class EventsStreamTransformer extends TransformStream<
           // Find the data line(s)
           const dataLines = eventBlock
             .split(/\r?\n/)
-            .filter((line) => line.startsWith("data:"));
+            .filter((line) => line.startsWith('data:'));
           for (const dataLine of dataLines) {
-            const jsonStr = dataLine.replace(/^data:\s*/, "");
+            const jsonStr = dataLine.replace(/^data:\s*/, '');
             try {
               let parsed = JSON.parse(jsonStr);
               if (
-                typeof parsed === "object" &&
+                typeof parsed === 'object' &&
                 parsed !== null &&
                 Object.keys(parsed).length === 1 &&
-                !("type" in parsed)
+                !('type' in parsed)
               ) {
                 const [key] = Object.keys(parsed);
                 parsed = { type: key, ...parsed[key] };
@@ -102,16 +102,16 @@ export class EventsStreamTransformer extends TransformStream<
               controller.enqueue(parsed);
             } catch (e) {
               controller.enqueue({
-                type: "error",
-                error: "Invalid JSON in SSE data",
-                state: "parse_error",
+                type: 'error',
+                error: 'Invalid JSON in SSE data',
+                state: 'parse_error',
               });
             }
           }
           // Find the next event
-          eventEnd = buffer.indexOf("\n\n");
-          if (eventEnd === -1 && buffer.indexOf("\r\n\r\n") !== -1) {
-            eventEnd = buffer.indexOf("\r\n\r\n");
+          eventEnd = buffer.indexOf('\n\n');
+          if (eventEnd === -1 && buffer.indexOf('\r\n\r\n') !== -1) {
+            eventEnd = buffer.indexOf('\r\n\r\n');
           }
         }
       },
@@ -131,7 +131,7 @@ class OramaEventEmitter<T extends { type: string }> {
     });
   }
 
-  on<K extends T["type"]>(event: K, handler: Handler<Extract<T, { type: K }>>) {
+  on<K extends T['type']>(event: K, handler: Handler<Extract<T, { type: K }>>) {
     if (!this.handlers[event]) {
       this.handlers[event] = [];
     }
@@ -139,12 +139,12 @@ class OramaEventEmitter<T extends { type: string }> {
     return this;
   }
 
-  onStateChange(handler: Handler<Extract<T, { type: "state_changed" }>>) {
-    return this.on("state_changed" as T["type"], handler as any);
+  onStateChange(handler: Handler<Extract<T, { type: 'state_changed' }>>) {
+    return this.on('state_changed' as T['type'], handler as any);
   }
 
-  onProgress(handler: Handler<Extract<T, { type: "progress" }>>) {
-    return this.on("progress" as T["type"], handler as any);
+  onProgress(handler: Handler<Extract<T, { type: 'progress' }>>) {
+    return this.on('progress' as T['type'], handler as any);
   }
 
   onEnd(handler: Handler<void>) {
@@ -161,14 +161,14 @@ class OramaEventEmitter<T extends { type: string }> {
     // Check for completion
     const shouldEnd =
       // Success completion
-      (event.type === "state_changed" &&
-        "state" in event &&
-        event.state === "completed") ||
+      (event.type === 'state_changed' &&
+        'state' in event &&
+        event.state === 'completed') ||
       // Search results
-      event.type === "search_results" ||
+      event.type === 'search_results' ||
       // Terminal errors only
-      (event.type === "error" &&
-        "is_terminal" in event &&
+      (event.type === 'error' &&
+        'is_terminal' in event &&
         event.is_terminal === true);
 
     if (shouldEnd) {
@@ -189,16 +189,16 @@ class OramaEventEmitter<T extends { type: string }> {
 
 function isAnswerEvent(event: OramaSSEEvent): event is AnswerEvent {
   return (
-    event.type === "acknowledged" ||
-    event.type === "selected_llm" ||
-    event.type === "optimizing_query" ||
-    event.type === "search_results" ||
-    event.type === "answer_token" ||
-    event.type === "related_queries" ||
-    event.type === "result_action" ||
-    event.type === "state_changed" ||
-    event.type === "error" ||
-    event.type === "progress"
+    event.type === 'acknowledged' ||
+    event.type === 'selected_llm' ||
+    event.type === 'optimizing_query' ||
+    event.type === 'search_results' ||
+    event.type === 'answer_token' ||
+    event.type === 'related_queries' ||
+    event.type === 'result_action' ||
+    event.type === 'state_changed' ||
+    event.type === 'error' ||
+    event.type === 'progress'
   );
 }
 
@@ -206,10 +206,10 @@ function isAdvancedAutoqueryEvent(
   event: OramaSSEEvent,
 ): event is AdvancedAutoqueryEvent {
   return (
-    event.type === "state_changed" ||
-    event.type === "error" ||
-    event.type === "progress" ||
-    event.type === "search_results"
+    event.type === 'state_changed' ||
+    event.type === 'error' ||
+    event.type === 'progress' ||
+    event.type === 'search_results'
   );
 }
 

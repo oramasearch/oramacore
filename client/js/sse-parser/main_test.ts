@@ -1,24 +1,17 @@
-import {
-  assert,
-  assertEquals,
-} from "https://deno.land/std@0.204.0/assert/mod.ts";
-import type { AdvancedAutoqueryEvent, AnswerEvent } from "./main.ts";
+import { assert, assertEquals } from 'https://deno.land/std@0.204.0/assert/mod.ts';
+import type { AdvancedAutoqueryEvent, AnswerEvent } from './main.ts';
 
-import {
-  EventsStreamTransformer,
-  parseAnswerStream,
-  parseNLPQueryStream,
-} from "./main.ts";
+import { EventsStreamTransformer, parseAnswerStream, parseNLPQueryStream } from './main.ts';
 
 function encodeSSE(lines: string[]): Uint8Array {
-  return new TextEncoder().encode(lines.join("\n"));
+  return new TextEncoder().encode(lines.join('\n'));
 }
 
-Deno.test("EventsStreamTransformer parses valid SSE JSON event", async () => {
+Deno.test('EventsStreamTransformer parses valid SSE JSON event', async () => {
   const eventObj = {
-    type: "state_changed",
-    state: "foo",
-    message: "bar",
+    type: 'state_changed',
+    state: 'foo',
+    message: 'bar',
   } as const;
   const sseData = `data: ${JSON.stringify(eventObj)}\n\n`;
   const input = encodeSSE([sseData]);
@@ -29,7 +22,7 @@ Deno.test("EventsStreamTransformer parses valid SSE JSON event", async () => {
   assertEquals(value, eventObj);
 });
 
-Deno.test("EventsStreamTransformer emits error event on invalid JSON", async () => {
+Deno.test('EventsStreamTransformer emits error event on invalid JSON', async () => {
   const sseData = `data: {invalid json}\n\n`;
   const input = encodeSSE([sseData]);
   const transformer = new EventsStreamTransformer();
@@ -37,22 +30,22 @@ Deno.test("EventsStreamTransformer emits error event on invalid JSON", async () 
   const { value, done } = await reader.read();
   assert(!done);
   assert(value !== undefined);
-  if (value && value.type === "error") {
-    assertEquals(value.state, "parse_error");
+  if (value && value.type === 'error') {
+    assertEquals(value.state, 'parse_error');
   } else {
-    throw new Error("Expected error event");
+    throw new Error('Expected error event');
   }
 });
 
-Deno.test("parseAnswerStream emits correct events to handlers", async () => {
+Deno.test('parseAnswerStream emits correct events to handlers', async () => {
   const events: AnswerEvent[] = [
-    { type: "acknowledged" },
-    { type: "selected_llm", provider: "openai", model: "gpt-4" },
-    { type: "answer_token", token: "Hello" },
-    { type: "state_changed", state: "foo", message: "bar" },
-    { type: "error", error: "fail", state: "fail_state" },
+    { type: 'acknowledged' },
+    { type: 'selected_llm', provider: 'openai', model: 'gpt-4' },
+    { type: 'answer_token', token: 'Hello' },
+    { type: 'state_changed', state: 'foo', message: 'bar' },
+    { type: 'error', error: 'fail', state: 'fail_state' },
   ];
-  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   const input = encodeSSE([sseLines]);
   const stream = new Response(input).body!;
   const emitter = parseAnswerStream(stream);
@@ -74,19 +67,19 @@ Deno.test("parseAnswerStream emits correct events to handlers", async () => {
   }
 });
 
-Deno.test("parseNLPQueryStream emits correct events to handlers", async () => {
+Deno.test('parseNLPQueryStream emits correct events to handlers', async () => {
   const events: AdvancedAutoqueryEvent[] = [
-    { type: "state_changed", state: "init", message: "Initializing" },
+    { type: 'state_changed', state: 'init', message: 'Initializing' },
     {
-      type: "progress",
+      type: 'progress',
       current_step: { step: 1 },
       total_steps: 2,
-      message: "Step 1",
+      message: 'Step 1',
     },
-    { type: "search_results", results: [{ id: 1 }] },
-    { type: "error", error: "fail", state: "fail_state" },
+    { type: 'search_results', results: [{ id: 1 }] },
+    { type: 'error', error: 'fail', state: 'fail_state' },
   ];
-  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   const input = encodeSSE([sseLines]);
   const stream = new Response(input).body!;
   const emitter = parseNLPQueryStream(stream);
@@ -108,18 +101,18 @@ Deno.test("parseNLPQueryStream emits correct events to handlers", async () => {
   }
 });
 
-Deno.test("handlers for unrelated events are not called", async () => {
+Deno.test('handlers for unrelated events are not called', async () => {
   const events: AnswerEvent[] = [
-    { type: "acknowledged" },
-    { type: "answer_token", token: "Hello" },
+    { type: 'acknowledged' },
+    { type: 'answer_token', token: 'Hello' },
   ];
-  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   const input = encodeSSE([sseLines]);
   const stream = new Response(input).body!;
   const emitter = parseAnswerStream(stream);
 
   let unrelatedCalled = false;
-  emitter.on("selected_llm", () => {
+  emitter.on('selected_llm', () => {
     unrelatedCalled = true;
   });
 
@@ -129,12 +122,12 @@ Deno.test("handlers for unrelated events are not called", async () => {
   assert(!unrelatedCalled);
 });
 
-Deno.test("onStateChange and onProgress work for parseAnswerStream", async () => {
+Deno.test('onStateChange and onProgress work for parseAnswerStream', async () => {
   const events: AnswerEvent[] = [
-    { type: "state_changed", state: "foo", message: "bar" },
-    { type: "progress", current_step: 1, total_steps: 2, message: "Step 1" },
+    { type: 'state_changed', state: 'foo', message: 'bar' },
+    { type: 'progress', current_step: 1, total_steps: 2, message: 'Step 1' },
   ];
-  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   const input = encodeSSE([sseLines]);
   const stream = new Response(input).body!;
   const emitter = parseAnswerStream(stream);
@@ -150,13 +143,13 @@ Deno.test("onStateChange and onProgress work for parseAnswerStream", async () =>
   });
   emitter.onProgress((ev) => {
     progressCalled++;
-    if (typeof ev.current_step === "number") {
+    if (typeof ev.current_step === 'number') {
       lastStep = ev.current_step;
     } else if (
       ev.current_step &&
-      typeof ev.current_step === "object" &&
-      "step" in ev.current_step &&
-      typeof (ev.current_step as any).step === "number"
+      typeof ev.current_step === 'object' &&
+      'step' in ev.current_step &&
+      typeof (ev.current_step as any).step === 'number'
     ) {
       lastStep = (ev.current_step as any).step;
     } else {
@@ -168,21 +161,21 @@ Deno.test("onStateChange and onProgress work for parseAnswerStream", async () =>
 
   assertEquals(stateChangeCalled, 1);
   assertEquals(progressCalled, 1);
-  assertEquals(lastState, "foo");
+  assertEquals(lastState, 'foo');
   assertEquals(lastStep, 1);
 });
 
-Deno.test("onStateChange and onProgress work for parseNLPQueryStream", async () => {
+Deno.test('onStateChange and onProgress work for parseNLPQueryStream', async () => {
   const events: AdvancedAutoqueryEvent[] = [
-    { type: "state_changed", state: "init", message: "Initializing" },
+    { type: 'state_changed', state: 'init', message: 'Initializing' },
     {
-      type: "progress",
+      type: 'progress',
       current_step: { step: 2 },
       total_steps: 3,
-      message: "Step 2",
+      message: 'Step 2',
     },
   ];
-  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  const sseLines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   const input = encodeSSE([sseLines]);
   const stream = new Response(input).body!;
   const emitter = parseNLPQueryStream(stream);
@@ -198,10 +191,10 @@ Deno.test("onStateChange and onProgress work for parseNLPQueryStream", async () 
   });
   emitter.onProgress((ev) => {
     progressCalled++;
-    const step = typeof ev.current_step === "object" &&
+    const step = typeof ev.current_step === 'object' &&
         ev.current_step !== null &&
-        "step" in ev.current_step &&
-        typeof (ev.current_step as any).step === "number"
+        'step' in ev.current_step &&
+        typeof (ev.current_step as any).step === 'number'
       ? (ev.current_step as any).step
       : undefined;
     lastStep = step;
@@ -211,6 +204,6 @@ Deno.test("onStateChange and onProgress work for parseNLPQueryStream", async () 
 
   assertEquals(stateChangeCalled, 1);
   assertEquals(progressCalled, 1);
-  assertEquals(lastState, "init");
+  assertEquals(lastState, 'init');
   assertEquals(lastStep, 2);
 });
