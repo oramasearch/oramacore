@@ -74,6 +74,7 @@ async fn nlp_query_v1(
                 let error_event = AdvancedAutoqueryEvent::Error {
                     error: e.to_string(),
                     state: "collection_stats_error".to_string(),
+                    is_terminal: Some(true),
                 };
                 let event_json = serde_json::to_string(&error_event).unwrap();
                 let sse_event = Event::default().data(event_json);
@@ -103,6 +104,7 @@ async fn nlp_query_v1(
                 let error_event = AdvancedAutoqueryEvent::Error {
                     error: e.to_string(),
                     state: "state_machine_init_error".to_string(),
+                    is_terminal: Some(true),
                 };
                 let event_json = serde_json::to_string(&error_event).unwrap();
                 let sse_event = Event::default().data(event_json);
@@ -161,6 +163,7 @@ async fn answer_v1(
                 let error_event = AnswerEvent::Error {
                     error: e.to_string(),
                     state: "state_machine_init_error".to_string(),
+                    is_terminal: Some(true),
                 };
                 let event_json = serde_json::to_string(&error_event).unwrap();
                 let sse_event = Event::default().data(event_json);

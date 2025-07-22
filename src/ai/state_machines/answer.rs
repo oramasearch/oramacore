@@ -19,12 +19,12 @@ use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
 };
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
     SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
 };
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 use futures::TryFutureExt;
 
 // ==== SSE Event Types ====
@@ -39,7 +39,12 @@ pub enum AnswerEvent {
         data: Option<serde_json::Value>,
     },
     #[serde(rename = "error")]
-    Error { error: String, state: String },
+    Error {
+        error: String,
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_terminal: Option<bool>,
+    },
     #[serde(rename = "progress")]
     Progress {
         current_step: serde_json::Value,
@@ -296,11 +301,15 @@ impl AnswerStateMachine {
             }
             AnswerFlow::HandleGPUOverload { interaction, .. } => {
                 serde_json::json!({
-                    "type": "HandleGPUOverload", 
+                    "type": "HandleGPUOverload",
                     "interaction_id": interaction.interaction_id
                 })
             }
-            AnswerFlow::GetLLMConfig { interaction, llm_config, .. } => {
+            AnswerFlow::GetLLMConfig {
+                interaction,
+                llm_config,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "GetLLMConfig",
                     "interaction_id": interaction.interaction_id,
@@ -329,21 +338,34 @@ impl AnswerStateMachine {
                     "original_query": interaction.query
                 })
             }
-            AnswerFlow::ExecuteSearch { interaction, optimized_query, .. } => {
+            AnswerFlow::ExecuteSearch {
+                interaction,
+                optimized_query,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "ExecuteSearch",
                     "interaction_id": interaction.interaction_id,
                     "optimized_query": optimized_query
                 })
             }
-            AnswerFlow::ExecuteBeforeAnswerHook { interaction, search_results, .. } => {
+            AnswerFlow::ExecuteBeforeAnswerHook {
+                interaction,
+                search_results,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "ExecuteBeforeAnswerHook",
                     "interaction_id": interaction.interaction_id,
                     "search_results_count": search_results.len()
                 })
             }
-            AnswerFlow::GenerateAnswer { interaction, search_results, variables, .. } => {
+            AnswerFlow::GenerateAnswer {
+                interaction,
+                search_results,
+                variables,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "GenerateAnswer",
                     "interaction_id": interaction.interaction_id,
@@ -351,7 +373,12 @@ impl AnswerStateMachine {
                     "variables_count": variables.len()
                 })
             }
-            AnswerFlow::GenerateRelatedQueries { interaction, search_results, answer, .. } => {
+            AnswerFlow::GenerateRelatedQueries {
+                interaction,
+                search_results,
+                answer,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "GenerateRelatedQueries",
                     "interaction_id": interaction.interaction_id,
@@ -365,7 +392,11 @@ impl AnswerStateMachine {
                     "interaction_id": interaction.interaction_id
                 })
             }
-            AnswerFlow::Completed { search_results, related_queries, .. } => {
+            AnswerFlow::Completed {
+                search_results,
+                related_queries,
+                ..
+            } => {
                 serde_json::json!({
                     "type": "Completed",
                     "search_results_count": search_results.len(),
@@ -671,6 +702,7 @@ impl AnswerStateMachine {
                     self.send_event(AnswerEvent::Error {
                         error: error.to_string(),
                         state: format!("{:?}", error),
+                        is_terminal: Some(true),
                     })
                     .await;
                     return Err(error);
@@ -702,11 +734,12 @@ impl AnswerStateMachine {
                     // Success - the final event will be sent by the state machine
                 }
                 Err(e) => {
-                    // Error - send error event
+                    // Error - send terminal error event
                     if let Some(sender) = &state_machine.event_sender {
                         let _ = sender.send(AnswerEvent::Error {
                             error: e.to_string(),
                             state: format!("{:?}", e),
+                            is_terminal: Some(true),
                         });
                     }
                 }
@@ -807,7 +840,11 @@ impl AnswerStateMachine {
 
             // Run the advanced autoquery with streaming and capture events
             let advanced_event_stream = advanced_state_machine
-                .run_stream(interaction.messages.clone(), self.collection_id.clone(), self.read_api_key.clone())
+                .run_stream(
+                    interaction.messages.clone(),
+                    self.collection_id.clone(),
+                    self.read_api_key.clone(),
+                )
                 .await
                 .map_err(|e| AnswerError::AdvancedAutoqueryError(e.to_string()))?;
 
@@ -837,16 +874,17 @@ impl AnswerStateMachine {
                         let search_hits = results.into_iter()
                             .flat_map(|query_result| query_result.results.into_iter().flat_map(|search_result| search_result.hits))
                             .collect::<Vec<_>>();
-                        
+
                         self.send_event(AnswerEvent::SearchResults {
                             results: search_hits,
                         })
                         .await;
                     }
-                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Error { error, state } => {
+                    crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Error { error, state, is_terminal } => {
                         self.send_event(AnswerEvent::Error {
                             error: format!("Advanced Autoquery Error: {}", error),
                             state: format!("advanced_autoquery_{}", state),
+                            is_terminal,
                         })
                         .await;
                     }
@@ -1364,7 +1402,12 @@ impl AnswerStateMachine {
 
             let result = self
                 .read_side
-                .search(read_api_key, collection_id, params, AnalyticSearchEventInvocationType::Answer)
+                .search(
+                    read_api_key,
+                    collection_id,
+                    params,
+                    AnalyticSearchEventInvocationType::Answer,
+                )
                 .await
                 .map_err(|e| AnswerError::SearchError(e.to_string()))?;
             result.hits

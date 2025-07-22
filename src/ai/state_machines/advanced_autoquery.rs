@@ -21,8 +21,8 @@ use crate::types::{
 };
 
 use crate::ai::run_hooks::run_before_retrieval;
-use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::read::{CollectionStats, ReadSide};
 
 // ==== SSE Event Types ====
 
@@ -36,7 +36,12 @@ pub enum AdvancedAutoqueryEvent {
         data: Option<serde_json::Value>,
     },
     #[serde(rename = "error")]
-    Error { error: String, state: String },
+    Error {
+        error: String,
+        state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_terminal: Option<bool>,
+    },
     #[serde(rename = "progress")]
     Progress {
         current_step: serde_json::Value,
@@ -678,6 +683,13 @@ impl AdvancedAutoqueryStateMachine {
                         results: results.clone(),
                     })
                     .await;
+                    // Send completion event
+                    self.send_event(AdvancedAutoqueryEvent::StateChanged {
+                        state: "completed".to_string(),
+                        message: "Advanced autoquery completed".to_string(),
+                        data: None,
+                    })
+                    .await;
                     // Return the search results instead of continuing to answer generation
                     return Ok(GeneratedAnswer {
                         answer: String::new(),
@@ -694,6 +706,7 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::Error {
                         error: error.to_string(),
                         state: format!("{:?}", error),
+                        is_terminal: Some(true),
                     })
                     .await;
                     return Err(error);
@@ -729,6 +742,7 @@ impl AdvancedAutoqueryStateMachine {
                         let _ = sender.send(AdvancedAutoqueryEvent::Error {
                             error: e.to_string(),
                             state: format!("{:?}", e),
+                            is_terminal: Some(true),
                         });
                     }
                 }
@@ -1346,7 +1360,12 @@ impl AdvancedAutoqueryStateMachine {
         let search_params = processed_query.processed_search_params.clone();
 
         let search_result = read_side
-            .search(read_api_key, collection_id, search_params, AnalyticSearchEventInvocationType::NLPSearch)
+            .search(
+                read_api_key,
+                collection_id,
+                search_params,
+                AnalyticSearchEventInvocationType::NLPSearch,
+            )
             .await
             .map_err(|e| AdvancedAutoqueryError::ExecuteSearchesError(e.to_string()))?;
 

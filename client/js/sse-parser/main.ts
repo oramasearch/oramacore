@@ -5,8 +5,14 @@ export type SSEEvent = {
 };
 
 export type AdvancedAutoqueryEvent =
-  | { type: 'state_changed'; state: string; message: string; data?: unknown }
-  | { type: 'error'; error: string; state: string }
+  | {
+    type: 'state_changed';
+    state: string;
+    message: string;
+    data?: unknown;
+    is_terminal?: boolean;
+  }
+  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
   | {
     type: 'progress';
     current_step: unknown;
@@ -16,8 +22,14 @@ export type AdvancedAutoqueryEvent =
   | { type: 'search_results'; results: unknown[] };
 
 export type AnswerEvent =
-  | { type: 'state_changed'; state: string; message: string; data?: unknown }
-  | { type: 'error'; error: string; state: string }
+  | {
+    type: 'state_changed';
+    state: string;
+    message: string;
+    data?: unknown;
+    is_terminal?: boolean;
+  }
+  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
   | {
     type: 'progress';
     current_step: unknown;
@@ -109,6 +121,7 @@ export class EventsStreamTransformer extends TransformStream<
 
 class OramaEventEmitter<T extends { type: string }> {
   private handlers: { [key: string]: Handler<T>[] } = {};
+  private endHandlers: Handler<void>[] = [];
   public done: Promise<void>;
   private resolveDone: () => void = () => {};
 
@@ -134,10 +147,38 @@ class OramaEventEmitter<T extends { type: string }> {
     return this.on('progress' as T['type'], handler as any);
   }
 
+  onEnd(handler: Handler<void>) {
+    this.endHandlers.push(handler);
+    return this;
+  }
+
   emit(event: T) {
     const hs = this.handlers[event.type];
     if (hs) {
       for (const h of hs) h(event as any);
+    }
+
+    // Check for completion
+    const shouldEnd =
+      // Success completion
+      (event.type === 'state_changed' &&
+        'state' in event &&
+        event.state === 'completed') ||
+      // Search results
+      event.type === 'search_results' ||
+      // Terminal errors only
+      (event.type === 'error' &&
+        'is_terminal' in event &&
+        event.is_terminal === true);
+
+    if (shouldEnd) {
+      this._triggerEnd();
+    }
+  }
+
+  private _triggerEnd() {
+    for (const handler of this.endHandlers) {
+      handler();
     }
   }
 
