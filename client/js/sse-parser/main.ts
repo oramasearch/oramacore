@@ -50,6 +50,22 @@ export type AnswerEvent =
 
 export type OramaSSEEvent = AdvancedAutoqueryEvent | AnswerEvent;
 
+export const STATES_STEPS = [
+  'initialize',
+  'handle_gpu_overload',
+  'get_llm_config',
+  'determine_query_strategy',
+  'handle_system_prompt',
+];
+
+export const PROGRESS_STEPS = [
+  'initialize',
+  'handle_gpu_overload',
+  'get_llm_config',
+  'determine_query_strategy',
+  'handle_system_prompt',
+];
+
 export class EventsStreamTransformer extends TransformStream<
   Uint8Array,
   OramaSSEEvent

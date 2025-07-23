@@ -473,7 +473,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "analyzing_input".to_string(),
                         message: "Analyzing user input".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "conversation_messages": conversation.len()
+                        })),
                     })
                     .await;
                     self.transition_to_analyze_input(conversation, collection_id, read_api_key)
@@ -484,10 +486,14 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let queries_preview = conversation_json.chars().take(100).collect::<String>();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "query_optimized".to_string(),
                         message: "Optimizing queries".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "conversation_json_preview": queries_preview,
+                            "conversation_json_length": conversation_json.len()
+                        })),
                     })
                     .await;
                     self.transition_to_query_optimized(
@@ -505,7 +511,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "select_properties".to_string(),
                         message: "Selecting properties".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "optimized_queries": optimized_queries.clone(),
+                        })),
                     })
                     .await;
                     self.transition_to_select_properties(
@@ -523,7 +531,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "properties_selected".to_string(),
                         message: "Properties selected".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "queries_count": queries.len()
+                        })),
                     })
                     .await;
                     self.transition_to_properties_selected(queries, collection_id, read_api_key)
@@ -535,10 +545,22 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let properties_preview: Vec<_> = selected_properties.iter().map(|map| {
+                        map.iter().map(|(k, v)| {
+                            serde_json::json!({
+                                "collection": k,
+                                "properties": v.selected_properties.iter().map(|p| &p.property).collect::<Vec<_>>()
+                            })
+                        }).collect::<Vec<_>>()
+                    }).collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "combine_queries".to_string(),
                         message: "Combining queries and properties".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "queries_count": queries.len(),
+                            "selected_properties_count": selected_properties.len(),
+                            "selected_properties_preview": properties_preview
+                        })),
                     })
                     .await;
                     self.transition_to_combine_queries(
@@ -558,7 +580,10 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "queries_combined".to_string(),
                         message: "Queries combined".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "queries_count": queries.len(),
+                            "properties_count": properties.len()
+                        })),
                     })
                     .await;
                     self.transition_to_queries_combined(
@@ -574,10 +599,22 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let combined_preview: Vec<_> = queries_and_properties
+                        .iter()
+                        .map(|qap| {
+                            serde_json::json!({
+                                "query": qap.query,
+                                "property_keys": qap.properties.keys().collect::<Vec<_>>()
+                            })
+                        })
+                        .collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "generate_tracked_queries".to_string(),
                         message: "Generating tracked queries".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "combined_count": queries_and_properties.len(),
+                            "combined_preview": combined_preview
+                        })),
                     })
                     .await;
                     self.transition_to_generate_tracked_queries(
@@ -595,7 +632,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "tracked_queries_generated".to_string(),
                         message: "Tracked queries generated".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "queries_count": queries_and_properties.len()
+                        })),
                     })
                     .await;
                     self.transition_to_tracked_queries_generated(
@@ -610,10 +649,24 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    // Preview: for each, show original_query and generated_query_text (first 3)
+                    let tracked_preview: Vec<_> = tracked_queries
+                        .iter()
+                        .take(3)
+                        .map(|tq| {
+                            serde_json::json!({
+                                "original_query": tq.original_query,
+                                "generated_query_text": tq.generated_query_text
+                            })
+                        })
+                        .collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "execute_before_retrieval_hook".to_string(),
                         message: "Executing before retrieval hook".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "tracked_queries_count": tracked_queries.len(),
+                            "tracked_queries_preview": tracked_preview
+                        })),
                     })
                     .await;
                     self.transition_to_execute_before_retrieval_hook(
@@ -631,7 +684,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "hooks_executed".to_string(),
                         message: "Hooks executed".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "tracked_queries_count": tracked_queries.len()
+                        })),
                     })
                     .await;
                     self.transition_to_hooks_executed(tracked_queries, collection_id, read_api_key)
@@ -645,7 +700,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "execute_searches".to_string(),
                         message: "Executing searches".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "processed_queries_count": processed_queries.len()
+                        })),
                     })
                     .await;
                     self.transition_to_execute_searches(
@@ -663,7 +720,9 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "search_results".to_string(),
                         message: "Search results obtained".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "processed_queries_count": processed_queries.len()
+                        })),
                     })
                     .await;
                     self.transition_to_search_results(
@@ -687,7 +746,10 @@ impl AdvancedAutoqueryStateMachine {
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "completed".to_string(),
                         message: "Advanced autoquery completed".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "results_count": results.len(),
+                            "results_preview": results.iter().take(3).collect::<Vec<_>>()
+                        })),
                     })
                     .await;
                     // Return the search results instead of continuing to answer generation
@@ -833,20 +895,30 @@ impl AdvancedAutoqueryStateMachine {
         conversation_json: String,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<(), AdvancedAutoqueryError> {
+    ) -> Result<Vec<String>, AdvancedAutoqueryError> {
         let optimized_queries = self
             .transition_with_retry("analyze_input", || {
                 self.analyze_input(conversation_json.clone())
             })
             .await?;
 
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "query_optimized".to_string(),
+            message: "Optimizing queries".to_string(),
+            data: Some(serde_json::json!({
+                "optimized_queries": optimized_queries.clone(),
+            })),
+        })
+        .await;
+
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::QueryOptimized {
-            optimized_queries,
+            optimized_queries: optimized_queries.clone(),
             collection_id,
             read_api_key,
         };
-        Ok(())
+
+        Ok(optimized_queries)
     }
 
     async fn transition_to_select_properties(
@@ -855,9 +927,26 @@ impl AdvancedAutoqueryStateMachine {
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
+        let selected_properties = self
+            .transition_with_retry("select_properties", || {
+                self.select_properties(optimized_queries.clone())
+            })
+            .await?;
+
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "properties_selected".to_string(),
+            message: "Properties selected".to_string(),
+            data: Some(serde_json::json!({
+                "queries_count": optimized_queries.len(),
+                "selected_properties": selected_properties
+            })),
+        })
+        .await;
+
         let mut state = self.state.lock().await;
-        *state = AdvancedAutoqueryFlow::SelectProperties {
+        *state = AdvancedAutoqueryFlow::PropertiesSelected {
             queries: optimized_queries,
+            selected_properties,
             collection_id,
             read_api_key,
         };
@@ -876,6 +965,15 @@ impl AdvancedAutoqueryStateMachine {
             })
             .await?;
 
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "properties_selected".to_string(),
+            message: "Properties selected".to_string(),
+            data: Some(serde_json::json!({
+                "selected_properties": selected_properties
+            })),
+        })
+        .await;
+
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::PropertiesSelected {
             queries,
@@ -893,6 +991,20 @@ impl AdvancedAutoqueryStateMachine {
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
+        let queries_and_properties =
+            self.combine_queries_and_properties(queries.clone(), selected_properties.clone());
+
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "combine_queries".to_string(),
+            message: "Combining queries and properties".to_string(),
+            data: Some(serde_json::json!({
+                "queries_count": queries.len(),
+                "properties_count": selected_properties.len(),
+                "combined_queries_preview": queries_and_properties
+            })),
+        })
+        .await;
+
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::CombineQueriesAndProperties {
             queries,
@@ -910,7 +1022,19 @@ impl AdvancedAutoqueryStateMachine {
         collection_id: CollectionId,
         read_api_key: ApiKey,
     ) -> Result<(), AdvancedAutoqueryError> {
-        let queries_and_properties = self.combine_queries_and_properties(queries, properties);
+        let queries_and_properties =
+            self.combine_queries_and_properties(queries.clone(), properties.clone());
+
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "queries_combined".to_string(),
+            message: "Queries combined".to_string(),
+            data: Some(serde_json::json!({
+                "queries_count": queries.len(),
+                "properties_count": properties.len(),
+                "combined_queries_preview": queries_and_properties.iter().take(3).collect::<Vec<_>>()
+            })),
+        })
+        .await;
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::QueriesCombined {
@@ -947,6 +1071,16 @@ impl AdvancedAutoqueryStateMachine {
                 self.generate_tracked_search_queries(queries_and_properties.clone())
             })
             .await?;
+
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "tracked_queries_generated".to_string(),
+            message: "Tracked queries generated".to_string(),
+            data: Some(serde_json::json!({
+                "queries_count": tracked_queries.len(),
+                "tracked_queries_preview": tracked_queries.iter().take(3).collect::<Vec<_>>()
+            })),
+        })
+        .await;
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::TrackedQueriesGenerated {
@@ -988,6 +1122,16 @@ impl AdvancedAutoqueryStateMachine {
             })
             .await?;
 
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "hooks_executed".to_string(),
+            message: "Hooks executed".to_string(),
+            data: Some(serde_json::json!({
+                "processed_queries_count": processed_queries.len(),
+                "processed_queries_preview": processed_queries.iter().take(3).collect::<Vec<_>>()
+            })),
+        })
+        .await;
+
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::HooksExecuted {
             processed_queries,
@@ -1027,6 +1171,16 @@ impl AdvancedAutoqueryStateMachine {
                 )
             })
             .await?;
+
+        self.send_event(AdvancedAutoqueryEvent::StateChanged {
+            state: "search_results".to_string(),
+            message: "Search results obtained".to_string(),
+            data: Some(serde_json::json!({
+                "processed_queries_count": processed_queries.len(),
+                "search_results_preview": results.iter().take(3).collect::<Vec<_>>()
+            })),
+        })
+        .await;
 
         let mut state = self.state.lock().await;
         *state = AdvancedAutoqueryFlow::SearchResults { results };
