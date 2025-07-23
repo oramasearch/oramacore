@@ -13,7 +13,6 @@ use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 use tracing::{error, info, warn};
 
 use crate::ai::llms::{KnownPrompts, LLMService};
-use crate::ai::party_planner::PartyPlanner;
 use crate::ai::ragat::{ContextComponent, GeneralRagAtError, RAGAtParser};
 use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
@@ -110,8 +109,6 @@ pub enum AnswerError {
     AnswerGenerationError(String),
     #[error("Failed to generate related queries: {0}")]
     RelatedQueriesError(String),
-    #[error("Failed to execute party planner: {0}")]
-    PartyPlannerError(String),
     #[error("LLM service error: {0}")]
     LLMServiceError(String),
     #[error("Read error: {0}")]
@@ -198,13 +195,6 @@ pub enum AnswerFlow {
         llm_config: InteractionLLMConfig,
         search_results: Vec<SearchResultHit>,
         answer: String,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    },
-    PartyPlanner {
-        interaction: Interaction,
-        llm_config: InteractionLLMConfig,
-        system_prompt: Option<SystemPrompt>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
     },
@@ -384,12 +374,6 @@ impl AnswerStateMachine {
                     "interaction_id": interaction.interaction_id,
                     "search_results_count": search_results.len(),
                     "answer_length": answer.len()
-                })
-            }
-            AnswerFlow::PartyPlanner { interaction, .. } => {
-                serde_json::json!({
-                    "type": "PartyPlanner",
-                    "interaction_id": interaction.interaction_id
                 })
             }
             AnswerFlow::Completed {
@@ -662,28 +646,6 @@ impl AnswerStateMachine {
                         search_results,
                         related_queries: None, // Will be populated if related queries were generated
                     });
-                }
-                AnswerFlow::PartyPlanner {
-                    interaction,
-                    llm_config,
-                    system_prompt,
-                    collection_id,
-                    read_api_key,
-                } => {
-                    self.send_event(AnswerEvent::StateChanged {
-                        state: "party_planner".to_string(),
-                        message: "Executing party planner".to_string(),
-                        data: None,
-                    })
-                    .await;
-                    self.transition_to_party_planner(
-                        interaction,
-                        llm_config,
-                        system_prompt,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
                 }
                 AnswerFlow::Completed {
                     answer,
@@ -1115,35 +1077,6 @@ impl AnswerStateMachine {
         Ok(())
     }
 
-    async fn transition_to_party_planner(
-        &self,
-        interaction: Interaction,
-        llm_config: InteractionLLMConfig,
-        system_prompt: Option<SystemPrompt>,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<(), AnswerError> {
-        let party_planner_result = self
-            .transition_with_retry("party_planner", || {
-                self.execute_party_planner(
-                    interaction.clone(),
-                    llm_config.clone(),
-                    system_prompt.clone(),
-                    collection_id,
-                    read_api_key,
-                )
-            })
-            .await?;
-
-        let mut state = self.state.lock().await;
-        *state = AnswerFlow::Completed {
-            answer: party_planner_result,
-            search_results: vec![],
-            related_queries: None,
-        };
-        Ok(())
-    }
-
     /// Transition with retry logic
     async fn transition_with_retry<F, Fut, T>(
         &self,
@@ -1553,43 +1486,6 @@ impl AnswerStateMachine {
         }
 
         Ok(Some(related_queries))
-    }
-
-    async fn execute_party_planner(
-        &self,
-        interaction: Interaction,
-        llm_config: InteractionLLMConfig,
-        system_prompt: Option<SystemPrompt>,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
-    ) -> Result<String, AnswerError> {
-        let party_planner = PartyPlanner::new(self.read_side.clone(), Some(llm_config.clone()));
-
-        let mut party_planner_stream = party_planner.run(
-            self.read_side.clone(),
-            collection_id,
-            read_api_key,
-            interaction.query.clone(),
-            interaction.messages.clone(),
-            system_prompt,
-        );
-
-        let mut result = String::new();
-
-        while let Some(message) = party_planner_stream.next().await {
-            // Send result action event
-            self.send_event(AnswerEvent::ResultAction {
-                action: message.action.clone(),
-                result: message.result.clone(),
-            })
-            .await;
-            result.push_str(&format!(
-                "Action: {}\nResult: {}\n",
-                message.action, message.result
-            ));
-        }
-
-        Ok(result)
     }
 
     async fn execute_rag_at_specification(

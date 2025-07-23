@@ -65,7 +65,7 @@ async fn nlp_query_v1(
             .collection_stats(
                 query_params.api_key,
                 collection_id,
-                crate::types::CollectionStatsRequest { with_keys: false },
+                crate::types::CollectionStatsRequest { with_keys: true },
             )
             .await
         {
