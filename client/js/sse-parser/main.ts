@@ -4,18 +4,67 @@ export type SSEEvent = {
   data: string;
 };
 
+// Answer flow specific states
+export type AnswerFlowState =
+  | 'initializing'
+  | 'handle_gpu_overload'
+  | 'get_llm_config'
+  | 'determine_query_strategy'
+  | 'simple_rag'
+  | 'advanced_autoquery'
+  | 'handle_system_prompt'
+  | 'optimize_query'
+  | 'execute_search'
+  | 'execute_before_answer_hook'
+  | 'generate_answer'
+  | 'generate_related_queries'
+  | 'completed'
+  | 'error';
+
+// Advanced autoquery specific states (with prefix)
+export type AdvancedAutoqueryFlowState =
+  | 'advanced_autoquery_initializing'
+  | 'advanced_autoquery_analyzing_input'
+  | 'advanced_autoquery_query_optimized'
+  | 'advanced_autoquery_select_properties'
+  | 'advanced_autoquery_properties_selected'
+  | 'advanced_autoquery_combine_queries'
+  | 'advanced_autoquery_queries_combined'
+  | 'advanced_autoquery_generate_tracked_queries'
+  | 'advanced_autoquery_tracked_queries_generated'
+  | 'advanced_autoquery_execute_before_retrieval_hook'
+  | 'advanced_autoquery_hooks_executed'
+  | 'advanced_autoquery_execute_searches'
+  | 'advanced_autoquery_search_results'
+  | 'advanced_autoquery_completed';
+
+// Combined type
+export type AllPossibleStates = AnswerFlowState | AdvancedAutoqueryFlowState;
+
+// Create union types from the arrays
+export type StateStep = (typeof STATES_STEPS)[number];
+export type ProgressStep = (typeof PROGRESS_STEPS)[number];
+
+// More specific event types
 export type AdvancedAutoqueryEvent =
   | {
     type: 'state_changed';
-    state: string;
+    state: StateStep; // Now type-safe instead of string
     message: string;
     data?: unknown;
     is_terminal?: boolean;
   }
-  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
+  | {
+    type: 'error';
+    error: string;
+    state: StateStep; // Now type-safe
+    is_terminal?: boolean;
+  }
   | {
     type: 'progress';
-    current_step: unknown;
+    current_step:
+      | ProgressStep
+      | { type: 'advanced_autoquery'; step: unknown }; // Handle nested format
     total_steps: number;
     message: string;
   }
@@ -24,15 +73,22 @@ export type AdvancedAutoqueryEvent =
 export type AnswerEvent =
   | {
     type: 'state_changed';
-    state: string;
+    state: StateStep; // Now type-safe instead of string
     message: string;
     data?: unknown;
     is_terminal?: boolean;
   }
-  | { type: 'error'; error: string; state: string; is_terminal?: boolean }
+  | {
+    type: 'error';
+    error: string;
+    state: StateStep; // Now type-safe
+    is_terminal?: boolean;
+  }
   | {
     type: 'progress';
-    current_step: unknown;
+    current_step:
+      | ProgressStep
+      | { type: 'advanced_autoquery'; step: unknown }; // Handle nested format
     total_steps: number;
     message: string;
   }
@@ -51,29 +107,67 @@ export type AnswerEvent =
 export type OramaSSEEvent = AdvancedAutoqueryEvent | AnswerEvent;
 
 export const STATES_STEPS = [
+  // Main answer flow states
   'initializing',
   'handle_gpu_overload',
   'get_llm_config',
-  'advanced_autoquery',
   'determine_query_strategy',
+  'simple_rag', // When simple RAG is selected
+  'advanced_autoquery', // When advanced autoquery is selected
+  'handle_system_prompt',
   'optimize_query',
   'execute_search',
   'execute_before_answer_hook',
   'generate_answer',
   'generate_related_queries',
   'completed',
+  'error',
+
+  // Advanced autoquery states (forwarded with prefix)
+  'advanced_autoquery_initializing',
+  'advanced_autoquery_analyzing_input',
+  'advanced_autoquery_query_optimized',
+  'advanced_autoquery_select_properties',
+  'advanced_autoquery_properties_selected',
+  'advanced_autoquery_combine_queries',
+  'advanced_autoquery_queries_combined',
+  'advanced_autoquery_generate_tracked_queries',
+  'advanced_autoquery_tracked_queries_generated',
+  'advanced_autoquery_execute_before_retrieval_hook',
+  'advanced_autoquery_hooks_executed',
+  'advanced_autoquery_execute_searches',
+  'advanced_autoquery_search_results',
+  'advanced_autoquery_completed',
 ];
 
 export const PROGRESS_STEPS = [
+  // Main answer flow progress steps (enum variant names)
   'Initialize',
   'HandleGPUOverload',
   'GetLLMConfig',
+  'DetermineQueryStrategy',
   'HandleSystemPrompt',
   'OptimizeQuery',
   'ExecuteSearch',
   'ExecuteBeforeAnswerHook',
   'GenerateAnswer',
   'GenerateRelatedQueries',
+  'Completed',
+  'Error',
+
+  // Advanced autoquery progress steps
+  'AnalyzeInput',
+  'QueryOptimized',
+  'SelectProperties',
+  'PropertiesSelected',
+  'CombineQueriesAndProperties',
+  'QueriesCombined',
+  'GenerateTrackedQueries',
+  'TrackedQueriesGenerated',
+  'ExecuteBeforeRetrievalHook',
+  'HooksExecuted',
+  'ExecuteSearches',
+  'SearchResults',
 ];
 
 export class EventsStreamTransformer extends TransformStream<
@@ -208,7 +302,8 @@ class OramaEventEmitter<T extends { type: string }> {
       // Success completion
       (event.type === 'state_changed' &&
         'state' in event &&
-        event.state === 'completed') ||
+        (event.state === 'completed' ||
+          event.state === 'advanced_autoquery_completed')) ||
       // Terminal errors only
       (event.type === 'error' &&
         'is_terminal' in event &&
@@ -230,24 +325,46 @@ class OramaEventEmitter<T extends { type: string }> {
   }
 }
 
+// Define separate types for pure advanced autoquery vs forwarded events
+export type PureAdvancedAutoqueryEvent =
+  | (AdvancedAutoqueryEvent & {
+    type: 'state_changed';
+    state: Exclude<StateStep, AnswerFlowState>; // Only advanced_autoquery_ states
+  })
+  | Exclude<AdvancedAutoqueryEvent, { type: 'state_changed' }>;
+
 function isAnswerEvent(event: OramaSSEEvent): event is AnswerEvent {
-  return (
+  // First check for Answer-specific event types
+  if (
     event.type === 'acknowledged' ||
     event.type === 'selected_llm' ||
     event.type === 'optimizing_query' ||
-    event.type === 'search_results' ||
     event.type === 'answer_token' ||
     event.type === 'related_queries' ||
-    event.type === 'result_action' ||
+    event.type === 'result_action'
+  ) {
+    return true;
+  }
+
+  // For overlapping types, include all since AnswerEvent is a superset
+  // The distinction is made at the parser level, not the type guard level
+  if (
     event.type === 'state_changed' ||
     event.type === 'error' ||
-    event.type === 'progress'
-  );
+    event.type === 'progress' ||
+    event.type === 'search_results'
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isAdvancedAutoqueryEvent(
   event: OramaSSEEvent,
 ): event is AdvancedAutoqueryEvent {
+  // Advanced autoquery events can have any state - the prefix logic only applies
+  // when they're forwarded through the answer stream
   return (
     event.type === 'state_changed' ||
     event.type === 'error' ||
@@ -292,4 +409,14 @@ export function parseNLPQueryStream(
     emitter._markDone();
   })();
   return emitter;
+}
+
+export function isAnswerFlowState(state: StateStep): state is AnswerFlowState {
+  return !state.startsWith('advanced_autoquery_');
+}
+
+export function isAdvancedAutoqueryState(
+  state: StateStep,
+): state is AdvancedAutoqueryFlowState {
+  return state.startsWith('advanced_autoquery_');
 }

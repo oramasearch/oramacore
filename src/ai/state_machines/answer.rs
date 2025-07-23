@@ -572,7 +572,7 @@ impl AnswerStateMachine {
                         message: "Executing search".to_string(),
                         data: Some(serde_json::json!({
                             "search_results_count": search_results.len(),
-                            "results": search_results.iter().take(3).collect::<Vec<_>>() // Include first 3 for preview
+                            "results": search_results
                         })),
                     })
                     .await;
@@ -639,7 +639,7 @@ impl AnswerStateMachine {
                         state: "generate_answer".to_string(),
                         message: "Generating answer".to_string(),
                         data: Some(serde_json::json!({
-                            "answer_preview": answer,
+                            "answer": answer,
                             "answer_token_count": token_count
                         })),
                     })
