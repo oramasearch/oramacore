@@ -25,7 +25,6 @@ pub mod automatic_embeddings_selector;
 pub mod context_evaluator;
 pub mod gpu;
 pub mod llms;
-pub mod party_planner;
 pub mod ragat;
 mod run_hooks;
 pub mod state_machines;

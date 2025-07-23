@@ -14,7 +14,6 @@ use tracing::{error, info, warn};
 use crate::{
     ai::{
         llms,
-        party_planner::PartyPlanner,
         ragat::{ContextComponent, GeneralRagAtError, RAGAtParser},
         run_hooks::{run_before_answer, run_before_retrieval},
     },
@@ -85,24 +84,6 @@ impl Answer {
         let system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id)
             .await?;
-
-        let party_planner = PartyPlanner::new(self.read_side.clone(), Some(llm_config.clone()));
-
-        let mut party_planner_stream = party_planner.run(
-            self.read_side.clone(),
-            self.collection_id,
-            self.read_api_key,
-            interaction.query.clone(),
-            interaction.messages.clone(),
-            system_prompt,
-        );
-
-        while let Some(message) = party_planner_stream.next().await {
-            sender.send(AnswerEvent::ResultAction {
-                action: message.action,
-                result: message.result,
-            })?;
-        }
 
         let llm_service = self.read_side.get_llm_service();
         let mut related_queries_params =

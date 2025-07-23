@@ -21,7 +21,7 @@ use crate::{
     types::{RelatedQueriesFormat, Role},
 };
 
-use super::{party_planner::Step, AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
+use super::{AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
 use crate::ai::gpu::LocalGPUManager;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +33,6 @@ pub enum KnownPrompts {
     AdvancedAutoQueryQueryComposer,
     AutomaticEmbeddingsSelector,
     OptimizeQuery,
-    PartyPlanner,
     Segmenter,
     Trigger,
     ValidateSystemPrompt,
@@ -48,38 +47,29 @@ pub struct KnownPrompt {
     pub user: String,
 }
 
-pub enum PartyPlannerPrompt {
-    AskFollowup,
-    OptimizeQuery,
-    GenerateQueries,
-    DescribeInputCode,
-    ImproveInput,
-    CreateCode,
-    GiveReply,
-}
-
-impl TryFrom<&str> for PartyPlannerPrompt {
+impl TryFrom<&str> for KnownPrompts {
     type Error = String;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
-            "ASK_FOLLOWUP" => Ok(Self::AskFollowup),
+            "ANSWER" => Ok(Self::Answer),
+            "AUTOQUERY" => Ok(Self::Autoquery),
+            "ADVANCED_AUTOQUERY_QUERY_ANALYZER" => Ok(Self::AdvancedAutoqueryQueryAnalyzer),
+            "ADVANCED_AUTOQUERY_PROPERTIES_SELECTOR" => {
+                Ok(Self::AdvancedAutoQueryPropertiesSelector)
+            }
+            "ADVANCED_AUTOQUERY_QUERY_COMPOSER" => Ok(Self::AdvancedAutoQueryQueryComposer),
+            "AUTOMATIC_EMBEDDINGS_SELECTOR" => Ok(Self::AutomaticEmbeddingsSelector),
             "OPTIMIZE_QUERY" => Ok(Self::OptimizeQuery),
-            "GENERATE_QUERIES" => Ok(Self::GenerateQueries),
-            "DESCRIBE_INPUT_CODE" => Ok(Self::DescribeInputCode),
-            "IMPROVE_INPUT" => Ok(Self::ImproveInput),
-            "CREATE_CODE" => Ok(Self::CreateCode),
-            "GIVE_REPLY" => Ok(Self::GiveReply),
+            "SEGMENTER" => Ok(Self::Segmenter),
+            "TRIGGER" => Ok(Self::Trigger),
+            "VALIDATE_SYSTEM_PROMPT" => Ok(Self::ValidateSystemPrompt),
+            "FOLLOWUP" => Ok(Self::Followup),
+            "GENERATE_RELATED_QUERIES" => Ok(Self::GenerateRelatedQueries),
+            "DETERMINE_QUERY_STRATEGY" => Ok(Self::DetermineQueryStrategy),
             _ => Err(format!("Unknown prompt type: {s}")),
         }
     }
-}
-
-pub struct PartyPlannerPromptHyperParams {
-    pub system_prompt: String,
-    pub user_prompt: String,
-    pub max_tokens: u32,
-    pub temperature: f32,
 }
 
 impl KnownPrompts {
@@ -92,10 +82,6 @@ impl KnownPrompts {
             KnownPrompts::Autoquery => KnownPrompt {
                 system: include_str!("../prompts/v1/autoquery/system.md").to_string(),
                 user: include_str!("../prompts/v1/autoquery/user.md").to_string(),
-            },
-            KnownPrompts::PartyPlanner => KnownPrompt {
-                system: include_str!("../prompts/v1/party_planner/system.md").to_string(),
-                user: include_str!("../prompts/v1/party_planner/user.md").to_string(),
             },
             KnownPrompts::Segmenter => KnownPrompt {
                 system: include_str!("../prompts/v1/segmenter/system.md").to_string(),
@@ -156,121 +142,6 @@ impl KnownPrompts {
                     .to_string(),
                 user: include_str!("../prompts/v1/determine_query_strategy/user.md").to_string(),
             },
-        }
-    }
-}
-
-impl PartyPlannerPrompt {
-    pub fn get_hyperparameters(
-        &self,
-        variables: Vec<(String, String)>,
-    ) -> PartyPlannerPromptHyperParams {
-        let variables_map: HashMap<String, String> = HashMap::from_iter(variables);
-
-        match self {
-            PartyPlannerPrompt::AskFollowup => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/ask_followup_system.md")
-                        .to_string();
-                let user = include_str!("../prompts/v1/party_planner/actions/ask_followup_user.md")
-                    .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 256,
-                    temperature: 0.3,
-                }
-            }
-            PartyPlannerPrompt::OptimizeQuery => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/optimize_query_system.md")
-                        .to_string();
-                let user =
-                    include_str!("../prompts/v1/party_planner/actions/optimize_query_user.md")
-                        .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 256,
-                    temperature: 0.3,
-                }
-            }
-            PartyPlannerPrompt::GenerateQueries => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/generate_queries_system.md")
-                        .to_string();
-                let user =
-                    include_str!("../prompts/v1/party_planner/actions/generate_queries_user.md")
-                        .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 512,
-                    temperature: 0.3,
-                }
-            }
-            PartyPlannerPrompt::DescribeInputCode => {
-                let system = include_str!(
-                    "../prompts/v1/party_planner/actions/describe_input_code_system.md"
-                )
-                .to_string();
-                let user =
-                    include_str!("../prompts/v1/party_planner/actions/describe_input_code_user.md")
-                        .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 512,
-                    temperature: 0.1,
-                }
-            }
-            PartyPlannerPrompt::ImproveInput => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/improve_input_system.md")
-                        .to_string();
-                let user =
-                    include_str!("../prompts/v1/party_planner/actions/improve_input_user.md")
-                        .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 1024,
-                    temperature: 0.2,
-                }
-            }
-            PartyPlannerPrompt::CreateCode => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/create_code_system.md")
-                        .to_string();
-                let user = include_str!("../prompts/v1/party_planner/actions/create_code_user.md")
-                    .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 2048,
-                    temperature: 0.1,
-                }
-            }
-            PartyPlannerPrompt::GiveReply => {
-                let system =
-                    include_str!("../prompts/v1/party_planner/actions/give_reply_system.md")
-                        .to_string();
-                let user = include_str!("../prompts/v1/party_planner/actions/give_reply_user.md")
-                    .to_string();
-
-                PartyPlannerPromptHyperParams {
-                    system_prompt: system,
-                    user_prompt: format_prompt(user, variables_map),
-                    max_tokens: 4096,
-                    temperature: 0.1,
-                }
-            }
         }
     }
 }
@@ -598,146 +469,6 @@ impl LLMService {
         });
 
         Ok(ReceiverStream::new(rx))
-    }
-
-    pub async fn run_party_planner_prompt_stream(
-        &self,
-        step: Step,
-        input: &str,
-        history: &Vec<InteractionMessage>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<impl Stream<Item = Result<String>>> {
-        let step_name = step.name.as_str();
-
-        let variables = match step_name {
-            "GIVE_REPLY" => vec![
-                ("question".to_string(), input.to_owned()),
-                ("context".to_string(), step.description),
-            ],
-            _ => vec![
-                ("input".to_string(), input.to_owned()),
-                ("description".to_string(), step.description),
-            ],
-        };
-
-        let party_planner_prompt = PartyPlannerPrompt::try_from(step_name).unwrap();
-        let hyperparameters = party_planner_prompt.get_hyperparameters(variables);
-
-        let mut full_history: Vec<ChatCompletionRequestMessage> =
-            vec![ChatCompletionRequestSystemMessageArgs::default()
-                .content(hyperparameters.system_prompt)
-                .build()
-                .unwrap()
-                .into()];
-
-        for message in history {
-            match message.role {
-                Role::System => {
-                    // @todo: make sure there are no multiple system messages in the history
-                    // return Err(anyhow::Error::msg(
-                    //     "Found multiple system messages in Party Planner chat history",
-                    // ));
-                }
-                Role::User => {
-                    full_history.push(
-                        ChatCompletionRequestUserMessageArgs::default()
-                            .content(message.content.clone())
-                            .build()
-                            .unwrap()
-                            .into(),
-                    );
-                }
-                Role::Assistant => {
-                    full_history.push(
-                        ChatCompletionRequestAssistantMessageArgs::default()
-                            .content(message.content.clone())
-                            .build()
-                            .unwrap()
-                            .into(),
-                    );
-                }
-            }
-        }
-
-        full_history.push(
-            ChatCompletionRequestUserMessageArgs::default()
-                .content(hyperparameters.user_prompt)
-                .build()
-                .unwrap()
-                .into(),
-        );
-
-        let chosen_model = self.get_chosen_model(llm_config.clone());
-        let llm_client = self.get_chosen_llm_client(llm_config);
-
-        let request = CreateChatCompletionRequestArgs::default()
-            .model(chosen_model)
-            .max_tokens(hyperparameters.max_tokens)
-            .stream(true)
-            .messages(full_history)
-            .build()
-            .context("Unable to build KnownPrompt LLM request body")?;
-
-        let mut response_stream =
-            llm_client.chat().create_stream(request).await.context(
-                "An error occurred while initializing the stream from remote LLM instance",
-            )?;
-
-        let (tx, rx) = mpsc::channel(100);
-
-        tokio::spawn(async move {
-            while let Some(result) = response_stream.next().await {
-                match result {
-                    Ok(response) => {
-                        let empty_str = &String::new();
-                        let chunk = response
-                            .choices
-                            .first()
-                            .unwrap()
-                            .delta
-                            .content
-                            .as_ref()
-                            .unwrap_or(empty_str);
-
-                        tx.send(Ok(chunk.to_string())).await.unwrap();
-                    }
-                    Err(e) => {
-                        let error_message = format!("An error occurred while processing the response from the remote Party Planner LLM instance: {e:?}");
-                        tx.send(Err(anyhow::Error::msg(error_message)))
-                            .await
-                            .unwrap();
-                    }
-                }
-            }
-        });
-
-        Ok(ReceiverStream::new(rx))
-    }
-
-    pub async fn run_party_planner_prompt(
-        &self,
-        step: Step,
-        input: &str,
-        history: &Vec<InteractionMessage>,
-        llm_config: Option<InteractionLLMConfig>,
-    ) -> Result<String> {
-        let mut acc = String::new();
-        let mut stream = self
-            .run_party_planner_prompt_stream(step, input, history, llm_config)
-            .await?;
-
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(m) => {
-                    acc += &m;
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-
-        Ok(acc)
     }
 
     pub fn get_chosen_llm_client(
