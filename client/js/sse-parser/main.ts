@@ -50,6 +50,32 @@ export type AnswerEvent =
 
 export type OramaSSEEvent = AdvancedAutoqueryEvent | AnswerEvent;
 
+export const STATES_STEPS = [
+  'initializing',
+  'handle_gpu_overload',
+  'get_llm_config',
+  'advanced_autoquery',
+  'determine_query_strategy',
+  'optimize_query',
+  'execute_search',
+  'execute_before_answer_hook',
+  'generate_answer',
+  'generate_related_queries',
+  'completed',
+];
+
+export const PROGRESS_STEPS = [
+  'Initialize',
+  'HandleGPUOverload',
+  'GetLLMConfig',
+  'HandleSystemPrompt',
+  'OptimizeQuery',
+  'ExecuteSearch',
+  'ExecuteBeforeAnswerHook',
+  'GenerateAnswer',
+  'GenerateRelatedQueries',
+];
+
 export class EventsStreamTransformer extends TransformStream<
   Uint8Array,
   OramaSSEEvent
@@ -57,12 +83,10 @@ export class EventsStreamTransformer extends TransformStream<
   constructor() {
     const decoder = new TextDecoder('utf-8', { ignoreBOM: false });
     let buffer = '';
-    let currentEvent: Record<string, string> = {};
 
     super({
       start() {
         buffer = '';
-        currentEvent = {};
       },
       transform(chunk, controller) {
         const chunkText = decoder.decode(chunk);
@@ -86,19 +110,39 @@ export class EventsStreamTransformer extends TransformStream<
           const dataLines = eventBlock
             .split(/\r?\n/)
             .filter((line) => line.startsWith('data:'));
+
           for (const dataLine of dataLines) {
             const jsonStr = dataLine.replace(/^data:\s*/, '');
             try {
+              // Handle string events like "acknowledged"
+              if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
+                const stringEvent = JSON.parse(jsonStr);
+                controller.enqueue({ type: stringEvent });
+                continue;
+              }
+
               let parsed = JSON.parse(jsonStr);
+
+              // Handle new nested structure
               if (
                 typeof parsed === 'object' &&
                 parsed !== null &&
-                Object.keys(parsed).length === 1 &&
                 !('type' in parsed)
               ) {
-                const [key] = Object.keys(parsed);
-                parsed = { type: key, ...parsed[key] };
+                // Convert nested format like {"state_changed": {...}} to {type: "state_changed", ...}
+                const keys = Object.keys(parsed);
+                if (keys.length === 1) {
+                  const [eventType] = keys;
+                  const eventData = parsed[eventType];
+
+                  if (typeof eventData === 'object' && eventData !== null) {
+                    parsed = { type: eventType, ...eventData };
+                  } else {
+                    parsed = { type: eventType, data: eventData };
+                  }
+                }
               }
+
               controller.enqueue(parsed);
             } catch (e) {
               controller.enqueue({
@@ -108,6 +152,7 @@ export class EventsStreamTransformer extends TransformStream<
               });
             }
           }
+
           // Find the next event
           eventEnd = buffer.indexOf('\n\n');
           if (eventEnd === -1 && buffer.indexOf('\r\n\r\n') !== -1) {
@@ -158,14 +203,12 @@ class OramaEventEmitter<T extends { type: string }> {
       for (const h of hs) h(event as any);
     }
 
-    // Check for completion
+    // Check for completion - updated for new event format
     const shouldEnd =
       // Success completion
       (event.type === 'state_changed' &&
         'state' in event &&
         event.state === 'completed') ||
-      // Search results
-      event.type === 'search_results' ||
       // Terminal errors only
       (event.type === 'error' &&
         'is_terminal' in event &&

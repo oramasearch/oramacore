@@ -34,7 +34,6 @@ pub enum AnswerEvent {
     StateChanged {
         state: String,
         message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
     #[serde(rename = "error")]
@@ -321,22 +320,29 @@ impl AnswerStateMachine {
                     "system_prompt_id": interaction.system_prompt_id
                 })
             }
-            AnswerFlow::OptimizeQuery { interaction, .. } => {
-                serde_json::json!({
-                    "type": "OptimizeQuery",
-                    "interaction_id": interaction.interaction_id,
-                    "original_query": interaction.query
-                })
-            }
-            AnswerFlow::ExecuteSearch {
+            AnswerFlow::OptimizeQuery {
                 interaction,
                 optimized_query,
                 ..
             } => {
                 serde_json::json!({
+                    "type": "OptimizeQuery",
+                    "interaction_id": interaction.interaction_id,
+                    "original_query": interaction.query,
+                    "optimized_query": optimized_query
+                })
+            }
+            AnswerFlow::ExecuteSearch {
+                interaction,
+                optimized_query,
+                search_results,
+                ..
+            } => {
+                serde_json::json!({
                     "type": "ExecuteSearch",
                     "interaction_id": interaction.interaction_id,
-                    "optimized_query": optimized_query
+                    "optimized_query": optimized_query,
+                    "search_results_count": search_results
                 })
             }
             AnswerFlow::ExecuteBeforeAnswerHook {
@@ -470,14 +476,19 @@ impl AnswerStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let gpu_status = self
+                        .transition_to_get_llm_config(interaction, collection_id, read_api_key)
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "get_llm_config".to_string(),
                         message: "Getting LLM configuration".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "provider": gpu_status.provider,
+                            "model": gpu_status.model
+                        })),
                     })
                     .await;
-                    self.transition_to_get_llm_config(interaction, collection_id, read_api_key)
-                        .await?;
                 }
                 AnswerFlow::GetLLMConfig {
                     interaction,
@@ -485,14 +496,18 @@ impl AnswerStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let query_strategy = self
+                        .transition_to_determine_query_strategy(interaction, llm_config)
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "determine_query_strategy".to_string(),
                         message: "Determining query strategy".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "strategy": query_strategy
+                        })),
                     })
                     .await;
-                    self.transition_to_determine_query_strategy(interaction, llm_config)
-                        .await?;
                 }
                 AnswerFlow::DetermineQueryStrategy {
                     interaction,
@@ -512,19 +527,25 @@ impl AnswerStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let original_query = interaction.query.clone();
+                    let optimized_query = self
+                        .transition_to_optimize_query(
+                            interaction,
+                            llm_config,
+                            collection_id,
+                            read_api_key,
+                        )
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "optimize_query".to_string(),
                         message: "Optimizing query".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "original_query": original_query,
+                            "optimized_query": optimized_query
+                        })),
                     })
                     .await;
-                    self.transition_to_optimize_query(
-                        interaction,
-                        llm_config,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
                 }
                 AnswerFlow::OptimizeQuery {
                     interaction,
@@ -534,22 +555,27 @@ impl AnswerStateMachine {
                     read_api_key,
                     optimized_query,
                 } => {
+                    let search_results = self
+                        .transition_to_execute_search(
+                            interaction,
+                            llm_config,
+                            system_prompt,
+                            collection_id,
+                            read_api_key,
+                            optimized_query,
+                            log_sender.clone(),
+                        )
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "execute_search".to_string(),
                         message: "Executing search".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "search_results_count": search_results.len(),
+                            "results": search_results.iter().take(3).collect::<Vec<_>>() // Include first 3 for preview
+                        })),
                     })
                     .await;
-                    self.transition_to_execute_search(
-                        interaction,
-                        llm_config,
-                        system_prompt,
-                        collection_id,
-                        read_api_key,
-                        optimized_query,
-                        log_sender.clone(),
-                    )
-                    .await?;
                 }
                 AnswerFlow::ExecuteSearch {
                     interaction,
@@ -561,22 +587,27 @@ impl AnswerStateMachine {
                     read_api_key,
                     log_sender,
                 } => {
+                    let (variables, processed_system_prompt) = self
+                        .transition_to_execute_before_answer_hook(
+                            interaction,
+                            llm_config,
+                            system_prompt,
+                            search_results,
+                            collection_id,
+                            read_api_key,
+                            log_sender,
+                        )
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "execute_before_answer_hook".to_string(),
                         message: "Executing before answer hook".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "variables_count": variables.len(),
+                            "system_prompt_updated": processed_system_prompt.is_some()
+                        })),
                     })
                     .await;
-                    self.transition_to_execute_before_answer_hook(
-                        interaction,
-                        llm_config,
-                        system_prompt,
-                        search_results,
-                        collection_id,
-                        read_api_key,
-                        log_sender,
-                    )
-                    .await?;
                 }
                 AnswerFlow::ExecuteBeforeAnswerHook {
                     interaction,
@@ -586,21 +617,33 @@ impl AnswerStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let answer = self
+                        .transition_to_generate_answer(
+                            interaction,
+                            llm_config,
+                            system_prompt,
+                            search_results,
+                            collection_id,
+                            read_api_key,
+                        )
+                        .await?;
+
+                    let bpe = tiktoken_rs::get_bpe_from_model("gpt-4o");
+
+                    let token_count = match bpe {
+                        Ok(bpe) => bpe.encode_with_special_tokens(&answer).len(),
+                        Err(_) => 0,
+                    };
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "generate_answer".to_string(),
                         message: "Generating answer".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "answer_preview": answer,
+                            "answer_token_count": token_count
+                        })),
                     })
                     .await;
-                    self.transition_to_generate_answer(
-                        interaction,
-                        llm_config,
-                        system_prompt,
-                        search_results,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
                 }
                 AnswerFlow::GenerateAnswer {
                     interaction,
@@ -611,20 +654,24 @@ impl AnswerStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
+                    let related_queries = self
+                        .transition_to_generate_related_queries(
+                            interaction,
+                            llm_config,
+                            search_results,
+                            collection_id,
+                            read_api_key,
+                        )
+                        .await?;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "generate_related_queries".to_string(),
                         message: "Generating related queries".to_string(),
-                        data: None,
+                        data: Some(serde_json::json!({
+                            "related_queries": related_queries
+                        })),
                     })
                     .await;
-                    self.transition_to_generate_related_queries(
-                        interaction,
-                        llm_config,
-                        search_results,
-                        collection_id,
-                        read_api_key,
-                    )
-                    .await?;
                 }
                 AnswerFlow::GenerateRelatedQueries {
                     interaction: _,
@@ -735,7 +782,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<InteractionLLMConfig, AnswerError> {
         let llm_config = self.get_llm_config(&interaction);
 
         // Send LLM config event
@@ -745,24 +792,22 @@ impl AnswerStateMachine {
         })
         .await;
 
-        // Send acknowledged event
         self.send_event(AnswerEvent::Acknowledged).await;
 
         let mut state = self.state.lock().await;
         *state = AnswerFlow::GetLLMConfig {
             interaction,
-            llm_config,
+            llm_config: llm_config.clone(),
             collection_id,
             read_api_key,
         };
-        Ok(())
+        Ok(llm_config)
     }
-
     async fn transition_to_determine_query_strategy(
         &self,
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<String, AnswerError> {
         let query_strategy = self
             .transition_with_retry("determine_query_strategy", || {
                 self.determine_query_strategy(interaction.query.clone(), llm_config.clone())
@@ -801,9 +846,16 @@ impl AnswerStateMachine {
             );
 
             // Run the advanced autoquery with streaming and capture events
+            let mut messages = interaction.messages.clone();
+            if messages.is_empty() {
+                messages.push(crate::types::InteractionMessage {
+                    role: crate::types::Role::User,
+                    content: interaction.query.clone(),
+                });
+            }
             let advanced_event_stream = advanced_state_machine
                 .run_stream(
-                    interaction.messages.clone(),
+                    messages,
                     self.collection_id.clone(),
                     self.read_api_key.clone(),
                 )
@@ -878,7 +930,7 @@ impl AnswerStateMachine {
                 read_api_key: self.read_api_key.clone(),
             };
         }
-        Ok(())
+        Ok(query_strategy)
     }
 
     async fn transition_to_handle_system_prompt(
@@ -908,7 +960,7 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<String, AnswerError> {
         let optimized_query = self
             .transition_with_retry("optimize_query", || {
                 self.optimize_query(interaction.query.clone(), llm_config.clone())
@@ -929,9 +981,10 @@ impl AnswerStateMachine {
             system_prompt: None,
             collection_id,
             read_api_key,
-            optimized_query,
+            optimized_query: optimized_query.clone(),
         };
-        Ok(())
+
+        Ok(optimized_query)
     }
 
     async fn transition_to_execute_search(
@@ -943,7 +996,7 @@ impl AnswerStateMachine {
         read_api_key: ApiKey,
         optimized_query: String,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<Vec<SearchResultHit>, AnswerError> {
         let search_results = self
             .transition_with_retry("execute_search", || {
                 self.execute_search(
@@ -956,7 +1009,6 @@ impl AnswerStateMachine {
             })
             .await?;
 
-        // Send search results event
         self.send_event(AnswerEvent::SearchResults {
             results: search_results.clone(),
         })
@@ -968,12 +1020,12 @@ impl AnswerStateMachine {
             llm_config,
             system_prompt,
             optimized_query,
-            search_results,
+            search_results: search_results.clone(),
             collection_id,
             read_api_key,
             log_sender,
         };
-        Ok(())
+        Ok(search_results)
     }
 
     async fn transition_to_execute_before_answer_hook(
@@ -985,7 +1037,7 @@ impl AnswerStateMachine {
         collection_id: CollectionId,
         read_api_key: ApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<(Vec<(String, String)>, Option<SystemPrompt>), AnswerError> {
         let (variables, processed_system_prompt) = self
             .transition_with_retry("execute_before_answer_hook", || {
                 self.execute_before_answer_hook(
@@ -1002,12 +1054,12 @@ impl AnswerStateMachine {
         *state = AnswerFlow::ExecuteBeforeAnswerHook {
             interaction,
             llm_config,
-            system_prompt: processed_system_prompt,
+            system_prompt: processed_system_prompt.clone(),
             search_results,
             collection_id,
             read_api_key,
         };
-        Ok(())
+        Ok((variables, processed_system_prompt))
     }
 
     async fn transition_to_generate_answer(
@@ -1018,7 +1070,7 @@ impl AnswerStateMachine {
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<String, AnswerError> {
         let answer = self
             .transition_with_retry("generate_answer", || {
                 self.generate_answer(
@@ -1042,7 +1094,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
-        Ok(())
+        Ok(answer)
     }
 
     async fn transition_to_generate_related_queries(
@@ -1052,7 +1104,7 @@ impl AnswerStateMachine {
         search_results: Vec<SearchResultHit>,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-    ) -> Result<(), AnswerError> {
+    ) -> Result<Option<String>, AnswerError> {
         let related_queries = self
             .transition_with_retry("generate_related_queries", || {
                 self.generate_related_queries(
@@ -1074,7 +1126,7 @@ impl AnswerStateMachine {
             collection_id,
             read_api_key,
         };
-        Ok(())
+        Ok(related_queries)
     }
 
     /// Transition with retry logic
