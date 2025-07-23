@@ -486,12 +486,11 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
-                    let queries_preview = conversation_json.chars().take(100).collect::<String>();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "query_optimized".to_string(),
                         message: "Optimizing queries".to_string(),
                         data: Some(serde_json::json!({
-                            "conversation_json_preview": queries_preview,
+                            "conversation": conversation_json,
                             "conversation_json_length": conversation_json.len()
                         })),
                     })
@@ -545,21 +544,13 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
-                    let properties_preview: Vec<_> = selected_properties.iter().map(|map| {
-                        map.iter().map(|(k, v)| {
-                            serde_json::json!({
-                                "collection": k,
-                                "properties": v.selected_properties.iter().map(|p| &p.property).collect::<Vec<_>>()
-                            })
-                        }).collect::<Vec<_>>()
-                    }).collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "combine_queries".to_string(),
                         message: "Combining queries and properties".to_string(),
                         data: Some(serde_json::json!({
                             "queries_count": queries.len(),
                             "selected_properties_count": selected_properties.len(),
-                            "selected_properties_preview": properties_preview
+                            "selected_properties": selected_properties
                         })),
                     })
                     .await;
@@ -599,21 +590,11 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
-                    let combined_preview: Vec<_> = queries_and_properties
-                        .iter()
-                        .map(|qap| {
-                            serde_json::json!({
-                                "query": qap.query,
-                                "property_keys": qap.properties.keys().collect::<Vec<_>>()
-                            })
-                        })
-                        .collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "generate_tracked_queries".to_string(),
                         message: "Generating tracked queries".to_string(),
                         data: Some(serde_json::json!({
-                            "combined_count": queries_and_properties.len(),
-                            "combined_preview": combined_preview
+                            "queries_and_properties": queries_and_properties
                         })),
                     })
                     .await;
@@ -649,23 +630,11 @@ impl AdvancedAutoqueryStateMachine {
                     collection_id,
                     read_api_key,
                 } => {
-                    // Preview: for each, show original_query and generated_query_text (first 3)
-                    let tracked_preview: Vec<_> = tracked_queries
-                        .iter()
-                        .take(3)
-                        .map(|tq| {
-                            serde_json::json!({
-                                "original_query": tq.original_query,
-                                "generated_query_text": tq.generated_query_text
-                            })
-                        })
-                        .collect();
                     self.send_event(AdvancedAutoqueryEvent::StateChanged {
                         state: "execute_before_retrieval_hook".to_string(),
                         message: "Executing before retrieval hook".to_string(),
                         data: Some(serde_json::json!({
-                            "tracked_queries_count": tracked_queries.len(),
-                            "tracked_queries_preview": tracked_preview
+                            "tracked_queries": tracked_queries
                         })),
                     })
                     .await;
@@ -748,7 +717,7 @@ impl AdvancedAutoqueryStateMachine {
                         message: "Advanced autoquery completed".to_string(),
                         data: Some(serde_json::json!({
                             "results_count": results.len(),
-                            "results_preview": results.iter().take(3).collect::<Vec<_>>()
+                            "results": results
                         })),
                     })
                     .await;
@@ -1000,7 +969,7 @@ impl AdvancedAutoqueryStateMachine {
             data: Some(serde_json::json!({
                 "queries_count": queries.len(),
                 "properties_count": selected_properties.len(),
-                "combined_queries_preview": queries_and_properties
+                "queries_and_properties": queries_and_properties
             })),
         })
         .await;
@@ -1031,7 +1000,7 @@ impl AdvancedAutoqueryStateMachine {
             data: Some(serde_json::json!({
                 "queries_count": queries.len(),
                 "properties_count": properties.len(),
-                "combined_queries_preview": queries_and_properties.iter().take(3).collect::<Vec<_>>()
+                "queries_and_properties": queries_and_properties
             })),
         })
         .await;
@@ -1077,7 +1046,7 @@ impl AdvancedAutoqueryStateMachine {
             message: "Tracked queries generated".to_string(),
             data: Some(serde_json::json!({
                 "queries_count": tracked_queries.len(),
-                "tracked_queries_preview": tracked_queries.iter().take(3).collect::<Vec<_>>()
+                "tracked_queries": tracked_queries
             })),
         })
         .await;
@@ -1127,7 +1096,7 @@ impl AdvancedAutoqueryStateMachine {
             message: "Hooks executed".to_string(),
             data: Some(serde_json::json!({
                 "processed_queries_count": processed_queries.len(),
-                "processed_queries_preview": processed_queries.iter().take(3).collect::<Vec<_>>()
+                "processed_queries": processed_queries
             })),
         })
         .await;
@@ -1177,7 +1146,7 @@ impl AdvancedAutoqueryStateMachine {
             message: "Search results obtained".to_string(),
             data: Some(serde_json::json!({
                 "processed_queries_count": processed_queries.len(),
-                "search_results_preview": results.iter().take(3).collect::<Vec<_>>()
+                "search_results": results
             })),
         })
         .await;
