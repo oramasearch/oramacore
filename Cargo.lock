@@ -4286,7 +4286,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-version = "1.1.52"
+version = "1.1.65"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -4374,6 +4374,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-build",
  "tower 0.5.2",

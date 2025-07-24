@@ -18,17 +18,21 @@ use tracing::{debug, error, info, trace};
 use uncommitted_field::*;
 
 use crate::{
-    ai::{llms, AIService, OramaModel},
+    ai::{llms, OramaModel},
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
         sides::{
-            read::index::{
-                committed_field::{
-                    CommittedDateField, CommittedGeoPointField, DateFieldInfo, GeoPointFieldInfo,
+            read::{
+                context::ReadSideContext,
+                index::{
+                    committed_field::{
+                        CommittedDateField, CommittedGeoPointField, DateFieldInfo,
+                        GeoPointFieldInfo,
+                    },
+                    merge::{merge_date_field, merge_geopoint_field},
+                    sort::SortIterator,
                 },
-                merge::{merge_date_field, merge_geopoint_field},
-                sort::SortIterator,
             },
             Offset,
         },
@@ -44,7 +48,7 @@ use crate::{
     },
 };
 use fs::{create_if_not_exists, BufferedFile};
-use nlp::{locales::Locale, NLPService, TextParser};
+use nlp::{locales::Locale, TextParser};
 
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
 mod committed_field;
@@ -125,8 +129,7 @@ pub struct Index {
     deleted: Option<DeletionReason>,
     pub promoted_to_runtime_index: AtomicBool,
 
-    llm_service: Arc<llms::LLMService>,
-    ai_service: Arc<AIService>,
+    context: ReadSideContext,
 
     document_count: u64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
@@ -143,12 +146,7 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn new(
-        id: IndexId,
-        text_parser: Arc<TextParser>,
-        llm_service: Arc<llms::LLMService>,
-        ai_service: Arc<AIService>,
-    ) -> Self {
+    pub fn new(id: IndexId, text_parser: Arc<TextParser>, context: ReadSideContext) -> Self {
         Self {
             id,
             locale: text_parser.locale(),
@@ -157,8 +155,7 @@ impl Index {
             deleted: None,
             promoted_to_runtime_index: AtomicBool::new(false),
 
-            llm_service,
-            ai_service,
+            context,
 
             document_count: 0,
             uncommitted_deleted_documents: HashSet::new(),
@@ -177,9 +174,7 @@ impl Index {
     pub fn try_load(
         index_id: IndexId,
         data_dir: PathBuf,
-        nlp_service: Arc<NLPService>,
-        llm_service: Arc<llms::LLMService>,
-        ai_service: Arc<AIService>,
+        context: ReadSideContext,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
             .context("Cannot open index.json")?
@@ -276,13 +271,12 @@ impl Index {
         Ok(Self {
             id: dump.id,
             locale: dump.locale,
-            text_parser: nlp_service.get(dump.locale),
+            text_parser: context.nlp_service.get(dump.locale),
             deleted: None,
             promoted_to_runtime_index: AtomicBool::new(false),
             aliases: dump.aliases,
 
-            llm_service,
-            ai_service,
+            context,
 
             document_count: dump.document_count,
             uncommitted_deleted_documents: HashSet::new(),
@@ -1111,6 +1105,7 @@ impl Index {
         let search_mode: SearchMode = match &search_params.mode {
             SearchMode::Auto(mode_result) => {
                 let final_mode: String = self
+                    .context
                     .llm_service
                     .run_known_prompt(
                         llms::KnownPrompts::Autoquery,
@@ -1358,19 +1353,14 @@ impl Index {
                     })
                 }),
         );
-        fields_stats.extend(
-            committed_fields
-                .string_filter_fields
-                .iter()
-                .filter_map(|(k, v)| {
-                    let path = v.field_path().join(".");
-                    Some(IndexFieldStats {
-                        field_id: *k,
-                        field_path: path,
-                        stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
-                    })
-                }),
-        );
+        fields_stats.extend(committed_fields.string_filter_fields.iter().map(|(k, v)| {
+            let path = v.field_path().join(".");
+            IndexFieldStats {
+                field_id: *k,
+                field_path: path,
+                stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
+            }
+        }));
         fields_stats.extend(committed_fields.string_fields.iter().filter_map(|(k, v)| {
             let path = v.field_path().join(".");
             Some(IndexFieldStats {
@@ -2050,6 +2040,7 @@ impl Index {
             // We should put a sort of cache here.
             // TODO: think about this.
             let targets = self
+                .context
                 .ai_service
                 .embed_query(model, vec![&term.to_string()])
                 .await?;

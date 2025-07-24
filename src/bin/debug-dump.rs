@@ -7,7 +7,7 @@ use oramacore::{
     ai::{gpu::LocalGPUManager, llms::LLMService, AIService},
     collection_manager::sides::read::{
         document_storage::{DocumentStorage, DocumentStorageConfig},
-        Index,
+        Index, ReadSideContext,
     },
     types::{DocumentId, IndexId},
     OramacoreConfig,
@@ -96,8 +96,13 @@ async fn main() -> anyhow::Result<()> {
 
             let nlp_service = Arc::new(NLPService::new());
 
-            let index = Index::try_load(index_id, path, nlp_service, llm_service, ai_service)
-                .context("Failed to load index")?;
+            let context = ReadSideContext {
+                ai_service,
+                nlp_service: nlp_service.clone(),
+                llm_service: llm_service.clone(),
+                notifier: None,
+            };
+            let index = Index::try_load(index_id, path, context).context("Failed to load index")?;
 
             match command {
                 OpenReadIndex::ListDocument => {

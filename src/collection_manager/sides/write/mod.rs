@@ -5,7 +5,9 @@ mod embedding;
 pub mod index;
 use hook_storage::{HookWriter, HookWriterError};
 pub use index::OramaModelSerializable;
+use nlp::NLPService;
 use thiserror::Error;
+mod context;
 pub mod jwt_manager;
 
 use std::{
@@ -21,9 +23,7 @@ use std::{
 
 use super::{
     generic_kv::{KVConfig, KV},
-    segments::{CollectionSegmentInterface, SegmentInterface},
     system_prompts::SystemPromptInterface,
-    triggers::TriggerInterface,
     Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
@@ -43,6 +43,8 @@ pub use collections::CollectionReadLock;
 use collections::CollectionsWriter;
 use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest};
 
+pub use context::WriteSideContext;
+
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -52,7 +54,6 @@ use crate::{
     },
     collection_manager::sides::{
         system_prompts::CollectionSystemPromptsInterface,
-        triggers::WriteCollectionTriggerInterface,
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
@@ -65,7 +66,6 @@ use crate::{
     },
 };
 use fs::BufferedFile;
-use nlp::NLPService;
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -124,13 +124,12 @@ pub struct WriteSide {
     insert_batch_commit_size: u64,
 
     document_storage: DocumentStorage,
-    segments: SegmentInterface,
-    triggers: TriggerInterface,
     system_prompts: SystemPromptInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
-    llm_service: Arc<LLMService>,
     master_api_key: ApiKey,
+
+    context: WriteSideContext,
 
     stop_sender: tokio::sync::broadcast::Sender<()>,
     stop_done_receiver: RwLock<tokio::sync::mpsc::Receiver<()>>,
@@ -193,26 +192,28 @@ impl WriteSide {
                 .context("Cannot create sender")?
         };
 
+        let context = WriteSideContext {
+            ai_service,
+            embedding_sender: sx,
+            op_sender: op_sender.clone(),
+            nlp_service,
+            automatic_embeddings_selector,
+            llm_service,
+        };
+
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
             sender: Some(op_sender.clone()),
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
-        let segments = SegmentInterface::new(kv.clone(), llm_service.clone());
-        let triggers = TriggerInterface::new(kv.clone(), llm_service.clone());
-        let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
-        let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
+        let system_prompts = SystemPromptInterface::new(kv.clone(), context.llm_service.clone());
+        let tools = ToolsRuntime::new(kv.clone(), context.llm_service.clone());
 
-        let collections_writer = CollectionsWriter::try_load(
-            collections_writer_config,
-            sx,
-            nlp_service.clone(),
-            op_sender.clone(),
-            automatic_embeddings_selector.clone(),
-        )
-        .await
-        .context("Cannot load collections")?;
+        let collections_writer =
+            CollectionsWriter::try_load(collections_writer_config, context.clone())
+                .await
+                .context("Cannot load collections")?;
 
         let document_storage = DocumentStorage::try_new(data_dir.join("documents"))
             .await
@@ -236,12 +237,10 @@ impl WriteSide {
             master_api_key,
             operation_counter: Default::default(),
             op_sender: op_sender.clone(),
-            segments,
-            triggers,
             system_prompts,
             tools,
             kv,
-            llm_service,
+            context: context.clone(),
             stop_sender,
             stop_done_receiver: RwLock::new(stop_done_receiver),
             write_operation_counter: AtomicU32::new(0),
@@ -257,7 +256,7 @@ impl WriteSide {
             stop_done_sender.clone(),
         );
         start_calculate_embedding_loop(
-            ai_service,
+            context.ai_service.clone(),
             rx,
             op_sender,
             embedding_queue_limit,
@@ -1011,8 +1010,8 @@ impl WriteSide {
         Ok(doc_ids)
     }
 
-    async fn inner_process_documents<'s>(
-        &'s self,
+    async fn inner_process_documents(
+        &self,
         collection_id: CollectionId,
         index_id: IndexId,
         document_list: DocumentList,
@@ -1152,7 +1151,7 @@ impl WriteSide {
     }
 
     pub fn llm_service(&self) -> &LLMService {
-        &self.llm_service
+        &self.context.llm_service
     }
 
     pub async fn get_system_prompts_manager(
@@ -1189,33 +1188,6 @@ impl WriteSide {
         Ok(CollectionToolsRuntime::new(
             self.tools.clone(),
             collection_id,
-        ))
-    }
-
-    pub async fn get_segments_manager(
-        &self,
-        write_api_key: WriteApiKey,
-        collection_id: CollectionId,
-    ) -> Result<CollectionSegmentInterface, WriteError> {
-        self.check_write_api_key(collection_id, write_api_key)
-            .await?;
-        Ok(CollectionSegmentInterface::new(
-            self.segments.clone(),
-            collection_id,
-        ))
-    }
-
-    pub async fn get_triggers_manager(
-        &self,
-        write_api_key: WriteApiKey,
-        collection_id: CollectionId,
-    ) -> Result<WriteCollectionTriggerInterface, WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
-        Ok(WriteCollectionTriggerInterface::new(
-            self.triggers.clone(),
-            collection,
         ))
     }
 

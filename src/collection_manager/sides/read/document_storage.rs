@@ -65,7 +65,7 @@ impl CommittedDiskDocumentStorage {
             .into_iter()
             .map(|(_, d)| match d {
                 None => None,
-                Some(d) => d.into_raw_json_doc().ok(),
+                Some(d) => d.as_raw_json_doc().ok(),
             })
             .collect();
 
@@ -331,7 +331,7 @@ impl ZeboDocument<'_> {
         Ok(ZeboDocument::Split(Cow::Owned(id), Cow::Owned(data)))
     }
 
-    fn into_raw_json_doc(&self) -> Result<Arc<RawJSONDocument>> {
+    fn as_raw_json_doc(&self) -> Result<Arc<RawJSONDocument>> {
         match self {
             Self::Split(id, json) => {
                 let inner = serde_json::value::RawValue::from_string(json.to_string())?;

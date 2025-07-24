@@ -17,8 +17,6 @@ use crate::{
     ai::{answer::AnswerError, tools::ToolError},
     collection_manager::sides::{
         read::ReadError,
-        segments::SegmentError,
-        triggers::TriggerError,
         write::{
             jwt_manager::{JwtError, JwtManager},
             WriteError,
@@ -291,67 +289,6 @@ impl IntoResponse for WriteError {
     }
 }
 
-impl IntoResponse for SegmentError {
-    fn into_response(self) -> Response {
-        match self {
-            SegmentError::Generic(e) => {
-                print_error(&e, "Unhandled error in segment side");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {e:?}"),
-                )
-                    .into_response()
-            }
-            SegmentError::WriteError(e) => e.into_response(),
-            SegmentError::RepairError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Cannot repair JSON: {e:?}"),
-            )
-                .into_response(),
-            SegmentError::DeserializationError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid JSON format: {e:?}"),
-            )
-                .into_response(),
-        }
-    }
-}
-
-impl IntoResponse for TriggerError {
-    fn into_response(self) -> Response {
-        match self {
-            TriggerError::Generic(e) => {
-                print_error(&e, "Unhandled error in trigger side");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Cannot process the request: {e:?}"),
-                )
-                    .into_response()
-            }
-            TriggerError::WriteError(e) => e.into_response(),
-            TriggerError::ReadError(e) => e.into_response(),
-            TriggerError::NotFound(collection_id, trigger_id) => (
-                StatusCode::BAD_REQUEST,
-                format!("Trigger {trigger_id} not found in collection {collection_id}"),
-            )
-                .into_response(),
-            TriggerError::InvalidTriggerId(id) => {
-                (StatusCode::BAD_REQUEST, format!("Invalid trigger id: {id}")).into_response()
-            }
-            TriggerError::RepairError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Cannot repair JSON: {e:?}"),
-            )
-                .into_response(),
-            TriggerError::DeserializationError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid JSON format: {e:?}"),
-            )
-                .into_response(),
-        }
-    }
-}
-
 impl IntoResponse for ToolError {
     fn into_response(self) -> Response {
         match self {
@@ -448,7 +385,6 @@ impl IntoResponse for AnswerError {
                     .into_response()
             }
             AnswerError::ReadError(e) => e.into_response(),
-            AnswerError::SegmentError(e) => e.into_response(),
             AnswerError::ChannelClosed(e) => {
                 print_error(&anyhow::anyhow!(e), "Channel closed in answer side");
                 (

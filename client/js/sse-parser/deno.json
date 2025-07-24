@@ -1,0 +1,23 @@
+{
+  "name": "@orama/oramacore-events-parser",
+  "version": "0.0.5",
+  "exports": "./main.ts",
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "build": "deno run -A ./dnt.ts",
+    "test": "deno test"
+  },
+  "fmt": {
+    "options": {
+      "singleQuote": true,
+      "lineWidth": 160,
+      "indentWidth": 2
+    }
+  },
+  "compilerOptions": {
+    "lib": [
+      "deno.window",
+      "dom"
+    ]
+  }
+}

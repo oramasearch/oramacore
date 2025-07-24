@@ -29,8 +29,10 @@ use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{CollectionStats, IndexesConfig, ReadSide, ReadSideConfig},
-        triggers::Trigger,
+        read::{
+            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, ReadSide,
+            ReadSideConfig,
+        },
         write::{
             CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
         },
@@ -130,6 +132,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 commit_interval: Duration::from_secs(3_000),
                 notifier: None,
             },
+            analytics: None,
         },
     }
 }
@@ -272,8 +275,7 @@ pub async fn create_ai_server_mock(
                         .as_secs();
                     let model = "gpt-3.5-turbo-0301";
                     let id = "chatcmpl-mock";
-                    let mut idx = 0;
-                    for s in first {
+                    for (idx, s) in first.into_iter().enumerate() {
                         let chunk = json!({
                             "id": id,
                             "object": "chat.completion.chunk",
@@ -289,7 +291,6 @@ pub async fn create_ai_server_mock(
                         });
                         let ev = Event::default().json_data(chunk).unwrap();
                         http_sender.send(Ok(ev)).await.unwrap();
-                        idx += 1;
                     }
                     let ev = Event::default().data("[DONE]");
                     http_sender.send(Ok(ev)).await.unwrap();
@@ -617,54 +618,6 @@ impl TestCollectionClient {
         Ok(())
     }
 
-    pub async fn insert_trigger(
-        &self,
-        trigger: Trigger,
-        trigger_id: Option<String>,
-    ) -> Result<Trigger> {
-        let trigger_interface = self
-            .writer
-            .get_triggers_manager(self.write_api_key, self.collection_id)
-            .await?;
-
-        let trigger = trigger_interface
-            .insert_trigger(trigger, trigger_id.clone())
-            .await?;
-
-        wait_for(self, |coll| {
-            let reader = coll.reader.clone();
-            let read_api_key = coll.read_api_key;
-            let collection_id = coll.collection_id;
-            let trigger_id = trigger_id.clone();
-            async move {
-                let trigger_interface = reader
-                    .get_triggers_manager(read_api_key, collection_id)
-                    .await?;
-
-                let trigger = trigger_interface.get_trigger(trigger_id.unwrap()).await?;
-
-                if trigger.is_none() {
-                    bail!("Trigger not found");
-                }
-
-                Ok(())
-            }
-            .boxed()
-        })
-        .await?;
-
-        Ok(trigger)
-    }
-
-    pub async fn get_trigger(&self, trigger_id: String) -> Result<Option<Trigger>> {
-        let trigger_interface = self
-            .reader
-            .get_triggers_manager(self.read_api_key, self.collection_id)
-            .await?;
-
-        trigger_interface.get_trigger(trigger_id).await.context("")
-    }
-
     pub async fn replace_index(
         &self,
         runtime_index_id: IndexId,
@@ -757,7 +710,12 @@ impl TestCollectionClient {
 
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
-            .search(self.read_api_key, self.collection_id, search_params)
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                search_params,
+                AnalyticSearchEventInvocationType::Direct,
+            )
             .await
             .context("")
     }
