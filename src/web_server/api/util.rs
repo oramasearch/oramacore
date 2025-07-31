@@ -14,7 +14,10 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    ai::{answer::{AnswerError, SuggestionsError}, tools::ToolError},
+    ai::{
+        answer::{AnswerError, SuggestionsError},
+        tools::ToolError,
+    },
     collection_manager::sides::{
         read::ReadError,
         write::{
@@ -417,7 +420,7 @@ impl IntoResponse for SuggestionsError {
                     format!("Cannot process the request: {e:?}"),
                 )
                     .into_response()
-            },
+            }
             SuggestionsError::RepairError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error repairing suggestions: {e:?}"),

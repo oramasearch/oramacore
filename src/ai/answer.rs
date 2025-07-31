@@ -50,7 +50,7 @@ pub enum AnswerError {
     #[error("Hook read error: {0:?}")]
     HookError(#[from] HookReaderError),
     #[error("JS run error: {0:?}")]
-    JSError(#[from] JSRunnerError)
+    JSError(#[from] JSRunnerError),
 }
 
 pub struct Answer {
