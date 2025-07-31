@@ -212,7 +212,9 @@ impl Answer {
         let search_result_str = match serde_json::to_string(&search_results) {
             Ok(s) => s,
             Err(_) => {
-                return Err(AnswerError::Generic(anyhow::anyhow!("Error converting search results to string")));
+                return Err(AnswerError::Generic(anyhow::anyhow!(
+                    "Error converting search results to string"
+                )));
             }
         };
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
@@ -342,12 +344,15 @@ impl Answer {
 
         let search_results = match self
             .get_search_results(interaction.clone(), log_sender)
-            .await {
-                Ok(results) => results,
-                Err(_) => {
-                    return Err(SuggestionsError::Generic(anyhow::anyhow!("Error getting search results")));
-                }
-            };
+            .await
+        {
+            Ok(results) => results,
+            Err(_) => {
+                return Err(SuggestionsError::Generic(anyhow::anyhow!(
+                    "Error getting search results"
+                )));
+            }
+        };
         let search_result_str = serde_json::to_string(&search_results)?;
 
         let suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
@@ -522,12 +527,15 @@ impl Answer {
                 params,
                 AnalyticSearchEventInvocationType::Answer,
             )
-            .await {
-                Ok(result) => result,
-                Err(_) => {
-                    return Err(AnswerError::Generic(anyhow::anyhow!("Error getting search results")));
-                }
-            };
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(AnswerError::Generic(anyhow::anyhow!(
+                    "Error getting search results"
+                )));
+            }
+        };
 
         return Ok(result.hits);
     }
