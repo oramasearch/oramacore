@@ -209,7 +209,12 @@ impl Answer {
             result.hits
         };
 
-        let search_result_str = serde_json::to_string(&search_results).unwrap();
+        let search_result_str = match serde_json::to_string(&search_results) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(AnswerError::Generic(anyhow::anyhow!("Error converting search results to string")));
+            }
+        };
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
         let variables = vec![
