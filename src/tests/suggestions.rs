@@ -29,7 +29,7 @@ async fn test_answer() {
 
     let output = create_ai_server_mock(completition_mock, completition_req.clone())
         .await
-        .unwrap();
+        .expect("Failed to create AI server mock");
     let mut config = create_oramacore_config();
     config.ai_server.llm.port = output.port();
 
