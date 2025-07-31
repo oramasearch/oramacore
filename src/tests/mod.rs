@@ -20,9 +20,9 @@ mod replace_doc_on_insert;
 mod replace_index;
 mod shutdown;
 mod sort;
+mod suggestions;
 mod temp_index;
 mod update_docs;
 mod vector_search;
-mod suggestions;
 
 pub mod utils;

@@ -1490,11 +1490,11 @@ pub enum SuggestionsFormat {
     #[serde(rename = "conversation")]
     Conversation,
     #[serde(rename = "query")]
-    Query,    
+    Query,
     #[serde(rename = "context")]
     Context,
     #[serde(rename = "maxSuggestions")]
-    MaxSuggestions
+    MaxSuggestions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1581,7 +1581,6 @@ pub struct Interaction {
     pub llm_config: Option<InteractionLLMConfig>,
     pub min_similarity: Option<f32>,
     pub max_documents: Option<usize>,
-    pub max_suggestions: Option<usize>,
     pub ragat_notation: Option<String>,
     pub search_mode: Option<String>,
 }

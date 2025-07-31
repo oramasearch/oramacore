@@ -1,6 +1,6 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
-use llm_json::{repair_json};
+use llm_json::repair_json;
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{
     collections::HashMap,
@@ -23,9 +23,9 @@ use crate::{
         system_prompts::SystemPrompt,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
-        SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
-        SuggestionsRequest, InteractionMessage
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
+        Limit, Properties, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
+        SuggestionsRequest, VectorMode,
     },
 };
 
@@ -294,10 +294,7 @@ impl Answer {
         Ok(())
     }
 
-    pub fn get_empty_interaction(
-        &self,
-        suggestions_request: &SuggestionsRequest,
-    ) -> Interaction {
+    pub fn get_empty_interaction(&self, suggestions_request: &SuggestionsRequest) -> Interaction {
         return Interaction {
             conversation_id: "".to_string(),
             interaction_id: "".to_string(),
@@ -311,17 +308,15 @@ impl Answer {
             llm_config: suggestions_request.llm_config.clone(),
             query: suggestions_request.query.clone(),
             ragat_notation: None,
-            max_suggestions: suggestions_request.max_suggestions.clone(),
         };
     }
-    
+
     // @todo: move suggestion to its own implementation
     pub async fn suggestions(
         self,
         suggestions_request: SuggestionsRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> anyhow::Result<serde_json::Value> {
-
         // Stub interaction to avoid code duplication. Need refactor.
         let interaction = self.get_empty_interaction(&suggestions_request);
         let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
@@ -330,20 +325,31 @@ impl Answer {
         let optimized_query: String = self.get_optimized_query(&interaction, &llm_config).await;
         info!("Optimized query: {}", optimized_query);
 
-        let search_results = self.get_search_results(interaction.clone(), log_sender).await;
+        let search_results = self
+            .get_search_results(interaction.clone(), log_sender)
+            .await;
         let search_result_str = serde_json::to_string(&search_results).unwrap();
 
         let suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
-        let parsed_value = match self.get_suggestions(suggestion_params, search_result_str, &llm_service, llm_config, interaction.messages).await {
+        let parsed_value = match self
+            .get_suggestions(
+                suggestion_params,
+                search_result_str,
+                &llm_service,
+                llm_config,
+                interaction.messages,
+            )
+            .await
+        {
             Ok(parsed) => parsed,
             Err(e) => {
                 anyhow::bail!("Failed to get suggestions: {:?}", e);
             }
         };
-        
+
         Ok(parsed_value)
     }
-    
+
     pub async fn get_suggestions(
         self,
         mut suggestion_params: Vec<(String, String)>,
@@ -364,15 +370,11 @@ impl Answer {
             _ => llms::KnownPrompts::Followup,
         };
         println!("Prompt: {:?}", prompt);
-       
+
         let suggestions = llm_service
-            .run_known_prompt(
-                prompt,
-                suggestion_params,
-                Some(llm_config),
-            )
+            .run_known_prompt(prompt, suggestion_params, Some(llm_config))
             .await?;
-        
+
         let repaired = match repair_json(&suggestions, &Default::default()) {
             Ok(json) => json,
             Err(e) => {
@@ -390,8 +392,11 @@ impl Answer {
         return Ok(parsed_value);
     }
 
-
-    async fn get_optimized_query(&self, interaction: &Interaction, llm_config: &InteractionLLMConfig) -> String {
+    async fn get_optimized_query(
+        &self,
+        interaction: &Interaction,
+        llm_config: &InteractionLLMConfig,
+    ) -> String {
         let llm_service = self.read_side.get_llm_service();
 
         let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
@@ -406,34 +411,44 @@ impl Answer {
         optimized_query
     }
 
-    async fn get_composed_results(&self, interaction: &Interaction, notation: &String) -> Vec<SearchResultHit> {
+    async fn get_composed_results(
+        &self,
+        interaction: &Interaction,
+        notation: &String,
+    ) -> Vec<SearchResultHit> {
         let parsed = RAGAtParser::parse(notation);
 
         let components = match self
             .execute_rag_at_specification(&parsed.components, interaction.clone())
             .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
-            .await {
-                Ok(components) => components,
-                Err(e) => {
-                    warn!("Failed to execute RAGAT specification: {:?}", e);
-                    return vec![];
-                }
-            };
+            .await
+        {
+            Ok(components) => components,
+            Err(e) => {
+                warn!("Failed to execute RAGAT specification: {:?}", e);
+                return vec![];
+            }
+        };
 
         let results = match self
             .merge_component_results(components)
             .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
-            .await {
-                Ok(results) => results,
-                Err(e) => {
-                    warn!("Failed to merge component results: {:?}", e);
-                    return vec![];
-                }
-            };
+            .await
+        {
+            Ok(results) => results,
+            Err(e) => {
+                warn!("Failed to merge component results: {:?}", e);
+                return vec![];
+            }
+        };
         results
     }
 
-    async fn get_search_results(&self, interaction: Interaction, log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>) -> Vec<SearchResultHit> {
+    async fn get_search_results(
+        &self,
+        interaction: Interaction,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> Vec<SearchResultHit> {
         let max_documents = Limit(interaction.max_documents.unwrap_or(5));
         let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
 
@@ -465,7 +480,8 @@ impl Answer {
         let hook_storage = self
             .read_side
             .get_hook_storage(self.read_api_key, self.collection_id)
-            .await.unwrap();
+            .await
+            .unwrap();
         let lock = hook_storage.read().await;
         let params = run_before_retrieval(
             &lock,
@@ -476,7 +492,8 @@ impl Answer {
                 timeout: Duration::from_millis(500),
             },
         )
-        .await.unwrap();
+        .await
+        .unwrap();
         drop(lock);
 
         let result = self
@@ -485,9 +502,10 @@ impl Answer {
                 self.read_api_key,
                 self.collection_id,
                 params,
-                AnalyticSearchEventInvocationType::Answer
+                AnalyticSearchEventInvocationType::Answer,
             )
-            .await.unwrap();
+            .await
+            .unwrap();
         result.hits
     }
 

@@ -1,9 +1,10 @@
 use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{CollectionId, SuggestionsRequest};
 use crate::types::{ApiKey, Interaction};
+use crate::types::{CollectionId, SuggestionsRequest};
 use anyhow::Context;
 use axum::extract::Query;
+use axum::http::StatusCode;
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, post};
@@ -17,7 +18,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error};
-use axum::http::StatusCode;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
@@ -131,19 +131,18 @@ async fn answer_suggestions_v1(
     Query(query): Query<AnswerQueryParams>,
     Json(request): Json<SuggestionsRequest>,
 ) -> impl IntoResponse {
-    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key)
-        .await {
-            Ok(answer) => answer,
-            Err(e) => {
-                error!(error = ?e, "Failed to create Answer instance");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to initialize answer service"
-                    }))
-                );
-            }
-        };
+    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key).await {
+        Ok(answer) => answer,
+        Err(e) => {
+            error!(error = ?e, "Failed to create Answer instance");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to initialize answer service"
+                })),
+            );
+        }
+    };
 
     let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
@@ -156,14 +155,17 @@ async fn answer_suggestions_v1(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to generate suggestions"
-                }))
+                })),
             );
         }
     };
 
-    (StatusCode::OK, Json(json!({
-        "suggestions": response
-    })))
+    (
+        StatusCode::OK,
+        Json(json!({
+            "suggestions": response
+        })),
+    )
 }
 
 async fn answer_logs_v1(

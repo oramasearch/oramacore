@@ -502,13 +502,16 @@ impl LLMService {
 
     pub fn get_suggestions_params(
         &self,
-        suggestion_request: SuggestionsRequest
+        suggestion_request: SuggestionsRequest,
     ) -> Vec<(String, String)> {
         return vec![
             ("conversation".to_string(), "".to_string()),
             ("context".to_string(), "".to_string()),
             ("query".to_string(), suggestion_request.query),
-            ("maxSuggestions".to_string(), suggestion_request.max_suggestions.unwrap_or(3).to_string()),
+            (
+                "maxSuggestions".to_string(),
+                suggestion_request.max_suggestions.unwrap_or(3).to_string(),
+            ),
         ];
     }
 
