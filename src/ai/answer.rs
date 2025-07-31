@@ -335,10 +335,15 @@ impl Answer {
         let optimized_query: String = self.get_optimized_query(&interaction, &llm_config).await;
         info!("Optimized query: {}", optimized_query);
 
-        let search_results = self
+        let search_results = match self
             .get_search_results(interaction.clone(), log_sender)
-            .await;
-        let search_result_str = serde_json::to_string(&search_results).unwrap();
+            .await {
+                Ok(results) => results,
+                Err(_) => {
+                    return Err(SuggestionsError::Generic(anyhow::anyhow!("Error getting search results")));
+                }
+            };
+        let search_result_str = serde_json::to_string(&search_results)?;
 
         let suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
         let parsed_value = match self
@@ -371,7 +376,7 @@ impl Answer {
         suggestion_params.push(("context".to_string(), search_result_str));
 
         if !messages.is_empty() {
-            let conversation_value = serde_json::to_string(&messages).unwrap();
+            let conversation_value = serde_json::to_string(&messages)?;
             suggestion_params.push(("conversation".to_string(), conversation_value));
         }
 
@@ -458,7 +463,7 @@ impl Answer {
         &self,
         interaction: Interaction,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> Vec<SearchResultHit> {
+    ) -> Result<Vec<SearchResultHit>, AnswerError> {
         let max_documents = Limit(interaction.max_documents.unwrap_or(5));
         let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
 
@@ -490,8 +495,7 @@ impl Answer {
         let hook_storage = self
             .read_side
             .get_hook_storage(self.read_api_key, self.collection_id)
-            .await
-            .unwrap();
+            .await?;
         let lock = hook_storage.read().await;
         let params = run_before_retrieval(
             &lock,
@@ -502,11 +506,10 @@ impl Answer {
                 timeout: Duration::from_millis(500),
             },
         )
-        .await
-        .unwrap();
+        .await?;
         drop(lock);
 
-        let result = self
+        let result = match self
             .read_side
             .search(
                 self.read_api_key,
@@ -514,9 +517,14 @@ impl Answer {
                 params,
                 AnalyticSearchEventInvocationType::Answer,
             )
-            .await
-            .unwrap();
-        result.hits
+            .await {
+                Ok(result) => result,
+                Err(_) => {
+                    return Err(AnswerError::Generic(anyhow::anyhow!("Error getting search results")));
+                }
+            };
+
+        return Ok(result.hits);
     }
 
     async fn handle_gpu_overload(&self, interaction: &mut Interaction) {
