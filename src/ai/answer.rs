@@ -32,7 +32,11 @@ use crate::{
 #[derive(Error, Debug)]
 pub enum SuggestionsError {
     #[error("Generic error: {0}")]
-    Generic(#[from] anyhow::Error)
+    Generic(#[from] anyhow::Error),
+    #[error("Failed to get suggestions: {0:?}")]
+    RepairError(#[from] JsonRepairError),
+    #[error("Failed to parse suggestions: {0:?}")]
+    ParseError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -46,13 +50,7 @@ pub enum AnswerError {
     #[error("Hook read error: {0:?}")]
     HookError(#[from] HookReaderError),
     #[error("JS run error: {0:?}")]
-    JSError(#[from] JSRunnerError),
-    #[error("Failed to get suggestions: {0:?}")]
-    SuggestionsError(#[from] SuggestionsError),
-    #[error("Failed to get suggestions: {0:?}")]
-    RepairSuggestionsError(#[from] JsonRepairError),
-    #[error("Failed to parse suggestions: {0:?}")]
-    ParseSuggestionsError(#[from] serde_json::Error),
+    JSError(#[from] JSRunnerError)
 }
 
 pub struct Answer {
@@ -328,7 +326,7 @@ impl Answer {
         self,
         suggestions_request: SuggestionsRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> Result<serde_json::Value, AnswerError> {
+    ) -> Result<serde_json::Value, SuggestionsError> {
         // Stub interaction to avoid code duplication. Need refactor.
         let interaction = self.get_empty_interaction(&suggestions_request);
         let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
@@ -369,7 +367,7 @@ impl Answer {
         llm_service: &llms::LLMService,
         llm_config: InteractionLLMConfig,
         messages: Vec<InteractionMessage>,
-    ) -> Result<serde_json::Value, AnswerError> {
+    ) -> Result<serde_json::Value, SuggestionsError> {
         suggestion_params.push(("context".to_string(), search_result_str));
 
         if !messages.is_empty() {
@@ -390,14 +388,14 @@ impl Answer {
         let repaired = match repair_json(&suggestions, &Default::default()) {
             Ok(json) => json,
             Err(e) => {
-                return Err(AnswerError::RepairSuggestionsError(e));
+                return Err(SuggestionsError::RepairError(e));
             }
         };
 
         let parsed_value = match serde_json::from_str(&repaired) {
             Ok(json) => json,
             Err(e) => {
-                return Err(AnswerError::ParseSuggestionsError(e));
+                return Err(SuggestionsError::ParseError(e));
             }
         };
 
