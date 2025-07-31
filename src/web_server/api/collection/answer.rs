@@ -1,6 +1,6 @@
 use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
-use crate::types::CollectionId;
+use crate::types::{CollectionId, SuggestionsRequest};
 use crate::types::{ApiKey, Interaction};
 use anyhow::Context;
 use axum::extract::Query;
@@ -129,7 +129,7 @@ async fn answer_suggestions_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
     Query(query): Query<AnswerQueryParams>,
-    Json(interaction): Json<Interaction>,
+    Json(request): Json<SuggestionsRequest>,
 ) -> impl IntoResponse {
     let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key)
         .await {
@@ -145,10 +145,10 @@ async fn answer_suggestions_v1(
             }
         };
 
-    let logs = read_side.get_logs();
+    let logs = read_side.get_hook_logs();
     let log_sender = logs.get_sender(&collection_id);
 
-    let response = match answer.suggestions(interaction, log_sender).await {
+    let response = match answer.suggestions(request, log_sender).await {
         Ok(response) => response,
         Err(e) => {
             error!(error = ?e, "Failed to generate suggestions");

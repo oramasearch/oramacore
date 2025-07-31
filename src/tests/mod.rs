@@ -23,5 +23,6 @@ mod sort;
 mod temp_index;
 mod update_docs;
 mod vector_search;
+mod suggestions;
 
 pub mod utils;

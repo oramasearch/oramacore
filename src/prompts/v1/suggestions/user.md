@@ -6,4 +6,4 @@ Q: ${query}
 
 Additional context: ${context}
 
-Generate ${maxSuggestions} relevant questions that would naturally come next in this conversation.
+Generate ${maxSuggestions} relevant questions that would naturally start a new conversation.

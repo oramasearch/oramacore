@@ -25,6 +25,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
         SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
+        SuggestionsRequest
     },
 };
 
@@ -295,31 +296,60 @@ impl Answer {
 
     pub async fn suggestions(
         self,
-        interaction: Interaction,
+        suggestions_request: SuggestionsRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> anyhow::Result<serde_json::Value> {
+
+        // Stub interaction to avoid code duplication.
+        // @todo: move suggestion to its own implementation
+        let interaction = Interaction {
+            conversation_id: "".to_string(),
+            interaction_id: "".to_string(),
+            system_prompt_id: None,
+            related: None,
+            visitor_id: "".to_string(),
+            messages: suggestions_request.messages.clone(),
+            max_documents: None,
+            min_similarity: None,
+            search_mode: None,
+            llm_config: suggestions_request.llm_config.clone(),
+            query: suggestions_request.query.clone(),
+            ragat_notation: None,
+            max_suggestions: suggestions_request.max_suggestions.clone(),
+        };
+
         let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
         let llm_service = self.read_side.get_llm_service();
 
-        let optimized_query: String = self.get_optimized_query(&interaction, &llm_config).await; // fallback to the original query if the optimization fails
+        let optimized_query: String = self.get_optimized_query(&interaction, &llm_config).await;
         info!("Optimized query: {}", optimized_query);
 
         let search_results = self.get_search_results(interaction.clone(), log_sender).await;
         let search_result_str = serde_json::to_string(&search_results).unwrap();
 
-        let mut related_queries_params = llm_service.get_related_questions_params(interaction.related);
-        related_queries_params.push(("context".to_string(), search_result_str));
-        related_queries_params.push(("query".to_string(), interaction.query.clone()));
+        let mut suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
+        suggestion_params.push(("context".to_string(), search_result_str));
 
-        let related_questions = llm_service
+        if !interaction.messages.is_empty() {
+            let conversation_value = serde_json::to_string(&interaction.messages).unwrap();
+            println!("Conversation value: {:?}", conversation_value.to_string());
+        }
+
+        let prompt = match interaction.messages.len() {
+            0 => llms::KnownPrompts::Suggestions,
+            _ => llms::KnownPrompts::Followup,
+        };
+        info!("Prompt: {:?}", prompt);
+       
+        let suggestions = llm_service
             .run_known_prompt(
-                llms::KnownPrompts::GenerateRelatedQueries,
-                related_queries_params,
+                prompt,
+                suggestion_params,
                 Some(llm_config),
             )
             .await?;
 
-        let repaired = match repair_json(&related_questions, &Default::default()) {
+        let repaired = match repair_json(&suggestions, &Default::default()) {
             Ok(json) => json,
             Err(e) => {
                 anyhow::bail!("JSON repair failed");
@@ -398,6 +428,7 @@ impl Answer {
             properties: Properties::Star,
             indexes: None, // Search all indexes
             sort_by: None,
+            user_id: None, // @todo: handle user_id if needed
         };
 
         let hook_storage = self
@@ -419,7 +450,12 @@ impl Answer {
 
         let result = self
             .read_side
-            .search(self.read_api_key, self.collection_id, params)
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                params,
+                AnalyticSearchEventInvocationType::Answer
+            )
             .await.unwrap();
         result.hits
     }
