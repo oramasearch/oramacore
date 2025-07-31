@@ -1,6 +1,6 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
-use llm_json::repair_json;
+use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{
     collections::HashMap,
@@ -29,6 +29,12 @@ use crate::{
     },
 };
 
+#[derive(Error, Debug)]
+pub enum SuggestionsError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error)
+}
+
 #[derive(Debug, Error)]
 pub enum AnswerError {
     #[error("Generic error: {0}")]
@@ -41,6 +47,12 @@ pub enum AnswerError {
     HookError(#[from] HookReaderError),
     #[error("JS run error: {0:?}")]
     JSError(#[from] JSRunnerError),
+    #[error("Failed to get suggestions: {0:?}")]
+    SuggestionsError(#[from] SuggestionsError),
+    #[error("Failed to get suggestions: {0:?}")]
+    RepairSuggestionsError(#[from] JsonRepairError),
+    #[error("Failed to parse suggestions: {0:?}")]
+    ParseSuggestionsError(#[from] serde_json::Error),
 }
 
 pub struct Answer {
@@ -316,7 +328,7 @@ impl Answer {
         self,
         suggestions_request: SuggestionsRequest,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> anyhow::Result<serde_json::Value> {
+    ) -> Result<serde_json::Value, AnswerError> {
         // Stub interaction to avoid code duplication. Need refactor.
         let interaction = self.get_empty_interaction(&suggestions_request);
         let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
@@ -343,7 +355,7 @@ impl Answer {
         {
             Ok(parsed) => parsed,
             Err(e) => {
-                anyhow::bail!("Failed to get suggestions: {:?}", e);
+                return Err(e);
             }
         };
 
@@ -357,7 +369,7 @@ impl Answer {
         llm_service: &llms::LLMService,
         llm_config: InteractionLLMConfig,
         messages: Vec<InteractionMessage>,
-    ) -> Result<serde_json::Value, anyhow::Error> {
+    ) -> Result<serde_json::Value, AnswerError> {
         suggestion_params.push(("context".to_string(), search_result_str));
 
         if !messages.is_empty() {
@@ -378,14 +390,14 @@ impl Answer {
         let repaired = match repair_json(&suggestions, &Default::default()) {
             Ok(json) => json,
             Err(e) => {
-                anyhow::bail!("Failed to repair suggestions: {:?}", e);
+                return Err(AnswerError::RepairSuggestionsError(e));
             }
         };
 
         let parsed_value = match serde_json::from_str(&repaired) {
             Ok(json) => json,
             Err(e) => {
-                anyhow::bail!("Failed to parse suggestions: {:?}", e);
+                return Err(AnswerError::ParseSuggestionsError(e));
             }
         };
 

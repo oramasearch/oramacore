@@ -403,6 +403,21 @@ impl IntoResponse for AnswerError {
                 format!("Error running JS code: {e:?}"),
             )
                 .into_response(),
+            AnswerError::SuggestionsError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error getting suggestions: {e:?}"),
+            )
+                .into_response(),
+            AnswerError::RepairSuggestionsError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error repairing suggestions: {e:?}"),
+            )
+                .into_response(),
+            AnswerError::ParseSuggestionsError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error parsing suggestions: {e:?}"),
+            )
+                .into_response(),
         }
     }
 }
