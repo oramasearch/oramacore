@@ -1,6 +1,6 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
-use llm_json::repair_json;
+use llm_json::{repair_json};
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{
     collections::HashMap,
@@ -25,7 +25,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
         SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
-        SuggestionsRequest
+        SuggestionsRequest, InteractionMessage
     },
 };
 
@@ -294,15 +294,11 @@ impl Answer {
         Ok(())
     }
 
-    pub async fn suggestions(
-        self,
-        suggestions_request: SuggestionsRequest,
-        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-    ) -> anyhow::Result<serde_json::Value> {
-
-        // Stub interaction to avoid code duplication.
-        // @todo: move suggestion to its own implementation
-        let interaction = Interaction {
+    pub fn get_empty_interaction(
+        &self,
+        suggestions_request: &SuggestionsRequest,
+    ) -> Interaction {
+        return Interaction {
             conversation_id: "".to_string(),
             interaction_id: "".to_string(),
             system_prompt_id: None,
@@ -317,7 +313,17 @@ impl Answer {
             ragat_notation: None,
             max_suggestions: suggestions_request.max_suggestions.clone(),
         };
+    }
+    
+    // @todo: move suggestion to its own implementation
+    pub async fn suggestions(
+        self,
+        suggestions_request: SuggestionsRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> anyhow::Result<serde_json::Value> {
 
+        // Stub interaction to avoid code duplication. Need refactor.
+        let interaction = self.get_empty_interaction(&suggestions_request);
         let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
         let llm_service = self.read_side.get_llm_service();
 
@@ -327,19 +333,37 @@ impl Answer {
         let search_results = self.get_search_results(interaction.clone(), log_sender).await;
         let search_result_str = serde_json::to_string(&search_results).unwrap();
 
-        let mut suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
+        let suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
+        let parsed_value = match self.get_suggestions(suggestion_params, search_result_str, &llm_service, llm_config, interaction.messages).await {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                anyhow::bail!("Failed to get suggestions: {:?}", e);
+            }
+        };
+        
+        Ok(parsed_value)
+    }
+    
+    pub async fn get_suggestions(
+        self,
+        mut suggestion_params: Vec<(String, String)>,
+        search_result_str: String,
+        llm_service: &llms::LLMService,
+        llm_config: InteractionLLMConfig,
+        messages: Vec<InteractionMessage>,
+    ) -> Result<serde_json::Value, anyhow::Error> {
         suggestion_params.push(("context".to_string(), search_result_str));
 
-        if !interaction.messages.is_empty() {
-            let conversation_value = serde_json::to_string(&interaction.messages).unwrap();
-            println!("Conversation value: {:?}", conversation_value.to_string());
+        if !messages.is_empty() {
+            let conversation_value = serde_json::to_string(&messages).unwrap();
+            suggestion_params.push(("conversation".to_string(), conversation_value));
         }
 
-        let prompt = match interaction.messages.len() {
+        let prompt = match messages.len() {
             0 => llms::KnownPrompts::Suggestions,
             _ => llms::KnownPrompts::Followup,
         };
-        info!("Prompt: {:?}", prompt);
+        println!("Prompt: {:?}", prompt);
        
         let suggestions = llm_service
             .run_known_prompt(
@@ -348,18 +372,25 @@ impl Answer {
                 Some(llm_config),
             )
             .await?;
-
+        
         let repaired = match repair_json(&suggestions, &Default::default()) {
             Ok(json) => json,
             Err(e) => {
-                anyhow::bail!("JSON repair failed");
+                anyhow::bail!("Failed to repair suggestions: {:?}", e);
             }
         };
 
-        let parsed_value = serde_json::from_str(&repaired)?;
-        Ok(parsed_value)
+        let parsed_value = match serde_json::from_str(&repaired) {
+            Ok(json) => json,
+            Err(e) => {
+                anyhow::bail!("Failed to parse suggestions: {:?}", e);
+            }
+        };
+
+        return Ok(parsed_value);
     }
-    
+
+
     async fn get_optimized_query(&self, interaction: &Interaction, llm_config: &InteractionLLMConfig) -> String {
         let llm_service = self.read_side.get_llm_service();
 
