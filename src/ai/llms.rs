@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 
-use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest};
+use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest, SuggestionsRequest};
 use crate::{
     collection_manager::sides::system_prompts::SystemPrompt,
     types::{RelatedQueriesFormat, Role},
@@ -37,6 +37,7 @@ pub enum KnownPrompts {
     Trigger,
     ValidateSystemPrompt,
     Followup,
+    Suggestions,
     GenerateRelatedQueries,
     DetermineQueryStrategy,
 }
@@ -66,6 +67,7 @@ impl TryFrom<&str> for KnownPrompts {
             "VALIDATE_SYSTEM_PROMPT" => Ok(Self::ValidateSystemPrompt),
             "FOLLOWUP" => Ok(Self::Followup),
             "GENERATE_RELATED_QUERIES" => Ok(Self::GenerateRelatedQueries),
+            "SUGGESTIONS" => Ok(Self::Suggestions),
             "DETERMINE_QUERY_STRATEGY" => Ok(Self::DetermineQueryStrategy),
             _ => Err(format!("Unknown prompt type: {s}")),
         }
@@ -141,6 +143,10 @@ impl KnownPrompts {
                 system: include_str!("../prompts/v1/determine_query_strategy/system.md")
                     .to_string(),
                 user: include_str!("../prompts/v1/determine_query_strategy/user.md").to_string(),
+            },
+            KnownPrompts::Suggestions => KnownPrompt {
+                system: include_str!("../prompts/v1/suggestions/system.md").to_string(),
+                user: include_str!("../prompts/v1/suggestions/user.md").to_string(),
             },
         }
     }
@@ -492,6 +498,21 @@ impl LLMService {
         }
 
         self.model.clone()
+    }
+
+    pub fn get_suggestions_params(
+        &self,
+        suggestion_request: SuggestionsRequest,
+    ) -> Vec<(String, String)> {
+        return vec![
+            ("conversation".to_string(), "".to_string()),
+            ("context".to_string(), "".to_string()),
+            ("query".to_string(), suggestion_request.query),
+            (
+                "maxSuggestions".to_string(),
+                suggestion_request.max_suggestions.unwrap_or(3).to_string(),
+            ),
+        ];
     }
 
     pub fn get_related_questions_params(

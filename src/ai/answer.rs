@@ -1,5 +1,6 @@
 use futures::TryFutureExt;
 use hook_storage::HookReaderError;
+use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{
     collections::HashMap,
@@ -22,10 +23,21 @@ use crate::{
         system_prompts::SystemPrompt,
     },
     types::{
-        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
-        SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity, VectorMode,
+        ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
+        Limit, Properties, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
+        SuggestionsRequest, VectorMode,
     },
 };
+
+#[derive(Error, Debug)]
+pub enum SuggestionsError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Failed to get suggestions: {0:?}")]
+    RepairError(#[from] JsonRepairError),
+    #[error("Failed to parse suggestions: {0:?}")]
+    ParseError(#[from] serde_json::Error),
+}
 
 #[derive(Debug, Error)]
 pub enum AnswerError {
@@ -138,18 +150,7 @@ impl Answer {
         sender.send(AnswerEvent::OptimizeingQuery(optimized_query.clone()))?;
 
         let search_results = if let Some(ref notation) = interaction.ragat_notation {
-            let parsed = RAGAtParser::parse(notation);
-
-            let components = self
-                .execute_rag_at_specification(&parsed.components, interaction.clone())
-                .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
-                .await?;
-
-            let results = self
-                .merge_component_results(components)
-                .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
-                .await?;
-            results
+            self.get_composed_results(&interaction, notation).await
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
@@ -208,7 +209,14 @@ impl Answer {
             result.hits
         };
 
-        let search_result_str = serde_json::to_string(&search_results).unwrap();
+        let search_result_str = match serde_json::to_string(&search_results) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(AnswerError::Generic(anyhow::anyhow!(
+                    "Error converting search results to string"
+                )));
+            }
+        };
         sender.send(AnswerEvent::SearchResults(search_results.clone()))?;
 
         let variables = vec![
@@ -301,6 +309,235 @@ impl Answer {
         }
 
         Ok(())
+    }
+
+    pub fn get_empty_interaction(&self, suggestions_request: &SuggestionsRequest) -> Interaction {
+        return Interaction {
+            conversation_id: "".to_string(),
+            interaction_id: "".to_string(),
+            system_prompt_id: None,
+            related: None,
+            visitor_id: "".to_string(),
+            messages: suggestions_request.messages.clone(),
+            max_documents: None,
+            min_similarity: None,
+            search_mode: None,
+            llm_config: suggestions_request.llm_config.clone(),
+            query: suggestions_request.query.clone(),
+            ragat_notation: None,
+        };
+    }
+
+    // @todo: move suggestion to its own implementation
+    pub async fn suggestions(
+        self,
+        suggestions_request: SuggestionsRequest,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> Result<serde_json::Value, SuggestionsError> {
+        // Stub interaction to avoid code duplication. Need refactor.
+        let interaction = self.get_empty_interaction(&suggestions_request);
+        let llm_config: InteractionLLMConfig = self.get_llm_config(&interaction);
+        let llm_service = self.read_side.get_llm_service();
+
+        let optimized_query: String = self.get_optimized_query(&interaction, &llm_config).await;
+        info!("Optimized query: {}", optimized_query);
+
+        let search_results = match self
+            .get_search_results(interaction.clone(), log_sender)
+            .await
+        {
+            Ok(results) => results,
+            Err(_) => {
+                return Err(SuggestionsError::Generic(anyhow::anyhow!(
+                    "Error getting search results"
+                )));
+            }
+        };
+        let search_result_str = serde_json::to_string(&search_results)?;
+
+        let suggestion_params = llm_service.get_suggestions_params(suggestions_request.clone());
+        let parsed_value = match self
+            .get_suggestions(
+                suggestion_params,
+                search_result_str,
+                &llm_service,
+                llm_config,
+                interaction.messages,
+            )
+            .await
+        {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        Ok(parsed_value)
+    }
+
+    pub async fn get_suggestions(
+        self,
+        mut suggestion_params: Vec<(String, String)>,
+        search_result_str: String,
+        llm_service: &llms::LLMService,
+        llm_config: InteractionLLMConfig,
+        messages: Vec<InteractionMessage>,
+    ) -> Result<serde_json::Value, SuggestionsError> {
+        suggestion_params.push(("context".to_string(), search_result_str));
+
+        if !messages.is_empty() {
+            let conversation_value = serde_json::to_string(&messages)?;
+            suggestion_params.push(("conversation".to_string(), conversation_value));
+        }
+
+        let prompt = match messages.len() {
+            0 => llms::KnownPrompts::Suggestions,
+            _ => llms::KnownPrompts::Followup,
+        };
+        println!("Prompt: {:?}", prompt);
+
+        let suggestions = llm_service
+            .run_known_prompt(prompt, suggestion_params, Some(llm_config))
+            .await?;
+
+        let repaired = match repair_json(&suggestions, &Default::default()) {
+            Ok(json) => json,
+            Err(e) => {
+                return Err(SuggestionsError::RepairError(e));
+            }
+        };
+
+        let parsed_value = match serde_json::from_str(&repaired) {
+            Ok(json) => json,
+            Err(e) => {
+                return Err(SuggestionsError::ParseError(e));
+            }
+        };
+
+        return Ok(parsed_value);
+    }
+
+    async fn get_optimized_query(
+        &self,
+        interaction: &Interaction,
+        llm_config: &InteractionLLMConfig,
+    ) -> String {
+        let llm_service = self.read_side.get_llm_service();
+
+        let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
+        let optimized_query = llm_service
+            .run_known_prompt(
+                llms::KnownPrompts::OptimizeQuery,
+                optimized_query_variables,
+                Some(llm_config.clone()),
+            )
+            .await
+            .unwrap_or_else(|_| interaction.query.clone()); // fallback to the original query if the optimization fails
+        optimized_query
+    }
+
+    async fn get_composed_results(
+        &self,
+        interaction: &Interaction,
+        notation: &String,
+    ) -> Vec<SearchResultHit> {
+        let parsed = RAGAtParser::parse(notation);
+
+        let components = match self
+            .execute_rag_at_specification(&parsed.components, interaction.clone())
+            .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
+            .await
+        {
+            Ok(components) => components,
+            Err(e) => {
+                warn!("Failed to execute RAGAT specification: {:?}", e);
+                return vec![];
+            }
+        };
+
+        let results = match self
+            .merge_component_results(components)
+            .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
+            .await
+        {
+            Ok(results) => results,
+            Err(e) => {
+                warn!("Failed to merge component results: {:?}", e);
+                return vec![];
+            }
+        };
+        results
+    }
+
+    async fn get_search_results(
+        &self,
+        interaction: Interaction,
+        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+    ) -> Result<Vec<SearchResultHit>, AnswerError> {
+        let max_documents = Limit(interaction.max_documents.unwrap_or(5));
+        let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
+
+        let search_mode = match interaction
+            .search_mode
+            .as_ref()
+            .map_or("vector", |s| s.as_str())
+        {
+            "vector" => SearchMode::Vector(VectorMode {
+                term: interaction.query.clone(),
+                similarity: min_similarity,
+            }),
+            mode => SearchMode::from_str(mode, interaction.query.clone()),
+        };
+
+        let params = SearchParams {
+            mode: search_mode,
+            limit: max_documents,
+            offset: SearchOffset(0),
+            where_filter: Default::default(),
+            boost: HashMap::new(),
+            facets: HashMap::new(),
+            properties: Properties::Star,
+            indexes: None, // Search all indexes
+            sort_by: None,
+            user_id: None, // @todo: handle user_id if needed
+        };
+
+        let hook_storage = self
+            .read_side
+            .get_hook_storage(self.read_api_key, self.collection_id)
+            .await?;
+        let lock = hook_storage.read().await;
+        let params = run_before_retrieval(
+            &lock,
+            params.clone(),
+            log_sender.clone(),
+            ExecOption {
+                allowed_hosts: Some(vec![]),
+                timeout: Duration::from_millis(500),
+            },
+        )
+        .await?;
+        drop(lock);
+
+        let result = match self
+            .read_side
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                params,
+                AnalyticSearchEventInvocationType::Answer,
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(AnswerError::Generic(anyhow::anyhow!(
+                    "Error getting search results"
+                )));
+            }
+        };
+
+        return Ok(result.hits);
     }
 
     async fn handle_gpu_overload(&self, interaction: &mut Interaction) {

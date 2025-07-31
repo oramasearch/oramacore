@@ -14,7 +14,10 @@ use serde_json::json;
 use tracing::error;
 
 use crate::{
-    ai::{answer::AnswerError, tools::ToolError},
+    ai::{
+        answer::{AnswerError, SuggestionsError},
+        tools::ToolError,
+    },
     collection_manager::sides::{
         read::ReadError,
         write::{
@@ -401,6 +404,31 @@ impl IntoResponse for AnswerError {
             AnswerError::JSError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error running JS code: {e:?}"),
+            )
+                .into_response(),
+        }
+    }
+}
+
+impl IntoResponse for SuggestionsError {
+    fn into_response(self) -> Response {
+        match self {
+            SuggestionsError::Generic(e) => {
+                print_error(&e, "Unhandled error in suggestions side");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Cannot process the request: {e:?}"),
+                )
+                    .into_response()
+            }
+            SuggestionsError::RepairError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error repairing suggestions: {e:?}"),
+            )
+                .into_response(),
+            SuggestionsError::ParseError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error parsing suggestions: {e:?}"),
             )
                 .into_response(),
         }

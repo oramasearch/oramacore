@@ -1486,10 +1486,30 @@ pub enum RelatedQueriesFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SuggestionsFormat {
+    #[serde(rename = "conversation")]
+    Conversation,
+    #[serde(rename = "query")]
+    Query,
+    #[serde(rename = "context")]
+    Context,
+    #[serde(rename = "maxSuggestions")]
+    MaxSuggestions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelatedRequest {
     pub enabled: Option<bool>,
     pub size: Option<usize>,
     pub format: Option<RelatedQueriesFormat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SuggestionsRequest {
+    pub query: String,
+    pub messages: Vec<InteractionMessage>,
+    pub llm_config: Option<InteractionLLMConfig>,
+    pub max_suggestions: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
