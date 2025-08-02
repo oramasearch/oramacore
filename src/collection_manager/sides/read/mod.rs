@@ -33,7 +33,7 @@ use tracing::{error, info, trace, warn};
 
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
 use crate::ai::gpu::LocalGPUManager;
-use crate::ai::llms::{self, LLMService};
+use crate::ai::llms::{self, KnownPrompt, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
@@ -728,6 +728,29 @@ impl ReadSide {
 
     pub fn get_analytics_logs(&self) -> Option<&AnalyticsStorage> {
         self.analytics_storage.as_ref()
+    }
+
+    pub async fn get_default_system_prompt(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+        system_prompt_id: String,
+    ) -> Result<String, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        let known_prompt: KnownPrompts = system_prompt_id
+            .as_str()
+            .try_into()
+            .map_err(|e| ReadError::Generic(anyhow::anyhow!("Unknown system prompt ID: {}", e)))?;
+
+        let prompt = known_prompt.get_prompts().system;
+
+        Ok(prompt)
     }
 }
 

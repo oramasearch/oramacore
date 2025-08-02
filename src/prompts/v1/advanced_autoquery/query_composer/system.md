@@ -31,11 +31,29 @@ When performing search, you can use a number of parameters to customize the sear
 | Parameter    | Description                                                                                                         | Default        |
 | ------------ | ------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `term`       | The search term.                                                                                                    | -              |
-| `properties` | The properties to search in. Should be an array of strings (for example: `["title", "description", "author.name"]`) or `undefined` when searching on all properties.                                                                                 | -              |
+| `properties` | The properties to search in. Should be an array of strings (for example: `["title", "description", "author.name"]`) or `undefined` when searching on all properties. | -              |
 | `mode`       | The search mode. Can be `fulltext`, `vector`, or `hybrid`.                                                          | `fulltext`     |
 | `where`      | A filter to apply to the search results.                                                                            | -              |
 | `threshold`  | The percentage of matches required to return a document. Read more                                                  | `0`            |
 | `exact`      | Whether to use exact matching.                                                                                      | `false`        |
+| `sortBy`     | The property to sort the search results by.                                                                         | -              |
+
+### Sorting
+
+You can sort the search results by a property using the `sortBy` parameter. The value of `sortBy` should be the name of the property you want to sort by.
+For example, if you want to sort by `age`, you can do so by setting `sortBy.property` to `"age"`:
+
+```json
+{
+  "term": "engineer",
+  "sortyBy": {
+    "property": "age",
+    "order": "DESC" // or "ASC"
+  }
+}
+```
+
+By default, the order is ascending (`ASC`). If you want to sort in descending order, you can set `sortBy.order` to `"DESC"`.
 
 #### Where Filters
 

@@ -1585,6 +1585,13 @@ pub struct Interaction {
     pub search_mode: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GetSystemPromptQueryParams {
+    #[serde(rename = "api-key")]
+    pub api_key: ApiKey,
+    pub system_prompt_id: String,
+}
+
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]
