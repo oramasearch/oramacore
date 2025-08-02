@@ -2,10 +2,9 @@ use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall,
-        FunctionObject,
+        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
+        ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolType,
+        CreateChatCompletionRequestArgs, FunctionCall, FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -15,11 +14,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 
-use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest, SuggestionsRequest};
-use crate::{
-    collection_manager::sides::system_prompts::SystemPrompt,
-    types::{RelatedQueriesFormat, Role},
-};
+use crate::types::{InteractionLLMConfig, RelatedRequest, SuggestionsRequest};
+use crate::{collection_manager::sides::system_prompts::SystemPrompt, types::RelatedQueriesFormat};
 
 use super::{AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
 use crate::ai::gpu::LocalGPUManager;
@@ -33,8 +29,6 @@ pub enum KnownPrompts {
     AdvancedAutoQueryQueryComposer,
     AutomaticEmbeddingsSelector,
     OptimizeQuery,
-    Segmenter,
-    Trigger,
     ValidateSystemPrompt,
     Followup,
     Suggestions,
@@ -62,8 +56,6 @@ impl TryFrom<&str> for KnownPrompts {
             "ADVANCED_AUTOQUERY_QUERY_COMPOSER" => Ok(Self::AdvancedAutoQueryQueryComposer),
             "AUTOMATIC_EMBEDDINGS_SELECTOR" => Ok(Self::AutomaticEmbeddingsSelector),
             "OPTIMIZE_QUERY" => Ok(Self::OptimizeQuery),
-            "SEGMENTER" => Ok(Self::Segmenter),
-            "TRIGGER" => Ok(Self::Trigger),
             "VALIDATE_SYSTEM_PROMPT" => Ok(Self::ValidateSystemPrompt),
             "FOLLOWUP" => Ok(Self::Followup),
             "GENERATE_RELATED_QUERIES" => Ok(Self::GenerateRelatedQueries),
@@ -84,14 +76,6 @@ impl KnownPrompts {
             KnownPrompts::Autoquery => KnownPrompt {
                 system: include_str!("../prompts/v1/autoquery/system.md").to_string(),
                 user: include_str!("../prompts/v1/autoquery/user.md").to_string(),
-            },
-            KnownPrompts::Segmenter => KnownPrompt {
-                system: include_str!("../prompts/v1/segmenter/system.md").to_string(),
-                user: include_str!("../prompts/v1/segmenter/user.md").to_string(),
-            },
-            KnownPrompts::Trigger => KnownPrompt {
-                system: include_str!("../prompts/v1/trigger/system.md").to_string(),
-                user: include_str!("../prompts/v1/trigger/user.md").to_string(),
             },
             KnownPrompts::OptimizeQuery => KnownPrompt {
                 system: include_str!("../prompts/v1/optimize_query/system.md").to_string(),

@@ -1,5 +1,0 @@
-### Personas
-{personas}
-
-### Conversation
-{conversation}

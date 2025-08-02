@@ -2,16 +2,19 @@ use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
 };
 use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent, AnswerStateMachine};
-use crate::collection_manager::sides::read::ReadSide;
-use crate::types::{ApiKey, CollectionId, Interaction, InteractionLLMConfig, RelatedRequest};
+use crate::collection_manager::sides::read::{ReadError, ReadSide};
+use crate::types::{
+    ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
+};
 use axum::extract::Query;
 use axum::response::sse::Event;
 use axum::response::Sse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;
 use futures::StreamExt;
 use serde::Deserialize;
+use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,6 +30,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/generate/answer",
             post(answer_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/generate/get_default_system_prompt",
+            get(get_default_system_prompt_v1),
         )
         .with_state(read_side)
 }
@@ -50,7 +57,6 @@ struct NlpQueryRequest {
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
-#[axum::debug_handler]
 async fn nlp_query_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
@@ -131,7 +137,6 @@ async fn nlp_query_v1(
     )
 }
 
-#[axum::debug_handler]
 async fn answer_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
@@ -188,4 +193,21 @@ async fn answer_v1(
             .interval(Duration::from_secs(15))
             .text("{ \"type\": \"keepalive\", \"message\": \"ok\" }"),
     )
+}
+
+async fn get_default_system_prompt_v1(
+    collection_id: CollectionId,
+    State(read_side): State<Arc<ReadSide>>,
+    Query(query_params): Query<GetSystemPromptQueryParams>,
+) -> Result<Json<serde_json::Value>, ReadError> {
+    let read_api_key = query_params.api_key;
+    let system_prompt_id = query_params.system_prompt_id;
+
+    match read_side
+        .get_default_system_prompt(collection_id, read_api_key, system_prompt_id)
+        .await
+    {
+        Ok(prompt) => Ok(Json(json!({ "system_prompt": prompt }))),
+        Err(e) => Err(e),
+    }
 }
