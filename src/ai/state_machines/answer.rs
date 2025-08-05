@@ -435,7 +435,7 @@ impl AnswerStateMachine {
             self.send_event(AnswerEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
-                message: format!("Processing step {}/{}", current_step, total_steps),
+                message: format!("Processing step {current_step}/{total_steps}"),
             })
             .await;
 
@@ -571,8 +571,8 @@ impl AnswerStateMachine {
                         .execute_search(
                             interaction.clone(),
                             llm_config.clone(),
-                            collection_id.clone(),
-                            read_api_key.clone(),
+                            collection_id,
+                            read_api_key,
                             optimized_query,
                         )
                         .await?;
@@ -710,7 +710,7 @@ impl AnswerStateMachine {
                     error!("Answer generation failed: {:?}", error);
                     self.send_event(AnswerEvent::Error {
                         error: error.to_string(),
-                        state: format!("{:?}", error),
+                        state: format!("{error:?}"),
                         is_terminal: Some(true),
                     })
                     .await;
@@ -747,7 +747,7 @@ impl AnswerStateMachine {
                     if let Some(sender) = &state_machine.event_sender {
                         let _ = sender.send(AnswerEvent::Error {
                             error: e.to_string(),
-                            state: format!("{:?}", e),
+                            state: format!("{e:?}"),
                             is_terminal: Some(true),
                         });
                     }
@@ -827,8 +827,8 @@ impl AnswerStateMachine {
             let collection_stats = self
                 .read_side
                 .collection_stats(
-                    self.read_api_key.clone(),
-                    self.collection_id.clone(),
+                    self.read_api_key,
+                    self.collection_id,
                     crate::types::CollectionStatsRequest { with_keys: false },
                 )
                 .await
@@ -841,8 +841,8 @@ impl AnswerStateMachine {
                 Some(llm_config.clone()),
                 collection_stats,
                 self.read_side.clone(),
-                self.collection_id.clone(),
-                self.read_api_key.clone(),
+                self.collection_id,
+                self.read_api_key,
             );
 
             // Run the advanced autoquery with streaming and capture events
@@ -854,11 +854,7 @@ impl AnswerStateMachine {
                 });
             }
             let advanced_event_stream = advanced_state_machine
-                .run_stream(
-                    messages,
-                    self.collection_id.clone(),
-                    self.read_api_key.clone(),
-                )
+                .run_stream(messages, self.collection_id, self.read_api_key)
                 .await
                 .map_err(|e| AnswerError::AdvancedAutoqueryError(e.to_string()))?;
 
@@ -869,8 +865,8 @@ impl AnswerStateMachine {
                 match advanced_event {
                     crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::StateChanged { state, message, data } => {
                         self.send_event(AnswerEvent::StateChanged {
-                            state: format!("advanced_autoquery_{}", state),
-                            message: format!("Advanced Autoquery: {}", message),
+                            state: format!("advanced_autoquery_{state}"),
+                            message: format!("Advanced Autoquery: {message}"),
                             data,
                         })
                         .await;
@@ -879,7 +875,7 @@ impl AnswerStateMachine {
                         self.send_event(AnswerEvent::Progress {
                             current_step: serde_json::json!({"type": "advanced_autoquery", "step": current_step}),
                             total_steps,
-                            message: format!("Advanced Autoquery: {}", message),
+                            message: format!("Advanced Autoquery: {message}"),
                         })
                         .await;
                     }
@@ -896,8 +892,8 @@ impl AnswerStateMachine {
                     }
                     crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Error { error, state, is_terminal } => {
                         self.send_event(AnswerEvent::Error {
-                            error: format!("Advanced Autoquery Error: {}", error),
-                            state: format!("advanced_autoquery_{}", state),
+                            error: format!("Advanced Autoquery Error: {error}"),
+                            state: format!("advanced_autoquery_{state}"),
                             is_terminal,
                         })
                         .await;
@@ -910,8 +906,8 @@ impl AnswerStateMachine {
             *state = AnswerFlow::ExecuteBeforeRetrievalHook {
                 interaction,
                 llm_config,
-                collection_id: self.collection_id.clone(),
-                read_api_key: self.read_api_key.clone(),
+                collection_id: self.collection_id,
+                read_api_key: self.read_api_key,
             };
         } else {
             // Simple RAG flow - go directly to system prompt handling
@@ -927,8 +923,8 @@ impl AnswerStateMachine {
                 interaction: interaction.clone(),
                 llm_config: llm_config.clone(),
                 system_prompt: None,
-                collection_id: self.collection_id.clone(),
-                read_api_key: self.read_api_key.clone(),
+                collection_id: self.collection_id,
+                read_api_key: self.read_api_key,
                 optimized_query: interaction.query.clone(),
             };
         }
@@ -1174,7 +1170,7 @@ impl AnswerStateMachine {
             Some(id) => {
                 let full_prompt = self
                     .read_side
-                    .get_system_prompt(self.read_api_key.clone(), self.collection_id.clone(), id)
+                    .get_system_prompt(self.read_api_key, self.collection_id, id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                 Ok(full_prompt)
@@ -1182,17 +1178,14 @@ impl AnswerStateMachine {
             None => {
                 let has_system_prompts = self
                     .read_side
-                    .has_system_prompts(self.read_api_key.clone(), self.collection_id.clone())
+                    .has_system_prompts(self.read_api_key, self.collection_id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
 
                 if has_system_prompts {
                     let chosen_system_prompt = self
                         .read_side
-                        .perform_system_prompt_selection(
-                            self.read_api_key.clone(),
-                            self.collection_id.clone(),
-                        )
+                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
                         .await
                         .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                     Ok(chosen_system_prompt)
@@ -1286,12 +1279,12 @@ impl AnswerStateMachine {
             let components = self
                 .execute_rag_at_specification(&parsed.components, interaction.clone())
                 .await
-                .map_err(|e| AnswerError::RagAtError(format!("{:?}", e)))?;
+                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
 
             let results = self
                 .merge_component_results(components)
                 .await
-                .map_err(|e| AnswerError::RagAtError(format!("{:?}", e)))?;
+                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
             results
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
@@ -1407,7 +1400,7 @@ impl AnswerStateMachine {
         let search_result_str = serde_json::to_string(&search_results)
             .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];

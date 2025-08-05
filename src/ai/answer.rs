@@ -312,7 +312,7 @@ impl Answer {
     }
 
     pub fn get_empty_interaction(&self, suggestions_request: &SuggestionsRequest) -> Interaction {
-        return Interaction {
+        Interaction {
             conversation_id: "".to_string(),
             interaction_id: "".to_string(),
             system_prompt_id: None,
@@ -325,7 +325,7 @@ impl Answer {
             llm_config: suggestions_request.llm_config.clone(),
             query: suggestions_request.query.clone(),
             ragat_notation: None,
-        };
+        }
     }
 
     // @todo: move suggestion to its own implementation
@@ -394,7 +394,7 @@ impl Answer {
             0 => llms::KnownPrompts::Suggestions,
             _ => llms::KnownPrompts::Followup,
         };
-        println!("Prompt: {:?}", prompt);
+        println!("Prompt: {prompt:?}");
 
         let suggestions = llm_service
             .run_known_prompt(prompt, suggestion_params, Some(llm_config))
@@ -414,7 +414,7 @@ impl Answer {
             }
         };
 
-        return Ok(parsed_value);
+        Ok(parsed_value)
     }
 
     async fn get_optimized_query(
@@ -537,7 +537,7 @@ impl Answer {
             }
         };
 
-        return Ok(result.hits);
+        Ok(result.hits)
     }
 
     async fn handle_gpu_overload(&self, interaction: &mut Interaction) {

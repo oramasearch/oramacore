@@ -488,7 +488,7 @@ impl LLMService {
         &self,
         suggestion_request: SuggestionsRequest,
     ) -> Vec<(String, String)> {
-        return vec![
+        vec![
             ("conversation".to_string(), "".to_string()),
             ("context".to_string(), "".to_string()),
             ("query".to_string(), suggestion_request.query),
@@ -496,7 +496,7 @@ impl LLMService {
                 "maxSuggestions".to_string(),
                 suggestion_request.max_suggestions.unwrap_or(3).to_string(),
             ),
-        ];
+        ]
     }
 
     pub fn get_related_questions_params(

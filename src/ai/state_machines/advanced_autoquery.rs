@@ -460,7 +460,7 @@ impl AdvancedAutoqueryStateMachine {
             self.send_event(AdvancedAutoqueryEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
-                message: format!("Processing step {}/{}", current_step, total_steps),
+                message: format!("Processing step {current_step}/{total_steps}"),
             })
             .await;
 
@@ -736,7 +736,7 @@ impl AdvancedAutoqueryStateMachine {
                     error!("Advanced search failed: {:?}", error);
                     self.send_event(AdvancedAutoqueryEvent::Error {
                         error: error.to_string(),
-                        state: format!("{:?}", error),
+                        state: format!("{error:?}"),
                         is_terminal: Some(true),
                     })
                     .await;
@@ -772,7 +772,7 @@ impl AdvancedAutoqueryStateMachine {
                     if let Some(sender) = &state_machine.event_sender {
                         let _ = sender.send(AdvancedAutoqueryEvent::Error {
                             error: e.to_string(),
-                            state: format!("{:?}", e),
+                            state: format!("{e:?}"),
                             is_terminal: Some(true),
                         });
                     }
@@ -1320,8 +1320,8 @@ impl AdvancedAutoqueryStateMachine {
         for (i, query) in tracked_queries.into_iter().enumerate() {
             let tx = tx.clone();
             let read_side = self.read_side.clone();
-            let collection_id = collection_id.clone();
-            let read_api_key = read_api_key.clone();
+            let collection_id = collection_id;
+            let read_api_key = read_api_key;
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_hook_with_retry(
@@ -1610,8 +1610,7 @@ impl AdvancedAutoqueryStateMachine {
                 .find(|index| index.id == index_id)
                 .ok_or_else(|| {
                     AdvancedAutoqueryError::CollectionStatsError(format!(
-                        "Collection {} not found in stats",
-                        collection_name
+                        "Collection {collection_name} not found in stats"
                     ))
                 })?;
 
