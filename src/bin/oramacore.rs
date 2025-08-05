@@ -21,11 +21,10 @@ fn load_config() -> Result<OramacoreConfig> {
     let config_path = fs::canonicalize(&config_path)?;
     let config_path: String = config_path.to_string_lossy().into();
 
-    let settings = Config::builder()
+    let builder = Config::builder()
         .add_source(config::File::with_name(&config_path).format(config::FileFormat::Yaml))
-        .add_source(config::Environment::with_prefix("ORAMACORE"))
-        .build()
-        .context("Failed to load configuration")?;
+        .add_source(config::Environment::with_prefix("ORAMACORE").separator("_"));
+    let settings = builder.build().context("Failed to load configuration")?;
 
     let oramacore_config = settings
         .try_deserialize::<OramacoreConfig>()
