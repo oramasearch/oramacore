@@ -1,0 +1,147 @@
+use anyhow::Result;
+use rand::Rng;
+use serde::Serialize;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::{
+    ai::llms::LLMService,
+    collection_manager::sides::read::ReadSide,
+    types::{
+        ApiKey, CollectionId, CollectionStatsRequest, FulltextMode, Limit, Properties, SearchMode,
+        SearchOffset, SearchParams, WhereFilter,
+    },
+};
+
+#[derive(Debug, Serialize)]
+pub enum QueryPlannerOptions {
+    Answer,
+    AdvancedAutoquery,
+    Suggestions,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QueryPlannerTrainingData {
+    pub training_set: Vec<(String, QueryPlannerOptions)>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QueryOptimizerTrainingData {
+    pub training_set: Vec<(String, Vec<String>)>,
+}
+
+#[derive(Debug, Serialize)]
+pub enum TrainingData {
+    QueryPlannerTrainingData,
+    QueryOptimizerTrainingData,
+    // @todo: add query filtering
+}
+
+#[derive(Debug, Serialize)]
+pub enum TraningDestination {
+    QueryPlanner,
+    QueryOptimizer,
+    QueryFiltering,
+}
+
+pub struct TrainingSet {
+    pub collection_id: CollectionId,
+    pub read_side: Arc<ReadSide>,
+    pub read_api_key: ApiKey,
+    pub llm_service: Arc<LLMService>,
+}
+
+impl TrainingSet {
+    pub fn new(
+        collection_id: CollectionId,
+        read_side: Arc<ReadSide>,
+        read_api_key: ApiKey,
+        llm_service: Arc<LLMService>,
+    ) -> Self {
+        TrainingSet {
+            collection_id,
+            read_side,
+            read_api_key,
+            llm_service,
+        }
+    }
+
+    pub fn generate_training_data_for(&self, destination: TraningDestination) -> TrainingData {
+        match destination {
+            TraningDestination::QueryPlanner => {
+                println!("@todo");
+            }
+            TraningDestination::QueryOptimizer => {
+                println!("@todo");
+            }
+            TraningDestination::QueryFiltering => {
+                println!("@todo");
+            }
+        }
+
+        unimplemented!()
+    }
+
+    fn generate_query_planner_training_data(&self) -> Result<QueryOptimizerTrainingData> {
+        unimplemented!()
+    }
+
+    async fn get_random_data_from_collection(&self, size: usize) -> Result<Vec<String>> {
+        let collection_stats = self
+            .read_side
+            .collection_stats(
+                self.read_api_key.clone(),
+                self.collection_id,
+                CollectionStatsRequest { with_keys: false },
+            )
+            .await?;
+
+        let docs_in_collection = collection_stats.document_count;
+        let random_offset = if docs_in_collection <= size {
+            0
+        } else {
+            rand::rng().random_range(0..docs_in_collection - size)
+        };
+
+        let search_params = SearchParams {
+            mode: SearchMode::FullText(FulltextMode {
+                term: "".to_string(),
+                exact: false,
+                threshold: None,
+                tolerance: None,
+            }),
+            limit: Limit(size),
+            offset: SearchOffset(random_offset),
+            boost: HashMap::new(),
+            facets: HashMap::new(),
+            indexes: None,
+            properties: Properties::Star,
+            sort_by: None,
+            user_id: None,
+            where_filter: WhereFilter {
+                filter_on_fields: vec![],
+                and: None,
+                or: None,
+                not: None,
+            },
+        };
+
+        let random_search_results = self
+            .read_side
+            .search(
+                self.read_api_key.clone(),
+                self.collection_id,
+                search_params,
+                AnalyticSearchEventInvocationType::TrainingDataGen,
+            )
+            .await?;
+
+        let as_json_docs = random_search_results
+            .hits
+            .iter()
+            .map(|hit| serde_json::to_string(&hit.document))
+            .collect::<Result<Vec<String>, _>>()?;
+
+        Ok(as_json_docs)
+    }
+}
