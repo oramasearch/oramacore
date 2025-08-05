@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
+    sync::RwLock,
 };
 
 use anyhow::{Context, Result};
@@ -24,7 +25,202 @@ use crate::{
 use fs::create_if_not_exists;
 
 #[derive(Debug)]
+pub enum InnerCommittedStringField {
+    Loaded(LoadedCommittedStringField),
+    Unloaded(UnloadedCommittedStringField),
+}
+
+#[derive(Debug)]
 pub struct CommittedStringField {
+    inner: RwLock<InnerCommittedStringField>,
+}
+
+impl CommittedStringField {
+    pub fn try_load(info: StringFieldInfo) -> Result<Self> {
+        let loaded = LoadedCommittedStringField::try_load(info)?;
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+        })
+    }
+
+    pub fn from_iter(
+        field_path: Box<[String]>,
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, (Positions, Positions)>,
+                ),
+            ),
+        >,
+        length_per_documents: HashMap<DocumentId, u32>,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+    ) -> Result<Self> {
+        let loaded = LoadedCommittedStringField::from_iter(
+            field_path,
+            uncommitted_iter,
+            length_per_documents,
+            data_dir,
+            uncommitted_document_deletions,
+        )?;
+
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+        })
+    }
+
+    pub fn from_iter_and_committed(
+        field_path: Box<[String]>,
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, (Positions, Positions)>,
+                ),
+            ),
+        >,
+        committed: &Self,
+        length_per_documents: HashMap<DocumentId, u32>,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+    ) -> Result<Self> {
+        committed.load(); // enforce loading of the committed field
+        let lock = committed.inner.read().unwrap();
+        let prev_loaded = match &*lock {
+            InnerCommittedStringField::Loaded(loaded) => loaded,
+            InnerCommittedStringField::Unloaded(unloaded) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot commit to an unloaded committed string field: {:?}",
+                    unloaded.get_field_info()
+                ));
+            }
+        };
+
+        let loaded = LoadedCommittedStringField::from_iter_and_committed(
+            field_path,
+            uncommitted_iter,
+            prev_loaded,
+            length_per_documents,
+            data_dir,
+            uncommitted_document_deletions,
+        )?;
+
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+        })
+    }
+
+    fn loaded(&self) -> bool {
+        matches!(
+            *self.inner.read().unwrap(),
+            InnerCommittedStringField::Loaded(_)
+        )
+    }
+
+    fn load(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedStringField::Unloaded(unloaded) = &*inner {
+            let loaded = LoadedCommittedStringField::try_load(unloaded.get_field_info())
+                .expect("Cannot load committed string field");
+            *inner = InnerCommittedStringField::Loaded(loaded);
+        }
+    }
+
+    pub fn unload(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedStringField::Loaded(loaded) = &*inner {
+            let unloaded = UnloadedCommittedStringField {
+                field_path: loaded.field_path.clone(),
+                data_dir: loaded.data_dir.clone(),
+            };
+            *inner = InnerCommittedStringField::Unloaded(unloaded);
+        }
+    }
+
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.get_field_info(),
+            InnerCommittedStringField::Unloaded(unloaded) => StringFieldInfo {
+                field_path: unloaded.field_path.clone(),
+                data_dir: unloaded.data_dir.clone(),
+            },
+        }
+    }
+
+    pub fn field_path(&self) -> Box<[String]> {
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.field_path().clone(),
+            InnerCommittedStringField::Unloaded(unloaded) => unloaded.field_path.clone(),
+        }
+    }
+
+    pub fn stats(&self) -> Result<CommittedStringFieldStats> {
+        if !self.loaded() {
+            self.load();
+        }
+
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.stats(),
+            InnerCommittedStringField::Unloaded(_) => Ok(CommittedStringFieldStats {
+                key_count: 0,
+                global_info: GlobalInfo::default(),
+            }),
+        }
+    }
+
+    pub fn global_info(&self) -> GlobalInfo {
+        if !self.loaded() {
+            self.load();
+        }
+
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.global_info(),
+            InnerCommittedStringField::Unloaded(_) => GlobalInfo::default(),
+        }
+    }
+
+    pub fn search(
+        &self,
+        context: &mut FullTextSearchContext<'_, '_>,
+        scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
+    ) -> Result<()> {
+        if !self.loaded() {
+            self.load();
+        }
+
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.search(context, scorer, tolerance),
+            InnerCommittedStringField::Unloaded(_) => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UnloadedCommittedStringField {
+    field_path: Box<[String]>,
+    data_dir: PathBuf,
+}
+
+impl UnloadedCommittedStringField {
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        StringFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LoadedCommittedStringField {
     field_path: Box<[String]>,
     index: FSTIndex,
 
@@ -34,7 +230,7 @@ pub struct CommittedStringField {
     data_dir: PathBuf,
 }
 
-impl CommittedStringField {
+impl LoadedCommittedStringField {
     pub fn from_iter(
         field_path: Box<[String]>,
         uncommitted_iter: impl Iterator<
@@ -220,8 +416,8 @@ impl CommittedStringField {
         })
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
+    pub fn field_path(&self) -> Box<[String]> {
+        self.field_path.clone()
     }
 
     pub fn get_field_info(&self) -> StringFieldInfo {

@@ -553,7 +553,7 @@ pub fn merge_string_field(
             // uncommitted and committed field_path has to be the same
             debug_assert_eq!(
                 uncommitted.field_path(),
-                committed.field_path(),
+                committed.field_path().as_ref(),
                 "Uncommitted and committed field paths should be the same",
             );
 
