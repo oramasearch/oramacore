@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use invocation_counter::Counter;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -129,7 +130,22 @@ impl CommittedStringField {
         }
     }
 
-    pub fn unload(&self) {
+    pub fn unload_if_not_used(&self) {
+        if let InnerCommittedStringField::Loaded(loaded) = &*self.inner.read().unwrap() {
+            if loaded
+                .counter
+                .get_count_till(std::time::Instant::now().elapsed().as_secs())
+                == 0
+            {
+                info!(field_path = ?loaded.field_path, "Unloading committed string field");
+                let _ = loaded; // drop the loaded field to release the lock
+
+                self.unload();
+            }
+        }
+    }
+
+    fn unload(&self) {
         let mut inner = self.inner.write().unwrap();
         if let InnerCommittedStringField::Loaded(loaded) = &*inner {
             let unloaded = UnloadedCommittedStringField {
@@ -228,6 +244,8 @@ pub struct LoadedCommittedStringField {
     document_lengths_per_document: DocumentLengthsPerDocument,
 
     data_dir: PathBuf,
+
+    counter: Counter<40, 4>,
 }
 
 impl LoadedCommittedStringField {
@@ -285,12 +303,14 @@ impl LoadedCommittedStringField {
             Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
                 .context("Cannot commit posting id storage")?,
         );
+
         Ok(Self {
             field_path,
             index,
             posting_storage,
             document_lengths_per_document,
             data_dir,
+            counter: create_counter(),
         })
     }
 
@@ -398,6 +418,7 @@ impl LoadedCommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir,
+            counter: create_counter(),
         })
     }
 
@@ -413,6 +434,7 @@ impl LoadedCommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir: info.data_dir,
+            counter: create_counter(),
         })
     }
 
@@ -437,6 +459,9 @@ impl LoadedCommittedStringField {
         scorer: &mut BM25Scorer<DocumentId>,
         tolerance: Option<u8>,
     ) -> Result<()> {
+        self.counter
+            .increment_by_one(std::time::Instant::now().elapsed().as_secs());
+
         if context.tokens.is_empty() {
             return Ok(());
         }
@@ -815,4 +840,104 @@ pub struct StringFieldInfo {
 pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
+}
+
+fn create_counter() -> Counter<40, 4> {
+    // 42 minutes and 40 seconds, why not?
+    Counter::new(16)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        collection_manager::sides::{
+            read::index::uncommitted_field::UncommittedStringField, Term,
+            TermStringField,
+        },
+        tests::utils::generate_new_path,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_offload_string_field() {
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        uncommitted.insert(
+            DocumentId(1),
+            5,
+            HashMap::from([
+                (
+                    Term("aa".to_string()),
+                    TermStringField {
+                        exact_positions: vec![0, 1],
+                        positions: vec![0, 1],
+                    },
+                ),
+                (
+                    Term("bb".to_string()),
+                    TermStringField {
+                        exact_positions: vec![2, 3],
+                        positions: vec![2, 3],
+                    },
+                ),
+            ]),
+        );
+        uncommitted.insert(
+            DocumentId(2),
+            3,
+            HashMap::from([(
+                Term("aa".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![0],
+                },
+            )]),
+        );
+
+        let mut search_context = FullTextSearchContext {
+            tokens: &["aa".to_string()],
+            exact_match: false,
+            boost: 1.0,
+            filtered_doc_ids: None,
+            global_info: uncommitted.global_info(),
+            uncommitted_deleted_documents: &HashSet::new(),
+            total_term_count: 0,
+        };
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        uncommitted
+            .search(&mut search_context, &mut scorer)
+            .unwrap();
+
+        assert_eq!(scorer.get_scores().len(), 2);
+
+        let field_length_per_doc = uncommitted.field_length_per_doc();
+
+        let data_dir = generate_new_path();
+
+        let committed = CommittedStringField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            uncommitted.iter(),
+            field_length_per_doc,
+            data_dir.clone(),
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        committed
+            .search(&mut search_context, &mut scorer, None)
+            .unwrap();
+
+        assert_eq!(scorer.get_scores().len(), 2);
+
+        committed.unload(); // force unloading
+        assert!(!committed.loaded());
+
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        committed
+            .search(&mut search_context, &mut scorer, None)
+            .unwrap();
+        assert_eq!(scorer.get_scores().len(), 2);
+    }
 }
