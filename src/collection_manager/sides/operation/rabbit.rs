@@ -191,7 +191,7 @@ impl RabbitOperationSenderCreator {
         })
     }
 
-    pub async fn create(self, _: Offset) -> Result<RabbitOperationSender> {
+    pub async fn create(self) -> Result<RabbitOperationSender> {
         let producer = create_producer(self.environment.clone(), self.producer_config)
             .await
             .context("Cannot create producer")?;
