@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::types::InteractionLLMConfig;
 use crate::{
     ai::llms::LLMService,
     collection_manager::sides::read::ReadSide,
@@ -12,6 +13,8 @@ use crate::{
         SearchOffset, SearchParams, WhereFilter,
     },
 };
+
+use super::llms::KnownPrompts;
 
 #[derive(Debug, Serialize)]
 pub enum QueryPlannerOptions {
@@ -49,6 +52,7 @@ pub struct TrainingSet {
     pub read_side: Arc<ReadSide>,
     pub read_api_key: ApiKey,
     pub llm_service: Arc<LLMService>,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 impl TrainingSet {
@@ -57,12 +61,14 @@ impl TrainingSet {
         read_side: Arc<ReadSide>,
         read_api_key: ApiKey,
         llm_service: Arc<LLMService>,
+        llm_config: Option<InteractionLLMConfig>,
     ) -> Self {
         TrainingSet {
             collection_id,
             read_side,
             read_api_key,
             llm_service,
+            llm_config,
         }
     }
 
@@ -82,7 +88,18 @@ impl TrainingSet {
         unimplemented!()
     }
 
-    fn generate_query_planner_training_data(&self) -> Result<QueryOptimizerTrainingData> {
+    async fn generate_query_planner_training_data(&self) -> Result<QueryOptimizerTrainingData> {
+        let random_documents = self.get_random_data_from_collection(5usize).await?;
+        let variables = vec![("documents".to_string(), random_documents.join("\n"))];
+        let random_queries = self
+            .llm_service
+            .run_known_prompt(
+                KnownPrompts::TrainingSetsQueriesGenerator,
+                variables,
+                self.llm_config.clone(),
+            )
+            .await?;
+
         unimplemented!()
     }
 
