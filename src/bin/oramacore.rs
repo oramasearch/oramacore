@@ -53,6 +53,11 @@ fn main() -> anyhow::Result<()> {
             dsn: Some(sentry_dsn.parse().expect("Invalid Sentry DSN")),
             traces_sample_rate: 1.0,
             release: Some(Cow::Owned(get_build_version())),
+            environment: oramacore_config
+                .log
+                .sentry_environment
+                .clone()
+                .map(|s| s.into()),
             ..sentry::ClientOptions::default()
         });
         sentry_guard = Some(_guard);
