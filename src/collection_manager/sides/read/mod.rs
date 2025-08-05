@@ -33,8 +33,9 @@ use tracing::{error, info, trace, warn};
 
 use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchResult};
 use crate::ai::gpu::LocalGPUManager;
-use crate::ai::llms::{self, KnownPrompt, KnownPrompts, LLMService};
+use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
+use crate::ai::training_sets::TrainingSet;
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{

@@ -1592,6 +1592,12 @@ pub struct GetSystemPromptQueryParams {
     pub system_prompt_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TrainingSetsQueryOptimizerParams {
+    #[serde(rename = "api-key")]
+    pub api_key: ApiKey,
+}
+
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]

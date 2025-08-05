@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rand::Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
@@ -47,6 +47,13 @@ pub enum TraningDestination {
     QueryFiltering,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct TrainingSetsQueriesGeneratorResponse {
+    pub simple: Vec<String>,
+    pub multiple_terms: Vec<String>,
+    pub advanced: Vec<String>,
+}
+
 pub struct TrainingSet {
     pub collection_id: CollectionId,
     pub read_side: Arc<ReadSide>,
@@ -72,13 +79,16 @@ impl TrainingSet {
         }
     }
 
-    pub fn generate_training_data_for(&self, destination: TraningDestination) -> TrainingData {
+    pub async fn generate_training_data_for(
+        &self,
+        destination: TraningDestination,
+    ) -> anyhow::Result<TrainingData> {
         match destination {
             TraningDestination::QueryPlanner => {
                 println!("@todo");
             }
             TraningDestination::QueryOptimizer => {
-                println!("@todo");
+                self.generate_query_optimizer_training_data().await?;
             }
             TraningDestination::QueryFiltering => {
                 println!("@todo");
@@ -88,7 +98,10 @@ impl TrainingSet {
         unimplemented!()
     }
 
-    async fn generate_query_planner_training_data(&self) -> Result<QueryOptimizerTrainingData> {
+    // will return QueryOptimizerTrainingData
+    async fn generate_query_optimizer_training_data(
+        &self,
+    ) -> Result<TrainingSetsQueriesGeneratorResponse> {
         let random_documents = self.get_random_data_from_collection(5usize).await?;
         let variables = vec![("documents".to_string(), random_documents.join("\n"))];
         let random_queries = self
@@ -100,7 +113,11 @@ impl TrainingSet {
             )
             .await?;
 
-        unimplemented!()
+        let repaired = llm_json::repair_json(&random_queries, &llm_json::RepairOptions::default())?;
+
+        let random_queries: TrainingSetsQueriesGeneratorResponse = serde_json::from_str(&repaired)?;
+
+        Ok(random_queries)
     }
 
     async fn get_random_data_from_collection(&self, size: usize) -> Result<Vec<String>> {
