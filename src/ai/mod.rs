@@ -42,7 +42,7 @@ impl OramaModel {
             OramaModel::MultilingualE5Base => 768,
             OramaModel::MultilingualE5Large => 1024,
             OramaModel::JinaEmbeddingsV2BaseCode => 768,
-            OramaModel::MultilingualMiniLml12v2 => 768,
+            OramaModel::MultilingualMiniLml12v2 => 384,
         }
     }
 }
