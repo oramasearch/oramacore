@@ -1180,6 +1180,7 @@ impl AdvancedAutoqueryStateMachine {
             .run_known_prompt(
                 KnownPrompts::AdvancedAutoqueryQueryAnalyzer,
                 variables,
+                None,
                 self.llm_config.clone(),
             )
             .await
@@ -1209,6 +1210,7 @@ impl AdvancedAutoqueryStateMachine {
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryPropertiesSelector,
                     variables,
+                    None,
                     self.llm_config.clone(),
                 )
             })
@@ -1274,6 +1276,7 @@ impl AdvancedAutoqueryStateMachine {
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryQueryComposer,
                     variables,
+                    None,
                     self.llm_config.clone(),
                 )
             })
@@ -1808,8 +1811,8 @@ impl AdvancedAutoqueryStateMachine {
 
     async fn get_system_prompt(
         &self,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
+        _collection_id: CollectionId,
+        _read_api_key: ApiKey,
     ) -> Result<
         Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
         AdvancedAutoqueryError,

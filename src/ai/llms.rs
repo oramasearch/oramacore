@@ -364,11 +364,12 @@ impl LLMService {
         &self,
         prompt: KnownPrompts,
         variables: Vec<(String, String)>,
+        custom_system_prompt: Option<SystemPrompt>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
         let mut acc = String::new();
         let mut stream = self
-            .run_known_prompt_stream(prompt, variables, None, llm_config)
+            .run_known_prompt_stream(prompt, variables, custom_system_prompt, llm_config)
             .await
             .context("An error occurred while initializing the stream from remote LLM instance")?;
 
