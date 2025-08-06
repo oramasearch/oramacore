@@ -1204,7 +1204,12 @@ impl AnswerStateMachine {
         let variables = vec![("input".to_string(), query.clone())];
         let optimized_query = self
             .llm_service
-            .run_known_prompt(KnownPrompts::OptimizeQuery, variables, Some(llm_config))
+            .run_known_prompt(
+                KnownPrompts::OptimizeQuery,
+                variables,
+                None,
+                Some(llm_config),
+            )
             .await
             .map_err(|e| AnswerError::LLMServiceError(e.to_string()))?;
 
@@ -1223,6 +1228,7 @@ impl AnswerStateMachine {
             .run_known_prompt(
                 KnownPrompts::DetermineQueryStrategy,
                 variables,
+                None,
                 Some(llm_config),
             )
             .await

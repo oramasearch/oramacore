@@ -477,6 +477,7 @@ impl AdvancedAutoQuery {
             .run_known_prompt(
                 KnownPrompts::AdvancedAutoqueryQueryAnalyzer,
                 variables,
+                None,
                 self.llm_config.clone(),
             )
             .await
@@ -505,6 +506,7 @@ impl AdvancedAutoQuery {
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryPropertiesSelector,
                     variables,
+                    None,
                     self.llm_config.clone(),
                 )
             })
@@ -572,6 +574,7 @@ impl AdvancedAutoQuery {
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryQueryComposer,
                     variables,
+                    None,
                     self.llm_config.clone(),
                 )
             })

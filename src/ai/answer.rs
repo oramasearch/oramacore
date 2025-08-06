@@ -141,6 +141,7 @@ impl Answer {
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
                 optimized_query_variables,
+                system_prompt.clone(),
                 Some(llm_config.clone()),
             )
             .await
@@ -397,7 +398,7 @@ impl Answer {
         println!("Prompt: {prompt:?}");
 
         let suggestions = llm_service
-            .run_known_prompt(prompt, suggestion_params, Some(llm_config))
+            .run_known_prompt(prompt, suggestion_params, None, Some(llm_config))
             .await?;
 
         let repaired = match repair_json(&suggestions, &Default::default()) {
@@ -429,6 +430,7 @@ impl Answer {
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
                 optimized_query_variables,
+                None,
                 Some(llm_config.clone()),
             )
             .await

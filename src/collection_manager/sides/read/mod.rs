@@ -640,6 +640,7 @@ impl ReadSide {
             .run_known_prompt(
                 llms::KnownPrompts::Autoquery,
                 vec![("query".to_string(), query.clone())],
+                None,
                 llm_config,
             )
             .await?;
