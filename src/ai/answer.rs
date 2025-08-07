@@ -141,7 +141,7 @@ impl Answer {
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
                 optimized_query_variables,
-                system_prompt.clone(),
+                None,
                 Some(llm_config.clone()),
             )
             .await
