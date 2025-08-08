@@ -346,9 +346,13 @@ async fn test_offload_vector_field() {
                 read_api_key,
             )?;
             let stats = collection_client.reader_stats().await?;
-            let IndexFieldStatsType::CommittedVector(vector_field_stats) =
-                get_field_stats(&stats, index_id, "___orama_auto_embedding", "committed_vector")
-                    .ok_or_else(|| anyhow::anyhow!("Field stats should exist after commit"))?
+            let IndexFieldStatsType::CommittedVector(vector_field_stats) = get_field_stats(
+                &stats,
+                index_id,
+                "___orama_auto_embedding",
+                "committed_vector",
+            )
+            .ok_or_else(|| anyhow::anyhow!("Field stats should exist after commit"))?
             else {
                 return Err(anyhow::anyhow!("Expected committed vector field stats"));
             };
