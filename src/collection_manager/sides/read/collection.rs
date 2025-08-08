@@ -125,7 +125,7 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config.clone(),
+                offload_config,
             )?;
             indexes.push(index);
         }
@@ -136,7 +136,7 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
                 context.clone(),
-                offload_config.clone(),
+                offload_config,
             )?;
             temp_indexes.push(index);
         }
@@ -543,7 +543,7 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config.clone(),
+                    self.offload_config,
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -560,7 +560,7 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
-                    self.offload_config.clone(),
+                    self.offload_config,
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {

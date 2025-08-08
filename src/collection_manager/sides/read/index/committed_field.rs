@@ -12,6 +12,7 @@ mod bool;
 mod date;
 mod geopoint;
 mod number;
+mod offload_utils;
 mod string;
 mod string_filter;
 mod vector;

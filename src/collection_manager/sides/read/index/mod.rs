@@ -263,7 +263,7 @@ impl Index {
                 field_id,
                 UncommittedStringField::empty(info.field_path.clone()),
             );
-            let field = CommittedStringField::try_load(info, &offload_config)
+            let field = CommittedStringField::try_load(info, offload_config)
                 .context("Cannot load string field")?;
             committed_fields.string_fields.insert(field_id, field);
         }
@@ -1399,7 +1399,7 @@ impl Index {
             Some(IndexFieldStats {
                 field_id: *k,
                 field_path: path,
-                stats: IndexFieldStatsType::CommittedString(v.stats().ok()?),
+                stats: IndexFieldStatsType::CommittedString(v.stats()),
             })
         }));
         fields_stats.extend(committed_fields.vector_fields.iter().filter_map(|(k, v)| {

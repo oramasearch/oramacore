@@ -72,7 +72,7 @@ pub struct ReadSideConfig {
     pub config: IndexesConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct OffloadFieldConfig {
     pub unload_window: DurationString,
     pub slot_count_exp: u8,

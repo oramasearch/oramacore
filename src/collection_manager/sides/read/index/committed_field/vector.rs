@@ -80,7 +80,7 @@ impl CommittedVectorField {
 
         Ok(Self {
             inner: RwLock::new(InnerCommittedVectorField::Loaded(loaded)),
-            offload_config: offload_config.clone(),
+            offload_config: *offload_config,
         })
     }
 
@@ -105,7 +105,7 @@ impl CommittedVectorField {
 
         Ok(Self {
             inner: RwLock::new(InnerCommittedVectorField::Loaded(loaded)),
-            offload_config: offload_config.clone(),
+            offload_config: *offload_config,
         })
     }
 
@@ -113,7 +113,7 @@ impl CommittedVectorField {
         let loaded = LoadedCommittedVectorField::try_load(info, offload_config)?;
         Ok(Self {
             inner: RwLock::new(InnerCommittedVectorField::Loaded(loaded)),
-            offload_config: offload_config.clone(),
+            offload_config: *offload_config,
         })
     }
 
