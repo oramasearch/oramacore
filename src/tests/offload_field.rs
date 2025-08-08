@@ -268,19 +268,33 @@ async fn test_offload_vector_field() {
         .unwrap();
 
     // Perform initial vector search to ensure the field is loaded
-    let search_result = collection_client
-        .search(
-            json!({
-                "mode": "vector",
-                // The first document
-                "term": "Document about artificial intelligence and machine learning",
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+    let search_result = wait_for(&collection_client, move |collection_client| {
+        async move {
+            let search_result = collection_client
+                .search(
+                    json!({
+                        "mode": "vector",
+                        // The first document
+                        "term": "Document about artificial intelligence and machine learning",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
 
+            if search_result.count == 0 {
+                return Err(anyhow::anyhow!(
+                    "No results found, waiting for index to load"
+                ));
+            }
+
+            Ok(search_result)
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
     assert_eq!(search_result.count, 1);
     assert_eq!(search_result.hits.len(), 1);
     assert_eq!(
