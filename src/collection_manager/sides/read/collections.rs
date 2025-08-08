@@ -77,8 +77,12 @@ impl CollectionsReader {
             let collection_dir = base_dir_for_collections.join(collection_id.as_str());
             info!("Loading collection {:?}", collection_dir);
 
-            let collection = CollectionReader::try_load(context.clone(), collection_dir)
-                .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
+            let collection = CollectionReader::try_load(
+                context.clone(),
+                collection_dir,
+                indexes_config.offload_field.clone(),
+            )
+            .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 
             collections.insert(collection_id, collection);
         }
@@ -201,6 +205,7 @@ impl CollectionsReader {
             read_api_key,
             write_api_key,
             self.context.clone(),
+            self.indexes_config.offload_field.clone(),
         )?;
 
         let mut guard = self.collections.write().await;

@@ -82,6 +82,15 @@ reader_side:
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
 
+        # offload fields if there's no search on that field in the last 30minutes
+        # keeping a window of 2 ^ 4 * 2 ^ 8 seconds = 4096 seconds = ~1 hour
+        offload_field:
+            unload_window: 30m
+            # 2 ^ 8 groups
+            slot_count_exp: 8
+            # group by 2 ^ 4 seconds
+            slot_size_exp: 4
+
     # Uncomment to allow analytics
     # analytics:
     #     api_key: my-analytics-api-key

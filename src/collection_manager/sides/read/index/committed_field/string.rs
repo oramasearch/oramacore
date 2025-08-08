@@ -2,19 +2,25 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
+    sync::RwLock,
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result};
+use invocation_counter::InvocationCounter;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::{
     collection_manager::{
         bm25::BM25Scorer,
         global_info::GlobalInfo,
-        sides::read::index::{
-            search_context::FullTextSearchContext,
-            uncommitted_field::{Positions, TotalDocumentsWithTermInField},
+        sides::read::{
+            index::{
+                search_context::FullTextSearchContext,
+                uncommitted_field::{Positions, TotalDocumentsWithTermInField},
+            },
+            OffloadFieldConfig,
         },
     },
     indexes::{fst::FSTIndex, map::Map},
@@ -24,7 +30,242 @@ use crate::{
 use fs::create_if_not_exists;
 
 #[derive(Debug)]
+pub enum InnerCommittedStringField {
+    Loaded(LoadedCommittedStringField),
+    Unloaded(UnloadedCommittedStringField),
+}
+
+#[derive(Debug)]
 pub struct CommittedStringField {
+    inner: RwLock<InnerCommittedStringField>,
+    offload_config: OffloadFieldConfig,
+}
+
+impl CommittedStringField {
+    pub fn try_load(info: StringFieldInfo, offload_config: &OffloadFieldConfig) -> Result<Self> {
+        let loaded = LoadedCommittedStringField::try_load(info, offload_config)?;
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+            offload_config: offload_config.clone(),
+        })
+    }
+
+    pub fn from_iter(
+        field_path: Box<[String]>,
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, (Positions, Positions)>,
+                ),
+            ),
+        >,
+        length_per_documents: HashMap<DocumentId, u32>,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: &OffloadFieldConfig,
+    ) -> Result<Self> {
+        let loaded = LoadedCommittedStringField::from_iter(
+            field_path,
+            uncommitted_iter,
+            length_per_documents,
+            data_dir,
+            uncommitted_document_deletions,
+            offload_config,
+        )?;
+
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+            offload_config: offload_config.clone(),
+        })
+    }
+
+    pub fn from_iter_and_committed(
+        field_path: Box<[String]>,
+        uncommitted_iter: impl Iterator<
+            Item = (
+                Vec<u8>,
+                (
+                    TotalDocumentsWithTermInField,
+                    HashMap<DocumentId, (Positions, Positions)>,
+                ),
+            ),
+        >,
+        committed: &Self,
+        length_per_documents: HashMap<DocumentId, u32>,
+        data_dir: PathBuf,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: &OffloadFieldConfig,
+    ) -> Result<Self> {
+        committed.load(); // enforce loading of the committed field
+        let lock = committed.inner.read().unwrap();
+        let prev_loaded = match &*lock {
+            InnerCommittedStringField::Loaded(loaded) => loaded,
+            InnerCommittedStringField::Unloaded(unloaded) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot commit to an unloaded committed string field: {:?}",
+                    unloaded.get_field_info()
+                ));
+            }
+        };
+
+        let loaded = LoadedCommittedStringField::from_iter_and_committed(
+            field_path,
+            uncommitted_iter,
+            prev_loaded,
+            length_per_documents,
+            data_dir,
+            uncommitted_document_deletions,
+            offload_config,
+        )?;
+
+        Ok(Self {
+            inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
+            offload_config: offload_config.clone(),
+        })
+    }
+
+    fn loaded(&self) -> bool {
+        matches!(
+            *self.inner.read().unwrap(),
+            InnerCommittedStringField::Loaded(_)
+        )
+    }
+
+    fn load(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedStringField::Unloaded(unloaded) = &*inner {
+            let loaded = LoadedCommittedStringField::try_load(
+                unloaded.get_field_info(),
+                &self.offload_config,
+            )
+            .expect("Cannot load committed string field");
+            *inner = InnerCommittedStringField::Loaded(loaded);
+        }
+    }
+
+    pub fn unload_if_not_used(&self) {
+        let lock = self.inner.read().unwrap();
+        let loaded = match &*lock {
+            InnerCommittedStringField::Loaded(loaded) => loaded,
+            InnerCommittedStringField::Unloaded(_) => {
+                return;
+            }
+        };
+
+        let now = now();
+        let start = now - self.offload_config.unload_window.as_secs();
+        let c = loaded.counter.count_in(start, now);
+        if c != 0 {
+            return;
+        }
+
+        drop(lock);
+
+        self.unload();
+    }
+
+    fn unload(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedStringField::Loaded(loaded) = &*inner {
+            let field_path = loaded.field_path();
+            debug!("Unloading committed string field {:?}", field_path,);
+            let stats = loaded.stats().expect("Cannot get stats during unload");
+            let unloaded = UnloadedCommittedStringField {
+                field_path: loaded.field_path.clone(),
+                data_dir: loaded.data_dir.clone(),
+                stats,
+            };
+            *inner = InnerCommittedStringField::Unloaded(unloaded);
+
+            info!("Committed string field {:?} unloaded", field_path,);
+        }
+    }
+
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.get_field_info(),
+            InnerCommittedStringField::Unloaded(unloaded) => StringFieldInfo {
+                field_path: unloaded.field_path.clone(),
+                data_dir: unloaded.data_dir.clone(),
+            },
+        }
+    }
+
+    pub fn field_path(&self) -> Box<[String]> {
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.field_path().clone(),
+            InnerCommittedStringField::Unloaded(unloaded) => unloaded.field_path.clone(),
+        }
+    }
+
+    pub fn stats(&self) -> Result<CommittedStringFieldStats> {
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.stats(),
+            InnerCommittedStringField::Unloaded(unloaded) => Ok(unloaded.get_stats()),
+        }
+    }
+
+    pub fn global_info(&self) -> GlobalInfo {
+        if !self.loaded() {
+            self.load();
+        }
+
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.global_info(),
+            InnerCommittedStringField::Unloaded(_) => GlobalInfo::default(),
+        }
+    }
+
+    pub fn search(
+        &self,
+        context: &mut FullTextSearchContext<'_, '_>,
+        scorer: &mut BM25Scorer<DocumentId>,
+        tolerance: Option<u8>,
+    ) -> Result<()> {
+        if !self.loaded() {
+            self.load();
+        }
+
+        let inner = self.inner.read().unwrap();
+        match &*inner {
+            InnerCommittedStringField::Loaded(loaded) => loaded.search(context, scorer, tolerance),
+            InnerCommittedStringField::Unloaded(_) => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UnloadedCommittedStringField {
+    field_path: Box<[String]>,
+    data_dir: PathBuf,
+    stats: CommittedStringFieldStats,
+}
+
+impl UnloadedCommittedStringField {
+    pub fn get_field_info(&self) -> StringFieldInfo {
+        StringFieldInfo {
+            field_path: self.field_path.clone(),
+            data_dir: self.data_dir.clone(),
+        }
+    }
+
+    pub fn get_stats(&self) -> CommittedStringFieldStats {
+        CommittedStringFieldStats {
+            key_count: self.stats.key_count,
+            global_info: self.stats.global_info.clone(),
+            loaded: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct LoadedCommittedStringField {
     field_path: Box<[String]>,
     index: FSTIndex,
 
@@ -32,9 +273,11 @@ pub struct CommittedStringField {
     document_lengths_per_document: DocumentLengthsPerDocument,
 
     data_dir: PathBuf,
+
+    counter: InvocationCounter,
 }
 
-impl CommittedStringField {
+impl LoadedCommittedStringField {
     pub fn from_iter(
         field_path: Box<[String]>,
         uncommitted_iter: impl Iterator<
@@ -49,6 +292,7 @@ impl CommittedStringField {
         mut length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: &OffloadFieldConfig,
     ) -> Result<Self> {
         let mut posting_id_generator = 0;
 
@@ -89,12 +333,14 @@ impl CommittedStringField {
             Map::from_hash_map(delta_committed_storage, posting_id_storage_file_path)
                 .context("Cannot commit posting id storage")?,
         );
+
         Ok(Self {
             field_path,
             index,
             posting_storage,
             document_lengths_per_document,
             data_dir,
+            counter: create_counter(offload_config.slot_count_exp, offload_config.slot_size_exp),
         })
     }
 
@@ -113,6 +359,7 @@ impl CommittedStringField {
         length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
+        offload_config: &OffloadFieldConfig,
     ) -> Result<Self> {
         create_if_not_exists(&data_dir)
             .context("Cannot create data directory for committed string field")?;
@@ -202,10 +449,11 @@ impl CommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir,
+            counter: create_counter(offload_config.slot_count_exp, offload_config.slot_size_exp),
         })
     }
 
-    pub fn try_load(info: StringFieldInfo) -> Result<Self> {
+    pub fn try_load(info: StringFieldInfo, offload_config: &OffloadFieldConfig) -> Result<Self> {
         let index = FSTIndex::load(info.data_dir.join("fst.map"))?;
         let posting_storage = PostingIdStorage::load(info.data_dir.join("posting_id_storage.map"))?;
         let document_lengths_per_document =
@@ -217,11 +465,12 @@ impl CommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir: info.data_dir,
+            counter: create_counter(offload_config.slot_count_exp, offload_config.slot_size_exp),
         })
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
+    pub fn field_path(&self) -> Box<[String]> {
+        self.field_path.clone()
     }
 
     pub fn get_field_info(&self) -> StringFieldInfo {
@@ -241,6 +490,8 @@ impl CommittedStringField {
         scorer: &mut BM25Scorer<DocumentId>,
         tolerance: Option<u8>,
     ) -> Result<()> {
+        self.counter.register(now());
+
         if context.tokens.is_empty() {
             return Ok(());
         }
@@ -500,6 +751,7 @@ impl CommittedStringField {
         Ok(CommittedStringFieldStats {
             key_count,
             global_info: self.global_info(),
+            loaded: true,
         })
     }
 }
@@ -619,4 +871,121 @@ pub struct StringFieldInfo {
 pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
+    pub loaded: bool,
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn create_counter(slot_count_exp: u8, slot_size_exp: u8) -> InvocationCounter {
+    // 2^8 * 2^4 = 4096 seconds = 1 hour, 6 minutes, and 36 seconds
+    let counter = InvocationCounter::new(slot_count_exp, slot_size_exp);
+
+    // Avoid to unload committed string field if it is created right now.
+    counter.register(now());
+
+    counter
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        collection_manager::sides::{
+            read::index::uncommitted_field::UncommittedStringField, Term, TermStringField,
+        },
+        tests::utils::generate_new_path,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_offload_string_field() {
+        let path = Box::new(["test".to_string()]);
+        let mut uncommitted = UncommittedStringField::empty(path);
+        uncommitted.insert(
+            DocumentId(1),
+            5,
+            HashMap::from([
+                (
+                    Term("term1".to_string()),
+                    TermStringField {
+                        exact_positions: vec![0, 1],
+                        positions: vec![0, 1],
+                    },
+                ),
+                (
+                    Term("term2".to_string()),
+                    TermStringField {
+                        exact_positions: vec![2, 3],
+                        positions: vec![2, 3],
+                    },
+                ),
+            ]),
+        );
+        uncommitted.insert(
+            DocumentId(2),
+            3,
+            HashMap::from([(
+                Term("term1".to_string()),
+                TermStringField {
+                    exact_positions: vec![0],
+                    positions: vec![0],
+                },
+            )]),
+        );
+
+        let mut search_context = FullTextSearchContext {
+            tokens: &["term1".to_string()],
+            exact_match: false,
+            boost: 1.0,
+            filtered_doc_ids: None,
+            global_info: uncommitted.global_info(),
+            uncommitted_deleted_documents: &HashSet::new(),
+            total_term_count: 0,
+        };
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        uncommitted
+            .search(&mut search_context, &mut scorer)
+            .unwrap();
+
+        assert_eq!(scorer.get_scores().len(), 2);
+
+        let field_length_per_doc = uncommitted.field_length_per_doc();
+
+        let data_dir = generate_new_path();
+
+        let committed = CommittedStringField::from_iter(
+            uncommitted.field_path().to_vec().into_boxed_slice(),
+            uncommitted.iter().map(|(n, v)| (n, v.clone())),
+            field_length_per_doc,
+            data_dir.clone(),
+            &HashSet::new(),
+            &crate::collection_manager::sides::read::OffloadFieldConfig {
+                unload_window: std::time::Duration::from_secs(30 * 60).into(), // 30 minutes
+                slot_count_exp: 8, // 2^8 = 256 time slots
+                slot_size_exp: 4,  // 2^4 = 16 seconds per slot
+            },
+        )
+        .unwrap();
+
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        committed
+            .search(&mut search_context, &mut scorer, None)
+            .unwrap();
+
+        assert_eq!(scorer.get_scores().len(), 2);
+
+        committed.unload(); // force unloading
+        assert!(!committed.loaded());
+
+        let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
+        committed
+            .search(&mut search_context, &mut scorer, None)
+            .unwrap();
+        assert_eq!(scorer.get_scores().len(), 2);
+    }
 }

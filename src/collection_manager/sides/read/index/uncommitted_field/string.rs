@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use serde::Serialize;
 use tracing::{debug, warn};
+use xtri::{RadixTree, SearchMode};
 
 use crate::{
     collection_manager::{
@@ -12,7 +13,6 @@ use crate::{
             read::index::search_context::FullTextSearchContext, InsertStringTerms, TermStringField,
         },
     },
-    indexes::radix::RadixIndex,
     types::DocumentId,
 };
 
@@ -62,7 +62,7 @@ pub struct UncommittedStringField {
     /// The length for each document in the collection
     field_length_per_doc: HashMap<DocumentId, u32>,
 
-    inner: RadixIndex<(
+    inner: RadixTree<(
         TotalDocumentsWithTermInField,
         // doc_id => (exact positions, stemmed positions)
         HashMap<DocumentId, PostingPositions>,
@@ -76,7 +76,7 @@ impl UncommittedStringField {
             total_field_length: 0,
             document_ids: HashSet::new(),
             field_length_per_doc: HashMap::new(),
-            inner: RadixIndex::new(),
+            inner: RadixTree::new(),
         }
     }
 
@@ -100,7 +100,7 @@ impl UncommittedStringField {
     }
 
     pub fn clear(&mut self) {
-        self.inner = RadixIndex::new();
+        self.inner.clear();
         self.document_ids = HashSet::new();
         self.field_length_per_doc = HashMap::new();
         self.total_field_length = 0;
@@ -129,28 +129,24 @@ impl UncommittedStringField {
                 exact_positions,
             } = term_string_field;
 
-            match self.inner.get_mut(k.bytes()) {
-                Some(v) => {
+            self.inner.mut_value(&k, |v| {
+                if let Some(v) = v {
                     v.0.increment_by_one();
                     let old_positions =
                         v.1.entry(document_id)
                             .or_insert_with(|| (Positions(vec![]), Positions(vec![])));
                     old_positions.0 .0.extend(exact_positions);
                     old_positions.1 .0.extend(positions);
+                } else {
+                    *v = Some((
+                        TotalDocumentsWithTermInField(1),
+                        HashMap::from_iter([(
+                            document_id,
+                            (Positions(exact_positions), Positions(positions)),
+                        )]),
+                    ));
                 }
-                None => {
-                    self.inner.insert(
-                        k.bytes(),
-                        (
-                            TotalDocumentsWithTermInField(1),
-                            HashMap::from_iter([(
-                                document_id,
-                                (Positions(exact_positions), Positions(positions)),
-                            )]),
-                        ),
-                    );
-                }
-            };
+            });
         }
     }
 
@@ -176,11 +172,12 @@ impl UncommittedStringField {
             // We don't "boost" the exact match at all.
             // Should we boost if the match is "perfect"?
             // TODO: think about this
-            let matches = if context.exact_match {
-                self.inner.search_exact(token)?
+            let mode = if context.exact_match {
+                SearchMode::Exact
             } else {
-                self.inner.search(token)?
+                SearchMode::Prefix
             };
+            let matches = self.inner.search_iter_value(token, mode);
 
             for (total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
@@ -246,13 +243,13 @@ impl UncommittedStringField {
     ) -> impl Iterator<
         Item = (
             Vec<u8>,
-            (
+            &(
                 TotalDocumentsWithTermInField,
                 HashMap<DocumentId, PostingPositions>,
             ),
         ),
     > + '_ {
-        self.inner.inner.iter()
+        self.inner.search_iter("", SearchMode::Prefix)
     }
 
     pub fn stats(&self) -> UncommittedStringFieldStats {

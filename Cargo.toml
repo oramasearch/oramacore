@@ -17,6 +17,7 @@ tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
+xtri = "0.1.1"
 
 bincode = "1.3.3"
 
@@ -33,7 +34,7 @@ ptrie = { git = "https://github.com/oramasearch/ptrie.git", branch = "feat/scan-
 
 regex = "1.11.1"
 
-invocation-counter = "0.1.0"
+invocation-counter = "1.0.0"
 
 rust-stemmers = "1.2.0"
 text-splitter = { version = "0.22", features = [

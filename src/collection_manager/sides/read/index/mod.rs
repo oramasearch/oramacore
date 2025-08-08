@@ -14,7 +14,7 @@ use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
@@ -51,6 +51,7 @@ use fs::{create_if_not_exists, BufferedFile};
 use nlp::{locales::Locale, TextParser};
 
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
+use super::OffloadFieldConfig;
 mod committed_field;
 mod merge;
 mod path_to_index_id_map;
@@ -130,6 +131,7 @@ pub struct Index {
     pub promoted_to_runtime_index: AtomicBool,
 
     context: ReadSideContext,
+    offload_config: OffloadFieldConfig,
 
     document_count: u64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
@@ -146,7 +148,12 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn new(id: IndexId, text_parser: Arc<TextParser>, context: ReadSideContext) -> Self {
+    pub fn new(
+        id: IndexId,
+        text_parser: Arc<TextParser>,
+        context: ReadSideContext,
+        offload_config: OffloadFieldConfig,
+    ) -> Self {
         Self {
             id,
             locale: text_parser.locale(),
@@ -156,6 +163,7 @@ impl Index {
             promoted_to_runtime_index: AtomicBool::new(false),
 
             context,
+            offload_config,
 
             document_count: 0,
             uncommitted_deleted_documents: HashSet::new(),
@@ -175,6 +183,7 @@ impl Index {
         index_id: IndexId,
         data_dir: PathBuf,
         context: ReadSideContext,
+        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
             .context("Cannot open index.json")?
@@ -254,7 +263,8 @@ impl Index {
                 field_id,
                 UncommittedStringField::empty(info.field_path.clone()),
             );
-            let field = CommittedStringField::try_load(info).context("Cannot load string field")?;
+            let field = CommittedStringField::try_load(info, &offload_config)
+                .context("Cannot load string field")?;
             committed_fields.string_fields.insert(field_id, field);
         }
         for (field_id, info) in dump.vector_field_ids {
@@ -277,6 +287,7 @@ impl Index {
             aliases: dump.aliases,
 
             context,
+            offload_config,
 
             document_count: dump.document_count,
             uncommitted_deleted_documents: HashSet::new(),
@@ -314,6 +325,8 @@ impl Index {
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+        warn!("Committing index {:?}", self.id);
+
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -361,6 +374,9 @@ impl Index {
         if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
+
+            self.try_unload_fields().await;
+
             return Ok(());
         }
 
@@ -524,6 +540,7 @@ impl Index {
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge string field")?
             {
@@ -704,6 +721,8 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
+        self.try_unload_fields().await;
+
         BufferedFile::create_or_overwrite(data_dir.join("index.json"))
             .context("Cannot create index.json")?
             .write_json_data(&dump)
@@ -717,6 +736,14 @@ impl Index {
         debug!("Index committed: {:?}", self.id);
 
         Ok(())
+    }
+
+    async fn try_unload_fields(&self) {
+        let lock = self.committed_fields.read().await;
+        for string_field in lock.string_fields.values() {
+            string_field.unload_if_not_used();
+        }
+        drop(lock);
     }
 
     #[inline]

@@ -38,8 +38,8 @@ use crate::{
 use super::{
     index::{Index, IndexStats},
     CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, ReadSide,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -57,6 +57,7 @@ pub struct CollectionReader {
     read_api_key: ApiKey,
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
+    offload_config: OffloadFieldConfig,
 
     indexes: RwLock<Vec<Index>>,
 
@@ -79,6 +80,7 @@ impl CollectionReader {
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
+        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -90,6 +92,7 @@ impl CollectionReader {
             write_api_key,
 
             context,
+            offload_config,
 
             indexes: Default::default(),
             temp_indexes: Default::default(),
@@ -105,7 +108,11 @@ impl CollectionReader {
         })
     }
 
-    pub fn try_load(context: ReadSideContext, data_dir: PathBuf) -> Result<Self> {
+    pub fn try_load(
+        context: ReadSideContext,
+        data_dir: PathBuf,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?
             .read_json_data()
@@ -118,6 +125,7 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("indexes").join(index_id.as_str()),
                 context.clone(),
+                offload_config.clone(),
             )?;
             indexes.push(index);
         }
@@ -128,6 +136,7 @@ impl CollectionReader {
                 index_id,
                 data_dir.join("temp_indexes").join(index_id.as_str()),
                 context.clone(),
+                offload_config.clone(),
             )?;
             temp_indexes.push(index);
         }
@@ -144,6 +153,7 @@ impl CollectionReader {
             write_api_key: dump.write_api_key,
 
             context,
+            offload_config,
 
             indexes: RwLock::new(indexes),
             temp_indexes: RwLock::new(temp_indexes),
@@ -533,6 +543,7 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
+                    self.offload_config.clone(),
                 );
                 let contains = get_index_in_vector(&indexes_lock, index_id).is_some();
                 if contains {
@@ -549,6 +560,7 @@ impl CollectionReader {
                     index_id,
                     self.context.nlp_service.get(locale),
                     self.context.clone(),
+                    self.offload_config.clone(),
                 );
                 let contains = get_index_in_vector(&temp_indexes_lock, index_id).is_some();
                 if contains {
