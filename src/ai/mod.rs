@@ -61,6 +61,8 @@ pub enum RemoteLLMProvider {
     Fireworks,
     Together,
     GoogleVertex,
+    Groq,
+    Anthropic,
 }
 
 impl FromStr for RemoteLLMProvider {
@@ -73,6 +75,8 @@ impl FromStr for RemoteLLMProvider {
             "google_vertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "googlevertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "vertex" => Ok(RemoteLLMProvider::GoogleVertex),
+            "groq" => Ok(RemoteLLMProvider::Groq),
+            "anthropic" => Ok(RemoteLLMProvider::Anthropic),
             _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
         }
     }
