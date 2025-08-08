@@ -1,12 +1,11 @@
-use std::time::Duration;
-
+use anyhow;
 use duration_string::DurationString;
+use futures::FutureExt;
 use serde_json::json;
-use tokio::time::sleep;
 
 use crate::{
     collection_manager::sides::read::{CollectionStats, IndexFieldStatsType, OffloadFieldConfig},
-    tests::utils::{create_oramacore_config, init_log, TestContext},
+    tests::utils::{create_oramacore_config, init_log, wait_for, TestContext},
     types::IndexId,
 };
 
@@ -17,7 +16,7 @@ async fn test_offload_string_field() {
     // Create config with short unload window for testing
     let mut config = create_oramacore_config();
     config.reader_side.config.offload_field = OffloadFieldConfig {
-        unload_window: DurationString::from_string("2s".to_string()).unwrap(),
+        unload_window: DurationString::from_string("3s".to_string()).unwrap(),
         slot_count_exp: 8, // 2^8 groups
         slot_size_exp: 1,  // group by 2 second
     };
@@ -73,24 +72,7 @@ async fn test_offload_string_field() {
     // Commit the index to create committed fields
     test_context.commit_all().await.unwrap();
 
-    // Check field stats after commit - field should be loaded
-    let stats = collection_client.reader_stats().await.unwrap();
-    let IndexFieldStatsType::CommittedString(string_field_stats) =
-        get_field_stats(&stats, index_client.index_id, "text", "committed_string")
-            .expect("Field stats should exist after commit")
-    else {
-        panic!("Expected committed string field stats");
-    };
-    assert!(
-        string_field_stats.loaded,
-        "Field should be loaded after commit"
-    );
-    assert!(
-        string_field_stats.key_count > 0,
-        "Field should contain indexed terms"
-    );
-
-    // Perform search to verify committed field works
+    // Perform search immediately after commit to register activity on the committed field
     let search_result = collection_client
         .search(
             json!({
@@ -105,14 +87,7 @@ async fn test_offload_string_field() {
     assert_eq!(search_result.count, 1);
     assert_eq!(search_result.hits.len(), 1);
 
-    // Wait for automatic field unloading due to the short unload window
-    // The unload happens during commits, so trigger another commit after waiting
-    sleep(Duration::from_millis(5_000)).await;
-
-    // Trigger commit to check for unloading
-    test_context.commit_all().await.unwrap();
-
-    // Verify field was unloaded
+    // Check field stats after search - field should be loaded and have activity
     let stats = collection_client.reader_stats().await.unwrap();
     let IndexFieldStatsType::CommittedString(string_field_stats) =
         get_field_stats(&stats, index_client.index_id, "text", "committed_string")
@@ -121,9 +96,45 @@ async fn test_offload_string_field() {
         panic!("Expected committed string field stats");
     };
     assert!(
-        !string_field_stats.loaded,
-        "Field should be unloaded after timeout"
+        string_field_stats.loaded,
+        "Field should be loaded after commit and search"
     );
+    assert!(
+        string_field_stats.key_count > 0,
+        "Field should contain indexed terms"
+    );
+
+    // Wait for automatic field unloading using wait_for pattern
+    // This continuously commits and checks until the field is unloaded
+    let collection_id = collection_client.collection_id;
+    let write_api_key = collection_client.write_api_key;
+    let read_api_key = collection_client.read_api_key;
+    wait_for(&test_context, |test_context| {
+        let index_id = index_client.index_id;
+        async move {
+            // Trigger commit to check for unloading
+            test_context.commit_all().await?;
+            
+            // Get the collection client and check if field was unloaded
+            let collection_client = test_context.get_test_collection_client(collection_id, write_api_key, read_api_key)?;
+            let stats = collection_client.reader_stats().await?;
+            let IndexFieldStatsType::CommittedString(string_field_stats) =
+                get_field_stats(&stats, index_id, "text", "committed_string")
+                    .ok_or_else(|| anyhow::anyhow!("Field stats should exist after commit"))?
+            else {
+                return Err(anyhow::anyhow!("Expected committed string field stats"));
+            };
+            
+            if string_field_stats.loaded {
+                return Err(anyhow::anyhow!("Field still loaded, waiting for unload"));
+            }
+
+            Ok(())
+        }
+        .boxed()
+    })
+    .await
+    .expect("Field should be unloaded after timeout");
 
     // Perform search - this should trigger automatic reloading of the field
     let search_result = collection_client
