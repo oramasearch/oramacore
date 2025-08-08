@@ -577,6 +577,7 @@ pub fn merge_vector_field(
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
+    offload_config: &OffloadFieldConfig,
 ) -> Result<Option<CommittedVectorField>> {
     create_if_not_exists(&data_dir).context("Failed to create data directory for vector field")?;
 
@@ -596,6 +597,7 @@ pub fn merge_vector_field(
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
                 uncommitted.get_model(),
                 data_dir,
+                offload_config,
             )?;
             Ok(Some(new_field))
         }
@@ -629,7 +631,7 @@ pub fn merge_vector_field(
                     info.data_dir = data_dir;
 
                     return Ok(Some(
-                        CommittedVectorField::try_load(info)
+                        CommittedVectorField::try_load(info, offload_config)
                             .context("Failed to load committed vector field")?,
                     ));
                 }
@@ -640,7 +642,7 @@ pub fn merge_vector_field(
             // uncommitted and committed field_path has to be the same
             debug_assert_eq!(
                 uncommitted.field_path(),
-                committed.field_path(),
+                committed.field_path().as_ref(),
                 "Uncommitted and committed field paths should be the same",
             );
 
@@ -658,6 +660,7 @@ pub fn merge_vector_field(
                 uncommitted_document_deletions,
                 uncommitted.get_model(),
                 data_dir,
+                offload_config,
             )?;
             Ok(Some(new_field))
         }
