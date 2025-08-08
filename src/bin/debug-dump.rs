@@ -102,7 +102,13 @@ async fn main() -> anyhow::Result<()> {
                 llm_service: llm_service.clone(),
                 notifier: None,
             };
-            let index = Index::try_load(index_id, path, context).context("Failed to load index")?;
+            let offload_config = oramacore::collection_manager::sides::read::OffloadFieldConfig {
+                unload_window: std::time::Duration::from_secs(30 * 60).into(), // 30 minutes
+                slot_count_exp: 8, // 2^8 = 256 time slots
+                slot_size_exp: 4,  // 2^4 = 16 seconds per slot
+            };
+            let index = Index::try_load(index_id, path, context, offload_config)
+                .context("Failed to load index")?;
 
             match command {
                 OpenReadIndex::ListDocument => {

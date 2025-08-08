@@ -485,6 +485,7 @@ pub fn merge_string_field(
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
+    offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
 ) -> Result<Option<CommittedStringField>> {
     match (uncommitted, committed) {
         (None, None) => {
@@ -503,6 +504,7 @@ pub fn merge_string_field(
                 length_per_documents,
                 data_dir,
                 uncommitted_document_deletions,
+                offload_config,
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
@@ -535,7 +537,7 @@ pub fn merge_string_field(
                     info.data_dir = data_dir;
 
                     return Ok(Some(
-                        CommittedStringField::try_load(info)
+                        CommittedStringField::try_load(info, offload_config)
                             .context("Failed to load committed string field")?,
                     ));
                 }
@@ -560,6 +562,7 @@ pub fn merge_string_field(
                     length_per_documents,
                     data_dir,
                     uncommitted_document_deletions,
+                    offload_config,
                 )
                 .context("Failed to merge string field")?,
             ))

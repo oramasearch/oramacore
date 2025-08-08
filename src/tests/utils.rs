@@ -31,8 +31,8 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, ReadSide,
-            ReadSideConfig,
+            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, OffloadFieldConfig,
+            ReadSide, ReadSideConfig,
         },
         write::{
             CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
@@ -133,7 +133,11 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 commit_interval: Duration::from_secs(3_000),
                 notifier: None,
                 // Not offload during tests
-                unload_window: Duration::from_secs(30 * 60).into(),
+                offload_field: OffloadFieldConfig {
+                    unload_window: DurationString::from_string("30m".to_string()).unwrap(),
+                    slot_count_exp: 8,
+                    slot_size_exp: 4,
+                },
             },
             analytics: None,
         },

@@ -139,12 +139,12 @@ impl UncommittedStringField {
                     old_positions.1 .0.extend(positions);
                 } else {
                     *v = Some((
-                            TotalDocumentsWithTermInField(1),
-                            HashMap::from_iter([(
-                                document_id,
-                                (Positions(exact_positions), Positions(positions)),
-                            )]),
-                        ));
+                        TotalDocumentsWithTermInField(1),
+                        HashMap::from_iter([(
+                            document_id,
+                            (Positions(exact_positions), Positions(positions)),
+                        )]),
+                    ));
                 }
             });
         }
@@ -179,7 +179,7 @@ impl UncommittedStringField {
             };
             let matches = self.inner.search_iter_value(token, mode);
 
-            for (total_documents_with_term_in_field, position_per_document )in matches {
+            for (total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
                     if let Some(filtered_doc_ids) = context.filtered_doc_ids {
                         if !filtered_doc_ids.contains(doc_id) {

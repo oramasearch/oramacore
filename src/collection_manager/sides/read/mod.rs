@@ -25,7 +25,7 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
-pub use collection::{IndexFieldStatsType, IndexFieldStats};
+pub use collection::{IndexFieldStats, IndexFieldStatsType};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,13 @@ pub struct ReadSideConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct OffloadFieldConfig {
+    pub unload_window: DurationString,
+    pub slot_count_exp: u8,
+    pub slot_size_exp: u8,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct IndexesConfig {
     pub data_dir: PathBuf,
     #[serde(default = "default_insert_batch_commit_size")]
@@ -80,8 +87,8 @@ pub struct IndexesConfig {
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
     pub notifier: Option<NotifierConfig>,
-    #[serde(default = "default_unload_window")]
-    pub unload_window: DurationString,
+    #[serde(default = "default_offload_field")]
+    pub offload_field: OffloadFieldConfig,
 }
 
 #[derive(Error, Debug)]
@@ -761,9 +768,12 @@ fn default_insert_batch_commit_size() -> u64 {
     300
 }
 
-fn default_unload_window() -> DurationString {
-    // 30min
-    Duration::from_secs(30 * 60).into()
+fn default_offload_field() -> OffloadFieldConfig {
+    OffloadFieldConfig {
+        unload_window: Duration::from_secs(30 * 60).into(),
+        slot_count_exp: 8,
+        slot_size_exp: 4,
+    }
 }
 
 fn start_commit_loop(
