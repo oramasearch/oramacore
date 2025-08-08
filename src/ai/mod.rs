@@ -49,9 +49,11 @@ impl OramaModel {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceLLMConfig {
-    pub port: u16,
+    pub port: Option<u16>,
     pub host: String,
     pub model: String,
+    #[serde(default)]
+    pub api_key: String,
 }
 
 #[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]

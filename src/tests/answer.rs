@@ -31,7 +31,7 @@ async fn test_answer() {
         .await
         .unwrap();
     let mut config = create_oramacore_config();
-    config.ai_server.llm.port = output.port();
+    config.ai_server.llm.port = Some(output.port());
 
     let test_context = TestContext::new_with_config(config).await;
 
@@ -165,7 +165,7 @@ async fn test_answer_before_retrieval() {
         .await
         .unwrap();
     let mut config = create_oramacore_config();
-    config.ai_server.llm.port = output.port();
+    config.ai_server.llm.port = Some(output.port());
 
     let test_context = TestContext::new_with_config(config).await;
 
@@ -344,7 +344,7 @@ async fn test_answer_before_answer() {
         .await
         .unwrap();
     let mut config = create_oramacore_config();
-    config.ai_server.llm.port = output.port();
+    config.ai_server.llm.port = Some(output.port());
 
     let test_context = TestContext::new_with_config(config).await;
 

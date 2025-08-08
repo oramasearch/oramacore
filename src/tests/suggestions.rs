@@ -30,7 +30,7 @@ async fn test_answer() {
         .await
         .expect("Failed to create AI server mock");
     let mut config = create_oramacore_config();
-    config.ai_server.llm.port = output.port();
+    config.ai_server.llm.port = Some(output.port());
 
     let test_context = TestContext::new_with_config(config).await;
 

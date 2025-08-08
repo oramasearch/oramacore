@@ -100,8 +100,9 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             embeddings: None,
             llm: AIServiceLLMConfig {
                 host: "localhost".to_string(),
-                port: 8000,
+                port: Some(8000),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                api_key: String::new(),
             },
             remote_llms: None,
         },
