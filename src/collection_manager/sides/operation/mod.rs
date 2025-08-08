@@ -193,7 +193,7 @@ impl OperationSenderCreator {
             }
             OperationSenderCreator::RabbitMQ(creator) => {
                 let sender = creator
-                    .create(offset)
+                    .create()
                     .await
                     .context("Cannot create RabbitMQ sender")?;
                 Ok(OperationSender::RabbitMQ(sender))

@@ -157,23 +157,51 @@ pub fn format_prompt(prompt: String, variables: HashMap<String, String>) -> Stri
 
 #[derive(Debug)]
 pub struct LLMService {
-    pub local_vllm_client: async_openai::Client<OpenAIConfig>,
+    pub local_vllm_client: Option<async_openai::Client<OpenAIConfig>>,
+    pub unified_remote_client: Option<async_openai::Client<OpenAIConfig>>,
     pub remote_clients: Option<HashMap<RemoteLLMProvider, async_openai::Client<OpenAIConfig>>>,
     pub model: String,
     pub default_remote_models: Option<HashMap<RemoteLLMProvider, String>>,
     pub local_gpu_manager: Arc<LocalGPUManager>,
+    pub is_unified_remote: bool,
 }
 
 impl LLMService {
     pub fn try_new(
-        local_vllm_config: AIServiceLLMConfig,
+        llm_config: AIServiceLLMConfig,
         remote_llm_config: Option<Vec<RemoteLLMsConfig>>,
         local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Self> {
-        let local_vllm_provider_url = format!(
-            "http://{}:{}/v1",
-            local_vllm_config.host, local_vllm_config.port
-        );
+        let is_unified_remote = !llm_config.local;
+
+        let (local_vllm_client, unified_remote_client) = if is_unified_remote {
+            // Remote configuration - use host as the API base URL
+            info!(
+                "Configuring unified remote LLM: {} with model {}",
+                llm_config.host, llm_config.model
+            );
+            let mut config = OpenAIConfig::new().with_api_base(&llm_config.host);
+            if !llm_config.api_key.is_empty() {
+                config = config.with_api_key(&llm_config.api_key);
+            }
+            (None, Some(async_openai::Client::with_config(config)))
+        } else {
+            // Local configuration - construct URL with port
+            let local_vllm_provider_url = format!(
+                "http://{}:{}/v1",
+                llm_config.host,
+                llm_config.port.unwrap_or(8000)
+            );
+            info!(
+                "Configuring local LLM: {} with model {}",
+                local_vllm_provider_url, llm_config.model
+            );
+            let mut config = OpenAIConfig::new().with_api_base(&local_vllm_provider_url);
+            if !llm_config.api_key.is_empty() {
+                config = config.with_api_key(&llm_config.api_key);
+            }
+            (Some(async_openai::Client::with_config(config)), None)
+        };
 
         let mut remote_llm_providers: HashMap<
             RemoteLLMProvider,
@@ -207,6 +235,60 @@ impl LLMService {
                                     .with_api_key(&conf.api_key)
                                     .with_api_base(conf.url.unwrap_or_else(|| {
                                         "https://api.openai.com/v1".to_string()
+                                    })),
+                            ),
+                        );
+                    }
+                    RemoteLLMProvider::Groq => {
+                        info!("Found Groq remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for Groq provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models
+                                    .insert(RemoteLLMProvider::Groq, conf.default_model.clone());
+                            }
+                        }
+
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::Groq,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
+                                        "https://api.groq.com/openai/v1".to_string()
+                                    })),
+                            ),
+                        );
+                    }
+                    RemoteLLMProvider::Anthropic => {
+                        info!("Found Anthropic remote LLM provider");
+
+                        match conf.default_model.as_str() {
+                            "" => {
+                                return Err(anyhow::Error::msg(
+                                    "Default model is required for Anthropic provider",
+                                ));
+                            }
+                            _ => {
+                                default_remote_models.insert(
+                                    RemoteLLMProvider::Anthropic,
+                                    conf.default_model.clone(),
+                                );
+                            }
+                        }
+
+                        remote_llm_providers.insert(
+                            RemoteLLMProvider::Anthropic,
+                            async_openai::Client::with_config(
+                                OpenAIConfig::new()
+                                    .with_api_key(&conf.api_key)
+                                    .with_api_base(conf.url.unwrap_or_else(|| {
+                                        "https://api.anthropic.com/v1/".to_string()
                                     })),
                             ),
                         );
@@ -318,13 +400,13 @@ impl LLMService {
         };
 
         Ok(Self {
-            local_vllm_client: async_openai::Client::with_config(
-                OpenAIConfig::new().with_api_base(&local_vllm_provider_url),
-            ),
+            local_vllm_client,
+            unified_remote_client,
             default_remote_models,
             remote_clients,
-            model: local_vllm_config.model,
+            model: llm_config.model,
             local_gpu_manager,
+            is_unified_remote,
         })
     }
 
@@ -375,11 +457,12 @@ impl LLMService {
         &self,
         prompt: KnownPrompts,
         variables: Vec<(String, String)>,
+        custom_system_prompt: Option<SystemPrompt>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
         let mut acc = String::new();
         let mut stream = self
-            .run_known_prompt_stream(prompt, variables, None, llm_config)
+            .run_known_prompt_stream(prompt, variables, custom_system_prompt, llm_config)
             .await
             .context("An error occurred while initializing the stream from remote LLM instance")?;
 
@@ -476,6 +559,7 @@ impl LLMService {
         &self,
         config: Option<InteractionLLMConfig>,
     ) -> async_openai::Client<OpenAIConfig> {
+        // If config specifies a provider, use that remote client
         if let Some(config) = config {
             if let Some(remote_clients) = &self.remote_clients {
                 if let Some(client) = remote_clients.get(&config.provider) {
@@ -484,7 +568,20 @@ impl LLMService {
             }
         }
 
-        self.local_vllm_client.clone()
+        // If we're in unified remote mode, use the unified remote client
+        if self.is_unified_remote {
+            if let Some(unified_client) = &self.unified_remote_client {
+                return unified_client.clone();
+            }
+        }
+
+        // Otherwise use the local client
+        if let Some(local_client) = &self.local_vllm_client {
+            return local_client.clone();
+        }
+
+        // This should never happen if configuration is valid
+        panic!("No LLM client available - configuration error")
     }
 
     pub fn get_chosen_model(&self, config: Option<InteractionLLMConfig>) -> String {
@@ -499,7 +596,7 @@ impl LLMService {
         &self,
         suggestion_request: SuggestionsRequest,
     ) -> Vec<(String, String)> {
-        return vec![
+        vec![
             ("conversation".to_string(), "".to_string()),
             ("context".to_string(), "".to_string()),
             ("query".to_string(), suggestion_request.query),
@@ -507,7 +604,7 @@ impl LLMService {
                 "maxSuggestions".to_string(),
                 suggestion_request.max_suggestions.unwrap_or(3).to_string(),
             ),
-        ];
+        ]
     }
 
     pub fn get_related_questions_params(
@@ -536,6 +633,11 @@ impl LLMService {
     }
 
     pub fn is_gpu_overloaded(&self) -> bool {
+        // If we're using unified remote configuration, GPU overload is not relevant
+        if self.is_unified_remote {
+            return false;
+        }
+
         match self.local_gpu_manager.is_overloaded() {
             Ok(overloaded) => overloaded,
             Err(e) => {
@@ -561,5 +663,65 @@ impl LLMService {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::gpu::LocalGPUManager;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_local_configuration_detection() {
+        let local_config = AIServiceLLMConfig {
+            local: true,
+            port: Some(8000),
+            host: "localhost".to_string(),
+            model: "test-model".to_string(),
+            api_key: "".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(local_config, None, gpu_manager).unwrap();
+
+        assert!(!service.is_unified_remote);
+        assert!(service.local_vllm_client.is_some());
+        assert!(service.unified_remote_client.is_none());
+    }
+
+    #[test]
+    fn test_remote_configuration_detection() {
+        let remote_config = AIServiceLLMConfig {
+            local: false,
+            port: None,
+            host: "https://api.groq.com/openai/v1".to_string(),
+            model: "test-model".to_string(),
+            api_key: "test-key".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(remote_config, None, gpu_manager).unwrap();
+
+        assert!(service.is_unified_remote);
+        assert!(service.local_vllm_client.is_none());
+        assert!(service.unified_remote_client.is_some());
+    }
+
+    #[test]
+    fn test_gpu_overload_check_with_remote_config() {
+        let remote_config = AIServiceLLMConfig {
+            local: false,
+            port: None,
+            host: "https://api.groq.com/openai/v1".to_string(),
+            model: "test-model".to_string(),
+            api_key: "test-key".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(remote_config, None, gpu_manager).unwrap();
+
+        // GPU overload should always return false for remote configurations
+        assert!(!service.is_gpu_overloaded());
     }
 }

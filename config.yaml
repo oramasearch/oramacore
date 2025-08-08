@@ -53,7 +53,7 @@ writer_side:
     # Uncomment to allow JWT validation
     # jwt:
     #     jwks_url: http://localhost:3000/api/.well-known/jwks.json
-    #     issuers: 
+    #     issuers:
     #         - http://localhost:3000
     #     audiences:
     #         - http://localhost:8080
@@ -82,6 +82,15 @@ reader_side:
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
 
+        # offload fields if there's no search on that field in the last 30minutes
+        # keeping a window of 2 ^ 4 * 2 ^ 8 seconds = 4096 seconds = ~1 hour
+        offload_field:
+            unload_window: 30m
+            # 2 ^ 8 groups
+            slot_count_exp: 8
+            # group by 2 ^ 4 seconds
+            slot_size_exp: 4
+
     # Uncomment to allow analytics
     # analytics:
     #     api_key: my-analytics-api-key
@@ -106,9 +115,18 @@ ai_server:
         #     provider: openai
 
     llm:
+        local: true
         port: 8000
         host: 0.0.0.0
         model: "Qwen/Qwen2.5-3B-Instruct"
+
+      # Remote LLM configuration
+      # Uncomment the lines below and comment the above to use remote LLM
+      # local: false
+      # host: "https://api.groq.com/openai/v1"
+      # model: "openai/gpt-oss-120b"
+      # api_key: "your-api-key-here"
+
 
     remote_llms:
     # - provider: openai

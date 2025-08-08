@@ -43,16 +43,20 @@ impl OramaModel {
             OramaModel::MultilingualE5Base => 768,
             OramaModel::MultilingualE5Large => 1024,
             OramaModel::JinaEmbeddingsV2BaseCode => 768,
-            OramaModel::MultilingualMiniLml12v2 => 768,
+            OramaModel::MultilingualMiniLml12v2 => 384,
         }
     }
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceLLMConfig {
-    pub port: u16,
+    #[serde(default = "default_local")]
+    pub local: bool,
+    pub port: Option<u16>,
     pub host: String,
     pub model: String,
+    #[serde(default)]
+    pub api_key: String,
 }
 
 #[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
@@ -62,6 +66,8 @@ pub enum RemoteLLMProvider {
     Fireworks,
     Together,
     GoogleVertex,
+    Groq,
+    Anthropic,
 }
 
 impl FromStr for RemoteLLMProvider {
@@ -74,6 +80,8 @@ impl FromStr for RemoteLLMProvider {
             "google_vertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "googlevertex" => Ok(RemoteLLMProvider::GoogleVertex),
             "vertex" => Ok(RemoteLLMProvider::GoogleVertex),
+            "groq" => Ok(RemoteLLMProvider::Groq),
+            "anthropic" => Ok(RemoteLLMProvider::Anthropic),
             _ => Err(anyhow!("Invalid remote LLM provider: {}", s)),
         }
     }
@@ -308,4 +316,7 @@ fn default_max_connections() -> u64 {
 }
 fn default_scheme() -> Scheme {
     Scheme::HTTP
+}
+fn default_local() -> bool {
+    true
 }

@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
+use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
 use fastembed::{
@@ -30,8 +31,8 @@ use crate::{
     build_orama,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, ReadSide,
-            ReadSideConfig,
+            AnalyticSearchEventInvocationType, CollectionStats, IndexesConfig, OffloadFieldConfig,
+            ReadSide, ReadSideConfig,
         },
         write::{
             CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
@@ -99,9 +100,11 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
+                local: true,
                 host: "localhost".to_string(),
-                port: 8000,
+                port: Some(8000),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),
+                api_key: String::new(),
             },
             remote_llms: None,
         },
@@ -131,6 +134,12 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 insert_batch_commit_size: 10_000,
                 commit_interval: Duration::from_secs(3_000),
                 notifier: None,
+                // Not offload during tests
+                offload_field: OffloadFieldConfig {
+                    unload_window: DurationString::from_string("30m".to_string()).unwrap(),
+                    slot_count_exp: 8,
+                    slot_size_exp: 4,
+                },
             },
             analytics: None,
         },
@@ -363,7 +372,7 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
 
 pub async fn wait_for<'i, 'b, I, R>(
     i: &'i I,
-    f: impl Fn(&I) -> BoxFuture<'b, Result<R>>,
+    f: impl Fn(&'i I) -> BoxFuture<'b, Result<R>>,
 ) -> Result<R>
 where
     'b: 'i,

@@ -1,9 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use hook_storage::HookType;
 use itertools::Itertools;
 use tokio::{
-    sync::{broadcast, mpsc, RwLock},
+    sync::{mpsc, RwLock},
     time::sleep,
 };
 
@@ -31,7 +30,7 @@ async fn test_answer() {
         .await
         .expect("Failed to create AI server mock");
     let mut config = create_oramacore_config();
-    config.ai_server.llm.port = output.port();
+    config.ai_server.llm.port = Some(output.port());
 
     let test_context = TestContext::new_with_config(config).await;
 
@@ -40,7 +39,7 @@ async fn test_answer() {
     let read_api_key = collection_client.read_api_key;
     let index_client = collection_client.create_index().await.unwrap();
 
-    println!("collection_id: {}", collection_id);
+    println!("collection_id: {collection_id}");
 
     let docs = r#" [
         {"id":"1","name":"I'm Tommaso, a software developer"}

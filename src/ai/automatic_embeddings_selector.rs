@@ -187,6 +187,7 @@ impl AutomaticEmbeddingsSelector {
                 .run_known_prompt(
                     super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
                     variables,
+                    None,
                     self.llm_config.clone(),
                 )
                 .await

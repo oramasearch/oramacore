@@ -170,6 +170,13 @@ pub enum AnswerFlow {
         read_api_key: ApiKey,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     },
+    HandleSystemPrompt {
+        interaction: Interaction,
+        llm_config: InteractionLLMConfig,
+        search_results: Vec<SearchResultHit>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    },
     ExecuteAfterRetrievalHook {
         interaction: Interaction,
         llm_config: InteractionLLMConfig,
@@ -349,6 +356,18 @@ impl AnswerStateMachine {
                     "search_results_count": search_results.len()
                 })
             }
+            AnswerFlow::HandleSystemPrompt {
+                interaction,
+                search_results,
+                ..
+            } => {
+                serde_json::json!({
+                    "type": "HandleSystemPrompt",
+                    "interaction_id": interaction.interaction_id,
+                    "search_results_count": search_results.len(),
+                    "system_prompt_id": interaction.system_prompt_id
+                })
+            }
             AnswerFlow::ExecuteBeforeAnswerHook {
                 interaction,
                 search_results,
@@ -395,7 +414,7 @@ impl AnswerStateMachine {
         interaction: Interaction,
         collection_id: CollectionId,
         read_api_key: ApiKey,
-        log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
+        _log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
     ) -> Result<GeneratedAnswer, AnswerError> {
         info!(
             "Starting answer generation for collection: {}",
@@ -435,7 +454,7 @@ impl AnswerStateMachine {
             self.send_event(AnswerEvent::Progress {
                 current_step: current_step_json,
                 total_steps,
-                message: format!("Processing step {}/{}", current_step, total_steps),
+                message: format!("Processing step {current_step}/{total_steps}"),
             })
             .await;
 
@@ -480,8 +499,9 @@ impl AnswerStateMachine {
                 AnswerFlow::GetLLMConfig {
                     interaction,
                     llm_config,
-                    collection_id,
-                    read_api_key,
+                    ..
+                    // collection_id,
+                    // read_api_key,
                 } => {
                     let query_strategy = self
                         .transition_to_determine_query_strategy(interaction, llm_config)
@@ -497,10 +517,11 @@ impl AnswerStateMachine {
                     .await;
                 }
                 AnswerFlow::DetermineQueryStrategy {
-                    interaction,
-                    llm_config,
-                    collection_id,
-                    read_api_key,
+                    ..
+                    // interaction,
+                    // llm_config,
+                    // collection_id,
+                    // read_api_key,
                 } => {
                     // This state is handled by the transition method
                     // The transition method will route to either SimpleRAG or AdvancedAutoquery
@@ -537,10 +558,11 @@ impl AnswerStateMachine {
                 AnswerFlow::OptimizeQuery {
                     interaction,
                     llm_config,
-                    system_prompt,
                     collection_id,
                     read_api_key,
                     optimized_query,
+                    // system_prompt,
+                    ..
                 } => {
                     // Execute before retrieval hook
                     self.send_event(AnswerEvent::StateChanged {
@@ -565,14 +587,15 @@ impl AnswerStateMachine {
                     optimized_query,
                     collection_id,
                     read_api_key,
-                    log_sender,
+                    // log_sender,
+                    ..
                 } => {
                     let search_results = self
                         .execute_search(
                             interaction.clone(),
                             llm_config.clone(),
-                            collection_id.clone(),
-                            read_api_key.clone(),
+                            collection_id,
+                            read_api_key,
                             optimized_query,
                         )
                         .await?;
@@ -604,18 +627,33 @@ impl AnswerStateMachine {
                     )
                     .await?;
                 }
-                AnswerFlow::ExecuteAfterRetrievalHook {
+                AnswerFlow::HandleSystemPrompt {
                     interaction,
                     llm_config,
                     search_results,
                     collection_id,
                     read_api_key,
                 } => {
+                    let system_prompt = self
+                        .handle_system_prompt(interaction.system_prompt_id.clone())
+                        .await?;
+
+                    self.send_event(AnswerEvent::StateChanged {
+                        state: "handle_system_prompt".to_string(),
+                        message: "Processing system prompt".to_string(),
+                        data: Some(serde_json::json!({
+                            "has_system_prompt": system_prompt.is_some(),
+                            "system_prompt_id": interaction.system_prompt_id
+                        })),
+                    })
+                    .await;
+
+                    // Now transition to execute before answer hook with the system prompt
                     let (variables, processed_system_prompt) = self
                         .transition_to_execute_before_answer_hook(
                             interaction,
                             llm_config,
-                            None, // system_prompt
+                            system_prompt,
                             search_results,
                             collection_id,
                             read_api_key,
@@ -632,6 +670,23 @@ impl AnswerStateMachine {
                         })),
                     })
                     .await;
+                }
+                AnswerFlow::ExecuteAfterRetrievalHook {
+                    interaction,
+                    llm_config,
+                    search_results,
+                    collection_id,
+                    read_api_key,
+                } => {
+                    // Transition to handle system prompt
+                    self.transition_to_handle_system_prompt(
+                        interaction,
+                        llm_config,
+                        search_results,
+                        collection_id,
+                        read_api_key,
+                    )
+                    .await?;
                 }
                 AnswerFlow::ExecuteBeforeAnswerHook {
                     interaction,
@@ -710,7 +765,7 @@ impl AnswerStateMachine {
                     error!("Answer generation failed: {:?}", error);
                     self.send_event(AnswerEvent::Error {
                         error: error.to_string(),
-                        state: format!("{:?}", error),
+                        state: format!("{error:?}"),
                         is_terminal: Some(true),
                     })
                     .await;
@@ -747,7 +802,7 @@ impl AnswerStateMachine {
                     if let Some(sender) = &state_machine.event_sender {
                         let _ = sender.send(AnswerEvent::Error {
                             error: e.to_string(),
-                            state: format!("{:?}", e),
+                            state: format!("{e:?}"),
                             is_terminal: Some(true),
                         });
                     }
@@ -827,8 +882,8 @@ impl AnswerStateMachine {
             let collection_stats = self
                 .read_side
                 .collection_stats(
-                    self.read_api_key.clone(),
-                    self.collection_id.clone(),
+                    self.read_api_key,
+                    self.collection_id,
                     crate::types::CollectionStatsRequest { with_keys: false },
                 )
                 .await
@@ -841,8 +896,8 @@ impl AnswerStateMachine {
                 Some(llm_config.clone()),
                 collection_stats,
                 self.read_side.clone(),
-                self.collection_id.clone(),
-                self.read_api_key.clone(),
+                self.collection_id,
+                self.read_api_key,
             );
 
             // Run the advanced autoquery with streaming and capture events
@@ -854,11 +909,7 @@ impl AnswerStateMachine {
                 });
             }
             let advanced_event_stream = advanced_state_machine
-                .run_stream(
-                    messages,
-                    self.collection_id.clone(),
-                    self.read_api_key.clone(),
-                )
+                .run_stream(messages, self.collection_id, self.read_api_key)
                 .await
                 .map_err(|e| AnswerError::AdvancedAutoqueryError(e.to_string()))?;
 
@@ -869,8 +920,8 @@ impl AnswerStateMachine {
                 match advanced_event {
                     crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::StateChanged { state, message, data } => {
                         self.send_event(AnswerEvent::StateChanged {
-                            state: format!("advanced_autoquery_{}", state),
-                            message: format!("Advanced Autoquery: {}", message),
+                            state: format!("advanced_autoquery_{state}"),
+                            message: format!("Advanced Autoquery: {message}"),
                             data,
                         })
                         .await;
@@ -879,7 +930,7 @@ impl AnswerStateMachine {
                         self.send_event(AnswerEvent::Progress {
                             current_step: serde_json::json!({"type": "advanced_autoquery", "step": current_step}),
                             total_steps,
-                            message: format!("Advanced Autoquery: {}", message),
+                            message: format!("Advanced Autoquery: {message}"),
                         })
                         .await;
                     }
@@ -896,8 +947,8 @@ impl AnswerStateMachine {
                     }
                     crate::ai::state_machines::advanced_autoquery::AdvancedAutoqueryEvent::Error { error, state, is_terminal } => {
                         self.send_event(AnswerEvent::Error {
-                            error: format!("Advanced Autoquery Error: {}", error),
-                            state: format!("advanced_autoquery_{}", state),
+                            error: format!("Advanced Autoquery Error: {error}"),
+                            state: format!("advanced_autoquery_{state}"),
                             is_terminal,
                         })
                         .await;
@@ -910,8 +961,8 @@ impl AnswerStateMachine {
             *state = AnswerFlow::ExecuteBeforeRetrievalHook {
                 interaction,
                 llm_config,
-                collection_id: self.collection_id.clone(),
-                read_api_key: self.read_api_key.clone(),
+                collection_id: self.collection_id,
+                read_api_key: self.read_api_key,
             };
         } else {
             // Simple RAG flow - go directly to system prompt handling
@@ -927,8 +978,8 @@ impl AnswerStateMachine {
                 interaction: interaction.clone(),
                 llm_config: llm_config.clone(),
                 system_prompt: None,
-                collection_id: self.collection_id.clone(),
-                read_api_key: self.read_api_key.clone(),
+                collection_id: self.collection_id,
+                read_api_key: self.read_api_key,
                 optimized_query: interaction.query.clone(),
             };
         }
@@ -1004,10 +1055,9 @@ impl AnswerStateMachine {
         // For now, we'll just pass through the search results
 
         let mut state = self.state.lock().await;
-        *state = AnswerFlow::ExecuteBeforeAnswerHook {
+        *state = AnswerFlow::ExecuteAfterRetrievalHook {
             interaction,
             llm_config,
-            system_prompt: None,
             search_results,
             collection_id,
             read_api_key,
@@ -1048,6 +1098,25 @@ impl AnswerStateMachine {
             read_api_key,
         };
         Ok((variables, processed_system_prompt))
+    }
+
+    async fn transition_to_handle_system_prompt(
+        &self,
+        interaction: Interaction,
+        llm_config: InteractionLLMConfig,
+        search_results: Vec<SearchResultHit>,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+    ) -> Result<(), AnswerError> {
+        let mut state = self.state.lock().await;
+        *state = AnswerFlow::HandleSystemPrompt {
+            interaction,
+            llm_config,
+            search_results,
+            collection_id,
+            read_api_key,
+        };
+        Ok(())
     }
 
     async fn transition_to_generate_answer(
@@ -1174,7 +1243,7 @@ impl AnswerStateMachine {
             Some(id) => {
                 let full_prompt = self
                     .read_side
-                    .get_system_prompt(self.read_api_key.clone(), self.collection_id.clone(), id)
+                    .get_system_prompt(self.read_api_key, self.collection_id, id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                 Ok(full_prompt)
@@ -1182,17 +1251,14 @@ impl AnswerStateMachine {
             None => {
                 let has_system_prompts = self
                     .read_side
-                    .has_system_prompts(self.read_api_key.clone(), self.collection_id.clone())
+                    .has_system_prompts(self.read_api_key, self.collection_id)
                     .await
                     .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
 
                 if has_system_prompts {
                     let chosen_system_prompt = self
                         .read_side
-                        .perform_system_prompt_selection(
-                            self.read_api_key.clone(),
-                            self.collection_id.clone(),
-                        )
+                        .perform_system_prompt_selection(self.read_api_key, self.collection_id)
                         .await
                         .map_err(|e| AnswerError::SystemPromptError(e.to_string()))?;
                     Ok(chosen_system_prompt)
@@ -1211,7 +1277,12 @@ impl AnswerStateMachine {
         let variables = vec![("input".to_string(), query.clone())];
         let optimized_query = self
             .llm_service
-            .run_known_prompt(KnownPrompts::OptimizeQuery, variables, Some(llm_config))
+            .run_known_prompt(
+                KnownPrompts::OptimizeQuery,
+                variables,
+                None,
+                Some(llm_config),
+            )
             .await
             .map_err(|e| AnswerError::LLMServiceError(e.to_string()))?;
 
@@ -1230,6 +1301,7 @@ impl AnswerStateMachine {
             .run_known_prompt(
                 KnownPrompts::DetermineQueryStrategy,
                 variables,
+                None,
                 Some(llm_config),
             )
             .await
@@ -1275,7 +1347,7 @@ impl AnswerStateMachine {
     async fn execute_search(
         &self,
         interaction: Interaction,
-        llm_config: InteractionLLMConfig,
+        _llm_config: InteractionLLMConfig,
         collection_id: CollectionId,
         read_api_key: ApiKey,
         optimized_query: String,
@@ -1286,12 +1358,12 @@ impl AnswerStateMachine {
             let components = self
                 .execute_rag_at_specification(&parsed.components, interaction.clone())
                 .await
-                .map_err(|e| AnswerError::RagAtError(format!("{:?}", e)))?;
+                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
 
             let results = self
                 .merge_component_results(components)
                 .await
-                .map_err(|e| AnswerError::RagAtError(format!("{:?}", e)))?;
+                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
             results
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
@@ -1303,10 +1375,10 @@ impl AnswerStateMachine {
                 .map_or("vector", |s| s.as_str())
             {
                 "vector" => SearchMode::Vector(VectorMode {
-                    term: interaction.query.clone(),
+                    term: optimized_query,
                     similarity: min_similarity,
                 }),
-                mode => SearchMode::from_str(mode, interaction.query.clone()),
+                mode => SearchMode::from_str(mode, optimized_query),
             };
 
             let params = SearchParams {
@@ -1401,13 +1473,13 @@ impl AnswerStateMachine {
         llm_config: InteractionLLMConfig,
         system_prompt: Option<SystemPrompt>,
         search_results: Vec<SearchResultHit>,
-        collection_id: CollectionId,
-        read_api_key: ApiKey,
+        _collection_id: CollectionId,
+        _read_api_key: ApiKey,
     ) -> Result<String, AnswerError> {
         let search_result_str = serde_json::to_string(&search_results)
             .map_err(|e| AnswerError::JsonParsingError(e.to_string()))?;
 
-        let mut variables = vec![
+        let variables = vec![
             ("question".to_string(), interaction.query.clone()),
             ("context".to_string(), search_result_str.clone()),
         ];

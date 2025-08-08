@@ -3210,9 +3210,9 @@ dependencies = [
 
 [[package]]
 name = "invocation-counter"
-version = "0.1.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95527be09cc8c06ee0ef1e5b23ad9064ef545ea23ff8be3bbcb59dfd8b0f9dc0"
+checksum = "420c5b7354025cb96da7f0416ba218e810f00cfcc2211f681038dbde9b59e5ff"
 
 [[package]]
 name = "io-uring"
@@ -4286,7 +4286,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-version = "1.1.66"
+version = "1.1.70"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -4385,6 +4385,7 @@ dependencies = [
  "tree-sitter-html",
  "tree-sitter-javascript",
  "tree-sitter-typescript",
+ "xtri",
  "zebo",
 ]
 
@@ -8332,6 +8333,12 @@ name = "xorfilter-rs"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47f9da296a88b6bc150b896d17770a62d4dc6f63ecf0ed10a9c08a1cb3d12f24"
+
+[[package]]
+name = "xtri"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3be156738051ea58ca5b455a2f1cfa5f001753f75cac9e3e3cd85e2e8979047"
 
 [[package]]
 name = "xxhash-rust"

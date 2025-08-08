@@ -9,6 +9,7 @@ use crate::merger::MergedIterator;
 use crate::types::{DocumentId, SerializableNumber};
 use fs::create_if_not_exists;
 
+use super::super::OffloadFieldConfig;
 use super::committed_field::*;
 use super::uncommitted_field::*;
 
@@ -485,6 +486,7 @@ pub fn merge_string_field(
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
+    offload_config: &OffloadFieldConfig,
 ) -> Result<Option<CommittedStringField>> {
     match (uncommitted, committed) {
         (None, None) => {
@@ -496,15 +498,14 @@ pub fn merge_string_field(
         (Some(uncommitted), None) => {
             let length_per_documents = uncommitted.field_length_per_doc();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-            let mut entries: Vec<_> = iter.collect();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             Ok(Some(CommittedStringField::from_iter(
                 uncommitted.field_path().to_vec().into_boxed_slice(),
-                entries.into_iter(),
+                iter,
                 length_per_documents,
                 data_dir,
                 uncommitted_document_deletions,
+                offload_config,
             )?))
         }
         (Some(uncommitted), Some(committed)) => {
@@ -537,7 +538,7 @@ pub fn merge_string_field(
                     info.data_dir = data_dir;
 
                     return Ok(Some(
-                        CommittedStringField::try_load(info)
+                        CommittedStringField::try_load(info, offload_config)
                             .context("Failed to load committed string field")?,
                     ));
                 }
@@ -545,26 +546,24 @@ pub fn merge_string_field(
             }
 
             let length_per_documents = uncommitted.field_length_per_doc();
-            // let uncommitted_iter = uncommitted.iter();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-            let mut entries: Vec<_> = iter.collect();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             // uncommitted and committed field_path has to be the same
             debug_assert_eq!(
                 uncommitted.field_path(),
-                committed.field_path(),
+                committed.field_path().as_ref(),
                 "Uncommitted and committed field paths should be the same",
             );
 
             Ok(Some(
                 CommittedStringField::from_iter_and_committed(
                     uncommitted.field_path().to_vec().into_boxed_slice(),
-                    entries.into_iter(),
+                    iter,
                     committed,
                     length_per_documents,
                     data_dir,
                     uncommitted_document_deletions,
+                    offload_config,
                 )
                 .context("Failed to merge string field")?,
             ))

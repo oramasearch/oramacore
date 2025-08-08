@@ -130,7 +130,12 @@ impl SystemPromptInterface {
         let variables = vec![("input".to_string(), system_prompt.prompt)];
         let response = self
             .llm_service
-            .run_known_prompt(KnownPrompts::ValidateSystemPrompt, variables, llm_config)
+            .run_known_prompt(
+                KnownPrompts::ValidateSystemPrompt,
+                variables,
+                None,
+                llm_config,
+            )
             .await?;
 
         let repaired = repair_json(&response, &Default::default())?;
