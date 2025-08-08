@@ -274,7 +274,8 @@ impl Index {
                 field_id,
                 UncommittedVectorField::empty(info.field_path.clone(), info.model.0),
             );
-            let field = CommittedVectorField::try_load(info).context("Cannot load vector field")?;
+            let field = CommittedVectorField::try_load(info, &offload_config)
+                .context("Cannot load vector field")?;
             committed_fields.vector_fields.insert(field_id, field);
         }
 
@@ -567,6 +568,7 @@ impl Index {
                 data_dir,
                 &self.uncommitted_deleted_documents,
                 is_promoted,
+                &self.offload_config,
             )
             .context("Cannot merge vector field")?
             {
@@ -742,6 +744,9 @@ impl Index {
         let lock = self.committed_fields.read().await;
         for string_field in lock.string_fields.values() {
             string_field.unload_if_not_used();
+        }
+        for vector_field in lock.vector_fields.values() {
+            vector_field.unload_if_not_used();
         }
         drop(lock);
     }
