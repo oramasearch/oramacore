@@ -161,8 +161,7 @@ impl LLMService {
         remote_llm_config: Option<Vec<RemoteLLMsConfig>>,
         local_gpu_manager: Arc<LocalGPUManager>,
     ) -> Result<Self> {
-        // Determine if this is a local or remote configuration based on the presence of port
-        let is_unified_remote = llm_config.port.is_none();
+        let is_unified_remote = !llm_config.local;
 
         let (local_vllm_client, unified_remote_client) = if is_unified_remote {
             // Remote configuration - use host as the API base URL
@@ -653,5 +652,65 @@ impl LLMService {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::gpu::LocalGPUManager;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_local_configuration_detection() {
+        let local_config = AIServiceLLMConfig {
+            local: true,
+            port: Some(8000),
+            host: "localhost".to_string(),
+            model: "test-model".to_string(),
+            api_key: "".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(local_config, None, gpu_manager).unwrap();
+
+        assert!(!service.is_unified_remote);
+        assert!(service.local_vllm_client.is_some());
+        assert!(service.unified_remote_client.is_none());
+    }
+
+    #[test]
+    fn test_remote_configuration_detection() {
+        let remote_config = AIServiceLLMConfig {
+            local: false,
+            port: None,
+            host: "https://api.groq.com/openai/v1".to_string(),
+            model: "test-model".to_string(),
+            api_key: "test-key".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(remote_config, None, gpu_manager).unwrap();
+
+        assert!(service.is_unified_remote);
+        assert!(service.local_vllm_client.is_none());
+        assert!(service.unified_remote_client.is_some());
+    }
+
+    #[test]
+    fn test_gpu_overload_check_with_remote_config() {
+        let remote_config = AIServiceLLMConfig {
+            local: false,
+            port: None,
+            host: "https://api.groq.com/openai/v1".to_string(),
+            model: "test-model".to_string(),
+            api_key: "test-key".to_string(),
+        };
+
+        let gpu_manager = Arc::new(LocalGPUManager::new());
+        let service = LLMService::try_new(remote_config, None, gpu_manager).unwrap();
+
+        // GPU overload should always return false for remote configurations
+        assert!(!service.is_gpu_overloaded());
     }
 }

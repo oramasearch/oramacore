@@ -99,6 +99,7 @@ pub fn create_oramacore_config() -> OramacoreConfig {
             scheme: Scheme::HTTP,
             embeddings: None,
             llm: AIServiceLLMConfig {
+                local: true,
                 host: "localhost".to_string(),
                 port: Some(8000),
                 model: "Qwen/Qwen2.5-3b-Instruct".to_string(),

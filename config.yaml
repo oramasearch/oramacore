@@ -53,7 +53,7 @@ writer_side:
     # Uncomment to allow JWT validation
     # jwt:
     #     jwks_url: http://localhost:3000/api/.well-known/jwks.json
-    #     issuers: 
+    #     issuers:
     #         - http://localhost:3000
     #     audiences:
     #         - http://localhost:8080
@@ -106,9 +106,18 @@ ai_server:
         #     provider: openai
 
     llm:
+        local: true
         port: 8000
         host: 0.0.0.0
         model: "Qwen/Qwen2.5-3B-Instruct"
+
+      # Remote LLM configuration
+      # Uncomment the lines below and comment the above to use remote LLM
+      # local: false
+      # host: "https://api.groq.com/openai/v1"
+      # model: "openai/gpt-oss-120b"
+      # api_key: "your-api-key-here"
+
 
     remote_llms:
     # - provider: openai

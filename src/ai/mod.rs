@@ -49,6 +49,8 @@ impl OramaModel {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AIServiceLLMConfig {
+    #[serde(default = "default_local")]
+    pub local: bool,
     pub port: Option<u16>,
     pub host: String,
     pub model: String,
@@ -313,4 +315,7 @@ fn default_max_connections() -> u64 {
 }
 fn default_scheme() -> Scheme {
     Scheme::HTTP
+}
+fn default_local() -> bool {
+    true
 }
