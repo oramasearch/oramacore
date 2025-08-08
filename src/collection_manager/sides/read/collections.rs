@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
-    sync::Arc,
+    sync::Arc, time::Duration,
 };
 
 use crate::{
@@ -38,10 +38,26 @@ pub struct CollectionsReader {
     collections: RwLock<HashMap<CollectionId, CollectionReader>>,
     indexes_config: IndexesConfig,
     last_reindexed_collections: RwLock<Vec<(CollectionId, CollectionId)>>,
+
+    unload_window: Duration,
 }
+
+// 42 minutes
+const MAX_UNLOAD_WINDOW: Duration = Duration::from_secs(42 * 60);
 
 impl CollectionsReader {
     pub async fn try_load(context: ReadSideContext, indexes_config: IndexesConfig) -> Result<Self> {
+        let unload_window: Duration = indexes_config.unload_window.into();
+        let unload_window = if unload_window > MAX_UNLOAD_WINDOW {
+            warn!(
+                "Unload window {:?} is too big. Using default {:?}",
+                unload_window, MAX_UNLOAD_WINDOW
+            );
+            MAX_UNLOAD_WINDOW
+        } else {
+            unload_window
+        };
+
         let data_dir = &indexes_config.data_dir;
         info!("Loading collections from disk '{:?}'.", data_dir);
 
@@ -58,6 +74,8 @@ impl CollectionsReader {
                         collections: Default::default(),
                         indexes_config,
                         last_reindexed_collections: Default::default(),
+
+                        unload_window,
                     });
                 }
             };
@@ -96,6 +114,8 @@ impl CollectionsReader {
                     .into_iter()
                     .collect(),
             ),
+
+            unload_window,
         })
     }
 
@@ -149,7 +169,7 @@ impl CollectionsReader {
 
             let m = COMMIT_CALCULATION_TIME.create(Empty);
 
-            match collection.commit(offset).await {
+            match collection.commit(offset, self.unload_window.clone()).await {
                 Ok(_) => {}
                 Err(error) => {
                     error!(error = ?error, collection_id=?id, "Cannot commit collection {:?}: {:?}", id, error);

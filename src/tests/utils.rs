@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use axum::{response::sse::Event, Json};
+use duration_string::DurationString;
 use fake::Fake;
 use fake::Faker;
 use fastembed::{
@@ -131,6 +132,8 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 insert_batch_commit_size: 10_000,
                 commit_interval: Duration::from_secs(3_000),
                 notifier: None,
+                // Not offload during tests
+                unload_window: Duration::from_secs(30 * 60).into(),
             },
             analytics: None,
         },
@@ -363,7 +366,7 @@ impl grpc_def::llm_service_server::LlmService for GRPCServer {
 
 pub async fn wait_for<'i, 'b, I, R>(
     i: &'i I,
-    f: impl Fn(&I) -> BoxFuture<'b, Result<R>>,
+    f: impl Fn(&'i I) -> BoxFuture<'b, Result<R>>,
 ) -> Result<R>
 where
     'b: 'i,

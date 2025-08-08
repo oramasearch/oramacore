@@ -2,13 +2,13 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::RwLock,
+    sync::RwLock, time::{Duration, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
-use invocation_counter::Counter;
+use invocation_counter::InvocationCounter;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use crate::{
     collection_manager::{
@@ -130,29 +130,51 @@ impl CommittedStringField {
         }
     }
 
-    pub fn unload_if_not_used(&self) {
-        if let InnerCommittedStringField::Loaded(loaded) = &*self.inner.read().unwrap() {
-            if loaded
-                .counter
-                .get_count_till(std::time::Instant::now().elapsed().as_secs())
-                == 0
-            {
-                info!(field_path = ?loaded.field_path, "Unloading committed string field");
-                let _ = loaded; // drop the loaded field to release the lock
+    pub fn unload_if_not_used(&self, unload_window: Duration) {
+        let lock = self.inner.read().unwrap();
+        let loaded = match &*lock {
+            InnerCommittedStringField::Loaded(loaded) => loaded,
+            InnerCommittedStringField::Unloaded(_) => {return;}
+        };
 
-                self.unload();
-            }
+        let now = now();
+        let start = now - unload_window.as_secs();
+
+        println!("now: {now} start {start} (delta {})", unload_window.as_secs());
+
+        let c = loaded
+            .counter
+            .count_in(start, now);
+        info!("c {c:#?}");
+        if c != 0 {
+            return;
         }
+
+        drop(lock);
+
+        self.unload();
     }
 
     fn unload(&self) {
         let mut inner = self.inner.write().unwrap();
         if let InnerCommittedStringField::Loaded(loaded) = &*inner {
+            let field_path = loaded.field_path();
+            debug!(
+                "Unloading committed string field {:?}",
+                field_path,
+            );
+            let stats = loaded.stats().expect("Cannot get stats during unload");
             let unloaded = UnloadedCommittedStringField {
                 field_path: loaded.field_path.clone(),
                 data_dir: loaded.data_dir.clone(),
+                stats,
             };
             *inner = InnerCommittedStringField::Unloaded(unloaded);
+
+            info!(
+                "Committed string field {:?} unloaded",
+                field_path,
+            );
         }
     }
 
@@ -176,17 +198,10 @@ impl CommittedStringField {
     }
 
     pub fn stats(&self) -> Result<CommittedStringFieldStats> {
-        if !self.loaded() {
-            self.load();
-        }
-
         let inner = self.inner.read().unwrap();
         match &*inner {
             InnerCommittedStringField::Loaded(loaded) => loaded.stats(),
-            InnerCommittedStringField::Unloaded(_) => Ok(CommittedStringFieldStats {
-                key_count: 0,
-                global_info: GlobalInfo::default(),
-            }),
+            InnerCommittedStringField::Unloaded(unloaded) => Ok(unloaded.get_stats()),
         }
     }
 
@@ -224,6 +239,7 @@ impl CommittedStringField {
 pub struct UnloadedCommittedStringField {
     field_path: Box<[String]>,
     data_dir: PathBuf,
+    stats: CommittedStringFieldStats,
 }
 
 impl UnloadedCommittedStringField {
@@ -231,6 +247,14 @@ impl UnloadedCommittedStringField {
         StringFieldInfo {
             field_path: self.field_path.clone(),
             data_dir: self.data_dir.clone(),
+        }
+    }
+
+    pub fn get_stats(&self) -> CommittedStringFieldStats {
+        CommittedStringFieldStats {
+            key_count: self.stats.key_count,
+            global_info: self.stats.global_info.clone(),
+            loaded: false,
         }
     }
 }
@@ -245,7 +269,7 @@ pub struct LoadedCommittedStringField {
 
     data_dir: PathBuf,
 
-    counter: Counter<40, 4>,
+    counter: InvocationCounter,
 }
 
 impl LoadedCommittedStringField {
@@ -310,7 +334,7 @@ impl LoadedCommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir,
-            counter: create_counter(),
+            counter: create_counter(slot_count_exp, slot_size_exp),
         })
     }
 
@@ -330,6 +354,9 @@ impl LoadedCommittedStringField {
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
     ) -> Result<Self> {
+        let slot_count_exp = committed.counter.slot_count_exp();
+        let slot_size_exp = committed.counter.slot_size_exp();
+
         create_if_not_exists(&data_dir)
             .context("Cannot create data directory for committed string field")?;
 
@@ -418,7 +445,7 @@ impl LoadedCommittedStringField {
             posting_storage,
             document_lengths_per_document,
             data_dir,
-            counter: create_counter(),
+            counter: create_counter(slot_count_exp, slot_size_exp),
         })
     }
 
@@ -460,7 +487,7 @@ impl LoadedCommittedStringField {
         tolerance: Option<u8>,
     ) -> Result<()> {
         self.counter
-            .increment_by_one(std::time::Instant::now().elapsed().as_secs());
+            .register(now());
 
         if context.tokens.is_empty() {
             return Ok(());
@@ -721,6 +748,7 @@ impl LoadedCommittedStringField {
         Ok(CommittedStringFieldStats {
             key_count,
             global_info: self.global_info(),
+            loaded: true,
         })
     }
 }
@@ -840,11 +868,27 @@ pub struct StringFieldInfo {
 pub struct CommittedStringFieldStats {
     pub key_count: usize,
     pub global_info: GlobalInfo,
+    pub loaded: bool,
 }
 
-fn create_counter() -> Counter<40, 4> {
-    // 42 minutes and 40 seconds, why not?
-    Counter::new(16)
+fn now() -> u64 {
+    let now = std::time::SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    warn!("now: {now}");
+
+    now
+}
+
+fn create_counter(slot_count_exp: u8, slot_size_exp: u8) -> InvocationCounter {
+    // 2^8 * 2^4 = 4096 seconds = 1 hour, 6 minutes, and 36 seconds
+    let counter = InvocationCounter::new(slot_count_exp, slot_size_exp);
+
+    // Avoid to unload committed string field if it is created right now.
+    counter.register(now());
+
+    counter
 }
 
 #[cfg(test)]
@@ -868,14 +912,14 @@ mod tests {
             5,
             HashMap::from([
                 (
-                    Term("aa".to_string()),
+                    Term("term1".to_string()),
                     TermStringField {
                         exact_positions: vec![0, 1],
                         positions: vec![0, 1],
                     },
                 ),
                 (
-                    Term("bb".to_string()),
+                    Term("term2".to_string()),
                     TermStringField {
                         exact_positions: vec![2, 3],
                         positions: vec![2, 3],
@@ -887,7 +931,7 @@ mod tests {
             DocumentId(2),
             3,
             HashMap::from([(
-                Term("aa".to_string()),
+                Term("term1".to_string()),
                 TermStringField {
                     exact_positions: vec![0],
                     positions: vec![0],
@@ -896,7 +940,7 @@ mod tests {
         );
 
         let mut search_context = FullTextSearchContext {
-            tokens: &["aa".to_string()],
+            tokens: &["term1".to_string()],
             exact_match: false,
             boost: 1.0,
             filtered_doc_ids: None,
@@ -917,7 +961,7 @@ mod tests {
 
         let committed = CommittedStringField::from_iter(
             uncommitted.field_path().to_vec().into_boxed_slice(),
-            uncommitted.iter(),
+            uncommitted.iter().map(|(n, v)| (n, v.clone())),
             field_length_per_doc,
             data_dir.clone(),
             &HashSet::new(),

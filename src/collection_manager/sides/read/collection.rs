@@ -3,7 +3,7 @@ use std::{
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{atomic::AtomicU64, Arc}, time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -161,7 +161,7 @@ impl CollectionReader {
         Ok(s)
     }
 
-    pub async fn commit(&self, offset: Offset) -> Result<()> {
+    pub async fn commit(&self, offset: Offset, unload_window: Duration) -> Result<()> {
         // During the commit we have:
         // 1. indexes till alive
         // 2. indexes deleted by the user
@@ -203,7 +203,7 @@ impl CollectionReader {
             count += index.document_count();
             index_ids.push(index.id());
             let dir = indexes_dir.join(index.id().as_str());
-            index.commit(dir, offset).await?;
+            index.commit(dir, offset, unload_window).await?;
         }
         drop(indexes_lock);
 
@@ -217,7 +217,7 @@ impl CollectionReader {
             }
             temp_index_ids.push(index.id());
             let dir = temp_indexes_dir.join(index.id().as_str());
-            index.commit(dir, offset).await?;
+            index.commit(dir, offset, unload_window).await?;
         }
         drop(temp_indexes_lock);
 

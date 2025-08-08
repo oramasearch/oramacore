@@ -16,6 +16,7 @@ mod hooks;
 mod index_rebuild;
 mod list_documents;
 mod migrations;
+mod offload_field;
 mod replace_doc_on_insert;
 mod replace_index;
 mod shutdown;

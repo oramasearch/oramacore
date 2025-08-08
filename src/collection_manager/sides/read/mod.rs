@@ -9,6 +9,7 @@ pub mod notify;
 
 use axum::extract::State;
 use chrono::Utc;
+use duration_string::DurationString;
 use futures::Stream;
 use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
@@ -24,7 +25,7 @@ use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
 use anyhow::{Context, Result};
-pub use collection::IndexFieldStatsType;
+pub use collection::{IndexFieldStatsType, IndexFieldStats};
 use collections::CollectionsReader;
 use document_storage::{DocumentStorage, DocumentStorageConfig};
 use serde::{Deserialize, Serialize};
@@ -79,6 +80,8 @@ pub struct IndexesConfig {
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
     pub notifier: Option<NotifierConfig>,
+    #[serde(default = "default_unload_window")]
+    pub unload_window: DurationString,
 }
 
 #[derive(Error, Debug)]
@@ -756,6 +759,11 @@ impl ReadSide {
 
 fn default_insert_batch_commit_size() -> u64 {
     300
+}
+
+fn default_unload_window() -> DurationString {
+    // 30min
+    Duration::from_secs(30 * 60).into()
 }
 
 fn start_commit_loop(

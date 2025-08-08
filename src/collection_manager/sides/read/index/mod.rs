@@ -14,7 +14,7 @@ use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
 use crate::{
@@ -64,7 +64,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
+    }, time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
@@ -313,7 +313,10 @@ impl Index {
         Ok(document_ids)
     }
 
-    pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
+    pub async fn commit(&self, data_dir: PathBuf, offset: Offset, unload_window: Duration) -> Result<()> {
+
+        warn!("Committing index {:?} with unload window {:?}", self.id, unload_window);
+
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 
         let uncommitted_fields = self.uncommitted_fields.read().await;
@@ -361,6 +364,9 @@ impl Index {
         if !something_to_commit && !is_promoted && !is_new {
             // Nothing to commit
             debug!("Nothing to commit {:?}", self.id);
+
+            self.try_unload_fields(unload_window).await;
+
             return Ok(());
         }
 
@@ -704,6 +710,8 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
+        self.try_unload_fields(unload_window).await;
+
         BufferedFile::create_or_overwrite(data_dir.join("index.json"))
             .context("Cannot create index.json")?
             .write_json_data(&dump)
@@ -717,6 +725,17 @@ impl Index {
         debug!("Index committed: {:?}", self.id);
 
         Ok(())
+    }
+
+    async fn try_unload_fields(&self, unload_window: Duration) {
+        println!("AAAAAAAAAAAAAAAA {:?}", unload_window);
+
+        let lock = self.committed_fields.read().await;
+        for (_, string_field) in &lock.string_fields {
+            println!("AAAAAAA {:?}", string_field.field_path());
+            string_field.unload_if_not_used(unload_window);
+        }
+        drop(lock);
     }
 
     #[inline]

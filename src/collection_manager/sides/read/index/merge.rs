@@ -496,12 +496,10 @@ pub fn merge_string_field(
         (Some(uncommitted), None) => {
             let length_per_documents = uncommitted.field_length_per_doc();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-            let mut entries: Vec<_> = iter.collect();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             Ok(Some(CommittedStringField::from_iter(
                 uncommitted.field_path().to_vec().into_boxed_slice(),
-                entries.into_iter(),
+                iter,
                 length_per_documents,
                 data_dir,
                 uncommitted_document_deletions,
@@ -545,10 +543,7 @@ pub fn merge_string_field(
             }
 
             let length_per_documents = uncommitted.field_length_per_doc();
-            // let uncommitted_iter = uncommitted.iter();
             let iter = uncommitted.iter().map(|(n, v)| (n, v.clone()));
-            let mut entries: Vec<_> = iter.collect();
-            entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
             // uncommitted and committed field_path has to be the same
             debug_assert_eq!(
@@ -560,7 +555,7 @@ pub fn merge_string_field(
             Ok(Some(
                 CommittedStringField::from_iter_and_committed(
                     uncommitted.field_path().to_vec().into_boxed_slice(),
-                    entries.into_iter(),
+                    iter,
                     committed,
                     length_per_documents,
                     data_dir,
