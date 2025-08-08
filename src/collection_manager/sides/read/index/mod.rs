@@ -51,6 +51,7 @@ use fs::{create_if_not_exists, BufferedFile};
 use nlp::{locales::Locale, TextParser};
 
 use super::collection::{IndexFieldStats, IndexFieldStatsType};
+use super::OffloadFieldConfig;
 mod committed_field;
 mod merge;
 mod path_to_index_id_map;
@@ -130,7 +131,7 @@ pub struct Index {
     pub promoted_to_runtime_index: AtomicBool,
 
     context: ReadSideContext,
-    offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    offload_config: OffloadFieldConfig,
 
     document_count: u64,
     uncommitted_deleted_documents: HashSet<DocumentId>,
@@ -151,7 +152,7 @@ impl Index {
         id: IndexId,
         text_parser: Arc<TextParser>,
         context: ReadSideContext,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: OffloadFieldConfig,
     ) -> Self {
         Self {
             id,
@@ -182,7 +183,7 @@ impl Index {
         index_id: IndexId,
         data_dir: PathBuf,
         context: ReadSideContext,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("index.json"))
             .context("Cannot open index.json")?

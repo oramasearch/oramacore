@@ -38,8 +38,8 @@ use crate::{
 use super::{
     index::{Index, IndexStats},
     CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, ReadSide,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
@@ -57,7 +57,7 @@ pub struct CollectionReader {
     read_api_key: ApiKey,
     write_api_key: Option<ApiKey>,
     context: ReadSideContext,
-    offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+    offload_config: OffloadFieldConfig,
 
     indexes: RwLock<Vec<Index>>,
 
@@ -80,7 +80,7 @@ impl CollectionReader {
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
         context: ReadSideContext,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         Ok(Self {
             id,
@@ -111,7 +111,7 @@ impl CollectionReader {
     pub fn try_load(
         context: ReadSideContext,
         data_dir: PathBuf,
-        offload_config: crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: OffloadFieldConfig,
     ) -> Result<Self> {
         let dump: Dump = BufferedFile::open(data_dir.join("collection.json"))
             .context("Cannot open collection.json")?

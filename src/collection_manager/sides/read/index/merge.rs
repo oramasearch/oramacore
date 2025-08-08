@@ -9,6 +9,7 @@ use crate::merger::MergedIterator;
 use crate::types::{DocumentId, SerializableNumber};
 use fs::create_if_not_exists;
 
+use super::super::OffloadFieldConfig;
 use super::committed_field::*;
 use super::uncommitted_field::*;
 
@@ -485,7 +486,7 @@ pub fn merge_string_field(
     data_dir: PathBuf,
     uncommitted_document_deletions: &HashSet<DocumentId>,
     is_promoted: bool,
-    offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
+    offload_config: &OffloadFieldConfig,
 ) -> Result<Option<CommittedStringField>> {
     match (uncommitted, committed) {
         (None, None) => {

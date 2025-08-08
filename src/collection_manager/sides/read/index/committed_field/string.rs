@@ -42,10 +42,7 @@ pub struct CommittedStringField {
 }
 
 impl CommittedStringField {
-    pub fn try_load(
-        info: StringFieldInfo,
-        offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
-    ) -> Result<Self> {
+    pub fn try_load(info: StringFieldInfo, offload_config: &OffloadFieldConfig) -> Result<Self> {
         let loaded = LoadedCommittedStringField::try_load(info, offload_config)?;
         Ok(Self {
             inner: RwLock::new(InnerCommittedStringField::Loaded(loaded)),
@@ -295,7 +292,7 @@ impl LoadedCommittedStringField {
         mut length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: &OffloadFieldConfig,
     ) -> Result<Self> {
         let mut posting_id_generator = 0;
 
@@ -362,7 +359,7 @@ impl LoadedCommittedStringField {
         length_per_documents: HashMap<DocumentId, u32>,
         data_dir: PathBuf,
         uncommitted_document_deletions: &HashSet<DocumentId>,
-        offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
+        offload_config: &OffloadFieldConfig,
     ) -> Result<Self> {
         create_if_not_exists(&data_dir)
             .context("Cannot create data directory for committed string field")?;
@@ -456,10 +453,7 @@ impl LoadedCommittedStringField {
         })
     }
 
-    pub fn try_load(
-        info: StringFieldInfo,
-        offload_config: &crate::collection_manager::sides::read::OffloadFieldConfig,
-    ) -> Result<Self> {
+    pub fn try_load(info: StringFieldInfo, offload_config: &OffloadFieldConfig) -> Result<Self> {
         let index = FSTIndex::load(info.data_dir.join("fst.map"))?;
         let posting_storage = PostingIdStorage::load(info.data_dir.join("posting_id_storage.map"))?;
         let document_lengths_per_document =

@@ -100,6 +100,7 @@ Tests are organized in `src/tests/` with comprehensive coverage for:
 - Prefer `anyhow::anyhow!` for error handling over `expect`.
 - Prefer creating a custom error enum with `thiserror` crate for complex error handling.
 - Comment the code to explain the intent and reason behind it.
+- Prefer import the structures and enums on the top of the file instead of use the full name inside the code
 
 ### Test development
 - Tests always using an complete e2e test and put that test under `src/tests/` folder.

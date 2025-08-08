@@ -114,9 +114,13 @@ async fn test_offload_string_field() {
         async move {
             // Trigger commit to check for unloading
             test_context.commit_all().await?;
-            
+
             // Get the collection client and check if field was unloaded
-            let collection_client = test_context.get_test_collection_client(collection_id, write_api_key, read_api_key)?;
+            let collection_client = test_context.get_test_collection_client(
+                collection_id,
+                write_api_key,
+                read_api_key,
+            )?;
             let stats = collection_client.reader_stats().await?;
             let IndexFieldStatsType::CommittedString(string_field_stats) =
                 get_field_stats(&stats, index_id, "text", "committed_string")
@@ -124,7 +128,7 @@ async fn test_offload_string_field() {
             else {
                 return Err(anyhow::anyhow!("Expected committed string field stats"));
             };
-            
+
             if string_field_stats.loaded {
                 return Err(anyhow::anyhow!("Field still loaded, waiting for unload"));
             }
