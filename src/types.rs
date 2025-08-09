@@ -1,4 +1,6 @@
-use crate::ai::training_sets::{TrainingSet, TrainingSetsQueriesOptimizerResponse};
+use crate::ai::training_sets::{
+    TrainingDestination, TrainingSet, TrainingSetsQueriesOptimizerResponse,
+};
 use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
@@ -2150,6 +2152,36 @@ impl IndexId {
     }
 }
 impl Display for IndexId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct TrainingSetId(StackString<64>);
+
+impl TrainingSetId {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::<64>::try_new(key)
+            .map(TrainingSetId)
+            .map_err(|e| anyhow::anyhow!("TrainingSetId is too long. Max 64 char. {:?}", e))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn try_into_destination(&self) -> anyhow::Result<TrainingDestination> {
+        match self.0.as_str() {
+            "optimize_query" => TrainingDestination::QueryOptimizer,
+            "query_planner" => Ok(TrainingDestination::QueryPlanner),
+            "query_filtering" => Ok(TrainingDestination::QueryFiltering),
+            _ => Err(anyhow::anyhow!("Invalid training destination: {}", self.0)),
+        }
+    }
+}
+
+impl Display for TrainingSetId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }

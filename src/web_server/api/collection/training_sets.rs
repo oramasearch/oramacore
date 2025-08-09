@@ -1,16 +1,19 @@
-use crate::ai::training_sets::{TrainingDestination, TrainingSet};
-use crate::collection_manager::sides::read::{ReadError, ReadSide};
-
-use crate::collection_manager::sides::write::{self, WriteError, WriteSide};
+use crate::ai::training_sets::TrainingSet;
+use crate::collection_manager::sides::read::ReadSide;
+use crate::collection_manager::sides::write::WriteSide;
 use crate::types::{
-    ApiKey, CollectionId, InsertTrainingSetParams, InteractionLLMConfig,
+    ApiKey, CollectionId, InsertTrainingSetParams, InteractionLLMConfig, TrainingSetId,
     TrainingSetsQueryOptimizerParams, WriteApiKey,
 };
-use axum::extract::Query;
-use axum::routing::{get, post};
-use axum::{extract::State, Json, Router};
-use axum_openapi3::utoipa::IntoParams;
+use crate::web_server::api::util::print_error;
+use axum::{
+    extract::{Query, State},
+    response::IntoResponse,
+    Json, Router,
+};
+use axum_openapi3::{utoipa::IntoParams, *};
 use axum_openapi3::{utoipa::ToSchema, *};
+use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -27,120 +30,111 @@ struct ApiKeyOnlyQuery {
     api_key: ApiKey,
 }
 
-#[derive(Deserialize, IntoParams, ToSchema)]
-struct WriteApiKeyOnlyQuery {
-    #[serde(rename = "api-key")]
-    api_key: WriteApiKey,
-}
-
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .route(
-            "/v1/collections/{collection_id}/training_sets/{training_set}/generate",
-            post(generate_training_sets_v1),
-        )
-        .route(
-            "/v1/collections/{collection_id}/training_sets/{training_set}/list",
-            get(list_training_sets_v1),
-        )
-        .route(
-            "/v1/collections/{collection_id}/training_sets/{training_set}/get",
-            get(get_training_sets_v1),
-        )
+        .add(generate_training_sets_v1)
+        .route(get_training_sets_v1)
         .with_state(read_side)
 }
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .route(
-            "/v1/collections/{collection_id}/training_sets/{training_set}/insert",
-            post(insert_training_sets_v1),
-        )
+        .add(insert_training_sets_v1)
+        .add(delete_training_sets_v1)
         .with_state(write_side)
 }
 
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/training_sets/{training_set}/generate",
+    description = "Generate training set data"
+)]
 async fn generate_training_sets_v1(
     collection_id: CollectionId,
-    State(read_side): State<Arc<ReadSide>>,
+    training_set_destination: TrainingSetId,
     Query(query_params): Query<TrainingSetsQueryOptimizerParams>,
+    read_side: State<Arc<ReadSide>>,
     Json(body): Json<TrainingSetsQueryBody>,
-) -> Result<Json<serde_json::Value>, ReadError> {
+) -> IntoResponse {
     let read_api_key = query_params.api_key;
     let llm_config = body.llm_config;
     let llm_service = read_side.get_llm_service();
 
     let training_set = TrainingSet::new(
         collection_id,
-        read_side,
+        read_side.0.clone(),
         read_api_key,
         llm_service,
         llm_config,
     );
 
-    let results = training_set
-        .generate_training_data_for(TrainingDestination::QueryOptimizer)
-        .await?;
+    match training_set_destination.try_into_destination() {
+        Ok(destination) => {
+            let results = training_set.generate_training_data_for(destination).await?;
 
-    Ok(Json(json!({ "queries": results })))
-}
-
-async fn list_training_sets_v1(
-    collection_id: CollectionId,
-    State(read_side): State<Arc<ReadSide>>,
-    Query(query_params): Query<ApiKeyOnlyQuery>,
-    training_set: String,
-) -> Result<Json<serde_json::Value>, ReadError> {
-    match TrainingDestination::try_from_str(&training_set) {
-        Some(destination) => {
-            let read_api_key = query_params.api_key;
-
-            let training_data = read_side
-                .list_training_data_for(collection_id, read_api_key, destination)
-                .await?;
-
-            Ok(Json(json!({ "training_data": training_data })))
+            Ok((StatusCode::OK, Json(json!({ "queries": results }))))
         }
-        None => Err(ReadError::Generic(anyhow::Error::msg(
-            "Invalid training set",
-        ))),
+        Err(err) => {
+            print_error(&err, "Error generating training sets");
+            Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid training set ID" })),
+            ))
+        }
     }
 }
 
+#[endpoint(
+    method = "GET",
+    path = "/v1/collections/{collection_id}/training_sets/{training_set}/get",
+    description = "Get existing training set data"
+)]
 async fn get_training_sets_v1(
     collection_id: CollectionId,
+    training_set: TrainingSetId,
     State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<ApiKeyOnlyQuery>,
-    training_set: String,
-) -> Result<Json<serde_json::Value>, ReadError> {
-    match TrainingDestination::try_from_str(&training_set) {
-        Some(destination) => {
+) -> IntoResponse {
+    match training_set.try_into_destination() {
+        Ok(destination) => {
             let read_api_key = query_params.api_key;
 
             match read_side
                 .get_training_data_for(collection_id, read_api_key, destination)
                 .await
             {
-                Some(Ok(training_data)) => Ok(Json(json!({ "training_data": training_data }))),
-                Some(Err(error)) => Err(error),
-                None => Err(ReadError::NotFound(collection_id)),
+                Some(Ok(training_data)) => Ok((
+                    StatusCode::OK,
+                    Json(json!({ "training_sets": training_data })),
+                )),
+                Some(Err(error)) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Error retrieving existing training sets" })),
+                )),
+                None => Ok((StatusCode::OK, Json(json!({ "training_sets": null })))),
             }
         }
-        None => Err(ReadError::Generic(anyhow::Error::msg(
-            "Invalid training set",
-        ))),
+        Err(error) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid training set ID" })),
+        )),
     }
 }
 
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/training_sets/{training_set}/insert",
+    description = "Insert a new training set"
+)]
 async fn insert_training_sets_v1(
     collection_id: CollectionId,
-    State(write_side): State<Arc<WriteSide>>,
-    Query(query_params): Query<WriteApiKeyOnlyQuery>,
+    training_set: TrainingSetId,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
     Json(params): Json<InsertTrainingSetParams>,
-    training_set: String,
-) -> Result<Json<serde_json::Value>, WriteError> {
-    match TrainingDestination::try_from_str(&training_set) {
-        Some(destination) => {
-            let write_api_key = query_params.api_key;
+) -> IntoResponse {
+    match training_set.try_into_destination() {
+        Ok(destination) => {
             let training_set_interface = write_side
                 .get_training_set_interface(write_api_key, collection_id)
                 .await?;
@@ -149,36 +143,46 @@ async fn insert_training_sets_v1(
                     let _ = training_set_interface
                         .insert_training_set(collection_id, destination, training_data_as_json)
                         .await?;
-                    Ok(Json(json!({ "inserted": true })))
+                    Ok((StatusCode::CREATED, json!({ "inserted": true })))
                 }
-                Err(error) => Err(WriteError::Generic(anyhow::Error::new(error))),
+                Err(error) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({ "error": "Failed to serialize training set data" }),
+                )),
             }
         }
-        None => Err(WriteError::Generic(anyhow::Error::msg(
-            "Invalid training set",
-        ))),
+        Err(error) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid training set ID" })),
+        )),
     }
 }
 
+#[endpoint(
+    method = "POST",
+    path = "/v1/collections/{collection_id}/training_sets/{training_set}/delete",
+    description = "Delete an existing training set"
+)]
 async fn delete_training_sets_v1(
     collection_id: CollectionId,
-    State(write_side): State<Arc<WriteSide>>,
-    Query(query_params): Query<WriteApiKeyOnlyQuery>,
-    training_set: String,
-) -> Result<Json<serde_json::Value>, WriteError> {
-    match TrainingDestination::try_from_str(&training_set) {
-        Some(destination) => {
-            let write_api_key = query_params.api_key;
+    training_set: TrainingSetId,
+    write_side: State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+) -> IntoResponse {
+    match training_set.try_into_destination() {
+        Ok(destination) => {
             let training_set_interface = write_side
                 .get_training_set_interface(write_api_key, collection_id)
                 .await?;
             let _ = training_set_interface
                 .delete_training_set(collection_id, destination)
                 .await?;
-            Ok(Json(json!({ "deleted": true })))
+
+            Ok((StatusCode::NO_CONTENT, json!({ "deleted": true })))
         }
-        None => Err(WriteError::Generic(anyhow::Error::msg(
-            "Invalid training set",
-        ))),
+        Err(error) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid training set ID" })),
+        )),
     }
 }
