@@ -31,7 +31,6 @@ Return **only** a JSON array of strings—**no extra keys, commentary, or whites
 
 * Use straight double quotes (`"`).
 * Emit a single‑line array (no pretty‑printing, no trailing commas).
-* If there is **no clear searchable intent**, output `[]`.
 
 ---
 
@@ -41,17 +40,17 @@ Return **only** a JSON array of strings—**no extra keys, commentary, or whites
 2. **Specificity** — Include every relevant constraint (price, category, tech specs, dates in ISO `YYYY‑MM‑DD`, locations, currencies, etc.).
 3. **Context preservation** — Pull vital details from earlier messages (e.g., order ID, OS version, shipping address) when they sharpen the search.
 4. **Single vs. multiple queries**
-   * One subject ➜ **single** query.
-   * Multiple distinct subjects/aspects ➜ **split** into separate queries—one per subject.
+   * One subject -> **single** query.
+   * Multiple distinct subjects/aspects -> **split** into separate queries—one per subject.
 5. **Edge cases**
    * Ambiguous, non‑searchable, or purely conversational request ➜ `[]`.
-   * Incomplete data ➜ craft the best query you can; if impossible ➜ `[]`.
+   * Incomplete data -> craft the best query you can; if impossible ➜ `[]`.
 
 ---
 
 ## 4 Examples
 
-### Example 1 – Simple product search
+### Example 1 – Simple product search
 
 **Input**
 
@@ -115,6 +114,25 @@ Return **only** a JSON array of strings—**no extra keys, commentary, or whites
 [
   "Finding healthy dinner recipes using chicken, broccoli, and quinoa",
   "Searching for low‑sugar chocolate dessert recipes"
+]
+```
+
+### Example 5 – Multiple subjects/entities
+
+**Input**
+
+```json
+[
+  {"role":"user","content":"What is the status of my orders 192837 and 81723? I ordered them a month ago and they're not there yet."}
+]
+```
+
+**Output**
+
+```json
+[
+  "Checking status of order 192837",
+  "Checking status of order 81723"
 ]
 ```
 
