@@ -93,7 +93,7 @@ impl Answer {
         sender.send(AnswerEvent::Acknowledged)?;
         sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
 
-        let system_prompt = self
+        let _system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id)
             .await?;
 

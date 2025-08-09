@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, ToSchema)]
 struct TrainingSetsQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_config: Option<InteractionLLMConfig>,

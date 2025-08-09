@@ -1,4 +1,4 @@
-use crate::ai::training_sets::{TrainingDestination, TrainingSetsQueriesOptimizerResponse};
+use crate::ai::training_sets::TrainingDestination;
 use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
@@ -9,7 +9,7 @@ use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
-use axum_openapi3::utoipa::{self, PartialSchema, ToSchema};
+use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
 use nlp::locales::Locale;
 
 use async_openai::types::{
@@ -1705,6 +1705,19 @@ pub enum IndexEmbeddingsCalculation {
     Automatic,
     AllProperties,
     Properties(Vec<String>),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+pub struct TrainingSetQueriesOptimizerQuerySet {
+    pub original: String,
+    pub optimized: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+pub struct TrainingSetsQueriesOptimizerResponse {
+    pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]

@@ -8,7 +8,10 @@ use strum_macros::Display;
 use crate::collection_manager::sides::generic_kv::KV;
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 
-use crate::types::{InteractionLLMConfig, InteractionMessage};
+use crate::types::{
+    InteractionLLMConfig, InteractionMessage, TrainingSetQueriesOptimizerQuerySet,
+    TrainingSetsQueriesOptimizerResponse,
+};
 use crate::{
     ai::llms::LLMService,
     collection_manager::sides::read::ReadSide,
@@ -67,19 +70,6 @@ pub struct TrainingSetsQueriesGeneratorResponse {
     pub simple: Vec<String>,
     pub multiple_terms: Vec<String>,
     pub advanced: Vec<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct TrainingSetQueriesOptimizerQuerySet {
-    pub original: String,
-    pub optimized: Vec<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct TrainingSetsQueriesOptimizerResponse {
-    pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
-    pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
-    pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
 }
 
 #[derive(Clone)]
