@@ -1,3 +1,4 @@
+use crate::ai::training_sets::{TrainingSet, TrainingSetsQueriesOptimizerResponse};
 use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
@@ -1704,6 +1705,11 @@ pub enum IndexEmbeddingsCalculation {
     Automatic,
     AllProperties,
     Properties(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct InsertTrainingSetParams {
+    pub training_set: TrainingSetsQueriesOptimizerResponse,
 }
 
 impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {

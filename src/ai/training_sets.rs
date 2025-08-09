@@ -1,13 +1,13 @@
 use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::path::Display;
+
 use std::{collections::HashMap, sync::Arc};
 use strum_macros::Display;
 
 use crate::collection_manager::sides::generic_kv::KV;
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
-use crate::collection_manager::sides::write::WriteError;
+
 use crate::types::{InteractionLLMConfig, InteractionMessage};
 use crate::{
     ai::llms::LLMService,
@@ -253,7 +253,7 @@ impl TrainingSet {
 
             let deserialized: Vec<String> = match serde_json::from_str(&repaired) {
                 Ok(vec) => vec,
-                Err(e) => match serde_json::from_str::<serde_json::Value>(&repaired) {
+                Err(_e) => match serde_json::from_str::<serde_json::Value>(&repaired) {
                     Ok(serde_json::Value::Object(obj)) => {
                         if let Some(optimized) = obj.get("optimized") {
                             if let Some(arr) = optimized.as_array() {

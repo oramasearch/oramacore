@@ -50,6 +50,7 @@ use crate::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
         llms::LLMService,
         tools::{CollectionToolsRuntime, ToolsRuntime},
+        training_sets::{TrainingSet, TrainingSetInterface},
         AIService, OramaModel,
     },
     collection_manager::sides::{
@@ -125,6 +126,7 @@ pub struct WriteSide {
 
     document_storage: DocumentStorage,
     system_prompts: SystemPromptInterface,
+    training_sets: TrainingSetInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
     master_api_key: ApiKey,
@@ -228,6 +230,8 @@ impl WriteSide {
             .await
             .context("Cannot create jwt_manager")?;
 
+        let training_sets = TrainingSetInterface::new(kv.clone());
+
         let write_side = Self {
             document_count,
             collections: collections_writer,
@@ -238,6 +242,7 @@ impl WriteSide {
             operation_counter: Default::default(),
             op_sender: op_sender.clone(),
             system_prompts,
+            training_sets,
             tools,
             kv,
             context: context.clone(),
@@ -1189,6 +1194,17 @@ impl WriteSide {
             self.tools.clone(),
             collection_id,
         ))
+    }
+
+    pub async fn get_training_set_interface(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+    ) -> Result<TrainingSetInterface, WriteError> {
+        self.check_write_api_key(collection_id, write_api_key)
+            .await?;
+
+        return Ok(self.training_sets.clone());
     }
 
     pub fn get_jwt_manager(&self) -> JwtManager {

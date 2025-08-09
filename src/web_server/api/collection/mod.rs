@@ -24,7 +24,6 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(admin::apis(write_side.clone()))
             .merge(tools::write_apis(write_side.clone()))
             .merge(system_prompts::write_apis(write_side.clone()))
-            .merge(training_sets::write_apis(write_side))
     } else {
         collection_router
     };
@@ -37,8 +36,9 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(answer::apis(read_side.clone()))
             .merge(generate::apis(read_side.clone()))
             .merge(tools::read_apis(read_side.clone()))
-            .merge(system_prompts::read_apis(read_side))
+            .merge(system_prompts::read_apis(read_side.clone()))
             .merge(training_sets::read_apis(read_side.clone()))
+            .merge(training_sets::write_apis(read_side.clone()))
     } else {
         collection_router
     }

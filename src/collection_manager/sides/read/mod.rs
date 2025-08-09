@@ -36,7 +36,7 @@ use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchRes
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
-use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface, TraningDestination};
+use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{
@@ -799,24 +799,29 @@ impl ReadSide {
         collection_id: CollectionId,
         read_api_key: ApiKey,
         training_destination: TrainingDestination,
-    ) -> Result<String, ReadError> {
-        let collection = self
-            .collections
-            .get_collection(collection_id)
-            .await
-            .ok_or_else(|| ReadError::NotFound(collection_id))?;
-        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+    ) -> Option<Result<String, ReadError>> {
+        let collection = match self.collections.get_collection(collection_id).await {
+            Some(collection) => collection,
+            None => return Some(Err(ReadError::NotFound(collection_id))),
+        };
+
+        if let Err(e) = collection.check_read_api_key(read_api_key, self.master_api_key) {
+            return Some(Err(e));
+        }
 
         match self
             .training_sets
             .get_training_set(collection_id, training_destination)
             .await
         {
-            Ok(training_data) => Ok(training_data),
-            Err(e) => Err(ReadError::Generic(anyhow::anyhow!(
-                "Failed to get training data: {}",
-                e
-            ))),
+            Some(training_data_result) => match training_data_result {
+                Ok(training_data) => Some(Ok(training_data)),
+                Err(e) => Some(Err(ReadError::Generic(anyhow::anyhow!(
+                    "Failed to get training data: {}",
+                    e
+                )))),
+            },
+            None => None,
         }
     }
 }
