@@ -992,7 +992,7 @@ pub struct HookReaderLock<'guard> {
     collection: CollectionReadLock<'guard>,
 }
 
-impl<'guard> Deref for HookReaderLock<'guard> {
+impl Deref for HookReaderLock<'_> {
     type Target = RwLock<HookReader>;
 
     fn deref(&self) -> &Self::Target {
