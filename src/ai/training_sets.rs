@@ -69,13 +69,13 @@ pub struct TrainingSetsQueriesGeneratorResponse {
     pub advanced: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct TrainingSetQueriesOptimizerQuerySet {
     pub original: String,
     pub optimized: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct TrainingSetsQueriesOptimizerResponse {
     pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
     pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,

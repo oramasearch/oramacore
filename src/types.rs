@@ -1707,7 +1707,7 @@ pub enum IndexEmbeddingsCalculation {
     Properties(Vec<String>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct InsertTrainingSetParams {
     pub training_set: TrainingSetsQueriesOptimizerResponse,
 }
