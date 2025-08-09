@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
-use crate::types::InteractionLLMConfig;
+use crate::types::{InteractionLLMConfig, InteractionMessage};
 use crate::{
     ai::llms::LLMService,
     collection_manager::sides::read::ReadSide,
@@ -35,8 +35,8 @@ pub struct QueryOptimizerTrainingData {
 
 #[derive(Debug, Serialize)]
 pub enum TrainingData {
-    QueryPlannerTrainingData,
-    QueryOptimizerTrainingData,
+    QueryPlannerTrainingData(QueryPlannerTrainingData),
+    QueryOptimizerTrainingData(QueryOptimizerTrainingData),
     // @todo: add query filtering
 }
 
@@ -47,11 +47,24 @@ pub enum TraningDestination {
     QueryFiltering,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct TrainingSetsQueriesGeneratorResponse {
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TrainingSetsQueriesGeneratorResponse {
     pub simple: Vec<String>,
     pub multiple_terms: Vec<String>,
     pub advanced: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TrainingSetQueriesOptimizerQuerySet {
+    pub original: String,
+    pub optimized: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TrainingSetsQueriesOptimizerResponse {
+    pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
 }
 
 pub struct TrainingSet {
@@ -82,26 +95,25 @@ impl TrainingSet {
     pub async fn generate_training_data_for(
         &self,
         destination: TraningDestination,
-    ) -> anyhow::Result<TrainingData> {
+    ) -> anyhow::Result<TrainingSetsQueriesOptimizerResponse> {
         match destination {
             TraningDestination::QueryPlanner => {
                 println!("@todo");
+                unimplemented!()
             }
             TraningDestination::QueryOptimizer => {
-                self.generate_query_optimizer_training_data().await?;
+                return self.generate_query_optimizer_training_data().await;
             }
             TraningDestination::QueryFiltering => {
                 println!("@todo");
+                unimplemented!()
             }
         }
-
-        unimplemented!()
     }
 
-    // will return QueryOptimizerTrainingData
     async fn generate_query_optimizer_training_data(
         &self,
-    ) -> Result<TrainingSetsQueriesGeneratorResponse> {
+    ) -> Result<TrainingSetsQueriesOptimizerResponse> {
         let random_documents = self.get_random_data_from_collection(5usize).await?;
         let variables = vec![("documents".to_string(), random_documents.join("\n"))];
         let random_queries = self
@@ -109,15 +121,102 @@ impl TrainingSet {
             .run_known_prompt(
                 KnownPrompts::TrainingSetsQueriesGenerator,
                 variables,
+                None,
                 self.llm_config.clone(),
             )
             .await?;
 
-        let repaired = llm_json::repair_json(&random_queries, &llm_json::RepairOptions::default())?;
+        let repaired_random_queries =
+            llm_json::repair_json(&random_queries, &llm_json::RepairOptions::default())?;
+        let ser_random_queries: TrainingSetsQueriesGeneratorResponse =
+            serde_json::from_str(&repaired_random_queries)?;
 
-        let random_queries: TrainingSetsQueriesGeneratorResponse = serde_json::from_str(&repaired)?;
+        let mut results = TrainingSetsQueriesOptimizerResponse {
+            simple: vec![],
+            multiple_terms: vec![],
+            advanced: vec![],
+        };
 
-        Ok(random_queries)
+        results.simple = self.optimize_queries(&ser_random_queries.simple).await?;
+        results.multiple_terms = self
+            .optimize_queries(&ser_random_queries.multiple_terms)
+            .await?;
+        results.advanced = self.optimize_queries(&ser_random_queries.advanced).await?;
+
+        Ok(results)
+    }
+
+    async fn optimize_queries(
+        &self,
+        queries: &[String],
+    ) -> Result<Vec<TrainingSetQueriesOptimizerQuerySet>> {
+        let mut optimized_queries = Vec::new();
+
+        for query in queries.iter() {
+            let messages = vec![InteractionMessage {
+                content: query.clone(),
+                role: crate::types::Role::User,
+            }];
+
+            let messages_as_json = serde_json::to_string(&messages)?;
+            let current_time = chrono::Utc::now().to_string();
+            let current_timestamp = chrono::Utc::now().timestamp();
+
+            let variables = vec![
+                ("conversation".to_string(), messages_as_json),
+                ("timestamp".to_string(), current_time),
+                ("timestamp".to_string(), current_timestamp.to_string()),
+            ];
+
+            let resp = self
+                .llm_service
+                .run_known_prompt(
+                    KnownPrompts::TrainingSetsQueriesOptimizer,
+                    variables,
+                    None,
+                    self.llm_config.clone(),
+                )
+                .await?;
+
+            let repaired = llm_json::repair_json(&resp, &llm_json::RepairOptions::default())?;
+
+            let deserialized: Vec<String> = match serde_json::from_str(&repaired) {
+                Ok(vec) => vec,
+                Err(e) => match serde_json::from_str::<serde_json::Value>(&repaired) {
+                    Ok(serde_json::Value::Object(obj)) => {
+                        if let Some(optimized) = obj.get("optimized") {
+                            if let Some(arr) = optimized.as_array() {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            } else if let Some(s) = optimized.as_str() {
+                                vec![s.to_string()]
+                            } else {
+                                vec![format!(
+                                    "Error: Unexpected optimized format: {:?}",
+                                    optimized
+                                )]
+                            }
+                        } else {
+                            obj.values()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        }
+                    }
+                    Ok(serde_json::Value::String(s)) => vec![s],
+                    _ => {
+                        vec![query.clone()]
+                    }
+                },
+            };
+
+            optimized_queries.push(TrainingSetQueriesOptimizerQuerySet {
+                original: query.clone(),
+                optimized: deserialized,
+            });
+        }
+
+        Ok(optimized_queries)
     }
 
     async fn get_random_data_from_collection(&self, size: usize) -> Result<Vec<String>> {

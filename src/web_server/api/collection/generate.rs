@@ -10,7 +10,7 @@ use crate::types::{
 };
 use axum::extract::Query;
 use axum::response::sse::Event;
-use axum::response::{IntoResponse, Sse};
+use axum::response::Sse;
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use futures::Stream;

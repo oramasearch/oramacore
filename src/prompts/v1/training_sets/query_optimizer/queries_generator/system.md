@@ -113,14 +113,14 @@ In this case, you should return the following JSON containing the following quer
     "Show me a movie about superheroes"
   ],
   "multiple_terms": [
-    "Show me a movie with Al Pacino and Robert De Niro",
-    "Is there a movie with Heath Ledger playing Joker? And what about Christian Bale playing Batman?",
-    "Compare the ratings of The Godfather and The Godfather: Part II"
+    "I really want to see a movie with Al Pacino and Robert De Niro, what do you suggest?",
+    "Is there a movie with Heath Ledger playing Joker? And what about Christian Bale playing Batman? I love them as actors!",
+    "Compare the ratings of The Godfather and The Godfather: Part II. I've seem them both, but I want to know what people thinks of them, if they liked them as much as I did."
   ],
   "advanced": [
-    "I want to see a crime movie starring Christian Bale, ideally rated above 8",
+    "I want to see a crime movie starring Christian Bale, ideally rated above 8.",
     "Show me all the movies directed by Francis Ford Coppola and compare their ratings with movies directed by Christopher Nolan",
-    "I want to see a movie about Vito Corleone, starring Al Pacino and Robert De Niro."
+    "I want to see the movie about Vito Corleone, starring Al Pacino and Robert De Niro. I remember seeing it in the theater but I don't recall the title"
   ]
 }
 ```
