@@ -11,8 +11,8 @@ use axum::{
     response::IntoResponse,
     Json, Router,
 };
+use axum_openapi3::{endpoint, utoipa::ToSchema};
 use axum_openapi3::{utoipa::IntoParams, *};
-use axum_openapi3::{utoipa::ToSchema, *};
 use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -32,15 +32,15 @@ struct ApiKeyOnlyQuery {
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(generate_training_sets_v1)
-        .route(get_training_sets_v1)
+        .add(generate_training_sets_v1())
+        .add(get_training_sets_v1())
         .with_state(read_side)
 }
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .add(insert_training_sets_v1)
-        .add(delete_training_sets_v1)
+        .add(insert_training_sets_v1())
+        .add(delete_training_sets_v1())
         .with_state(write_side)
 }
 
@@ -55,7 +55,7 @@ async fn generate_training_sets_v1(
     Query(query_params): Query<TrainingSetsQueryOptimizerParams>,
     read_side: State<Arc<ReadSide>>,
     Json(body): Json<TrainingSetsQueryBody>,
-) -> IntoResponse {
+) -> impl IntoResponse {
     let read_api_key = query_params.api_key;
     let llm_config = body.llm_config;
     let llm_service = read_side.get_llm_service();
@@ -69,11 +69,16 @@ async fn generate_training_sets_v1(
     );
 
     match training_set_destination.try_into_destination() {
-        Ok(destination) => {
-            let results = training_set.generate_training_data_for(destination).await?;
-
-            Ok((StatusCode::OK, Json(json!({ "queries": results }))))
-        }
+        Ok(destination) => match training_set.generate_training_data_for(destination).await {
+            Ok(results) => Ok((StatusCode::OK, Json(json!({ "queries": results })))),
+            Err(e) => {
+                print_error(&e, "Error generating training data");
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to generate training data" })),
+                ))
+            }
+        },
         Err(err) => {
             print_error(&err, "Error generating training sets");
             Err((
@@ -94,7 +99,7 @@ async fn get_training_sets_v1(
     training_set: TrainingSetId,
     State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<ApiKeyOnlyQuery>,
-) -> IntoResponse {
+) -> impl IntoResponse {
     match training_set.try_into_destination() {
         Ok(destination) => {
             let read_api_key = query_params.api_key;
@@ -107,14 +112,14 @@ async fn get_training_sets_v1(
                     StatusCode::OK,
                     Json(json!({ "training_sets": training_data })),
                 )),
-                Some(Err(error)) => Err((
+                Some(Err(_error)) => Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({ "error": "Error retrieving existing training sets" })),
                 )),
                 None => Ok((StatusCode::OK, Json(json!({ "training_sets": null })))),
             }
         }
-        Err(error) => Err((
+        Err(_error) => Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "Invalid training set ID" })),
         )),
@@ -132,26 +137,48 @@ async fn insert_training_sets_v1(
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
     Json(params): Json<InsertTrainingSetParams>,
-) -> IntoResponse {
+) -> impl IntoResponse {
     match training_set.try_into_destination() {
         Ok(destination) => {
-            let training_set_interface = write_side
+            let training_set_interface = match write_side
                 .get_training_set_interface(write_api_key, collection_id)
-                .await?;
+                .await
+            {
+                Ok(interface) => interface,
+                Err(e) => {
+                    print_error(&e.into(), "Error getting training set interface");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to access training set interface" })),
+                    ));
+                }
+            };
             match serde_json::to_string(&params.training_set) {
                 Ok(training_data_as_json) => {
-                    let _ = training_set_interface
+                    match training_set_interface
                         .insert_training_set(collection_id, destination, training_data_as_json)
-                        .await?;
-                    Ok((StatusCode::CREATED, json!({ "inserted": true })))
+                        .await
+                    {
+                        Ok(_) => Ok((StatusCode::CREATED, Json(json!({ "inserted": true })))),
+                        Err(e) => {
+                            print_error(&e, "Error inserting training set");
+                            Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({ "error": "Failed to insert training set" })),
+                            ))
+                        }
+                    }
                 }
-                Err(error) => Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "error": "Failed to serialize training set data" }),
-                )),
+                Err(error) => {
+                    print_error(&error.into(), "Failed to serialize training set data");
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to serialize training set data" })),
+                    ))
+                }
             }
         }
-        Err(error) => Err((
+        Err(_error) => Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "Invalid training set ID" })),
         )),
@@ -168,19 +195,38 @@ async fn delete_training_sets_v1(
     training_set: TrainingSetId,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
-) -> IntoResponse {
+) -> impl IntoResponse {
     match training_set.try_into_destination() {
         Ok(destination) => {
-            let training_set_interface = write_side
+            let training_set_interface = match write_side
                 .get_training_set_interface(write_api_key, collection_id)
-                .await?;
-            let _ = training_set_interface
-                .delete_training_set(collection_id, destination)
-                .await?;
+                .await
+            {
+                Ok(interface) => interface,
+                Err(e) => {
+                    print_error(&e.into(), "Error getting training set interface for delete");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to access training set interface" })),
+                    ));
+                }
+            };
 
-            Ok((StatusCode::NO_CONTENT, json!({ "deleted": true })))
+            match training_set_interface
+                .delete_training_set(collection_id, destination)
+                .await
+            {
+                Ok(_) => Ok((StatusCode::NO_CONTENT, Json(json!({ "deleted": true })))),
+                Err(e) => {
+                    print_error(&e, "Error deleting training set");
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": "Failed to delete training set" })),
+                    ))
+                }
+            }
         }
-        Err(error) => Err((
+        Err(_error) => Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "Invalid training set ID" })),
         )),

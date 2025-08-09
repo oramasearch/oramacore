@@ -1,6 +1,4 @@
-use crate::ai::training_sets::{
-    TrainingDestination, TrainingSet, TrainingSetsQueriesOptimizerResponse,
-};
+use crate::ai::training_sets::{TrainingDestination, TrainingSetsQueriesOptimizerResponse};
 use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
@@ -1595,7 +1593,7 @@ pub struct GetSystemPromptQueryParams {
     pub system_prompt_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, IntoParams)]
 pub struct TrainingSetsQueryOptimizerParams {
     #[serde(rename = "api-key")]
     pub api_key: ApiKey,
@@ -1709,7 +1707,7 @@ pub enum IndexEmbeddingsCalculation {
     Properties(Vec<String>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertTrainingSetParams {
     pub training_set: TrainingSetsQueriesOptimizerResponse,
 }
@@ -2173,7 +2171,7 @@ impl TrainingSetId {
 
     pub fn try_into_destination(&self) -> anyhow::Result<TrainingDestination> {
         match self.0.as_str() {
-            "optimize_query" => TrainingDestination::QueryOptimizer,
+            "optimize_query" => Ok(TrainingDestination::QueryOptimizer),
             "query_planner" => Ok(TrainingDestination::QueryPlanner),
             "query_filtering" => Ok(TrainingDestination::QueryFiltering),
             _ => Err(anyhow::anyhow!("Invalid training destination: {}", self.0)),

@@ -50,7 +50,7 @@ use crate::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
         llms::LLMService,
         tools::{CollectionToolsRuntime, ToolsRuntime},
-        training_sets::{TrainingSet, TrainingSetInterface},
+        training_sets::TrainingSetInterface,
         AIService, OramaModel,
     },
     collection_manager::sides::{
