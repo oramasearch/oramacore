@@ -1,9 +1,13 @@
 use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::path::Display;
 use std::{collections::HashMap, sync::Arc};
+use strum_macros::Display;
 
+use crate::collection_manager::sides::generic_kv::KV;
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::write::WriteError;
 use crate::types::{InteractionLLMConfig, InteractionMessage};
 use crate::{
     ai::llms::LLMService,
@@ -40,11 +44,22 @@ pub enum TrainingData {
     // @todo: add query filtering
 }
 
-#[derive(Debug, Serialize)]
-pub enum TraningDestination {
+#[derive(Debug, Serialize, Display)]
+pub enum TrainingDestination {
     QueryPlanner,
     QueryOptimizer,
     QueryFiltering,
+}
+
+impl TrainingDestination {
+    pub fn try_from_str(s: &str) -> Option<Self> {
+        match s {
+            "query_planner" => Some(TrainingDestination::QueryPlanner),
+            "query_optimizer" => Some(TrainingDestination::QueryOptimizer),
+            "query_filtering" => Some(TrainingDestination::QueryFiltering),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -65,6 +80,62 @@ pub struct TrainingSetsQueriesOptimizerResponse {
     pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
     pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
     pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
+}
+
+#[derive(Clone)]
+pub struct TrainingSetInterface {
+    kv: Arc<KV>,
+}
+
+impl TrainingSetInterface {
+    pub fn new(kv: Arc<KV>) -> Self {
+        TrainingSetInterface { kv }
+    }
+
+    pub async fn insert_training_set(
+        &self,
+        collection_id: CollectionId,
+        destination: TrainingDestination,
+        training_data: String,
+    ) -> anyhow::Result<()> {
+        let key = self.get_training_set_kv_key(collection_id, destination);
+        self.kv.insert(key, training_data).await
+    }
+
+    pub async fn list_training_sets(
+        &self,
+        collection_id: CollectionId,
+        destination: TrainingDestination,
+    ) -> anyhow::Result<Vec<String>> {
+        let prefix = self.get_training_set_kv_key(collection_id, destination);
+        self.kv.prefix_scan(&prefix).await
+    }
+
+    pub async fn get_training_set(
+        &self,
+        collection_id: CollectionId,
+        destination: TrainingDestination,
+    ) -> Option<anyhow::Result<String>> {
+        let key = self.get_training_set_kv_key(collection_id, destination);
+        self.kv.get(&key).await
+    }
+
+    pub async fn delete_training_set(
+        &self,
+        collection_id: CollectionId,
+        destination: TrainingDestination,
+    ) -> anyhow::Result<()> {
+        let key = self.get_training_set_kv_key(collection_id, destination);
+        self.kv.delete_with_prefix(&key).await
+    }
+
+    fn get_training_set_kv_key(
+        &self,
+        collection_id: CollectionId,
+        destination: TrainingDestination,
+    ) -> String {
+        format!("training_set:{}:{}", collection_id, destination)
+    }
 }
 
 pub struct TrainingSet {
@@ -94,17 +165,17 @@ impl TrainingSet {
 
     pub async fn generate_training_data_for(
         &self,
-        destination: TraningDestination,
+        destination: TrainingDestination,
     ) -> anyhow::Result<TrainingSetsQueriesOptimizerResponse> {
         match destination {
-            TraningDestination::QueryPlanner => {
+            TrainingDestination::QueryPlanner => {
                 println!("@todo");
                 unimplemented!()
             }
-            TraningDestination::QueryOptimizer => {
+            TrainingDestination::QueryOptimizer => {
                 return self.generate_query_optimizer_training_data().await;
             }
-            TraningDestination::QueryFiltering => {
+            TrainingDestination::QueryFiltering => {
                 println!("@todo");
                 unimplemented!()
             }

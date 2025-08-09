@@ -36,7 +36,7 @@ use crate::ai::advanced_autoquery::{AdvancedAutoQuerySteps, QueryMappedSearchRes
 use crate::ai::gpu::LocalGPUManager;
 use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
-use crate::ai::training_sets::TrainingSet;
+use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface, TraningDestination};
 use crate::ai::RemoteLLMProvider;
 use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{
@@ -113,6 +113,7 @@ pub struct ReadSide {
     commit_insert_mutex: Mutex<Offset>,
     master_api_key: Option<ApiKey>,
     system_prompts: SystemPromptInterface,
+    training_sets: TrainingSetInterface,
     tools: ToolsRuntime,
     kv: Arc<KV>,
     llm_service: Arc<LLMService>,
@@ -186,6 +187,7 @@ impl ReadSide {
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);
         let system_prompts = SystemPromptInterface::new(kv.clone(), llm_service.clone());
+        let training_sets = TrainingSetInterface::new(kv.clone());
         let tools = ToolsRuntime::new(kv.clone(), llm_service.clone());
 
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
@@ -211,6 +213,7 @@ impl ReadSide {
             commit_insert_mutex: Mutex::new(last_offset),
             master_api_key: config.master_api_key,
             system_prompts,
+            training_sets,
             tools,
             kv,
             llm_service,
@@ -763,6 +766,58 @@ impl ReadSide {
         let prompt = known_prompt.get_prompts().system;
 
         Ok(prompt)
+    }
+
+    pub async fn list_training_data_for(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+        training_destination: TrainingDestination,
+    ) -> Result<Vec<String>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        match self
+            .training_sets
+            .list_training_sets(collection_id, training_destination)
+            .await
+        {
+            Ok(training_sets) => Ok(training_sets),
+            Err(e) => Err(ReadError::Generic(anyhow::anyhow!(
+                "Failed to list training data: {}",
+                e
+            ))),
+        }
+    }
+
+    pub async fn get_training_data_for(
+        &self,
+        collection_id: CollectionId,
+        read_api_key: ApiKey,
+        training_destination: TrainingDestination,
+    ) -> Result<String, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        match self
+            .training_sets
+            .get_training_set(collection_id, training_destination)
+            .await
+        {
+            Ok(training_data) => Ok(training_data),
+            Err(e) => Err(ReadError::Generic(anyhow::anyhow!(
+                "Failed to get training data: {}",
+                e
+            ))),
+        }
     }
 }
 

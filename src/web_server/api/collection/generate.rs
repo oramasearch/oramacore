@@ -2,11 +2,9 @@ use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryEvent, AdvancedAutoqueryStateMachine,
 };
 use crate::ai::state_machines::answer::{AnswerConfig, AnswerEvent, AnswerStateMachine};
-use crate::ai::training_sets::{TrainingSet, TraningDestination};
 use crate::collection_manager::sides::read::{ReadError, ReadSide};
 use crate::types::{
     ApiKey, CollectionId, GetSystemPromptQueryParams, Interaction, InteractionLLMConfig,
-    TrainingSetsQueryOptimizerParams,
 };
 use axum::extract::Query;
 use axum::response::sse::Event;
@@ -37,10 +35,6 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
             "/v1/collections/{collection_id}/generate/get_default_system_prompt",
             get(get_default_system_prompt_v1),
         )
-        .route(
-            "/v1/collections/{collection_id}/generate/training_sets/query_optimizer",
-            post(training_sets_query_optimizer_v1),
-        )
         .with_state(read_side)
 }
 
@@ -59,12 +53,6 @@ struct AnswerQueryParams {
 #[derive(Deserialize)]
 struct NlpQueryRequest {
     pub messages: Vec<crate::types::InteractionMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_config: Option<InteractionLLMConfig>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct TrainingSetsQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_config: Option<InteractionLLMConfig>,
 }
@@ -222,29 +210,4 @@ async fn get_default_system_prompt_v1(
         Ok(prompt) => Ok(Json(json!({ "system_prompt": prompt }))),
         Err(e) => Err(e),
     }
-}
-
-async fn training_sets_query_optimizer_v1(
-    collection_id: CollectionId,
-    State(read_side): State<Arc<ReadSide>>,
-    Query(query_params): Query<TrainingSetsQueryOptimizerParams>,
-    Json(body): Json<TrainingSetsQueryBody>,
-) -> Result<Json<serde_json::Value>, ReadError> {
-    let read_api_key = query_params.api_key;
-    let llm_config = body.llm_config;
-    let llm_service = read_side.get_llm_service();
-
-    let training_set = TrainingSet::new(
-        collection_id,
-        read_side,
-        read_api_key,
-        llm_service,
-        llm_config,
-    );
-
-    let results = training_set
-        .generate_training_data_for(TraningDestination::QueryOptimizer)
-        .await?;
-
-    Ok(Json(json!({ "queries": results })))
 }
