@@ -131,7 +131,6 @@ async fn get_training_sets_v1(
     path = "/v1/collections/{collection_id}/training_sets/{training_set}/insert",
     description = "Insert a new training set"
 )]
-#[axum::debug_handler]
 async fn insert_training_sets_v1(
     collection_id: CollectionId,
     training_set: TrainingSetId,
