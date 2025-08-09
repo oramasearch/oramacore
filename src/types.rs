@@ -2155,9 +2155,8 @@ impl Display for IndexId {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
 pub struct TrainingSetId(StackString<64>);
-
 impl TrainingSetId {
     pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
         StackString::<64>::try_new(key)
