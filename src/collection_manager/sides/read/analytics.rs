@@ -28,6 +28,8 @@ pub enum AnalyticSearchEventInvocationType {
     Answer,
     #[serde(rename = "nlp_search")]
     NLPSearch,
+    #[serde(rename = "training_data_gen")]
+    TrainingDataGen,
 }
 
 #[cfg_attr(test, derive(Clone))]

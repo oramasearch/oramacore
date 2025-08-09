@@ -1,3 +1,4 @@
+use crate::ai::training_sets::TrainingDestination;
 use crate::ai::{OramaModel, RemoteLLMProvider};
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
@@ -8,7 +9,7 @@ use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
 use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
-use axum_openapi3::utoipa::{self, PartialSchema, ToSchema};
+use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
 use nlp::locales::Locale;
 
 use async_openai::types::{
@@ -1592,6 +1593,12 @@ pub struct GetSystemPromptQueryParams {
     pub system_prompt_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, IntoParams)]
+pub struct TrainingSetsQueryOptimizerParams {
+    #[serde(rename = "api-key")]
+    pub api_key: ApiKey,
+}
+
 #[derive(Deserialize, Clone, Serialize, ToSchema)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]
@@ -1698,6 +1705,24 @@ pub enum IndexEmbeddingsCalculation {
     Automatic,
     AllProperties,
     Properties(Vec<String>),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+pub struct TrainingSetQueriesOptimizerQuerySet {
+    pub original: String,
+    pub optimized: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+pub struct TrainingSetsQueriesOptimizerResponse {
+    pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
+    pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+pub struct InsertTrainingSetParams {
+    pub training_set: TrainingSetsQueriesOptimizerResponse,
 }
 
 impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
@@ -2138,6 +2163,35 @@ impl IndexId {
     }
 }
 impl Display for IndexId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
+pub struct TrainingSetId(StackString<64>);
+impl TrainingSetId {
+    pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
+        StackString::<64>::try_new(key)
+            .map(TrainingSetId)
+            .map_err(|e| anyhow::anyhow!("TrainingSetId is too long. Max 64 char. {:?}", e))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn try_into_destination(&self) -> anyhow::Result<TrainingDestination> {
+        match self.0.as_str() {
+            "optimize_query" => Ok(TrainingDestination::QueryOptimizer),
+            "query_planner" => Ok(TrainingDestination::QueryPlanner),
+            "query_filtering" => Ok(TrainingDestination::QueryFiltering),
+            _ => Err(anyhow::anyhow!("Invalid training destination: {}", self.0)),
+        }
+    }
+}
+
+impl Display for TrainingSetId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }

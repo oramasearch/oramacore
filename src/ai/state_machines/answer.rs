@@ -742,7 +742,7 @@ impl AnswerStateMachine {
                     interaction: _,
                     llm_config: _,
                     system_prompt: _,
-                    search_results,
+                    search_results: _,
                     variables: _,
                     collection_id: _,
                     read_api_key: _,

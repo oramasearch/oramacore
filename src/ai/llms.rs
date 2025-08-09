@@ -34,6 +34,8 @@ pub enum KnownPrompts {
     Suggestions,
     GenerateRelatedQueries,
     DetermineQueryStrategy,
+    TrainingSetsQueriesGenerator,
+    TrainingSetsQueriesOptimizer,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +133,24 @@ impl KnownPrompts {
             KnownPrompts::Suggestions => KnownPrompt {
                 system: include_str!("../prompts/v1/suggestions/system.md").to_string(),
                 user: include_str!("../prompts/v1/suggestions/user.md").to_string(),
+            },
+            KnownPrompts::TrainingSetsQueriesGenerator => KnownPrompt {
+                system: include_str!(
+                    "../prompts/v1/training_sets/query_optimizer/queries_generator/system.md"
+                )
+                .to_string(),
+                user: include_str!(
+                    "../prompts/v1/training_sets/query_optimizer/queries_generator/user.md"
+                )
+                .to_string(),
+            },
+            KnownPrompts::TrainingSetsQueriesOptimizer => KnownPrompt {
+                system: include_str!(
+                    "../prompts/v1/training_sets/query_optimizer/optimizer/system.md"
+                )
+                .to_string(),
+                user: include_str!("../prompts/v1/training_sets/query_optimizer/optimizer/user.md")
+                    .to_string(),
             },
         }
     }
