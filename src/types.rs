@@ -2183,7 +2183,7 @@ impl TrainingSetId {
 
     pub fn try_into_destination(&self) -> anyhow::Result<TrainingDestination> {
         match self.0.as_str() {
-            "optimize_query" => Ok(TrainingDestination::QueryOptimizer),
+            "query_optimizer" => Ok(TrainingDestination::QueryOptimizer),
             "query_planner" => Ok(TrainingDestination::QueryPlanner),
             "query_filtering" => Ok(TrainingDestination::QueryFiltering),
             _ => Err(anyhow::anyhow!("Invalid training destination: {}", self.0)),
