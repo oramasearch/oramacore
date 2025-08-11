@@ -2,29 +2,47 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     path::PathBuf,
+    sync::RwLock,
 };
 
 use anyhow::{anyhow, Context, Result};
 use filters::FilterResult;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
 
 use crate::{
-    ai::OramaModel, collection_manager::sides::write::OramaModelSerializable,
-    indexes::hnsw2::HNSW2Index, types::DocumentId,
+    ai::OramaModel,
+    collection_manager::sides::{
+        read::{
+            index::committed_field::offload_utils::{InnerCommittedField, LoadedField},
+            OffloadFieldConfig,
+        },
+        write::OramaModelSerializable,
+    },
+    indexes::hnsw2::HNSW2Index,
+    types::DocumentId,
 };
 use fs::{create_if_not_exists, BufferedFile};
 
+#[derive(Debug)]
 pub struct CommittedVectorField {
+    inner: RwLock<
+        InnerCommittedField<LoadedCommittedVectorField, CommittedVectorFieldStats, VectorFieldInfo>,
+    >,
+}
+
+pub struct LoadedCommittedVectorField {
     field_path: Box<[String]>,
     inner: HNSW2Index,
     data_dir: PathBuf,
     model: OramaModel,
 }
 
-impl Debug for CommittedVectorField {
+impl Debug for LoadedCommittedVectorField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let inner = serde_json::to_string(&self.inner).unwrap();
-        f.debug_struct("EmbeddingField")
+        let inner = serde_json::to_string(&self.inner).unwrap_or_default();
+        f.debug_struct("LoadedCommittedVectorField")
+            .field("field_path", &self.field_path)
             .field("inner", &inner)
             .field("data_dir", &self.data_dir)
             .finish()
@@ -32,6 +50,150 @@ impl Debug for CommittedVectorField {
 }
 
 impl CommittedVectorField {
+    pub fn from_iter<I>(
+        field_path: Box<[String]>,
+        iter: I,
+        model: OramaModel,
+        data_dir: PathBuf,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self>
+    where
+        I: Iterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+    {
+        let loaded = LoadedCommittedVectorField::from_iter(field_path, iter, model, data_dir)?;
+
+        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
+        let inner = RwLock::new(inner);
+        Ok(Self { inner })
+    }
+
+    pub fn from_dump_and_iter(
+        field_path: Box<[String]>,
+        data_dir: PathBuf,
+        iter: impl ExactSizeIterator<Item = (DocumentId, Vec<Vec<f32>>)>,
+        uncommitted_document_deletions: &HashSet<DocumentId>,
+        model: OramaModel,
+        new_data_dir: PathBuf,
+        offload_config: OffloadFieldConfig,
+    ) -> Result<Self> {
+        let loaded = LoadedCommittedVectorField::from_dump_and_iter(
+            field_path,
+            data_dir,
+            iter,
+            uncommitted_document_deletions,
+            model,
+            new_data_dir,
+        )?;
+
+        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
+        let inner = RwLock::new(inner);
+        Ok(Self { inner })
+    }
+
+    pub fn try_load(info: VectorFieldInfo, offload_config: OffloadFieldConfig) -> Result<Self> {
+        let loaded = LoadedCommittedVectorField::try_load(info)?;
+        let inner = InnerCommittedField::new_loaded(loaded, offload_config);
+        let inner = RwLock::new(inner);
+        Ok(Self { inner })
+    }
+
+    fn loaded(&self) -> bool {
+        self.inner.read().unwrap().loaded()
+    }
+
+    fn load(&self) {
+        if self.loaded() {
+            return;
+        }
+
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedField::Unloaded {
+            offload_config,
+            field_info,
+            ..
+        } = &*inner
+        {
+            let loaded = LoadedCommittedVectorField::try_load(field_info.clone())
+                .expect("Cannot load committed vector field");
+            *inner = InnerCommittedField::new_loaded(loaded, *offload_config)
+        }
+    }
+
+    pub fn unload_if_not_used(&self) {
+        let lock = self.inner.read().unwrap();
+        if lock.should_unload() {
+            drop(lock); // Release the read lock before unloading
+            self.unload();
+        }
+    }
+
+    fn unload(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if let InnerCommittedField::Loaded {
+            field,
+            offload_config,
+            ..
+        } = &*inner
+        {
+            let field_path = field.field_path();
+            debug!("Unloading committed vector field {:?}", field_path,);
+            let mut stats = field.stats();
+            stats.loaded = false; // Mark field as unloaded
+            *inner = InnerCommittedField::unloaded(*offload_config, stats, field.info());
+
+            info!("Committed vector field {:?} unloaded", field_path,);
+        }
+    }
+
+    pub fn get_field_info(&self) -> VectorFieldInfo {
+        self.inner.read().unwrap().info()
+    }
+
+    pub fn field_path(&self) -> Box<[String]> {
+        self.inner.read().unwrap().info().field_path.clone()
+    }
+
+    pub fn search(
+        &self,
+        target: &[f32],
+        similarity: f32,
+        limit: usize,
+        filtered_doc_ids: Option<&FilterResult<DocumentId>>,
+        output: &mut HashMap<DocumentId, f32>,
+        uncommitted_deleted_documents: &HashSet<DocumentId>,
+    ) -> Result<()> {
+        self.load();
+
+        let inner = self.inner.read().unwrap();
+
+        if let Some(field) = inner.get_load_unchecked() {
+            field.search(
+                target,
+                similarity,
+                limit,
+                filtered_doc_ids,
+                output,
+                uncommitted_deleted_documents,
+            )
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn stats(&self) -> CommittedVectorFieldStats {
+        let inner = self.inner.read().unwrap();
+        inner.stats()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VectorFieldInfo {
+    pub field_path: Box<[String]>,
+    pub data_dir: PathBuf,
+    pub model: OramaModelSerializable,
+}
+
+impl LoadedCommittedVectorField {
     pub fn from_iter<I>(
         field_path: Box<[String]>,
         iter: I,
@@ -56,9 +218,9 @@ impl CommittedVectorField {
             .context("Cannot write hnsw file")?;
 
         Ok(Self {
+            field_path,
             inner,
             data_dir,
-            field_path,
             model,
         })
     }
@@ -123,8 +285,8 @@ impl CommittedVectorField {
         })
     }
 
-    pub fn field_path(&self) -> &[String] {
-        &self.field_path
+    pub fn field_path(&self) -> Box<[String]> {
+        self.field_path.clone()
     }
 
     pub fn get_field_info(&self) -> VectorFieldInfo {
@@ -192,20 +354,23 @@ impl CommittedVectorField {
 
         Ok(())
     }
-
-    pub fn stats(&self) -> Result<CommittedVectorFieldStats> {
-        Ok(CommittedVectorFieldStats {
-            dimensions: self.inner.dim(),
-            vector_count: self.inner.len(),
-        })
-    }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VectorFieldInfo {
-    pub field_path: Box<[String]>,
-    pub data_dir: PathBuf,
-    pub model: OramaModelSerializable,
+impl LoadedField for LoadedCommittedVectorField {
+    type Stats = CommittedVectorFieldStats;
+    type Info = VectorFieldInfo;
+
+    fn stats(&self) -> Self::Stats {
+        CommittedVectorFieldStats {
+            dimensions: self.inner.dim(),
+            vector_count: self.inner.len(),
+            loaded: true,
+        }
+    }
+
+    fn info(&self) -> Self::Info {
+        self.get_field_info()
+    }
 }
 
 /// Rescales E5 embedding model cosine similarity scores from their typical range [0.7, 1.0] to [0.0, 1.0].
@@ -222,8 +387,9 @@ fn rescale_e5_similarity_score(score: f32) -> f32 {
     (clamped_score - E5_MIN_SCORE) / (E5_MAX_SCORE - E5_MIN_SCORE)
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct CommittedVectorFieldStats {
     pub dimensions: usize,
     pub vector_count: usize,
+    pub loaded: bool,
 }

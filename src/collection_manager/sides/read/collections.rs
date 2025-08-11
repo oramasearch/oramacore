@@ -80,7 +80,7 @@ impl CollectionsReader {
             let collection = CollectionReader::try_load(
                 context.clone(),
                 collection_dir,
-                indexes_config.offload_field.clone(),
+                indexes_config.offload_field,
             )
             .with_context(|| format!("Cannot load {collection_id:?} collection"))?;
 
@@ -205,7 +205,7 @@ impl CollectionsReader {
             read_api_key,
             write_api_key,
             self.context.clone(),
-            self.indexes_config.offload_field.clone(),
+            self.indexes_config.offload_field,
         )?;
 
         let mut guard = self.collections.write().await;

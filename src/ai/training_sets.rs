@@ -124,7 +124,7 @@ impl TrainingSetInterface {
         collection_id: CollectionId,
         destination: TrainingDestination,
     ) -> String {
-        format!("training_set:{}:{}", collection_id, destination)
+        format!("training_set:{collection_id}:{destination}")
     }
 }
 
