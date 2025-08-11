@@ -29,6 +29,7 @@ pub mod ragat;
 mod run_hooks;
 pub mod state_machines;
 pub mod tools;
+pub mod training_sets;
 
 tonic::include_proto!("orama_ai_service");
 

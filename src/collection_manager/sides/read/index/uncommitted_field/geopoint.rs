@@ -49,7 +49,7 @@ impl UncommittedGeoPointFilterField {
         self.inner.clone()
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = &'s Point<f32, DocumentId>> + 's {
+    pub fn iter(&self) -> impl Iterator<Item = &Point<f32, DocumentId>> + '_ {
         self.inner.iter()
     }
 

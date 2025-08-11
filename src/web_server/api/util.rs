@@ -25,7 +25,7 @@ use crate::{
             WriteError,
         },
     },
-    types::{ApiKey, CollectionId, IndexId, WriteApiKey},
+    types::{ApiKey, CollectionId, IndexId, TrainingSetId, WriteApiKey},
 };
 
 impl<S> FromRequestParts<S> for WriteApiKey
@@ -234,6 +234,46 @@ where
         })?;
 
         Ok(index_id)
+    }
+}
+
+impl<S> FromRequestParts<S> for TrainingSetId
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, Json<serde_json::Value>);
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let a = Path::<HashMap<String, String>>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "message": format!("missing training set id: {:?}", e)
+                    })),
+                )
+            })?;
+
+        let training_set_id = a.get("training_set").ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "message": "missing training set id"
+                })),
+            )
+        })?;
+
+        let training_set_id = TrainingSetId::try_new(training_set_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "message": format!("Bad training set id: {:?}", e)
+                })),
+            )
+        })?;
+
+        Ok(training_set_id)
     }
 }
 

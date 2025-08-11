@@ -93,7 +93,7 @@ impl Answer {
         sender.send(AnswerEvent::Acknowledged)?;
         sender.send(AnswerEvent::SelectedLLM(llm_config.clone()))?;
 
-        let system_prompt = self
+        let _system_prompt = self
             .handle_system_prompt(interaction.system_prompt_id)
             .await?;
 
@@ -426,7 +426,8 @@ impl Answer {
         let llm_service = self.read_side.get_llm_service();
 
         let optimized_query_variables = vec![("input".to_string(), interaction.query.clone())];
-        let optimized_query = llm_service
+        // fallback to the original query if the optimization fails
+        llm_service
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
                 optimized_query_variables,
@@ -434,8 +435,7 @@ impl Answer {
                 Some(llm_config.clone()),
             )
             .await
-            .unwrap_or_else(|_| interaction.query.clone()); // fallback to the original query if the optimization fails
-        optimized_query
+            .unwrap_or_else(|_| interaction.query.clone())
     }
 
     async fn get_composed_results(
@@ -457,7 +457,7 @@ impl Answer {
             }
         };
 
-        let results = match self
+        match self
             .merge_component_results(components)
             .map_err(|_| AnswerError::Generic(anyhow::anyhow!("Error")))
             .await
@@ -465,10 +465,9 @@ impl Answer {
             Ok(results) => results,
             Err(e) => {
                 warn!("Failed to merge component results: {:?}", e);
-                return vec![];
+                vec![]
             }
-        };
-        results
+        }
     }
 
     async fn get_search_results(

@@ -28,6 +28,8 @@ pub enum AnalyticSearchEventInvocationType {
     Answer,
     #[serde(rename = "nlp_search")]
     NLPSearch,
+    #[serde(rename = "training_data_gen")]
+    TrainingDataGen,
 }
 
 #[cfg_attr(test, derive(Clone))]
@@ -122,12 +124,11 @@ impl AnalyticsStorage {
 
         let init_file_name: String =
             if BufferedFile::exists_as_file(&data_dir.join("analytics.index")) {
-                let content = BufferedFile::open(data_dir.join("analytics.index"))
+                BufferedFile::open(data_dir.join("analytics.index"))
                     .with_context(|| {
                         format!("Cannot open analytics file at {}", data_dir.display())
                     })?
-                    .read_text_data()?;
-                content
+                    .read_text_data()?
             } else {
                 // Default file name is based on the current timestamp
                 let now = Utc::now().timestamp();

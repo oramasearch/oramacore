@@ -297,6 +297,15 @@ impl LoadedCommittedVectorField {
         }
     }
 
+    fn is_e5_model(&self) -> bool {
+        matches!(
+            self.model,
+            OramaModel::MultilingualE5Small
+                | OramaModel::MultilingualE5Base
+                | OramaModel::MultilingualE5Large
+        )
+    }
+
     pub fn search(
         &self,
         target: &[f32],
@@ -322,13 +331,19 @@ impl LoadedCommittedVectorField {
             limit * 2
         };
         let data = self.inner.search(target.to_vec(), limit * 2);
+        let is_e5_model = self.is_e5_model();
 
-        for (doc_id, score) in data {
+        for (doc_id, mut score) in data {
             if filtered_doc_ids.is_some_and(|ids| !ids.contains(&doc_id)) {
                 continue;
             }
             if uncommitted_deleted_documents.contains(&doc_id) {
                 continue;
+            }
+
+            // Rescale E5 model scores from [0.7, 1.0] to [0.0, 1.0]
+            if is_e5_model {
+                score = rescale_e5_similarity_score(score);
             }
 
             if score >= similarity {
@@ -356,6 +371,20 @@ impl LoadedField for LoadedCommittedVectorField {
     fn info(&self) -> Self::Info {
         self.get_field_info()
     }
+}
+
+/// Rescales E5 embedding model cosine similarity scores from their typical range [0.7, 1.0] to [0.0, 1.0].
+/// E5 models produce similarity scores that rarely go below 0.7, making the effective range much narrower.
+/// This rescaling helps normalize the scores to use the full [0.0, 1.0] range for better search ranking.
+fn rescale_e5_similarity_score(score: f32) -> f32 {
+    const E5_MIN_SCORE: f32 = 0.7;
+    const E5_MAX_SCORE: f32 = 1.0;
+
+    // Clamp the score to the expected E5 range to handle edge cases
+    let clamped_score = score.clamp(E5_MIN_SCORE, E5_MAX_SCORE);
+
+    // Rescale from [0.7, 1.0] to [0.0, 1.0]
+    (clamped_score - E5_MIN_SCORE) / (E5_MAX_SCORE - E5_MIN_SCORE)
 }
 
 #[derive(Serialize, Debug, Clone)]

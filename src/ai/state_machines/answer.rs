@@ -742,7 +742,7 @@ impl AnswerStateMachine {
                     interaction: _,
                     llm_config: _,
                     system_prompt: _,
-                    search_results,
+                    search_results: _,
                     variables: _,
                     collection_id: _,
                     read_api_key: _,
@@ -1360,11 +1360,9 @@ impl AnswerStateMachine {
                 .await
                 .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
 
-            let results = self
-                .merge_component_results(components)
+            self.merge_component_results(components)
                 .await
-                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?;
-            results
+                .map_err(|e| AnswerError::RagAtError(format!("{e:?}")))?
         } else {
             let max_documents = Limit(interaction.max_documents.unwrap_or(5));
             let min_similarity = Similarity(interaction.min_similarity.unwrap_or(0.5));
