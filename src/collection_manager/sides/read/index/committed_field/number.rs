@@ -166,11 +166,11 @@ impl BoundedValue for SerializableNumber {
     }
 }
 
-pub fn get_iter<'s, K: Ord + Eq>(
-    vec: &'s [(K, HashSet<DocumentId>)],
+pub fn get_iter<K: Ord + Eq>(
+    vec: &[(K, HashSet<DocumentId>)],
     min: (bool, K),
     max: (bool, K),
-) -> impl Iterator<Item = DocumentId> + 's {
+) -> impl Iterator<Item = DocumentId> + '_ {
     let min_index = match vec.binary_search_by_key(&&min.1, |(num, _)| num) {
         Ok(index) => {
             // vec[index] is == min.1
