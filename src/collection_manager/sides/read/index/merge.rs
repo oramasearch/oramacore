@@ -597,7 +597,7 @@ pub fn merge_vector_field(
                     .filter(|(doc_id, _)| !uncommitted_document_deletions.contains(doc_id)),
                 uncommitted.get_model(),
                 data_dir,
-                offload_config,
+                *offload_config,
             )?;
             Ok(Some(new_field))
         }
@@ -631,7 +631,7 @@ pub fn merge_vector_field(
                     info.data_dir = data_dir;
 
                     return Ok(Some(
-                        CommittedVectorField::try_load(info, offload_config)
+                        CommittedVectorField::try_load(info, *offload_config)
                             .context("Failed to load committed vector field")?,
                     ));
                 }
@@ -660,7 +660,7 @@ pub fn merge_vector_field(
                 uncommitted_document_deletions,
                 uncommitted.get_model(),
                 data_dir,
-                offload_config,
+                *offload_config,
             )?;
             Ok(Some(new_field))
         }

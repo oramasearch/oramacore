@@ -274,7 +274,7 @@ impl Index {
                 field_id,
                 UncommittedVectorField::empty(info.field_path.clone(), info.model.0),
             );
-            let field = CommittedVectorField::try_load(info, &offload_config)
+            let field = CommittedVectorField::try_load(info, offload_config)
                 .context("Cannot load vector field")?;
             committed_fields.vector_fields.insert(field_id, field);
         }
@@ -1407,7 +1407,7 @@ impl Index {
             Some(IndexFieldStats {
                 field_id: *k,
                 field_path: path,
-                stats: IndexFieldStatsType::CommittedVector(v.stats().ok()?),
+                stats: IndexFieldStatsType::CommittedVector(v.stats()),
             })
         }));
 
