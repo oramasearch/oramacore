@@ -1204,7 +1204,7 @@ impl WriteSide {
         self.check_write_api_key(collection_id, write_api_key)
             .await?;
 
-        return Ok(self.training_sets.clone());
+        Ok(self.training_sets.clone())
     }
 
     pub fn get_jwt_manager(&self) -> JwtManager {
@@ -1317,7 +1317,7 @@ fn default_insert_batch_commit_size() -> u64 {
 pub struct HookWriterLock<'guard> {
     collection: CollectionReadLock<'guard>,
 }
-impl<'guard> Deref for HookWriterLock<'guard> {
+impl Deref for HookWriterLock<'_> {
     type Target = HookWriter;
 
     fn deref(&self) -> &Self::Target {

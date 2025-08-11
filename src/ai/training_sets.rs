@@ -284,7 +284,7 @@ impl TrainingSet {
         let collection_stats = self
             .read_side
             .collection_stats(
-                self.read_api_key.clone(),
+                self.read_api_key,
                 self.collection_id,
                 CollectionStatsRequest { with_keys: false },
             )
@@ -323,7 +323,7 @@ impl TrainingSet {
         let random_search_results = self
             .read_side
             .search(
-                self.read_api_key.clone(),
+                self.read_api_key,
                 self.collection_id,
                 search_params,
                 AnalyticSearchEventInvocationType::TrainingDataGen,
