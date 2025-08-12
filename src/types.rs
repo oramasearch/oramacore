@@ -1313,7 +1313,7 @@ impl WhereFilter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, ToSchema, JsonSchema)]
 pub struct NLPSearchRequest {
     pub query: String,
     pub llm_config: Option<InteractionLLMConfig>,
@@ -1565,7 +1565,7 @@ impl InteractionMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 pub struct InteractionLLMConfig {
     pub provider: RemoteLLMProvider,
     pub model: String,
