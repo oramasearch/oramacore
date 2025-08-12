@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    Json, Router
+    Json, Router,
 };
 use axum_openapi3::{utoipa::ToSchema, *};
 use rmcp::{
@@ -52,9 +52,7 @@ impl StructuredOutputServer {
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
-    Router::new()
-        .add(mcp_endpoint())
-        .with_state(read_side)
+    Router::new().add(mcp_endpoint()).with_state(read_side)
 }
 
 #[derive(Deserialize, IntoParams, ToSchema)]
