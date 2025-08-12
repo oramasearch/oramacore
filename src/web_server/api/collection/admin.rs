@@ -41,6 +41,7 @@ pub fn apis(write_side: Arc<WriteSide>) -> Router {
         .add(reindex())
         .add(create_temp_index())
         .add(replace_index())
+        .add(update_documents())
         .with_state(write_side)
 }
 
@@ -177,7 +178,7 @@ async fn add_documents(
 
 #[endpoint(
     method = "POST",
-    path = "/v1/collections/{collection_id}/indexes/{index_id}/update",
+    path = "/v1/collections/{collection_id}/indexes/{index_id}/documents/upsert",
     description = "Update documents to an index"
 )]
 async fn update_documents(
