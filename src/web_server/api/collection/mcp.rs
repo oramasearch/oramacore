@@ -91,13 +91,30 @@ struct JsonRpcError {
     description = "MCP (Model Context Protocol) Endpoint"
 )]
 async fn mcp_endpoint(
-    Path(_collection_id): Path<CollectionId>,
-    Query(_query): Query<McpQueryParams>,
-    _read_side: State<Arc<ReadSide>>,
+    Path(collection_id): Path<CollectionId>,
+    Query(query): Query<McpQueryParams>,
+    read_side: State<Arc<ReadSide>>,
     _headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {
-    // Parse request body
+    let api_key = query.api_key;
+
+    match read_side.check_read_api_key(collection_id, api_key).await {
+        Ok(_) => {}
+        Err(_err) => {
+            let error_response = JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: None,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: 401,
+                    message: "unauthorized".to_string(),
+                }),
+            };
+            return (StatusCode::UNAUTHORIZED, Json(error_response));
+        }
+    }
+
     let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(_) => {
