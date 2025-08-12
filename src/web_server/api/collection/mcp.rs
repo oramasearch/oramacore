@@ -1,12 +1,9 @@
+use crate::types::SearchParams;
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
     tool, tool_handler, tool_router,
 };
-
-use crate::{
-    collection_manager::sides::read::ReadError,
-    types::{SearchParams, SearchResult},
-};
+use std::future::Future;
 
 #[derive(Clone)]
 pub struct StructuredOutputServer {
@@ -26,7 +23,7 @@ impl Default for StructuredOutputServer {
 impl StructuredOutputServer {
     pub fn new() -> Self {
         Self {
-            tool_router: ToolRouter::new(),
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -34,10 +31,7 @@ impl StructuredOutputServer {
         name = "search",
         description = "Perform a search operation on all the indexes"
     )]
-    pub async fn search(
-        &self,
-        params: Parameters<SearchParams>,
-    ) -> Result<SearchResult, ReadError> {
-        unimplemented!()
+    pub async fn search(&self, _params: Parameters<SearchParams>) -> String {
+        "Search functionality not yet implemented".to_string()
     }
 }
