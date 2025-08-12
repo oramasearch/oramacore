@@ -23,6 +23,7 @@ mod shutdown;
 mod sort;
 mod suggestions;
 mod temp_index;
+mod temp_index_cleanup;
 mod update_docs;
 mod vector_search;
 

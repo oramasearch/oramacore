@@ -93,6 +93,7 @@ pub enum DeletionReason {
     UserWanted,
     CollectionReindexed { temp_index_id: IndexId },
     IndexResynced { temp_index_id: IndexId },
+    ExpiredTempIndex,
 }
 
 #[derive(Default)]
@@ -759,6 +760,11 @@ impl Index {
     #[inline]
     pub fn aliases(&self) -> &[IndexId] {
         self.aliases.as_slice()
+    }
+
+    #[inline]
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
     }
 
     pub fn promote_to_runtime_index(&mut self, runtime_index_id: IndexId) {

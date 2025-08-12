@@ -189,6 +189,9 @@ pub enum CollectionWriteOperation {
     DeleteIndex2 {
         index_id: IndexId,
     },
+    DeleteTempIndex {
+        temp_index_id: IndexId,
+    },
     IndexWriteOperation(IndexId, IndexWriteOperation),
 }
 
@@ -349,6 +352,9 @@ impl WriteOperation {
             }
             WriteOperation::Collection(_, CollectionWriteOperation::DeleteIndex2 { .. }) => {
                 "delete_index"
+            }
+            WriteOperation::Collection(_, CollectionWriteOperation::DeleteTempIndex { .. }) => {
+                "delete_expired_temp_index"
             }
             WriteOperation::Collection(
                 _,

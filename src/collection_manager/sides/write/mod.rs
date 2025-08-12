@@ -93,6 +93,12 @@ pub enum WriteError {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct TempIndexCleanupConfig {
+    pub cleanup_interval: Duration,
+    pub max_age: Duration,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct CollectionsWriterConfig {
     pub data_dir: PathBuf,
     #[serde(default = "embedding_queue_limit_default")]
@@ -105,6 +111,8 @@ pub struct CollectionsWriterConfig {
     pub javascript_queue_limit: usize,
     #[serde(deserialize_with = "deserialize_duration")]
     pub commit_interval: Duration,
+    #[serde(default = "default_temp_index_cleanup_config")]
+    pub temp_index_cleanup: TempIndexCleanupConfig,
 }
 
 #[derive(Deserialize, Clone)]
@@ -166,6 +174,7 @@ impl WriteSide {
         let data_dir = collections_writer_config.data_dir.clone();
 
         let insert_batch_commit_size = collections_writer_config.insert_batch_commit_size;
+        let temp_index_cleanup_config = collections_writer_config.temp_index_cleanup.clone();
 
         let commit_interval = collections_writer_config.commit_interval;
         let embedding_queue_limit = collections_writer_config.embedding_queue_limit;
@@ -224,6 +233,7 @@ impl WriteSide {
         let (stop_done_sender, stop_done_receiver) = tokio::sync::mpsc::channel(1);
         let (stop_sender, _) = tokio::sync::broadcast::channel(1);
         let commit_loop_receiver = stop_sender.subscribe();
+        let temp_index_cleanup_receiver = stop_sender.subscribe();
         let receive_operation_loop_receiver = stop_sender.subscribe();
 
         let jwt_manager = JwtManager::new(config.jwt)
@@ -260,6 +270,13 @@ impl WriteSide {
             commit_loop_receiver,
             stop_done_sender.clone(),
         );
+
+        start_temp_index_cleanup_loop(
+            write_side.clone(),
+            temp_index_cleanup_config,
+            temp_index_cleanup_receiver,
+            stop_done_sender.clone(),
+        );
         start_calculate_embedding_loop(
             context.ai_service.clone(),
             rx,
@@ -270,6 +287,10 @@ impl WriteSide {
         );
 
         Ok(write_side)
+    }
+
+    pub async fn cleanup_expired_temp_indexes(&self, max_age: Duration) -> Result<usize> {
+        self.collections.cleanup_expired_temp_indexes(max_age).await
     }
 
     pub async fn stop(&self) -> Result<()> {
@@ -595,6 +616,8 @@ impl WriteSide {
         let collection = self
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
+
+        println!("Collection: {:#?}", collection.as_dto().await);
 
         let index = collection
             .get_index(index_id)
@@ -1252,7 +1275,7 @@ fn start_commit_loop(
     stop_done_sender: tokio::sync::mpsc::Sender<()>,
 ) {
     tokio::task::spawn(async move {
-        let start = Instant::now() + insert_batch_commit_size;
+        let start = tokio::time::Instant::now() + insert_batch_commit_size;
         let mut interval = tokio::time::interval_at(start, insert_batch_commit_size);
 
         // If for some reason we miss a tick, we skip it.
@@ -1286,6 +1309,53 @@ fn start_commit_loop(
     });
 }
 
+fn start_temp_index_cleanup_loop(
+    write_side: Arc<WriteSide>,
+    cleanup_config: TempIndexCleanupConfig,
+    mut stop_receiver: tokio::sync::broadcast::Receiver<()>,
+    stop_done_sender: tokio::sync::mpsc::Sender<()>,
+) {
+    tokio::task::spawn(async move {
+        let start = tokio::time::Instant::now() + cleanup_config.cleanup_interval;
+        let mut interval = tokio::time::interval_at(start, cleanup_config.cleanup_interval);
+
+        // If for some reason we miss a tick, we skip it.
+        // Cleanup is not critical and we want to avoid overloading the system.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        info!(
+            "Started temp index cleanup loop with interval: {:?}, max_age: {:?}",
+            cleanup_config.cleanup_interval, cleanup_config.max_age
+        );
+
+        'outer: loop {
+            tokio::select! {
+                _ = stop_receiver.recv() => {
+                    info!("Stopping temp index cleanup loop");
+                    break 'outer;
+                }
+                _ = interval.tick() => {
+                    // Cleanup expired temp indexes
+                    match write_side.collections.cleanup_expired_temp_indexes(cleanup_config.max_age).await {
+                        Ok(cleaned_count) => {
+                            if cleaned_count > 0 {
+                                info!("Cleaned up {} expired temp indexes", cleaned_count);
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = ?e, "Error during temp index cleanup");
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Err(e) = stop_done_sender.send(()).await {
+            error!(error = ?e, "Cannot send stop signal from temp index cleanup loop");
+        }
+    });
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "version")]
 enum WriteSideInfo {
@@ -1312,6 +1382,17 @@ fn embedding_model_default() -> OramaModelSerializable {
 
 fn default_insert_batch_commit_size() -> u64 {
     1_000
+}
+
+fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {
+    TempIndexCleanupConfig {
+        cleanup_interval: Duration::from_secs(3600), // 1 hour
+        max_age: Duration::from_secs(43200),         // 12 hours
+    }
+}
+
+fn default_temp_index_cleanup_enabled() -> bool {
+    true
 }
 
 pub struct HookWriterLock<'guard> {
