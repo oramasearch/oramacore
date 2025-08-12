@@ -12,11 +12,14 @@ use axum_openapi3::{utoipa::ToSchema, *};
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::{
+    ai::advanced_autoquery::QueryMappedSearchResult,
+    collection_manager::sides::read::AnalyticSearchEventInvocationType,
+};
 
 use crate::{
     collection_manager::sides::read::{ReadError, ReadSide},
-    types::{ApiKey, CollectionId, SearchParams, SearchResult},
+    types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams, SearchResult},
 };
 
 #[derive(Clone)]
@@ -49,6 +52,24 @@ impl StructuredOutputServer {
                 self.collection_id,
                 search_params,
                 AnalyticSearchEventInvocationType::Action,
+            )
+            .await
+    }
+
+    pub async fn perform_nlp_search(
+        &self,
+        nlp_request: NLPSearchRequest,
+    ) -> Result<Vec<QueryMappedSearchResult>, ReadError> {
+        let logs = self.read_side.get_hook_logs();
+        let log_sender = logs.get_sender(&self.collection_id);
+
+        self.read_side
+            .nlp_search(
+                self.read_side.clone(),
+                self.read_api_key,
+                self.collection_id,
+                nlp_request,
+                log_sender,
             )
             .await
     }
@@ -169,12 +190,18 @@ async fn mcp_endpoint(
         }
         "tools/list" => {
             let search_params_schema = schemars::schema_for!(SearchParams);
+            let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
             serde_json::json!({
                 "tools": [
                     {
                         "name": "search",
                         "description": "Perform a full-text, vector, or hybrid search operation",
                         "inputSchema": search_params_schema
+                    },
+                    {
+                        "name": "nlp_search",
+                        "description": "Perform an advanced NLP search powered by AI",
+                        "inputSchema": nlp_search_params_schema
                     }
                 ]
             })
@@ -247,6 +274,68 @@ async fn mcp_endpoint(
                                             {
                                                 "type": "text",
                                                 "text": format!("Search error: {}", err)
+                                            }
+                                        ]
+                                    })
+                                }
+                            }
+                        }
+                        "nlp_search" => {
+                            // Extract NLP search parameters from the arguments
+                            let nlp_params = if let Some(args) = params.get("arguments") {
+                                match serde_json::from_value(args.clone()) {
+                                    Ok(params) => params,
+                                    Err(err) => {
+                                        return (
+                                            StatusCode::BAD_REQUEST,
+                                            Json(JsonRpcResponse {
+                                                jsonrpc: "2.0".to_string(),
+                                                id: request.id,
+                                                result: None,
+                                                error: Some(JsonRpcError {
+                                                    code: -32602,
+                                                    message: format!(
+                                                        "Invalid NLP search parameters: {}",
+                                                        err
+                                                    ),
+                                                }),
+                                            }),
+                                        );
+                                    }
+                                }
+                            } else {
+                                return (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(JsonRpcResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id: request.id,
+                                        result: None,
+                                        error: Some(JsonRpcError {
+                                            code: -32602,
+                                            message: "Missing NLP search parameters".to_string(),
+                                        }),
+                                    }),
+                                );
+                            };
+
+                            // Perform the NLP search
+                            match server.perform_nlp_search(nlp_params).await {
+                                Ok(result) => {
+                                    serde_json::json!({
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": serde_json::to_string_pretty(&result).unwrap_or_default()
+                                            }
+                                        ]
+                                    })
+                                }
+                                Err(err) => {
+                                    serde_json::json!({
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": format!("NLP search error: {}", err)
                                             }
                                         ]
                                     })
