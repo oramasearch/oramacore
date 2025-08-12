@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -8,46 +8,49 @@ use axum::{
     Json, Router,
 };
 use axum_openapi3::{utoipa::ToSchema, *};
-use rmcp::{
-    handler::server::tool::{Parameters, ToolRouter},
-    tool, tool_handler, tool_router,
-};
+
 use serde::{Deserialize, Serialize};
 use utoipa::IntoParams;
 
+use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+
 use crate::{
-    collection_manager::sides::read::ReadSide,
-    types::{ApiKey, CollectionId, SearchParams},
+    collection_manager::sides::read::{ReadError, ReadSide},
+    types::{ApiKey, CollectionId, SearchParams, SearchResult},
 };
 
 #[derive(Clone)]
 pub struct StructuredOutputServer {
-    tool_router: ToolRouter<Self>,
+    read_side: Arc<ReadSide>,
+    read_api_key: ApiKey,
+    collection_id: CollectionId,
 }
 
-#[tool_handler(router = self.tool_router)]
-impl rmcp::ServerHandler for StructuredOutputServer {}
-
-impl Default for StructuredOutputServer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[tool_router(router = tool_router)]
 impl StructuredOutputServer {
-    pub fn new() -> Self {
+    pub fn new(
+        read_side: Arc<ReadSide>,
+        read_api_key: ApiKey,
+        collection_id: CollectionId,
+    ) -> Self {
         Self {
-            tool_router: Self::tool_router(),
+            read_side,
+            read_api_key,
+            collection_id,
         }
     }
 
-    #[tool(
-        name = "search",
-        description = "Perform a search operation on all the indexes"
-    )]
-    pub async fn search(&self, _params: Parameters<SearchParams>) -> String {
-        "Search functionality not yet implemented".to_string()
+    pub async fn perform_search(
+        &self,
+        search_params: SearchParams,
+    ) -> Result<SearchResult, ReadError> {
+        self.read_side
+            .search(
+                self.read_api_key,
+                self.collection_id,
+                search_params,
+                AnalyticSearchEventInvocationType::Action,
+            )
+            .await
     }
 }
 
@@ -93,13 +96,16 @@ struct JsonRpcError {
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
     Query(query): Query<McpQueryParams>,
-    read_side: State<Arc<ReadSide>>,
+    State(read_side): State<Arc<ReadSide>>,
     _headers: HeaderMap,
     body: Body,
 ) -> impl IntoResponse {
     let api_key = query.api_key;
 
-    match read_side.check_read_api_key(collection_id, api_key).await {
+    match read_side
+        .check_read_api_key(collection_id, api_key.clone())
+        .await
+    {
         Ok(_) => {}
         Err(_err) => {
             let error_response = JsonRpcResponse {
@@ -169,7 +175,17 @@ async fn mcp_endpoint(
                         "description": "Perform a search operation on all the indexes",
                         "inputSchema": {
                             "type": "object",
-                            "properties": {},
+                            "properties": {
+                                "term": {
+                                    "type": "string",
+                                    "description": "Search term"
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Maximum number of results",
+                                    "default": 10
+                                }
+                            },
                             "required": []
                         }
                     }
@@ -178,15 +194,109 @@ async fn mcp_endpoint(
         }
         "tools/call" => {
             // Create MCP server instance and handle tool call
-            let _server = StructuredOutputServer::new();
-            serde_json::json!({
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Search functionality not yet implemented"
+            let server = StructuredOutputServer::new(
+                read_side.clone(),
+                api_key.clone(),
+                collection_id.clone(),
+            );
+
+            // Extract tool name and arguments from request params
+            if let Some(params) = request.params.as_ref() {
+                if let Some(tool_name) = params.get("name").and_then(|v| v.as_str()) {
+                    match tool_name {
+                        "search" => {
+                            // Extract search parameters from the arguments
+                            let search_params = if let Some(args) = params.get("arguments") {
+                                match serde_json::from_value(args.clone()) {
+                                    Ok(params) => params,
+                                    Err(err) => {
+                                        return (
+                                            StatusCode::BAD_REQUEST,
+                                            Json(JsonRpcResponse {
+                                                jsonrpc: "2.0".to_string(),
+                                                id: request.id,
+                                                result: None,
+                                                error: Some(JsonRpcError {
+                                                    code: -32602,
+                                                    message: format!(
+                                                        "Invalid search parameters: {}",
+                                                        err
+                                                    ),
+                                                }),
+                                            }),
+                                        );
+                                    }
+                                }
+                            } else {
+                                return (
+                                    StatusCode::BAD_REQUEST,
+                                    Json(JsonRpcResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id: request.id,
+                                        result: None,
+                                        error: Some(JsonRpcError {
+                                            code: -32602,
+                                            message: "Missing search parameters".to_string(),
+                                        }),
+                                    }),
+                                );
+                            };
+
+                            // Perform the search
+                            match server.perform_search(search_params).await {
+                                Ok(result) => {
+                                    serde_json::json!({
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": serde_json::to_string_pretty(&result).unwrap_or_default()
+                                            }
+                                        ]
+                                    })
+                                }
+                                Err(err) => {
+                                    serde_json::json!({
+                                        "content": [
+                                            {
+                                                "type": "text",
+                                                "text": format!("Search error: {}", err)
+                                            }
+                                        ]
+                                    })
+                                }
+                            }
+                        }
+                        _ => {
+                            serde_json::json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Unknown tool"
+                                    }
+                                ]
+                            })
+                        }
                     }
-                ]
-            })
+                } else {
+                    serde_json::json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Missing tool name"
+                            }
+                        ]
+                    })
+                }
+            } else {
+                serde_json::json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Missing parameters"
+                        }
+                    ]
+                })
+            }
         }
         _ => {
             let error_response = JsonRpcResponse {
