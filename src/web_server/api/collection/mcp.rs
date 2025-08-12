@@ -156,7 +156,7 @@ async fn mcp_endpoint(
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "oramacore-mcp",
+                    "name": "orama-mcp",
                     "version": "1.0.0"
                 }
             })
