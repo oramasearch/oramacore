@@ -14,6 +14,7 @@ mod search;
 mod system_prompts;
 mod tools;
 mod training_sets;
+mod mcp;
 
 pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>) -> Router {
     let collection_router = Router::new();
