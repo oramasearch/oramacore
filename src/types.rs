@@ -2085,12 +2085,12 @@ impl Eq for GeoSearchRadiusValue {}
 impl GeoSearchRadiusValue {
     pub fn to_meter(&self, in_unit: GeoSearchRadiusUnit) -> f32 {
         match in_unit {
-            GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01,  // 1 cm = 0.01 m
-            GeoSearchRadiusUnit::Meter => self.0,              // already in meters
+            GeoSearchRadiusUnit::CentiMeter => self.0 * 0.01, // 1 cm = 0.01 m
+            GeoSearchRadiusUnit::Meter => self.0,             // already in meters
             GeoSearchRadiusUnit::KiloMeter => self.0 * 1000.0, // 1 km = 1000 m
-            GeoSearchRadiusUnit::Feet => self.0 * 0.3048,      // 1 ft = 0.3048 m
-            GeoSearchRadiusUnit::Yard => self.0 * 0.9144,      // 1 yd = 0.9144 m
-            GeoSearchRadiusUnit::Mile => self.0 * 1609.344,    // 1 mi = 1609.344 m
+            GeoSearchRadiusUnit::Feet => self.0 * 0.3048,     // 1 ft = 0.3048 m
+            GeoSearchRadiusUnit::Yard => self.0 * 0.9144,     // 1 yd = 0.9144 m
+            GeoSearchRadiusUnit::Mile => self.0 * 1609.344,   // 1 mi = 1609.344 m
         }
     }
 }
@@ -2224,6 +2224,17 @@ impl<const N: usize> PartialSchema for StackString<N> {
     }
 }
 impl<const N: usize> ToSchema for StackString<N> {}
+
+impl<const N: usize> schemars::JsonSchema for StackString<N> {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "string".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(_gen)
+    }
+}
+
 impl<const N: usize> Serialize for StackString<N> {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

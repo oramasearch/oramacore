@@ -1,8 +1,11 @@
-use rmcp::{handler::server::tool::{ToolRouter, Parameters}, tool_router, tool_handler};
+use rmcp::{
+    handler::server::tool::{Parameters, ToolRouter},
+    tool_handler, tool_router,
+};
 
 #[derive(Clone)]
 pub struct StructuredOutputServer {
-    tool_router: ToolRouter<Self>
+    tool_router: ToolRouter<Self>,
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -18,10 +21,13 @@ impl Default for StructuredOutputServer {
 impl StructuredOutputServer {
     pub fn new() -> Self {
         Self {
-            tool_router: ToolRouter::new()
+            tool_router: ToolRouter::new(),
         }
     }
 
-    #[tool(name = "search", description = "Perform a search operation on all the indexes")]
-    pub async fn search(&self, params: Parameters)
+    #[tool(
+        name = "search",
+        description = "Perform a search operation on all the indexes"
+    )]
+    pub async fn search(&self, params: Parameters) {}
 }
