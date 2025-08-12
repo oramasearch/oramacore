@@ -617,8 +617,6 @@ impl WriteSide {
             .get_collection_with_write_key(collection_id, write_api_key)
             .await?;
 
-        println!("Collection: {:#?}", collection.as_dto().await);
-
         let index = collection
             .get_index(index_id)
             .await

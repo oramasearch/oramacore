@@ -211,7 +211,6 @@ impl CollectionReader {
                 Some(DeletionReason::ExpiredTempIndex) => {
                     // This shouldn't happen on regular indexes, only on temp indexes
                     index_id_to_remove.push((i, index.id()));
-                    println!("Index {} marked as deleted due to expiration", index.id());
                     continue;
                 }
                 None => {}
