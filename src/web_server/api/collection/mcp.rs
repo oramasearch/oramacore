@@ -168,26 +168,13 @@ async fn mcp_endpoint(
             })
         }
         "tools/list" => {
+            let search_params_schema = schemars::schema_for!(SearchParams);
             serde_json::json!({
                 "tools": [
                     {
                         "name": "search",
-                        "description": "Perform a search operation on all the indexes",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "term": {
-                                    "type": "string",
-                                    "description": "Search term"
-                                },
-                                "limit": {
-                                    "type": "integer",
-                                    "description": "Maximum number of results",
-                                    "default": 10
-                                }
-                            },
-                            "required": []
-                        }
+                        "description": "Perform a full-text, vector, or hybrid search operation",
+                        "inputSchema": search_params_schema
                     }
                 ]
             })
