@@ -10,6 +10,7 @@ use axum::{
 use axum_openapi3::{utoipa::ToSchema, *};
 
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error};
 use utoipa::IntoParams;
 
 use crate::{
@@ -65,7 +66,7 @@ impl StructuredOutputServer {
 
         self.read_side
             .nlp_search(
-                self.read_side.clone(),
+                axum::extract::State(self.read_side.clone()),
                 self.read_api_key,
                 self.collection_id,
                 nlp_request,
@@ -319,23 +320,51 @@ async fn mcp_endpoint(
                             };
 
                             // Perform the NLP search
+                            debug!("Performing NLP search with params: {:?}", nlp_params);
                             match server.perform_nlp_search(nlp_params).await {
                                 Ok(result) => {
-                                    serde_json::json!({
-                                        "content": [
-                                            {
-                                                "type": "text",
-                                                "text": serde_json::to_string_pretty(&result).unwrap_or_default()
-                                            }
-                                        ]
-                                    })
+                                    debug!(
+                                        "NLP search successful, result type: {}",
+                                        std::any::type_name_of_val(&result)
+                                    );
+                                    match serde_json::to_string_pretty(&result) {
+                                        Ok(json_str) => {
+                                            debug!(
+                                                "Successfully serialized NLP result, length: {}",
+                                                json_str.len()
+                                            );
+                                            serde_json::json!({
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": json_str
+                                                    }
+                                                ]
+                                            })
+                                        }
+                                        Err(serialize_err) => {
+                                            error!(
+                                                "Failed to serialize NLP search result: {}",
+                                                serialize_err
+                                            );
+                                            serde_json::json!({
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": format!("NLP search completed but failed to serialize result: {}. Result debug: {:?}", serialize_err, result)
+                                                    }
+                                                ]
+                                            })
+                                        }
+                                    }
                                 }
                                 Err(err) => {
+                                    error!("NLP search failed: {}", err);
                                     serde_json::json!({
                                         "content": [
                                             {
                                                 "type": "text",
-                                                "text": format!("NLP search error: {}", err)
+                                                "text": format!("NLP search error: {}. Error debug: {:?}", err, err)
                                             }
                                         ]
                                     })
