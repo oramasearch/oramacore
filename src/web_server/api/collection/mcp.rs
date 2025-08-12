@@ -1,6 +1,11 @@
 use rmcp::{
     handler::server::tool::{Parameters, ToolRouter},
-    tool_handler, tool_router,
+    tool, tool_handler, tool_router,
+};
+
+use crate::{
+    collection_manager::sides::read::ReadError,
+    types::{SearchParams, SearchResult},
 };
 
 #[derive(Clone)]
@@ -29,5 +34,10 @@ impl StructuredOutputServer {
         name = "search",
         description = "Perform a search operation on all the indexes"
     )]
-    pub async fn search(&self, params: Parameters) {}
+    pub async fn search(
+        &self,
+        params: Parameters<SearchParams>,
+    ) -> Result<SearchResult, ReadError> {
+        unimplemented!()
+    }
 }
