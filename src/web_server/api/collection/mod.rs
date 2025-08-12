@@ -10,6 +10,7 @@ mod analytics;
 mod answer;
 mod generate;
 mod hooks;
+mod mcp;
 mod search;
 mod system_prompts;
 mod tools;
@@ -39,6 +40,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(tools::read_apis(read_side.clone()))
             .merge(system_prompts::read_apis(read_side.clone()))
             .merge(training_sets::read_apis(read_side.clone()))
+            .merge(mcp::apis(read_side.clone()))
     } else {
         collection_router
     }

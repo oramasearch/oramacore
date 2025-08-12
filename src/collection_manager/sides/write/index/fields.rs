@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc::Sender, RwLock};
@@ -1021,7 +1022,7 @@ impl EmbeddingField {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct GeoPoint {
     pub lon: f32,
     pub lat: f32,

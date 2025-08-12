@@ -128,6 +128,8 @@ clap = { version = "4.5.39", features = ["derive"] }
 jwt-authorizer = "0.15"
 jsonwebtoken = "9.3.1"
 tokio-util = { version = "0.7.15", features = ["io"] }
+rmcp = { version = "0.5.0", features = ["server"] }
+schemars = "1.0.4"
 
 [build-dependencies]
 cc = "1"
