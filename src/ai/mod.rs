@@ -6,6 +6,7 @@ use backoff::ExponentialBackoff;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
 use mobc::{async_trait, Manager, Pool};
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use anyhow::{anyhow, Context, Result};
@@ -59,7 +60,7 @@ pub struct AIServiceLLMConfig {
     pub api_key: String,
 }
 
-#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy)]
+#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy, JsonSchema)]
 pub enum RemoteLLMProvider {
     OramaCore,
     OpenAI,

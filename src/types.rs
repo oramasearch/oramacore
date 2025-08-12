@@ -19,6 +19,7 @@ use async_openai::types::{
 
 use chrono::{DateTime, Utc};
 use redact::Secret;
+use schemars::JsonSchema;
 use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -722,7 +723,7 @@ pub struct DescribeCollectionResponse {
     pub indexes: Vec<DescribeCollectionIndexResponse>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, JsonSchema)]
 pub struct Limit(pub usize);
 impl Default for Limit {
     fn default() -> Self {
@@ -730,10 +731,10 @@ impl Default for Limit {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, Default, JsonSchema)]
 pub struct SearchOffset(pub usize);
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[serde(untagged)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Filter {
@@ -744,19 +745,19 @@ pub enum Filter {
     GeoPoint(GeoSearchFilter),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NumberFacetDefinitionRange {
     pub from: Number,
 
     pub to: Number,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NumberFacetDefinition {
     pub ranges: Vec<NumberFacetDefinitionRange>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BoolFacetDefinition {
     #[serde(rename = "true")]
     pub r#true: bool,
@@ -764,7 +765,7 @@ pub struct BoolFacetDefinition {
     pub r#false: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, JsonSchema)]
 pub struct StringFacetDefinition;
 impl<'de> Deserialize<'de> for StringFacetDefinition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -802,7 +803,7 @@ impl Serialize for StringFacetDefinition {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub enum FacetDefinition {
     #[serde(untagged)]
     Number(NumberFacetDefinition),
@@ -812,7 +813,7 @@ pub enum FacetDefinition {
     String(StringFacetDefinition),
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct FulltextMode {
     pub term: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -822,7 +823,7 @@ pub struct FulltextMode {
     pub tolerance: Option<u8>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct VectorMode {
     // In Orama previously we support 2 kind:
     // - "term": "hello"
@@ -834,7 +835,7 @@ pub struct VectorMode {
     pub similarity: Similarity,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
 pub struct Threshold(pub f32);
 
 impl<'de> Deserialize<'de> for Threshold {
@@ -853,7 +854,7 @@ impl<'de> Deserialize<'de> for Threshold {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
 pub struct Similarity(pub f32);
 
 impl Default for Similarity {
@@ -878,7 +879,7 @@ impl<'de> Deserialize<'de> for Similarity {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HybridMode {
     pub term: String,
     pub similarity: Similarity,
@@ -889,17 +890,17 @@ pub struct HybridMode {
     pub tolerance: Option<u8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AutoMode {
     pub term: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchModeResult {
     pub mode: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, JsonSchema)]
 pub enum SearchMode {
     FullText(FulltextMode),
     Vector(VectorMode),
@@ -1110,7 +1111,7 @@ impl SearchMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub enum Properties {
     None,
     Star,
@@ -1129,14 +1130,14 @@ impl Properties {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FilterOnField {
     #[serde(rename = "$key$")]
     pub field: String,
     pub filter: Filter,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, JsonSchema)]
 pub struct WhereFilter {
     pub filter_on_fields: Vec<(String, Filter)>,
     pub and: Option<Vec<WhereFilter>>,
@@ -1312,7 +1313,7 @@ impl WhereFilter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, ToSchema, JsonSchema)]
 pub struct NLPSearchRequest {
     pub query: String,
     pub llm_config: Option<InteractionLLMConfig>,
@@ -1320,7 +1321,7 @@ pub struct NLPSearchRequest {
     pub user_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default, JsonSchema)]
 pub enum SortOrder {
     #[serde(rename = "ASC")]
     #[default]
@@ -1329,14 +1330,14 @@ pub enum SortOrder {
     Descending,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct SortBy {
     pub property: String,
     #[serde(default)]
     pub order: SortOrder,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SearchParams {
     #[serde(flatten)]
     pub mode: SearchMode,
@@ -1564,7 +1565,7 @@ impl InteractionMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
 pub struct InteractionLLMConfig {
     pub provider: RemoteLLMProvider,
     pub model: String,
@@ -1801,7 +1802,7 @@ pub struct RunToolsParams {
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Number {
     I32(i32),
@@ -1988,7 +1989,7 @@ impl<'de> Deserialize<'de> for SerializableNumber {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum NumberFilter {
     #[serde(rename = "eq")]
@@ -2005,7 +2006,7 @@ pub enum NumberFilter {
     Between((Number, Number)),
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct OramaDate(DateTime<Utc>);
 
@@ -2054,7 +2055,7 @@ impl TryFrom<&str> for OramaDate {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum DateFilter {
     #[serde(rename = "eq")]
@@ -2071,7 +2072,7 @@ pub enum DateFilter {
     Between((OramaDate, OramaDate)),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct GeoSearchRadiusValue(f32);
 
 impl PartialEq for GeoSearchRadiusValue {
@@ -2094,7 +2095,7 @@ impl GeoSearchRadiusValue {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum GeoSearchRadiusUnit {
     #[serde(rename = "cm")]
@@ -2116,7 +2117,7 @@ impl Default for GeoSearchRadiusUnit {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct GeoSearchRadiusFilter {
     pub coordinates: GeoPoint,
@@ -2131,7 +2132,7 @@ fn get_true() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct GeoSearchPolygonFilter {
     pub coordinates: Vec<GeoPoint>,
@@ -2139,7 +2140,7 @@ pub struct GeoSearchPolygonFilter {
     pub inside: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum GeoSearchFilter {
     #[serde(rename = "radius")]
@@ -2148,7 +2149,7 @@ pub enum GeoSearchFilter {
     Polygon(GeoSearchPolygonFilter),
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema, JsonSchema)]
 pub struct IndexId(StackString<64>);
 
 impl IndexId {
@@ -2223,6 +2224,17 @@ impl<const N: usize> PartialSchema for StackString<N> {
     }
 }
 impl<const N: usize> ToSchema for StackString<N> {}
+
+impl<const N: usize> schemars::JsonSchema for StackString<N> {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "string".into()
+    }
+
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(_gen)
+    }
+}
+
 impl<const N: usize> Serialize for StackString<N> {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
