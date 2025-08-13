@@ -50,6 +50,14 @@ writer_side:
         javascript_queue_limit: 500000
         # Set interval for commiting the changes to the disk
         commit_interval: 1m
+        # Temporary index cleanup configuration
+        temp_index_cleanup:
+            # How often to run cleanup (default: 1 hour)
+            cleanup_interval: 1h
+            # Maximum age before cleanup (default: 12 hours)
+            max_age: 12h
+            # Enable/disable cleanup (default: true)
+            enabled: true
     # Uncomment to allow JWT validation
     # jwt:
     #     jwks_url: http://localhost:3000/api/.well-known/jwks.json

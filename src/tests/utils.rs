@@ -35,7 +35,8 @@ use crate::{
             ReadSide, ReadSideConfig,
         },
         write::{
-            CollectionsWriterConfig, OramaModelSerializable, WriteError, WriteSide, WriteSideConfig,
+            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteError,
+            WriteSide, WriteSideConfig,
         },
         InputSideChannelType, OutputSideChannelType, ReplaceIndexReason,
     },
@@ -121,6 +122,10 @@ pub fn create_oramacore_config() -> OramacoreConfig {
                 insert_batch_commit_size: 10_000,
                 javascript_queue_limit: 10_000,
                 commit_interval: Duration::from_secs(3_000),
+                temp_index_cleanup: TempIndexCleanupConfig {
+                    cleanup_interval: Duration::from_secs(3600), // 1 hour
+                    max_age: Duration::from_secs(43200),         // 12 hours
+                },
             },
             jwt: None,
         },

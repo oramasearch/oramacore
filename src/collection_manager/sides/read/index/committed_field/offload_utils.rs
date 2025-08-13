@@ -100,8 +100,6 @@ impl<Loaded, Stats, FieldInfo> InnerCommittedField<Loaded, Stats, FieldInfo> {
                 let start = now - offload_config.unload_window.as_secs();
                 let c = counter.count_in(start, now);
 
-                println!("AAAA {c}");
-
                 c == 0
             }
             InnerCommittedField::Unloaded { .. } => false,

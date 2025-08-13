@@ -124,10 +124,7 @@ async fn mcp_endpoint(
 ) -> impl IntoResponse {
     let api_key = query.api_key;
 
-    match read_side
-        .check_read_api_key(collection_id, api_key.clone())
-        .await
-    {
+    match read_side.check_read_api_key(collection_id, api_key).await {
         Ok(_) => {}
         Err(_err) => {
             let error_response = JsonRpcResponse {
@@ -209,11 +206,7 @@ async fn mcp_endpoint(
         }
         "tools/call" => {
             // Create MCP server instance and handle tool call
-            let server = StructuredOutputServer::new(
-                read_side.clone(),
-                api_key.clone(),
-                collection_id.clone(),
-            );
+            let server = StructuredOutputServer::new(read_side.clone(), api_key, collection_id);
 
             // Extract tool name and arguments from request params
             if let Some(params) = request.params.as_ref() {
@@ -234,8 +227,7 @@ async fn mcp_endpoint(
                                                 error: Some(JsonRpcError {
                                                     code: -32602,
                                                     message: format!(
-                                                        "Invalid search parameters: {}",
-                                                        err
+                                                        "Invalid search parameters: {err}"
                                                     ),
                                                 }),
                                             }),
@@ -296,8 +288,7 @@ async fn mcp_endpoint(
                                                 error: Some(JsonRpcError {
                                                     code: -32602,
                                                     message: format!(
-                                                        "Invalid NLP search parameters: {}",
-                                                        err
+                                                        "Invalid NLP search parameters: {err}"
                                                     ),
                                                 }),
                                             }),

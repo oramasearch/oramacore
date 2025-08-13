@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{error, info};
@@ -229,6 +231,79 @@ impl CollectionsWriter {
         }
 
         Some(document_ids)
+    }
+
+    pub async fn cleanup_expired_temp_indexes(&self, max_age: Duration) -> Result<usize> {
+        info!(
+            "Starting cleanup of temp indexes older than {} seconds",
+            max_age.as_secs()
+        );
+
+        // PHASE 1: Collect expired temp indexes (with collections lock)
+        let expired_temp_indexes = {
+            let collections = self.collections.read().await;
+            let mut expired_indexes = Vec::new();
+            let now = Utc::now();
+
+            for (collection_id, collection) in collections.iter() {
+                // Get temp indexes for this collection
+                let temp_indexes = collection.get_temp_index_ids().await;
+
+                for temp_index_id in temp_indexes {
+                    // Get the temp index to check its creation time
+                    if let Some(temp_index) = collection.get_temporary_index(temp_index_id).await {
+                        let age = now.signed_duration_since(temp_index.created_at());
+
+                        if age.to_std().unwrap_or(Duration::from_secs(0)) > max_age {
+                            info!(
+                                "Found expired temp index {} from collection {} (age: {} seconds)",
+                                temp_index_id,
+                                collection_id,
+                                age.num_seconds()
+                            );
+                            expired_indexes.push((*collection_id, temp_index_id));
+                        }
+                    }
+                }
+            }
+            expired_indexes
+        }; // collections lock is released here
+
+        // PHASE 2: Delete expired temp indexes (without collections lock)
+        let mut cleanup_count = 0;
+
+        for (collection_id, temp_index_id) in expired_temp_indexes {
+            let collections = self.collections.read().await;
+            let collection = collections.get(&collection_id);
+
+            if let Some(collection) = collection {
+                // Delete the expired temp index
+                match collection.delete_temp_index(temp_index_id).await {
+                    Ok(()) => {
+                        info!(
+                            "Successfully cleaned up expired temp index {} from collection {}",
+                            temp_index_id, collection_id
+                        );
+                        cleanup_count += 1;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to delete expired temp index {} from collection {}: {:?}",
+                            temp_index_id, collection_id, e
+                        );
+                    }
+                }
+            } else {
+                // Collection was deleted between phase 1 and 2, which is fine
+                info!(
+                    "Collection {} was deleted during cleanup, skipping temp index {}",
+                    collection_id, temp_index_id
+                );
+            }
+        }
+
+        info!("Cleaned up {} expired temp indexes", cleanup_count);
+        Ok(cleanup_count)
     }
 }
 
