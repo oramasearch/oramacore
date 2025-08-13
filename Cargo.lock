@@ -8517,9 +8517,9 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3179a8f34a9f87d488d34c0782975ebefd53f516cd601db2debcc30dcd4d6278"
+checksum = "8a48fca5702a2f85432b1de240c4d2b869f484050fa9f68e65cab648a49c329d"
 
 [[package]]
 name = "zerocopy"
