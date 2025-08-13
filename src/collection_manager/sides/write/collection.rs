@@ -219,6 +219,11 @@ impl CollectionWriter {
         indexes.keys().copied().collect()
     }
 
+    pub async fn get_temp_index_ids(&self) -> Vec<IndexId> {
+        let temp_indexes = self.temp_indexes.read().await;
+        temp_indexes.keys().copied().collect()
+    }
+
     pub async fn create_index(
         &self,
         index_id: IndexId,
@@ -373,6 +378,35 @@ impl CollectionWriter {
             .context("Cannot send delete index operation")?;
 
         Ok(doc_ids)
+    }
+
+    pub async fn delete_temp_index(&self, temp_index_id: IndexId) -> Result<(), WriteError> {
+        let mut temp_indexes = self.temp_indexes.write().await;
+        let temp_index = match temp_indexes.remove(&temp_index_id) {
+            Some(index) => index,
+            None => {
+                warn!(collection_id= ?self.id, "Temp index not found. Ignored");
+                return Ok(());
+            }
+        };
+        drop(temp_indexes);
+
+        let doc_ids = temp_index.get_document_ids().await;
+        self.context
+            .op_sender
+            .send_batch(vec![
+                WriteOperation::Collection(
+                    self.id,
+                    CollectionWriteOperation::DeleteTempIndex { temp_index_id },
+                ),
+                WriteOperation::DocumentStorage(DocumentStorageWriteOperation::DeleteDocuments {
+                    doc_ids,
+                }),
+            ])
+            .await
+            .context("Cannot send delete temp index operation")?;
+
+        Ok(())
     }
 
     pub async fn get_temporary_index<'s, 'index>(

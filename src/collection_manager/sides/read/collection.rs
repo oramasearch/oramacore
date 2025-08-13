@@ -208,6 +208,11 @@ impl CollectionReader {
                     temp_index_id_to_remove.push(temp_index_id);
                     continue;
                 }
+                Some(DeletionReason::ExpiredTempIndex) => {
+                    // This shouldn't happen on regular indexes, only on temp indexes
+                    index_id_to_remove.push((i, index.id()));
+                    continue;
+                }
                 None => {}
             }
             count += index.document_count();
@@ -222,7 +227,26 @@ impl CollectionReader {
         let temp_indexes_dir = self.data_dir.join("temp_indexes");
         for index in temp_indexes_lock.iter() {
             if index.is_deleted() {
-                debug_panic!("It is not possible to delete a temp index (yet)");
+                // Handle deleted temp indexes - collect them for removal
+                match index.get_deletion_reason() {
+                    Some(DeletionReason::ExpiredTempIndex) => {
+                        // Add expired temp index to removal list
+                        temp_index_id_to_remove.push(index.id());
+                    }
+                    Some(reason) => {
+                        warn!(
+                            "Unexpected deletion reason for temp index {}: {:?}",
+                            index.id(),
+                            reason
+                        );
+                    }
+                    None => {
+                        warn!(
+                            "Temp index {} marked as deleted but no deletion reason",
+                            index.id()
+                        );
+                    }
+                }
                 continue;
             }
             temp_index_ids.push(index.id());
@@ -272,7 +296,16 @@ impl CollectionReader {
             }
         }
 
-        // Remove temp deleted indexes from disk because they are promoted to runtime indexes.
+        // Remove deleted temp indexes from in memory
+        let temp_indexes_to_remove: std::collections::HashSet<_> =
+            temp_index_id_to_remove.iter().collect();
+        if !temp_indexes_to_remove.is_empty() {
+            let mut temp_indexes_lock = self.temp_indexes.write().await;
+            temp_indexes_lock.retain(|index| !temp_indexes_to_remove.contains(&index.id()));
+            drop(temp_indexes_lock);
+        }
+
+        // Remove temp deleted indexes from disk because they are promoted to runtime indexes or expired.
         // Here it is safe because we already save the collection dump to fs
         for index_id in temp_index_id_to_remove {
             let dir = temp_indexes_dir.join(index_id.as_str());
@@ -577,6 +610,17 @@ impl CollectionReader {
                     index.mark_as_deleted(DeletionReason::UserWanted);
                 } else {
                     warn!("Cannot mark index {} as deleted. Ignored.", index_id);
+                }
+            }
+            CollectionWriteOperation::DeleteTempIndex { temp_index_id } => {
+                let temp_index = self.get_temp_index_mut(temp_index_id).await;
+                if let Some(mut temp_index) = temp_index {
+                    temp_index.mark_as_deleted(DeletionReason::ExpiredTempIndex);
+                } else {
+                    warn!(
+                        "Cannot mark temp index {} as deleted. Ignored.",
+                        temp_index_id
+                    );
                 }
             }
             CollectionWriteOperation::IndexWriteOperation(index_id, index_op) => {
