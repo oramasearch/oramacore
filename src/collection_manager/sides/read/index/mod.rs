@@ -2012,6 +2012,7 @@ impl Index {
             tokens: &tokens,
             exact_match: exact,
             boost: 1.0,
+            field_id: FieldId(0), // Will be set per field in the loop
             filtered_doc_ids,
             global_info: GlobalInfo::default(),
             uncommitted_deleted_documents,
@@ -2033,6 +2034,7 @@ impl Index {
             let boost = boost.get(&field_id).copied().unwrap_or(1.0);
 
             context.boost = boost;
+            context.field_id = field_id;
             context.global_info = global_info;
 
             scorer.reset_term();

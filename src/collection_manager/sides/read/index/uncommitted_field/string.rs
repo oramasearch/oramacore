@@ -7,7 +7,7 @@ use xtri::{RadixTree, SearchMode};
 
 use crate::{
     collection_manager::{
-        bm25::{field_path_to_field_id, BM25FFieldParams, BM25Scorer},
+        bm25::{BM25FFieldParams, BM25Scorer},
         global_info::GlobalInfo,
         sides::{
             read::index::search_context::FullTextSearchContext, InsertStringTerms, TermStringField,
@@ -215,8 +215,8 @@ impl UncommittedStringField {
                     let total_documents_with_term_in_field =
                         total_documents_with_term_in_field.0 as usize;
 
-                    // Generate field_id from field_path for BM25F compatibility
-                    let field_id = field_path_to_field_id(&self.field_path);
+                    // Use stable field_id from context instead of hash-based generation
+                    let field_id = context.field_id;
 
                     let field_params = BM25FFieldParams {
                         weight: context.boost, // User-defined field boost as BM25F weight

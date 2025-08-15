@@ -34,28 +34,10 @@
  * (coll_id, field_id, doc_id, term) => [term_occurrence_in_document]
  * ```
  */
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    hash::{Hash, Hasher},
-};
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 use tracing::error;
 
 use crate::types::FieldId;
-
-/// Create a consistent FieldId from a field path for BM25F scoring
-/// This allows backward compatibility with existing code that uses field_path
-pub fn field_path_to_field_id(field_path: &[String]) -> FieldId {
-    use std::collections::hash_map::DefaultHasher;
-
-    let mut hasher = DefaultHasher::new();
-    for segment in field_path {
-        segment.hash(&mut hasher);
-    }
-    let hash = hasher.finish();
-    // Use lower 16 bits for FieldId(u16)
-    FieldId((hash & 0xFFFF) as u16)
-}
 
 /// BM25F field parameters for scoring
 ///

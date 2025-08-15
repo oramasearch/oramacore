@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 use crate::{
     collection_manager::{
-        bm25::{field_path_to_field_id, BM25FFieldParams, BM25Scorer},
+        bm25::{BM25FFieldParams, BM25Scorer},
         global_info::GlobalInfo,
         sides::read::{
             index::{
@@ -502,8 +502,8 @@ impl LoadedCommittedStringField {
                 total_documents_with_term_in_field,
             ) in matches
             {
-                // Generate field_id from field_path for BM25F compatibility
-                let field_id = field_path_to_field_id(&self.field_path);
+                // Use stable field_id from context instead of hash-based generation
+                let field_id = context.field_id;
 
                 // Use default BM25F field parameters for backward compatibility
                 let field_params = BM25FFieldParams {
@@ -660,8 +660,8 @@ impl LoadedCommittedStringField {
             let boost_sequence = sequences_count as f32 * 2.0;
             let phrase_boost = boost_any_order + boost_sequence;
 
-            // Generate field_id from field_path for BM25F compatibility
-            let field_id = field_path_to_field_id(&self.field_path);
+            // Use stable field_id from context instead of hash-based generation
+            let field_id = context.field_id;
 
             // Use user-defined boost as BM25F field weight for canonical implementation
             let field_params = BM25FFieldParams {
@@ -886,11 +886,13 @@ mod tests {
             tokens: &["term1".to_string()],
             exact_match: false,
             boost: 1.0,
+            field_id: FieldId(1), // Use test field ID
             filtered_doc_ids: None,
             global_info: uncommitted.global_info(),
             uncommitted_deleted_documents: &HashSet::new(),
             total_term_count: 0,
         };
+        use crate::types::FieldId;
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
         uncommitted
             .search(&mut search_context, &mut scorer)
