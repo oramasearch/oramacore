@@ -292,6 +292,19 @@ impl Serialize for AnswerEvent {
             AnswerEvent::FailedToFetchAnswer(err) => {
                 s.serialize_field("message", &format!("Failed to fetch answer: {err:?}"))?;
             }
+            AnswerEvent::TitleGenerator(title) => {
+                s.serialize_field(
+                    "message",
+                    &json!({
+                        "action": "TITLE",
+                        "result": title,
+                        "done": true,
+                    }),
+                )?;
+            }
+            AnswerEvent::FailedToGenerateTitle(err) => {
+                s.serialize_field("message", &format!("Failed to generate title: {err:?}"))?;
+            }
         }
 
         s.end()

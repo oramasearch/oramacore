@@ -25,7 +25,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
         Limit, Properties, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
-        SuggestionsRequest, VectorMode,
+        SuggestionsRequest, VectorMode, Role
     },
 };
 
@@ -37,6 +37,14 @@ pub enum SuggestionsError {
     RepairError(#[from] JsonRepairError),
     #[error("Failed to parse suggestions: {0:?}")]
     ParseError(#[from] serde_json::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum TitleGeneratorError {
+    #[error("Generic error: {0}")]
+    Generic(#[from] anyhow::Error),
+    #[error("Failed to serialize conversation: {0:?}")]
+    SerializeError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -51,6 +59,8 @@ pub enum AnswerError {
     HookError(#[from] HookReaderError),
     #[error("JS run error: {0:?}")]
     JSError(#[from] JSRunnerError),
+    #[error("Failed to get title: {0:?}")]
+    TitleGeneratorError(#[from] TitleGeneratorError),
 }
 
 pub struct Answer {
@@ -278,22 +288,30 @@ impl Answer {
             }
         }
 
+        if interaction.include_title == Some(true) {
+            match self.handle_title_generator(&interaction, llm_config.clone()).await {
+                Ok(title) => {
+                    sender.send(AnswerEvent::TitleGenerator(title))?;
+                },
+                Err(e) => {
+                    sender.send(AnswerEvent::FailedToGenerateTitle(e))?;
+                }
+            };
+        };
+
         let mut related_queries_params =
             llm_service.get_related_questions_params(interaction.related);
 
-        if related_queries_params.is_empty() {
-            sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
-            return Ok(());
+        if !related_queries_params.is_empty() {
+            related_queries_params.push(("context".to_string(), search_result_str));
+            related_queries_params.push(("query".to_string(), interaction.query.clone()));
+    
+            self.handle_related_queries(&llm_service, llm_config, related_queries_params, &sender)
+                .await?;
         }
 
-        related_queries_params.push(("context".to_string(), search_result_str));
-        related_queries_params.push(("query".to_string(), interaction.query.clone()));
-
-        self.handle_related_queries(&llm_service, llm_config, related_queries_params, &sender)
-            .await?;
-
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
-
+        
         if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
             if let Err(e) = analytics_logs.add_event(AnalyticAnswerEvent {
                 at: chrono::Utc::now().timestamp_millis(),
@@ -326,6 +344,7 @@ impl Answer {
             llm_config: suggestions_request.llm_config.clone(),
             query: suggestions_request.query.clone(),
             ragat_notation: None,
+            include_title: None,
         }
     }
 
@@ -374,6 +393,23 @@ impl Answer {
         };
 
         Ok(parsed_value)
+    }
+
+    pub async fn get_title(
+        &self,
+        conversation: Vec<InteractionMessage>,
+        llm_config: InteractionLLMConfig,
+    ) -> Result<String, TitleGeneratorError> {
+        let llm_service: Arc<llms::LLMService> = self.read_side.get_llm_service();
+
+        let serialized_conversation = serde_json::to_string(&conversation)?;
+        let suggestion_params = llm_service.get_title_params(serialized_conversation);
+
+        let title_response = llm_service
+            .run_known_prompt(llms::KnownPrompts::TitleGenerator, suggestion_params, None, Some(llm_config))
+            .await?;
+
+        Ok(title_response)
     }
 
     pub async fn get_suggestions(
@@ -593,6 +629,32 @@ impl Answer {
         }
     }
 
+    async fn handle_title_generator(
+        &self,
+        interaction: &Interaction,
+        llm_config: InteractionLLMConfig,
+    ) -> Result<String, TitleGeneratorError> {
+        let conversation: Vec<InteractionMessage> = self.build_conversation(interaction).await;
+        match self.get_title(conversation, llm_config).await {
+            Ok(title) => Ok(title),
+            Err(e) => {
+                return Err(e);
+            }
+        }
+    }
+
+    async fn build_conversation(
+        &self,
+        interaction: &Interaction,
+    ) -> Vec<InteractionMessage> {
+        let mut conversation = interaction.messages.clone();
+        conversation.push(InteractionMessage {
+            role: Role::User,
+            content: interaction.query.clone(),
+        });
+        conversation
+    }
+
     async fn handle_related_queries(
         &self,
         llm_service: &llms::LLMService,
@@ -723,4 +785,6 @@ pub enum AnswerEvent {
     FailedToRunPrompt(anyhow::Error),
     AnswerResponse(String),
     FailedToFetchAnswer(anyhow::Error),
+    TitleGenerator(String),
+    FailedToGenerateTitle(TitleGeneratorError),
 }
