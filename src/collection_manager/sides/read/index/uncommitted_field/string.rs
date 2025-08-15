@@ -214,8 +214,7 @@ impl UncommittedStringField {
 
                     let total_documents_with_term_in_field =
                         total_documents_with_term_in_field.0 as usize;
-
-                    // Use stable field_id from context instead of hash-based generation
+                    
                     let field_id = context.field_id;
 
                     let field_params = BM25FFieldParams {

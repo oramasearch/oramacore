@@ -502,10 +502,7 @@ impl LoadedCommittedStringField {
                 total_documents_with_term_in_field,
             ) in matches
             {
-                // Use stable field_id from context instead of hash-based generation
                 let field_id = context.field_id;
-
-                // Use default BM25F field parameters for backward compatibility
                 let field_params = BM25FFieldParams {
                     weight: 1.0, // Default field weight
                     b: 0.75,     // Default normalization parameter
@@ -660,13 +657,11 @@ impl LoadedCommittedStringField {
             let boost_sequence = sequences_count as f32 * 2.0;
             let phrase_boost = boost_any_order + boost_sequence;
 
-            // Use stable field_id from context instead of hash-based generation
             let field_id = context.field_id;
 
-            // Use user-defined boost as BM25F field weight for canonical implementation
             let field_params = BM25FFieldParams {
                 weight: context.boost, // User-defined field boost as BM25F weight
-                b: 0.75,               // Default normalization parameter
+                b: 0.75,               // Default normalization parameter @todo: make this configurable?
             };
 
             for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
