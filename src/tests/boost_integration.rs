@@ -2,7 +2,6 @@ use crate::tests::utils::{init_log, TestContext};
 use serde_json::json;
 
 /// Test boost functionality with real search scenarios
-/// This tests the integration between user-facing boost API and BM25F field weights
 #[tokio::test(flavor = "multi_thread")]
 async fn test_boost_no_boost_comparison() {
     init_log();

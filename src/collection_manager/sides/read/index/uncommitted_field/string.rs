@@ -218,7 +218,6 @@ impl UncommittedStringField {
                     // Generate field_id from field_path for BM25F compatibility
                     let field_id = field_path_to_field_id(&self.field_path);
 
-                    // Use user-defined boost as BM25F field weight for canonical implementation
                     let field_params = BM25FFieldParams {
                         weight: context.boost, // User-defined field boost as BM25F weight
                         b: 0.75,               // Default normalization parameter
