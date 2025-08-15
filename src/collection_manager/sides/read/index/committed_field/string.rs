@@ -653,20 +653,20 @@ impl LoadedCommittedStringField {
             // 2. Boost for the phrase match when the terms appear in sequence (without holes): implemented
             // 3. Boost for the phrase match when the terms appear in sequence (with holes): not implemented
             // 4. Boost for the phrase match when the terms appear in any order: implemented
-            // 5. Boost defined by the user: implemented
+            // 5. Boost defined by the user: implemented as BM25F field weight
             // We should allow the user to configure which boost to use and how much it impacts the score.
             // TODO: think about this
             let boost_any_order = positions.len() as f32;
             let boost_sequence = sequences_count as f32 * 2.0;
-            let total_boost = boost_any_order + boost_sequence + context.boost;
+            let phrase_boost = boost_any_order + boost_sequence;
 
             // Generate field_id from field_path for BM25F compatibility
             let field_id = field_path_to_field_id(&self.field_path);
 
-            // Use default BM25F field parameters for backward compatibility
+            // Use user-defined boost as BM25F field weight for canonical implementation
             let field_params = BM25FFieldParams {
-                weight: 1.0, // Default field weight
-                b: 0.75,     // Default normalization parameter
+                weight: context.boost, // User-defined field boost as BM25F weight
+                b: 0.75,               // Default normalization parameter
             };
 
             for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
@@ -682,7 +682,7 @@ impl LoadedCommittedStringField {
                     total_documents_with_term_in_field,
                     1.2,
                     &field_params,
-                    total_boost,
+                    phrase_boost, // Now only phrase-level boost, user field boost is in field_params.weight
                     token_indexes,
                 );
 

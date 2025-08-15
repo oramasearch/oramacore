@@ -218,10 +218,10 @@ impl UncommittedStringField {
                     // Generate field_id from field_path for BM25F compatibility
                     let field_id = field_path_to_field_id(&self.field_path);
 
-                    // Use default BM25F field parameters for backward compatibility
+                    // Use user-defined boost as BM25F field weight for canonical implementation
                     let field_params = BM25FFieldParams {
-                        weight: 1.0, // Default field weight
-                        b: 0.75,     // Default normalization parameter
+                        weight: context.boost, // User-defined field boost as BM25F weight
+                        b: 0.75,               // Default normalization parameter
                     };
 
                     scorer.add(
@@ -234,7 +234,7 @@ impl UncommittedStringField {
                         total_documents_with_term_in_field,
                         1.2,
                         &field_params,
-                        context.boost,
+                        1.0,
                         0,
                     );
 
