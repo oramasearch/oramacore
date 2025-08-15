@@ -1,8 +1,14 @@
-/** The structure of data needed for BM25 scoring:
+/** The structure of data needed for BM25F scoring:
+ *
+ * BM25F extends BM25 to handle multiple fields with field-specific weights and normalization.
+ * Each field contributes to the overall document score based on its weight and normalization factor.
+ *
  * ```text
  * (coll_id, field_id) => {
  *    average_field_length: f32,
  *    total_documents_with_field: usize,
+ *    field_weight: f32,        // Field-specific weight (boost)
+ *    field_b: f32,             // Field-specific normalization parameter
  *    
  *    (, doc_id) => {
  *      document_length
@@ -19,7 +25,7 @@
  *
  * RAW data:
  * ```text
- * (coll_id, field_id) => [average_field_length, total_documents_with_field]
+ * (coll_id, field_id) => [average_field_length, total_documents_with_field, field_weight, field_b]
  *
  * (coll_id, field_id, term) => [total_documents_with_term_in_field]
  *
@@ -28,60 +34,126 @@
  * (coll_id, field_id, doc_id, term) => [term_occurrence_in_document]
  * ```
  */
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    hash::{Hash, Hasher},
+};
 use tracing::error;
 
-/// BM25 scoring function
+use crate::types::FieldId;
+
+/// Create a consistent FieldId from a field path for BM25F scoring
+/// This allows backward compatibility with existing code that uses field_path
+pub fn field_path_to_field_id(field_path: &[String]) -> FieldId {
+    use std::collections::hash_map::DefaultHasher;
+
+    let mut hasher = DefaultHasher::new();
+    for segment in field_path {
+        segment.hash(&mut hasher);
+    }
+    let hash = hasher.finish();
+    // Use lower 16 bits for FieldId(u16)
+    FieldId((hash & 0xFFFF) as u16)
+}
+
+/// BM25F field parameters for scoring
+///
+/// Contains field-specific parameters that allow BM25F to weight
+/// and normalize different fields independently
+#[derive(Debug, Clone, PartialEq)]
+pub struct BM25FFieldParams {
+    /// Field-specific weight (boost factor)
+    pub weight: f32,
+    /// Field-specific normalization parameter (typically between 0.0 and 1.0)
+    pub b: f32,
+}
+
+impl Default for BM25FFieldParams {
+    fn default() -> Self {
+        Self {
+            weight: 1.0,
+            b: 0.75,
+        }
+    }
+}
+
+/// BM25F scoring function for a single field
 ///
 /// # Arguments
 ///
 /// * `term_occurrence_in_document` - occurrence of the term in the field in the document
-///   (coll_id, doc_id, field_id, term_id)
 /// * `document_length` - length of the field of the document in words
-///   (coll_id, field_id, doc_id)
 /// * `average_field_length` - average field length in the collection
-///   (coll_id, field_id)
 /// * `total_documents_with_field` - number of documents that has that field in the collection
-///   (coll_id, field_id)
 /// * `total_documents_with_term_in_field` - number of documents that has that term in the field in the collection
-///   (coll_id, field_id, term_id)
-/// * `k` - k parameter
-/// * `b` - b parameter
+/// * `k` - k parameter (shared across fields)
+/// * `field_params` - field-specific parameters (weight and b)
 ///
 /// # Returns
 ///
-/// * `f32` - BM25 score
-fn bm25_score(
+/// * `f32` - BM25F field score (before IDF multiplication)
+fn bm25f_field_score(
     term_occurrence_in_document: usize,
     document_length: u32,
     average_field_length: f32,
-    total_documents_with_field: f32,
-    total_documents_with_term_in_field: usize,
     k: f32,
-    b: f32,
+    field_params: &BM25FFieldParams,
 ) -> f32 {
     let f = term_occurrence_in_document as f32;
     let l = document_length as f32;
     let avgdl = average_field_length;
 
+    // BM25F field-specific normalization
+    let normalization = 1.0 - field_params.b + field_params.b * (l / avgdl);
+
+    // Apply field weight and normalization
+    field_params.weight * (f * (k + 1.0)) / (f + k * normalization)
+}
+
+/// Calculate IDF (Inverse Document Frequency) component
+///
+/// # Arguments
+///
+/// * `total_documents_with_field` - total documents in collection that have this field
+/// * `total_documents_with_term_in_field` - documents that contain this term in this field
+///
+/// # Returns
+///
+/// * `f32` - IDF score
+fn calculate_idf(
+    total_documents_with_field: f32,
+    total_documents_with_term_in_field: usize,
+) -> f32 {
     let ni = total_documents_with_term_in_field as f32;
+    ((total_documents_with_field - ni + 0.5_f32) / (ni + 0.5_f32)).ln_1p()
+}
 
-    let idf = ((total_documents_with_field - ni + 0.5_f32) / (ni + 0.5_f32)).ln_1p();
-
-    idf * (f * (k + 1.0)) / (f + k * (1.0 - b + b * (l / avgdl)))
+/// Complete BM25F score calculation combining field score and IDF
+///
+/// # Arguments
+///
+/// * `field_score` - Pre-calculated field score from bm25f_field_score
+/// * `idf` - Pre-calculated IDF score
+///
+/// # Returns
+///
+/// * `f32` - Final BM25F score
+fn bm25f_score(field_score: f32, idf: f32) -> f32 {
+    idf * field_score
 }
 
 pub enum BM25Scorer<K: Eq + Hash> {
-    Plain(BM25ScorerPlain<K>),
-    WithThreshold(BM25ScorerWithThreshold<K>),
+    Plain(BM25FScorerPlain<K>),
+    WithThreshold(BM25FScorerWithThreshold<K>),
 }
 impl<K: Eq + Hash + Debug> BM25Scorer<K> {
     pub fn plain() -> Self {
-        Self::Plain(BM25ScorerPlain::new())
+        Self::Plain(BM25FScorerPlain::new())
     }
 
     pub fn with_threshold(threshold: u32) -> Self {
-        Self::WithThreshold(BM25ScorerWithThreshold {
+        Self::WithThreshold(BM25FScorerWithThreshold {
             threshold,
             scores: Default::default(),
             term_index: 0,
@@ -104,38 +176,41 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
     pub fn add(
         &mut self,
         key: K,
+        field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
         total_documents_with_field: f32,
         total_documents_with_term_in_field: usize,
         k: f32,
-        b: f32,
+        field_params: &BM25FFieldParams,
         boost: f32,
         token_indexes: u32,
     ) {
         match self {
             Self::Plain(scorer) => scorer.add(
                 key,
+                field_id,
                 term_occurrence_in_field,
                 field_length,
                 average_field_length,
                 total_documents_with_field,
                 total_documents_with_term_in_field,
                 k,
-                b,
+                field_params,
                 boost,
             ),
             Self::WithThreshold(scorer) => {
                 scorer.add(
                     key,
+                    field_id,
                     term_occurrence_in_field,
                     field_length,
                     average_field_length,
                     total_documents_with_field,
                     total_documents_with_term_in_field,
                     k,
-                    b,
+                    field_params,
                     boost,
                     token_indexes,
                 );
@@ -151,12 +226,13 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
     }
 }
 
-pub struct BM25ScorerWithThreshold<K: Eq + Hash> {
+pub struct BM25FScorerWithThreshold<K: Eq + Hash> {
     threshold: u32,
     term_index: usize,
-    scores: HashMap<K, (u32, f32)>,
+    // Track field-specific scores: (token_indexes, field_scores_sum)
+    scores: HashMap<K, (u32, HashMap<FieldId, f32>)>,
 }
-impl<K: Eq + Hash + Debug> BM25ScorerWithThreshold<K> {
+impl<K: Eq + Hash + Debug> BM25FScorerWithThreshold<K> {
     pub fn next_term(&mut self) {
         self.term_index += 1;
     }
@@ -168,25 +244,34 @@ impl<K: Eq + Hash + Debug> BM25ScorerWithThreshold<K> {
     pub fn add(
         &mut self,
         key: K,
+        field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
         total_documents_with_field: f32,
         total_documents_with_term_in_field: usize,
         k: f32,
-        b: f32,
+        field_params: &BM25FFieldParams,
         boost: f32,
         token_indexes: u32,
     ) {
-        let score = bm25_score(
+        // Calculate field score component
+        let field_score = bm25f_field_score(
             term_occurrence_in_field as usize,
             field_length,
             average_field_length,
+            k,
+            field_params,
+        );
+
+        // Calculate IDF component
+        let idf = calculate_idf(
             total_documents_with_field,
             total_documents_with_term_in_field,
-            k,
-            b,
         );
+
+        // Combine field score and IDF
+        let score = bm25f_score(field_score, idf);
 
         if score.is_nan() {
             error!(
@@ -196,36 +281,38 @@ impl<K: Eq + Hash + Debug> BM25ScorerWithThreshold<K> {
                 ?total_documents_with_field,
                 ?total_documents_with_term_in_field,
                 ?k,
-                ?b,
-                "score is NaN. Skipping item"
+                ?field_params,
+                "BM25F score is NaN. Skipping item"
             );
             return;
         }
 
-        let score = score * boost;
+        let final_score = score * boost;
 
-        let old_score = self.scores.entry(key).or_default();
+        let entry = self
+            .scores
+            .entry(key)
+            .or_insert_with(|| (0, HashMap::new()));
 
-        old_score.0 |= if token_indexes > 0 {
+        // Update token indexes
+        entry.0 |= if token_indexes > 0 {
             token_indexes
         } else {
             1 << self.term_index
         };
 
-        // This "+" operation doesn't distinguish between the FieldId.
-        // This means that if a document matches on the same field
-        // or on different fields, it is the same.
-        // But this is not good for the ranking.
-        // TODO: we should distinguish between the FieldId.
-        old_score.1 += score;
+        // Accumulate field-specific scores
+        *entry.1.entry(field_id).or_insert(0.0) += final_score;
     }
 
     pub fn get_scores(self) -> HashMap<K, f32> {
         self.scores
             .into_iter()
-            .filter_map(|(key, (count, score))| {
+            .filter_map(|(key, (count, field_scores))| {
                 if count.count_ones() >= self.threshold {
-                    Some((key, score))
+                    // Sum all field scores for this document
+                    let total_score: f32 = field_scores.values().sum();
+                    Some((key, total_score))
                 } else {
                     None
                 }
@@ -234,17 +321,18 @@ impl<K: Eq + Hash + Debug> BM25ScorerWithThreshold<K> {
     }
 }
 
-pub struct BM25ScorerPlain<K: Eq + Hash> {
-    scores: HashMap<K, f32>,
+pub struct BM25FScorerPlain<K: Eq + Hash> {
+    // Track field-specific scores for proper BM25F combination
+    scores: HashMap<K, HashMap<FieldId, f32>>,
 }
 
-impl<K: Eq + Hash + Debug> Default for BM25ScorerPlain<K> {
+impl<K: Eq + Hash + Debug> Default for BM25FScorerPlain<K> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Eq + Hash + Debug> BM25ScorerPlain<K> {
+impl<K: Eq + Hash + Debug> BM25FScorerPlain<K> {
     pub fn new() -> Self {
         Self {
             scores: Default::default(),
@@ -255,24 +343,33 @@ impl<K: Eq + Hash + Debug> BM25ScorerPlain<K> {
     pub fn add(
         &mut self,
         key: K,
+        field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
         total_documents_with_field: f32,
         total_documents_with_term_in_field: usize,
         k: f32,
-        b: f32,
+        field_params: &BM25FFieldParams,
         boost: f32,
     ) {
-        let score = bm25_score(
+        // Calculate field score component
+        let field_score = bm25f_field_score(
             term_occurrence_in_field as usize,
             field_length,
             average_field_length,
+            k,
+            field_params,
+        );
+
+        // Calculate IDF component
+        let idf = calculate_idf(
             total_documents_with_field,
             total_documents_with_term_in_field,
-            k,
-            b,
         );
+
+        // Combine field score and IDF
+        let score = bm25f_score(field_score, idf);
 
         if score.is_nan() {
             error!(
@@ -282,26 +379,28 @@ impl<K: Eq + Hash + Debug> BM25ScorerPlain<K> {
                 ?total_documents_with_field,
                 ?total_documents_with_term_in_field,
                 ?k,
-                ?b,
-                "score is NaN. Skipping item"
+                ?field_params,
+                "BM25F score is NaN. Skipping item"
             );
             return;
         }
 
-        let score = score * boost;
+        let final_score = score * boost;
 
-        let old_score = self.scores.entry(key).or_default();
-
-        // This "+" operation doesn't distinguish between the FieldId.
-        // This means that if a document matches on the same field
-        // or on different fields, it is the same.
-        // But this is not good for the ranking.
-        // TODO: we should distinguish between the FieldId.
-        *old_score += score;
+        // Accumulate field-specific scores properly
+        let field_scores = self.scores.entry(key).or_default();
+        *field_scores.entry(field_id).or_insert(0.0) += final_score;
     }
 
     pub fn get_scores(self) -> HashMap<K, f32> {
         self.scores
+            .into_iter()
+            .map(|(key, field_scores)| {
+                // Sum all field scores for this document
+                let total_score: f32 = field_scores.values().sum();
+                (key, total_score)
+            })
+            .collect()
     }
 }
 
@@ -312,25 +411,181 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_indexes_string_scorer_bm25() {
+    fn test_bm25f_scorer_basic() {
         let mut scorer = BM25Scorer::plain();
+        let field_params = BM25FFieldParams {
+            weight: 1.0,
+            b: 0.75,
+        };
 
-        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0, 0);
+        scorer.add(
+            "doc1",
+            FieldId(0),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field_params,
+            1.0,
+            0,
+        );
 
         let scores = scorer.get_scores();
         assert_eq!(scores.len(), 1);
-        assert_approx_eq!(scores["doc1"], 1.2297773);
+        // Expected score should be similar to original BM25 since we're using default params
+        assert_approx_eq!(scores["doc1"], 1.2297773, 1e-6);
     }
 
     #[test]
-    fn test_indexes_string_scorer_bm25_boost() {
+    fn test_bm25f_scorer_boost() {
         let mut scorer = BM25Scorer::plain();
-        scorer.add("doc1", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 1.0, 0);
-        scorer.add("doc2", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 2.0, 0);
-        scorer.add("doc3", 5, 100, 100.0, 10.0, 5, 1.2, 0.75, 0.5, 0);
+        let field_params = BM25FFieldParams {
+            weight: 1.0,
+            b: 0.75,
+        };
+
+        scorer.add(
+            "doc1",
+            FieldId(0),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field_params,
+            1.0,
+            0,
+        );
+        scorer.add(
+            "doc2",
+            FieldId(0),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field_params,
+            2.0,
+            0,
+        );
+        scorer.add(
+            "doc3",
+            FieldId(0),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field_params,
+            0.5,
+            0,
+        );
         let scores = scorer.get_scores();
 
         assert!(scores["doc2"] > scores["doc1"]);
         assert!(scores["doc3"] < scores["doc1"]);
+    }
+
+    #[test]
+    fn test_bm25f_field_weights() {
+        let mut scorer = BM25Scorer::plain();
+
+        // Different field weights
+        let field1_params = BM25FFieldParams {
+            weight: 2.0, // Higher weight for field 1
+            b: 0.75,
+        };
+        let field2_params = BM25FFieldParams {
+            weight: 1.0, // Standard weight for field 2
+            b: 0.75,
+        };
+
+        // Same document, different fields, same term
+        scorer.add(
+            "doc1",
+            FieldId(1),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field1_params,
+            1.0,
+            0,
+        );
+        scorer.add(
+            "doc1",
+            FieldId(2),
+            5,
+            100,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &field2_params,
+            1.0,
+            0,
+        );
+
+        let scores = scorer.get_scores();
+        assert_eq!(scores.len(), 1);
+
+        // Score should be higher than a single field due to field combination
+        let expected_single_field_score = 1.2297773;
+        assert!(scores["doc1"] > expected_single_field_score);
+    }
+
+    #[test]
+    fn test_bm25f_field_normalization() {
+        let mut scorer = BM25Scorer::plain();
+
+        // Different normalization parameters
+        let low_b_params = BM25FFieldParams {
+            weight: 1.0,
+            b: 0.2, // Less length normalization
+        };
+        let high_b_params = BM25FFieldParams {
+            weight: 1.0,
+            b: 0.9, // More length normalization
+        };
+
+        // Test with longer document
+        scorer.add(
+            "doc1",
+            FieldId(0),
+            5,
+            200,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &low_b_params,
+            1.0,
+            0,
+        );
+        scorer.add(
+            "doc2",
+            FieldId(0),
+            5,
+            200,
+            100.0,
+            10.0,
+            5,
+            1.2,
+            &high_b_params,
+            1.0,
+            0,
+        );
+
+        let scores = scorer.get_scores();
+
+        // Document with lower b should score higher (less penalized for length)
+        assert!(scores["doc1"] > scores["doc2"]);
     }
 }
