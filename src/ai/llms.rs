@@ -36,6 +36,7 @@ pub enum KnownPrompts {
     DetermineQueryStrategy,
     TrainingSetsQueriesGenerator,
     TrainingSetsQueriesOptimizer,
+    TitleGenerator,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +64,7 @@ impl TryFrom<&str> for KnownPrompts {
             "GENERATE_RELATED_QUERIES" => Ok(Self::GenerateRelatedQueries),
             "SUGGESTIONS" => Ok(Self::Suggestions),
             "DETERMINE_QUERY_STRATEGY" => Ok(Self::DetermineQueryStrategy),
+            "TITLE" => Ok(Self::TitleGenerator),
             _ => Err(format!("Unknown prompt type: {s}")),
         }
     }
@@ -151,6 +153,10 @@ impl KnownPrompts {
                 .to_string(),
                 user: include_str!("../prompts/v1/training_sets/query_optimizer/optimizer/user.md")
                     .to_string(),
+            },
+            KnownPrompts::TitleGenerator => KnownPrompt {
+                system: include_str!("../prompts/v1/title_generator/system.md").to_string(),
+                user: include_str!("../prompts/v1/title_generator/user.md").to_string(),
             },
         }
     }
@@ -614,6 +620,10 @@ impl LLMService {
                 suggestion_request.max_suggestions.unwrap_or(3).to_string(),
             ),
         ]
+    }
+
+    pub fn get_title_params(&self, serialized_conversation: String) -> Vec<(String, String)> {
+        vec![("conversation".to_string(), serialized_conversation)]
     }
 
     pub fn get_related_questions_params(
