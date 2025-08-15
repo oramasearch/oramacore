@@ -682,7 +682,7 @@ impl LoadedCommittedStringField {
                     total_documents_with_term_in_field,
                     1.2,
                     &field_params,
-                    phrase_boost, // Now only phrase-level boost, user field boost is in field_params.weight
+                    phrase_boost,
                     token_indexes,
                 );
 

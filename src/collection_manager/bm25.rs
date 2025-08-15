@@ -588,4 +588,227 @@ mod tests {
         // Document with lower b should score higher (less penalized for length)
         assert!(scores["doc1"] > scores["doc2"]);
     }
+
+    #[test]
+    fn test_bm25f_boost_integration_single_field() {
+        let mut scorer_no_boost = BM25Scorer::plain();
+        let mut scorer_with_boost = BM25Scorer::plain();
+
+        // Test same document/field/term with different boost values
+        let no_boost_params = BM25FFieldParams {
+            weight: 1.0, // No boost
+            b: 0.75,
+        };
+        let with_boost_params = BM25FFieldParams {
+            weight: 2.0, // 2x boost
+            b: 0.75,
+        };
+
+        // Same document, same conditions
+        let field_id = FieldId(0);
+        let term_occurrence = 5_u32;
+        let field_length = 100_u32;
+        let average_field_length = 100.0_f32;
+        let total_documents = 10.0_f32;
+        let term_documents = 5_usize;
+        let k = 1.2_f32;
+
+        scorer_no_boost.add(
+            "doc1",
+            field_id,
+            term_occurrence,
+            field_length,
+            average_field_length,
+            total_documents,
+            term_documents,
+            k,
+            &no_boost_params,
+            1.0, // No additional boost
+            0,
+        );
+
+        scorer_with_boost.add(
+            "doc1",
+            field_id,
+            term_occurrence,
+            field_length,
+            average_field_length,
+            total_documents,
+            term_documents,
+            k,
+            &with_boost_params,
+            1.0, // No additional boost (boost is in field weight)
+            0,
+        );
+
+        let no_boost_scores = scorer_no_boost.get_scores();
+        let with_boost_scores = scorer_with_boost.get_scores();
+
+        // Boosted field should score higher
+        assert!(with_boost_scores["doc1"] > no_boost_scores["doc1"]);
+
+        // The boost should be significant (not just a tiny difference)
+        let score_ratio = with_boost_scores["doc1"] / no_boost_scores["doc1"];
+        assert!(score_ratio > 1.5); // Should be meaningfully higher due to 2x boost
+    }
+
+    #[test]
+    fn test_bm25f_boost_integration_multi_field() {
+        let mut scorer = BM25Scorer::plain();
+
+        // Test document with multiple fields having different boost values
+        let title_params = BM25FFieldParams {
+            weight: 3.0, // High boost for title
+            b: 0.75,
+        };
+        let content_params = BM25FFieldParams {
+            weight: 1.0, // Standard boost for content
+            b: 0.75,
+        };
+        let tags_params = BM25FFieldParams {
+            weight: 1.5, // Medium boost for tags
+            b: 0.75,
+        };
+
+        let title_field = FieldId(1);
+        let content_field = FieldId(2);
+        let tags_field = FieldId(3);
+
+        // Add same term occurrence across different fields
+        scorer.add(
+            "doc1",
+            title_field,
+            3,  // term occurs 3 times in title
+            50, // title is shorter
+            50.0,
+            10.0,
+            5,
+            1.2,
+            &title_params,
+            1.0,
+            0,
+        );
+
+        scorer.add(
+            "doc1",
+            content_field,
+            3,   // same term occurrence in content
+            200, // content is longer
+            200.0,
+            10.0,
+            5,
+            1.2,
+            &content_params,
+            1.0,
+            0,
+        );
+
+        scorer.add(
+            "doc1",
+            tags_field,
+            3,  // same term occurrence in tags
+            20, // tags are shortest
+            20.0,
+            10.0,
+            5,
+            1.2,
+            &tags_params,
+            1.0,
+            0,
+        );
+
+        let scores = scorer.get_scores();
+
+        // Document should have a combined score from all fields
+        // The title field with highest boost should contribute most significantly
+        assert!(scores["doc1"] > 0.0);
+
+        // Test individual field contributions by running separate scorers
+        let mut title_only = BM25Scorer::plain();
+        title_only.add(
+            "doc1",
+            title_field,
+            3,
+            50,
+            50.0,
+            10.0,
+            5,
+            1.2,
+            &title_params,
+            1.0,
+            0,
+        );
+        let title_score = title_only.get_scores()["doc1"];
+
+        let mut content_only = BM25Scorer::plain();
+        content_only.add(
+            "doc1",
+            content_field,
+            3,
+            200,
+            200.0,
+            10.0,
+            5,
+            1.2,
+            &content_params,
+            1.0,
+            0,
+        );
+        let content_score = content_only.get_scores()["doc1"];
+
+        // Title should score higher than content due to boost (3.0 vs 1.0)
+        assert!(title_score > content_score);
+    }
+
+    #[test]
+    fn test_bm25f_boost_values_comparison() {
+        // Test different boost values to ensure they create the expected score differences
+        let boost_values = [0.5, 1.0, 1.5, 2.0, 3.0];
+        let mut scores = Vec::new();
+
+        for &boost_value in &boost_values {
+            let mut scorer = BM25Scorer::plain();
+            let field_params = BM25FFieldParams {
+                weight: boost_value,
+                b: 0.75,
+            };
+
+            scorer.add(
+                "doc1",
+                FieldId(0),
+                5,
+                100,
+                100.0,
+                10.0,
+                5,
+                1.2,
+                &field_params,
+                1.0,
+                0,
+            );
+
+            let score = scorer.get_scores()["doc1"];
+            scores.push(score);
+        }
+
+        // Scores should increase with boost values
+        for i in 1..scores.len() {
+            assert!(
+                scores[i] > scores[i - 1],
+                "Score with boost {} ({}) should be higher than boost {} ({})",
+                boost_values[i],
+                scores[i],
+                boost_values[i - 1],
+                scores[i - 1]
+            );
+        }
+
+        // Specific ratio checks
+        let ratio_1x_to_2x = scores[3] / scores[1]; // 2.0 boost vs 1.0 boost
+        assert!(
+            ratio_1x_to_2x > 1.8 && ratio_1x_to_2x < 2.2,
+            "2x boost should roughly double the score, got ratio: {}",
+            ratio_1x_to_2x
+        );
+    }
 }
