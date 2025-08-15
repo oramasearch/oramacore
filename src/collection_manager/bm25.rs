@@ -78,39 +78,6 @@ impl Default for BM25FFieldParams {
     }
 }
 
-/// BM25F scoring function for a single field
-///
-/// # Arguments
-///
-/// * `term_occurrence_in_document` - occurrence of the term in the field in the document
-/// * `document_length` - length of the field of the document in words
-/// * `average_field_length` - average field length in the collection
-/// * `total_documents_with_field` - number of documents that has that field in the collection
-/// * `total_documents_with_term_in_field` - number of documents that has that term in the field in the collection
-/// * `k` - k parameter (shared across fields)
-/// * `field_params` - field-specific parameters (weight and b)
-///
-/// # Returns
-///
-/// * `f32` - BM25F field score (before IDF multiplication)
-fn bm25f_field_score(
-    term_occurrence_in_document: usize,
-    document_length: u32,
-    average_field_length: f32,
-    k: f32,
-    field_params: &BM25FFieldParams,
-) -> f32 {
-    let f = term_occurrence_in_document as f32;
-    let l = document_length as f32;
-    let avgdl = average_field_length;
-
-    // BM25F field-specific normalization
-    let normalization = 1.0 - field_params.b + field_params.b * (l / avgdl);
-
-    // Apply field weight and normalization
-    field_params.weight * (f * (k + 1.0)) / (f + k * normalization)
-}
-
 /// Calculate IDF (Inverse Document Frequency) component
 ///
 /// # Arguments
@@ -129,54 +96,162 @@ fn calculate_idf(
     ((total_documents_with_field - ni + 0.5_f32) / (ni + 0.5_f32)).ln_1p()
 }
 
-/// Complete BM25F score calculation combining field score and IDF
+/// Calculate normalized term frequency for a field in BM25F
+///
+/// This is tf'_{t,f} = tf_{t,f} / (1 − b_f + b_f · len_f/avglen_f)
 ///
 /// # Arguments
 ///
-/// * `field_score` - Pre-calculated field score from bm25f_field_score
-/// * `idf` - Pre-calculated IDF score
+/// * `term_occurrence_in_field` - Raw term frequency in the field
+/// * `field_length` - Length of the field in the document
+/// * `average_field_length` - Average field length in the collection
+/// * `b` - Field-specific normalization parameter
 ///
 /// # Returns
 ///
-/// * `f32` - Final BM25F score
-fn bm25f_score(field_score: f32, idf: f32) -> f32 {
-    idf * field_score
+/// * `f32` - Normalized term frequency
+fn bm25f_normalized_tf(
+    term_occurrence_in_field: u32,
+    field_length: u32,
+    average_field_length: f32,
+    b: f32,
+) -> f32 {
+    let tf = term_occurrence_in_field as f32;
+    let len = field_length as f32;
+    let avglen = average_field_length;
+
+    tf / (1.0 - b + b * (len / avglen))
+}
+
+/// Complete BM25F score calculation using canonical formulation
+///
+/// # Arguments
+///
+/// * `aggregated_score` - S_t = Σ_f w_f · tf'_{t,f} (sum of weighted normalized tf across fields)
+/// * `k` - k parameter (typically 1.2)
+/// * `idf` - Corpus-level IDF score
+///
+/// # Returns
+///
+/// * `f32` - Final BM25F score for this term
+fn bm25f_score(aggregated_score: f32, k: f32, idf: f32) -> f32 {
+    idf * (k + 1.0) * aggregated_score / (k + aggregated_score)
+}
+
+/// Represents a field contribution to a term in BM25F scoring
+#[derive(Debug, Clone)]
+struct BM25FFieldContribution {
+    normalized_tf: f32,
+    weight: f32,
 }
 
 pub enum BM25Scorer<K: Eq + Hash> {
     Plain(BM25FScorerPlain<K>),
     WithThreshold(BM25FScorerWithThreshold<K>),
 }
-impl<K: Eq + Hash + Debug> BM25Scorer<K> {
+
+impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
     pub fn plain() -> Self {
         Self::Plain(BM25FScorerPlain::new())
     }
 
     pub fn with_threshold(threshold: u32) -> Self {
-        Self::WithThreshold(BM25FScorerWithThreshold {
-            threshold,
-            scores: Default::default(),
-            term_index: 0,
-        })
+        Self::WithThreshold(BM25FScorerWithThreshold::new(threshold))
     }
 
     pub fn next_term(&mut self) {
-        if let Self::WithThreshold(scorer) = self {
-            scorer.next_term();
+        match self {
+            Self::Plain(scorer) => scorer.next_term(),
+            Self::WithThreshold(scorer) => scorer.next_term(),
         }
     }
 
     pub fn reset_term(&mut self) {
-        if let Self::WithThreshold(scorer) = self {
-            scorer.reset_term();
+        match self {
+            Self::Plain(scorer) => scorer.reset_term(),
+            Self::WithThreshold(scorer) => scorer.reset_term(),
         }
     }
 
+    /// Add a field contribution for the current term
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_field(
+        &mut self,
+        key: K,
+        _field_id: FieldId,
+        term_occurrence_in_field: u32,
+        field_length: u32,
+        average_field_length: f32,
+        field_params: &BM25FFieldParams,
+    ) {
+        let normalized_tf = bm25f_normalized_tf(
+            term_occurrence_in_field,
+            field_length,
+            average_field_length,
+            field_params.b,
+        );
+
+        match self {
+            Self::Plain(scorer) => {
+                scorer.add_field(key, _field_id, normalized_tf, field_params.weight)
+            }
+            Self::WithThreshold(scorer) => {
+                scorer.add_field(key, _field_id, normalized_tf, field_params.weight)
+            }
+        }
+    }
+
+    /// Finalize the current term and compute BM25F scores
+    pub fn finalize_term(
+        &mut self,
+        corpus_term_frequency: usize,
+        total_documents: f32,
+        k: f32,
+        phrase_boost: f32,
+        token_indexes: u32,
+    ) {
+        match self {
+            Self::Plain(scorer) => {
+                scorer.finalize_term(corpus_term_frequency, total_documents, k, phrase_boost)
+            }
+            Self::WithThreshold(scorer) => scorer.finalize_term(
+                corpus_term_frequency,
+                total_documents,
+                k,
+                phrase_boost,
+                token_indexes,
+            ),
+        }
+    }
+
+    /// Finalize term for plain scorer (no token tracking needed)
+    pub fn finalize_term_plain(
+        &mut self,
+        corpus_term_frequency: usize,
+        total_documents: f32,
+        k: f32,
+        phrase_boost: f32,
+    ) {
+        match self {
+            Self::Plain(scorer) => {
+                scorer.finalize_term(corpus_term_frequency, total_documents, k, phrase_boost)
+            }
+            Self::WithThreshold(_) => {
+                panic!("Use finalize_term with token_indexes for threshold scorer")
+            }
+        }
+    }
+
+    /// Legacy method for backward compatibility - approximates canonical BM25F per field
+    ///
+    /// Note: This doesn't provide true BM25F benefits since it processes one field at a time,
+    /// but it's closer to canonical BM25F than the old approach of applying field weight as
+    /// an external multiplier after BM25 calculation.
     #[allow(clippy::too_many_arguments)]
     pub fn add(
         &mut self,
         key: K,
-        field_id: FieldId,
+        _field_id: FieldId,
         term_occurrence_in_field: u32,
         field_length: u32,
         average_field_length: f32,
@@ -187,34 +262,51 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
         boost: f32,
         token_indexes: u32,
     ) {
-        match self {
-            Self::Plain(scorer) => scorer.add(
-                key,
-                field_id,
-                term_occurrence_in_field,
-                field_length,
-                average_field_length,
-                total_documents_with_field,
-                total_documents_with_term_in_field,
-                k,
-                field_params,
-                boost,
-            ),
-            Self::WithThreshold(scorer) => {
-                scorer.add(
-                    key,
-                    field_id,
-                    term_occurrence_in_field,
-                    field_length,
-                    average_field_length,
-                    total_documents_with_field,
-                    total_documents_with_term_in_field,
-                    k,
-                    field_params,
-                    boost,
-                    token_indexes,
-                );
+        // Calculate normalized tf using canonical BM25F approach
+        let normalized_tf = bm25f_normalized_tf(
+            term_occurrence_in_field,
+            field_length,
+            average_field_length,
+            field_params.b,
+        );
+
+        // Apply field weight (this is where user boost should be integrated)
+        let weighted_tf = field_params.weight * normalized_tf;
+
+        // Calculate corpus-level IDF (approximation using field-level data)
+        let idf = calculate_idf(
+            total_documents_with_field,
+            total_documents_with_term_in_field,
+        );
+
+        // Apply BM25F saturation to the weighted tf
+        let term_score = bm25f_score(weighted_tf, k, idf);
+
+        if !term_score.is_nan() && term_score > 0.0 {
+            let final_score = term_score * boost; // phrase boost
+
+            match self {
+                Self::Plain(scorer) => {
+                    *scorer.document_scores.entry(key).or_insert(0.0) += final_score;
+                }
+                Self::WithThreshold(scorer) => {
+                    *scorer.document_scores.entry(key.clone()).or_insert(0.0) += final_score;
+
+                    let token_mask = if token_indexes > 0 {
+                        token_indexes
+                    } else {
+                        1 << scorer.term_index
+                    };
+                    *scorer.document_token_masks.entry(key).or_insert(0) |= token_mask;
+                }
             }
+        } else if term_score.is_nan() {
+            error!(
+                ?weighted_tf,
+                ?k,
+                ?idf,
+                "BM25F score is NaN in legacy add method. Skipping term contribution"
+            );
         }
     }
 
@@ -229,90 +321,101 @@ impl<K: Eq + Hash + Debug> BM25Scorer<K> {
 pub struct BM25FScorerWithThreshold<K: Eq + Hash> {
     threshold: u32,
     term_index: usize,
-    // Track field-specific scores: (token_indexes, field_scores_sum)
-    scores: HashMap<K, (u32, HashMap<FieldId, f32>)>,
+    // Document scores and token tracking
+    document_scores: HashMap<K, f32>,
+    document_token_masks: HashMap<K, u32>,
+    // Current term data being accumulated
+    current_term_contributions: HashMap<K, Vec<BM25FFieldContribution>>,
 }
-impl<K: Eq + Hash + Debug> BM25FScorerWithThreshold<K> {
+impl<K: Eq + Hash + Debug + Clone> BM25FScorerWithThreshold<K> {
+    pub fn new(threshold: u32) -> Self {
+        Self {
+            threshold,
+            term_index: 0,
+            document_scores: HashMap::new(),
+            document_token_masks: HashMap::new(),
+            current_term_contributions: HashMap::new(),
+        }
+    }
+
     pub fn next_term(&mut self) {
         self.term_index += 1;
+        self.current_term_contributions.clear();
     }
+
     pub fn reset_term(&mut self) {
         self.term_index = 0;
+        self.current_term_contributions.clear();
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn add(
-        &mut self,
-        key: K,
-        field_id: FieldId,
-        term_occurrence_in_field: u32,
-        field_length: u32,
-        average_field_length: f32,
-        total_documents_with_field: f32,
-        total_documents_with_term_in_field: usize,
-        k: f32,
-        field_params: &BM25FFieldParams,
-        boost: f32,
-        token_indexes: u32,
-    ) {
-        // Calculate field score component
-        let field_score = bm25f_field_score(
-            term_occurrence_in_field as usize,
-            field_length,
-            average_field_length,
-            k,
-            field_params,
-        );
-
-        // Calculate IDF component
-        let idf = calculate_idf(
-            total_documents_with_field,
-            total_documents_with_term_in_field,
-        );
-
-        // Combine field score and IDF
-        let score = bm25f_score(field_score, idf);
-
-        if score.is_nan() {
-            error!(
-                ?term_occurrence_in_field,
-                ?field_length,
-                ?average_field_length,
-                ?total_documents_with_field,
-                ?total_documents_with_term_in_field,
-                ?k,
-                ?field_params,
-                "BM25F score is NaN. Skipping item"
-            );
-            return;
-        }
-
-        let final_score = score * boost;
-
-        let entry = self
-            .scores
-            .entry(key)
-            .or_insert_with(|| (0, HashMap::new()));
-
-        // Update token indexes
-        entry.0 |= if token_indexes > 0 {
-            token_indexes
-        } else {
-            1 << self.term_index
+    /// Add a field contribution for the current term
+    pub fn add_field(&mut self, key: K, _field_id: FieldId, normalized_tf: f32, weight: f32) {
+        let contribution = BM25FFieldContribution {
+            normalized_tf,
+            weight,
         };
 
-        // Accumulate field-specific scores
-        *entry.1.entry(field_id).or_insert(0.0) += final_score;
+        self.current_term_contributions
+            .entry(key)
+            .or_default()
+            .push(contribution);
+    }
+
+    /// Finalize the current term using canonical BM25F
+    pub fn finalize_term(
+        &mut self,
+        corpus_term_frequency: usize,
+        total_documents: f32,
+        k: f32,
+        phrase_boost: f32,
+        token_indexes: u32,
+    ) {
+        // Calculate corpus-level IDF
+        let idf = calculate_idf(total_documents, corpus_term_frequency);
+
+        for (key, contributions) in self.current_term_contributions.drain() {
+            // Calculate S_t = Σ_f w_f · tf'_{t,f} (canonical BM25F aggregation)
+            let aggregated_score: f32 = contributions
+                .iter()
+                .map(|contrib| contrib.weight * contrib.normalized_tf)
+                .sum();
+
+            if aggregated_score > 0.0 {
+                // Apply canonical BM25F saturation: score_t = idf(t) · (k + 1) · S_t / (k + S_t)
+                let term_score = bm25f_score(aggregated_score, k, idf);
+
+                if !term_score.is_nan() {
+                    let final_score = term_score * phrase_boost;
+
+                    // Add to document's total score
+                    *self.document_scores.entry(key.clone()).or_insert(0.0) += final_score;
+
+                    // Update token mask
+                    let token_mask = if token_indexes > 0 {
+                        token_indexes
+                    } else {
+                        1 << self.term_index
+                    };
+                    *self.document_token_masks.entry(key).or_insert(0) |= token_mask;
+                } else {
+                    error!(
+                        ?aggregated_score,
+                        ?k,
+                        ?idf,
+                        "BM25F score is NaN. Skipping term contribution"
+                    );
+                }
+            }
+        }
     }
 
     pub fn get_scores(self) -> HashMap<K, f32> {
-        self.scores
+        self.document_scores
             .into_iter()
-            .filter_map(|(key, (count, field_scores))| {
-                if count.count_ones() >= self.threshold {
-                    // Sum all field scores for this document
-                    let total_score: f32 = field_scores.values().sum();
-                    Some((key, total_score))
+            .filter_map(|(key, score)| {
+                let token_count = self.document_token_masks.get(&key)?.count_ones();
+                if token_count >= self.threshold {
+                    Some((key, score))
                 } else {
                     None
                 }
@@ -322,85 +425,88 @@ impl<K: Eq + Hash + Debug> BM25FScorerWithThreshold<K> {
 }
 
 pub struct BM25FScorerPlain<K: Eq + Hash> {
-    // Track field-specific scores for proper BM25F combination
-    scores: HashMap<K, HashMap<FieldId, f32>>,
+    // Document scores
+    document_scores: HashMap<K, f32>,
+    // Current term data being accumulated
+    current_term_contributions: HashMap<K, Vec<BM25FFieldContribution>>,
 }
 
-impl<K: Eq + Hash + Debug> Default for BM25FScorerPlain<K> {
+impl<K: Eq + Hash + Debug + Clone> Default for BM25FScorerPlain<K> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Eq + Hash + Debug> BM25FScorerPlain<K> {
+impl<K: Eq + Hash + Debug + Clone> BM25FScorerPlain<K> {
     pub fn new() -> Self {
         Self {
-            scores: Default::default(),
+            document_scores: HashMap::new(),
+            current_term_contributions: HashMap::new(),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn add(
+    pub fn next_term(&mut self) {
+        self.current_term_contributions.clear();
+    }
+
+    pub fn reset_term(&mut self) {
+        self.current_term_contributions.clear();
+    }
+
+    /// Add a field contribution for the current term
+    pub fn add_field(&mut self, key: K, _field_id: FieldId, normalized_tf: f32, weight: f32) {
+        let contribution = BM25FFieldContribution {
+            normalized_tf,
+            weight,
+        };
+
+        self.current_term_contributions
+            .entry(key)
+            .or_default()
+            .push(contribution);
+    }
+
+    /// Finalize the current term using canonical BM25F
+    pub fn finalize_term(
         &mut self,
-        key: K,
-        field_id: FieldId,
-        term_occurrence_in_field: u32,
-        field_length: u32,
-        average_field_length: f32,
-        total_documents_with_field: f32,
-        total_documents_with_term_in_field: usize,
+        corpus_term_frequency: usize,
+        total_documents: f32,
         k: f32,
-        field_params: &BM25FFieldParams,
-        boost: f32,
+        phrase_boost: f32,
     ) {
-        // Calculate field score component
-        let field_score = bm25f_field_score(
-            term_occurrence_in_field as usize,
-            field_length,
-            average_field_length,
-            k,
-            field_params,
-        );
+        // Calculate corpus-level IDF
+        let idf = calculate_idf(total_documents, corpus_term_frequency);
 
-        // Calculate IDF component
-        let idf = calculate_idf(
-            total_documents_with_field,
-            total_documents_with_term_in_field,
-        );
+        for (key, contributions) in self.current_term_contributions.drain() {
+            // Calculate S_t = Σ_f w_f · tf'_{t,f} (canonical BM25F aggregation)
+            let aggregated_score: f32 = contributions
+                .iter()
+                .map(|contrib| contrib.weight * contrib.normalized_tf)
+                .sum();
 
-        // Combine field score and IDF
-        let score = bm25f_score(field_score, idf);
+            if aggregated_score > 0.0 {
+                // Apply canonical BM25F saturation: score_t = idf(t) · (k + 1) · S_t / (k + S_t)
+                let term_score = bm25f_score(aggregated_score, k, idf);
 
-        if score.is_nan() {
-            error!(
-                ?term_occurrence_in_field,
-                ?field_length,
-                ?average_field_length,
-                ?total_documents_with_field,
-                ?total_documents_with_term_in_field,
-                ?k,
-                ?field_params,
-                "BM25F score is NaN. Skipping item"
-            );
-            return;
+                if !term_score.is_nan() {
+                    let final_score = term_score * phrase_boost;
+
+                    // Add to document's total score
+                    *self.document_scores.entry(key).or_insert(0.0) += final_score;
+                } else {
+                    error!(
+                        ?aggregated_score,
+                        ?k,
+                        ?idf,
+                        "BM25F score is NaN. Skipping term contribution"
+                    );
+                }
+            }
         }
-
-        let final_score = score * boost;
-
-        // Accumulate field-specific scores properly
-        let field_scores = self.scores.entry(key).or_default();
-        *field_scores.entry(field_id).or_insert(0.0) += final_score;
     }
 
     pub fn get_scores(self) -> HashMap<K, f32> {
-        self.scores
-            .into_iter()
-            .map(|(key, field_scores)| {
-                // Sum all field scores for this document
-                let total_score: f32 = field_scores.values().sum();
-                (key, total_score)
-            })
-            .collect()
+        self.document_scores
     }
 }
 
@@ -649,7 +755,14 @@ mod tests {
 
         // The boost should be significant (not just a tiny difference)
         let score_ratio = with_boost_scores["doc1"] / no_boost_scores["doc1"];
-        assert!(score_ratio > 1.5); // Should be meaningfully higher due to 2x boost
+        println!("Score ratio (2x boost): {:.6}", score_ratio);
+        println!("No boost score: {:.6}", no_boost_scores["doc1"]);
+        println!("With boost score: {:.6}", with_boost_scores["doc1"]);
+        assert!(
+            score_ratio > 1.05,
+            "Expected ratio > 1.05, got {:.6}",
+            score_ratio
+        ); // Should be meaningfully higher due to 2x boost (canonical BM25F has diminishing returns)
     }
 
     #[test]
@@ -803,12 +916,159 @@ mod tests {
             );
         }
 
-        // Specific ratio checks
+        // Specific ratio checks - canonical BM25F has diminishing returns
         let ratio_1x_to_2x = scores[3] / scores[1]; // 2.0 boost vs 1.0 boost
+        println!(
+            "Boost comparison - 1.0 boost: {:.6}, 2.0 boost: {:.6}, ratio: {:.6}",
+            scores[1], scores[3], ratio_1x_to_2x
+        );
         assert!(
-            ratio_1x_to_2x > 1.8 && ratio_1x_to_2x < 2.2,
-            "2x boost should roughly double the score, got ratio: {}",
+            ratio_1x_to_2x > 1.0 && ratio_1x_to_2x < 1.5,
+            "2x boost should provide some increase but with diminishing returns in canonical BM25F, got ratio: {}",
             ratio_1x_to_2x
+        );
+    }
+
+    #[test]
+    fn test_canonical_bm25f_single_term_two_fields() {
+        let mut scorer = BM25Scorer::plain();
+
+        // Hand-calculated canonical BM25F example
+        // Term appears in two fields with different lengths and weights
+        let title_params = BM25FFieldParams {
+            weight: 2.0, // Title has higher weight
+            b: 0.75,
+        };
+        let content_params = BM25FFieldParams {
+            weight: 1.0, // Content has standard weight
+            b: 0.75,
+        };
+
+        let doc_key = "test_doc";
+        let k = 1.2_f32;
+        let corpus_docs = 100_f32;
+        let term_docs = 10_usize;
+
+        // Field 1: Title - short field, term appears twice
+        let title_tf = 2_u32;
+        let title_len = 10_u32;
+        let title_avglen = 8.0_f32;
+
+        // Field 2: Content - longer field, term appears once
+        let content_tf = 1_u32;
+        let content_len = 200_u32;
+        let content_avglen = 150.0_f32;
+
+        // Add field contributions for the same term
+        scorer.add_field(
+            doc_key,
+            FieldId(1),
+            title_tf,
+            title_len,
+            title_avglen,
+            &title_params,
+        );
+        scorer.add_field(
+            doc_key,
+            FieldId(2),
+            content_tf,
+            content_len,
+            content_avglen,
+            &content_params,
+        );
+
+        // Finalize with canonical BM25F
+        scorer.finalize_term_plain(term_docs, corpus_docs, k, 1.0);
+
+        let scores = scorer.get_scores();
+        let actual_score = scores[doc_key];
+
+        // Hand calculate expected canonical BM25F score
+        // tf'_{title} = tf / (1 - b + b * (len / avglen)) = 2 / (1 - 0.75 + 0.75 * (10/8)) = 2 / (0.25 + 0.9375) = 1.6842
+        let title_normalized_tf = 2.0 / (1.0 - 0.75 + 0.75 * (10.0 / 8.0));
+        // tf'_{content} = 1 / (1 - 0.75 + 0.75 * (200/150)) = 1 / (0.25 + 1.0) = 0.8
+        let content_normalized_tf = 1.0 / (1.0 - 0.75 + 0.75 * (200.0 / 150.0));
+
+        // S_t = w_title * tf'_{title} + w_content * tf'_{content} = 2.0 * 1.6842 + 1.0 * 0.8
+        let aggregated_s = title_params.weight * title_normalized_tf
+            + content_params.weight * content_normalized_tf;
+
+        // IDF = ln((N - df + 0.5) / (df + 0.5)) = ln((100 - 10 + 0.5) / (10 + 0.5))
+        let idf = ((corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5)).ln_1p();
+
+        // Final score = idf * (k + 1) * S_t / (k + S_t)
+        let expected_score = idf * (k + 1.0) * aggregated_s / (k + aggregated_s);
+
+        assert_approx_eq!(actual_score, expected_score, 1e-5);
+
+        println!("Canonical BM25F test:");
+        println!("  Title tf': {:.6}", title_normalized_tf);
+        println!("  Content tf': {:.6}", content_normalized_tf);
+        println!("  Aggregated S_t: {:.6}", aggregated_s);
+        println!("  IDF: {:.6}", idf);
+        println!("  Expected score: {:.6}", expected_score);
+        println!("  Actual score: {:.6}", actual_score);
+    }
+
+    #[test]
+    fn test_canonical_bm25f_vs_sum_of_per_field_bm25() {
+        let mut canonical_scorer = BM25Scorer::plain();
+
+        // Field parameters
+        let field1_params = BM25FFieldParams {
+            weight: 2.0,
+            b: 0.75,
+        };
+        let field2_params = BM25FFieldParams {
+            weight: 1.0,
+            b: 0.75,
+        };
+
+        let doc_key = "test_doc";
+        let k = 1.2_f32;
+        let corpus_docs = 100_f32;
+        let term_docs = 10_usize;
+
+        // Add contributions using canonical BM25F
+        canonical_scorer.add_field(doc_key, FieldId(1), 3, 50, 40.0, &field1_params);
+        canonical_scorer.add_field(doc_key, FieldId(2), 2, 100, 80.0, &field2_params);
+        canonical_scorer.finalize_term_plain(term_docs, corpus_docs, k, 1.0);
+
+        let canonical_score = canonical_scorer.get_scores()[doc_key];
+
+        // Calculate what the sum of individual BM25 scores would be
+        let field1_tf_normalized = 3.0 / (1.0 - 0.75 + 0.75 * (50.0 / 40.0));
+        let field2_tf_normalized = 2.0 / (1.0 - 0.75 + 0.75 * (100.0 / 80.0));
+
+        // Individual BM25 scores (what old approach would do)
+        let idf = ((corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5)).ln_1p();
+        let field1_individual = field1_params.weight * idf * (k + 1.0) * field1_tf_normalized
+            / (k + field1_tf_normalized);
+        let field2_individual = field2_params.weight * idf * (k + 1.0) * field2_tf_normalized
+            / (k + field2_tf_normalized);
+        let sum_of_individual = field1_individual + field2_individual;
+
+        // Canonical BM25F should be different (typically lower due to single saturation)
+        println!("Canonical BM25F: {:.6}", canonical_score);
+        println!("Sum of individual BM25: {:.6}", sum_of_individual);
+        println!(
+            "Ratio (canonical/sum): {:.6}",
+            canonical_score / sum_of_individual
+        );
+
+        // The canonical score should be less than or equal to sum of individual scores
+        // (this catches double-saturation issues)
+        assert!(
+            canonical_score <= sum_of_individual + 1e-6,
+            "Canonical BM25F ({}) should be <= sum of individual BM25 scores ({})",
+            canonical_score,
+            sum_of_individual
+        );
+
+        // But it should still be a meaningful score
+        assert!(
+            canonical_score > 0.0,
+            "Canonical BM25F should produce positive scores"
         );
     }
 }
