@@ -155,14 +155,10 @@ impl KnownPrompts {
                     .to_string(),
             },
             KnownPrompts::TitleGenerator => KnownPrompt {
-                system: include_str!(
-                    "../prompts/v1/title_generator/system.md"
-                )
-                .to_string(),
-                user: include_str!("../prompts/v1/title_generator/user.md")
-                    .to_string(),
+                system: include_str!("../prompts/v1/title_generator/system.md").to_string(),
+                user: include_str!("../prompts/v1/title_generator/user.md").to_string(),
             },
-        } 
+        }
     }
 }
 
@@ -626,13 +622,8 @@ impl LLMService {
         ]
     }
 
-    pub fn get_title_params(
-        &self,
-        serialized_conversation: String
-    ) -> Vec<(String, String)> {
-        vec![
-            ("conversation".to_string(), serialized_conversation)
-        ]
+    pub fn get_title_params(&self, serialized_conversation: String) -> Vec<(String, String)> {
+        vec![("conversation".to_string(), serialized_conversation)]
     }
 
     pub fn get_related_questions_params(
