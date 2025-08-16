@@ -2,6 +2,7 @@
 
 mod answer;
 mod api_key_chain;
+mod boost_integration;
 mod bugs;
 mod commit;
 mod concurrency;
