@@ -499,7 +499,7 @@ impl LoadedCommittedStringField {
                 doc_id,
                 term_occurrence_in_field,
                 field_length,
-                total_documents_with_term_in_field,
+                _total_documents_with_term_in_field,
             ) in matches
             {
                 let field_id = context.field_id;
@@ -508,18 +508,13 @@ impl LoadedCommittedStringField {
                     b: 0.75,     // Default normalization parameter
                 };
 
-                scorer.add(
+                scorer.add_field(
                     *doc_id,
                     field_id,
                     term_occurrence_in_field,
                     field_length,
                     average_field_length,
-                    context.global_info.total_documents as f32,
-                    total_documents_with_term_in_field,
-                    1.2,
                     &field_params,
-                    context.boost,
-                    0,
                 );
             }
         }
@@ -627,7 +622,7 @@ impl LoadedCommittedStringField {
             PhraseMatchStorage {
                 matches,
                 positions,
-                token_indexes,
+                token_indexes: _,
             },
         ) in storage
         {
@@ -655,30 +650,25 @@ impl LoadedCommittedStringField {
             // TODO: think about this
             let boost_any_order = positions.len() as f32;
             let boost_sequence = sequences_count as f32 * 2.0;
-            let phrase_boost = boost_any_order + boost_sequence;
+            let _phrase_boost = boost_any_order + boost_sequence;
 
             let field_id = context.field_id;
 
             let field_params = BM25FFieldParams {
                 weight: context.boost, // User-defined field boost as BM25F weight
-                b: 0.75,               // Default normalization parameter @todo: make this configurable?
+                b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
-            for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
+            for (field_length, term_occurrence_in_field, _total_documents_with_term_in_field) in
                 matches
             {
-                scorer.add(
+                scorer.add_field(
                     doc_id,
                     field_id,
                     term_occurrence_in_field as u32,
                     field_length,
                     average_field_length,
-                    context.global_info.total_documents as f32,
-                    total_documents_with_term_in_field,
-                    1.2,
                     &field_params,
-                    phrase_boost,
-                    token_indexes,
                 );
 
                 total_matches += 1;

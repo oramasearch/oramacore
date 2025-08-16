@@ -21,7 +21,6 @@ use crate::{
     ai::{llms, OramaModel},
     collection_manager::{
         bm25::BM25Scorer,
-        global_info::GlobalInfo,
         sides::{
             read::{
                 context::ReadSideContext,
@@ -2008,46 +2007,91 @@ impl Index {
             None => BM25Scorer::plain(),
         };
 
-        let mut context = FullTextSearchContext {
-            tokens: &tokens,
-            exact_match: exact,
-            boost: 1.0,
-            field_id: FieldId(0), // Will be set per field in the loop
-            filtered_doc_ids,
-            global_info: GlobalInfo::default(),
-            uncommitted_deleted_documents,
-            total_term_count: 0,
-        };
+        // Calculate the maximum total documents across all fields for IDF calculation
+        let max_total_documents = properties
+            .iter()
+            .filter_map(|field_id| {
+                let field = uncommitted_fields.string_fields.get(field_id)?;
+                let committed = committed_fields.string_fields.get(field_id);
+                let global_info = if let Some(committed) = committed {
+                    committed.global_info() + field.global_info()
+                } else {
+                    field.global_info()
+                };
+                Some(global_info.total_documents)
+            })
+            .max()
+            .unwrap_or(0) as f32;
 
-        for field_id in properties {
-            let Some(field) = uncommitted_fields.string_fields.get(&field_id) else {
-                bail!("Cannot search on field {:?}: unknown field", field_id);
-            };
-            let committed = committed_fields.string_fields.get(&field_id);
-
-            let global_info = if let Some(committed) = committed {
-                committed.global_info() + field.global_info()
-            } else {
-                field.global_info()
-            };
-
-            let boost = boost.get(&field_id).copied().unwrap_or(1.0);
-
-            context.boost = boost;
-            context.field_id = field_id;
-            context.global_info = global_info;
-
+        // Process each term across all fields (canonical BM25F approach)
+        for (term_index, token) in tokens.iter().enumerate() {
             scorer.reset_term();
 
-            field
-                .search(&mut context, &mut scorer)
-                .context("Cannot perform search")?;
-            if let Some(committed) = committed {
-                scorer.reset_term();
-                committed
-                    .search(&mut context, &mut scorer, tolerance)
+            // Add field contributions for this term from all fields
+            for field_id in &properties {
+                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
+                    continue;
+                };
+                let committed = committed_fields.string_fields.get(field_id);
+
+                let global_info = if let Some(committed) = committed {
+                    committed.global_info() + field.global_info()
+                } else {
+                    field.global_info()
+                };
+
+                let boost = boost.get(field_id).copied().unwrap_or(1.0);
+
+                let single_token_vec = vec![token.clone()];
+                let mut context = FullTextSearchContext {
+                    tokens: &single_token_vec,
+                    exact_match: exact,
+                    boost,
+                    field_id: *field_id,
+                    filtered_doc_ids,
+                    global_info,
+                    uncommitted_deleted_documents,
+                    total_term_count: term_index as u64 + 1,
+                };
+
+                // Search this field for this specific term
+                field
+                    .search(&mut context, &mut scorer)
                     .context("Cannot perform search")?;
+
+                if let Some(committed_field) = committed {
+                    committed_field
+                        .search(&mut context, &mut scorer, tolerance)
+                        .context("Cannot perform search")?;
+                }
             }
+
+            // For now, use a simplified corpus df calculation
+            // TODO: Implement proper corpus-level document frequency computation
+            let corpus_df = 1; // Simplified - assume at least one document contains each term
+
+            match &scorer {
+                BM25Scorer::Plain(_) => {
+                    scorer.finalize_term_plain(
+                        corpus_df,
+                        max_total_documents,
+                        1.2, // k parameter
+                        1.0, // phrase boost
+                    );
+                }
+                BM25Scorer::WithThreshold(_) => {
+                    scorer.finalize_term(
+                        corpus_df,
+                        max_total_documents,
+                        1.2,             // k parameter
+                        1.0,             // phrase boost
+                        1 << term_index, // token_indexes: bit mask indicating which token this is
+                    );
+                }
+            }
+
+            // Move to next term
+            scorer.next_term();
         }
 
         Ok(scorer.get_scores())

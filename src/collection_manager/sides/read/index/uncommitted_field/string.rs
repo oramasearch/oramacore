@@ -165,8 +165,6 @@ impl UncommittedStringField {
 
         let mut total_matches = 0_usize;
         for token in context.tokens {
-            scorer.next_term();
-
             context.increment_term_count();
 
             // We don't "boost" the exact match at all.
@@ -179,7 +177,7 @@ impl UncommittedStringField {
             };
             let matches = self.inner.search_iter_value(token, mode);
 
-            for (total_documents_with_term_in_field, position_per_document) in matches {
+            for (_total_documents_with_term_in_field, position_per_document) in matches {
                 for (doc_id, positions) in position_per_document {
                     if let Some(filtered_doc_ids) = context.filtered_doc_ids {
                         if !filtered_doc_ids.contains(doc_id) {
@@ -212,9 +210,6 @@ impl UncommittedStringField {
                     // We should also here consider the phrase matching.
                     // TODO: Implement phrase matching
 
-                    let total_documents_with_term_in_field =
-                        total_documents_with_term_in_field.0 as usize;
-                    
                     let field_id = context.field_id;
 
                     let field_params = BM25FFieldParams {
@@ -222,18 +217,13 @@ impl UncommittedStringField {
                         b: 0.75,               // Default normalization parameter
                     };
 
-                    scorer.add(
+                    scorer.add_field(
                         *doc_id,
                         field_id,
                         term_occurrence_in_field,
                         field_length,
                         average_field_length,
-                        context.global_info.total_documents as f32,
-                        total_documents_with_term_in_field,
-                        1.2,
                         &field_params,
-                        1.0,
-                        0,
                     );
 
                     total_matches += 1;
