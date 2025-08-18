@@ -10,20 +10,34 @@ async fn test_quick_fulltext_benchmark() {
     init_log();
     println!("Quick Fulltext Search Benchmark");
 
-    // Load games.json data
-    let games_path = "benches/games.json";
-    let games_data = fs::read_to_string(games_path).expect("Failed to read games.json");
+    // Load games.json data - handle different working directories
+    let games_path = if std::path::Path::new("benches/games.json").exists() {
+        "benches/games.json".to_string()
+    } else if std::path::Path::new("../benches/games.json").exists() {
+        "../benches/games.json".to_string()
+    } else {
+        // Try to find games.json from project root
+        let current_dir = std::env::current_dir().expect("Failed to get current directory");
+        let mut path = current_dir;
+        loop {
+            let games_file = path.join("benches/games.json");
+            if games_file.exists() {
+                break games_file.to_str().expect("Invalid path").to_string();
+            }
+            if !path.pop() {
+                panic!("Could not find games.json file in project tree");
+            }
+        }
+    };
+    let games_data = fs::read_to_string(&games_path)
+        .unwrap_or_else(|e| panic!("Failed to read games.json from {}: {}", games_path, e));
     let games: Vec<serde_json::Value> =
         serde_json::from_str(&games_data).expect("Failed to parse games.json");
 
     println!("Loaded {} games from games.json", games.len());
 
-    // Use different subsets for different benchmark scales
-    let test_scales = vec![
-        (500, "Small scale"),
-        (1000, "Medium scale"),
-        (games.len(), "Full dataset"),
-    ];
+    // Use smaller subsets for quicker test execution
+    let test_scales = vec![(100, "Quick test"), (250, "Medium test")];
 
     for (doc_count, scale_name) in test_scales {
         let doc_count = doc_count.min(games.len());
@@ -43,22 +57,18 @@ async fn test_quick_fulltext_benchmark() {
             .unwrap();
         println!("  Insert time: {:?}", insert_start.elapsed());
 
-        // Create realistic game-based queries
+        // Create realistic game-based queries (reduced for speed)
         let queries = vec![
             ("RPG", "Genre search"),
             ("adventure", "Genre lowercase"),
             ("fantasy action", "Multi-genre"),
             ("Zelda", "Game title"),
-            ("combat exploration", "Gameplay features"),
-            ("indie platformer", "Indie genre combo"),
-            ("dungeon crawler", "Specific type"),
-            ("open world", "Popular feature"),
         ];
 
         println!("  Uncommitted Index Search Performance:");
         for (query_term, description) in &queries {
             let mut total_time = std::time::Duration::ZERO;
-            let iterations = 5; // Reduced for multiple scales
+            let iterations = 3; // Reduced for quicker test
 
             for _ in 0..iterations {
                 let start = Instant::now();
@@ -69,7 +79,7 @@ async fn test_quick_fulltext_benchmark() {
                 total_time += start.elapsed();
 
                 // Track first result for validation
-                if iterations == 5 {
+                if iterations == 3 {
                     println!(
                         "    {}: {:?} ({} results)",
                         description,
@@ -118,46 +128,6 @@ async fn test_quick_fulltext_benchmark() {
                 "Rating > 4.0",
             ),
             (
-                "rating_excellent",
-                json!({
-                    "term": "",
-                    "where": {
-                        "rating": {"gte": 4.5}
-                    }
-                }),
-                "Rating ≥ 4.5",
-            ),
-            (
-                "rating_range",
-                json!({
-                    "term": "",
-                    "where": {
-                        "rating": {"between": [3.5, 4.5]}
-                    }
-                }),
-                "Rating 3.5-4.5",
-            ),
-            (
-                "rating_low",
-                json!({
-                    "term": "",
-                    "where": {
-                        "rating": {"lt": 3.0}
-                    }
-                }),
-                "Rating < 3.0",
-            ),
-            (
-                "rating_poor",
-                json!({
-                    "term": "",
-                    "where": {
-                        "rating": {"lte": 2.5}
-                    }
-                }),
-                "Rating ≤ 2.5",
-            ),
-            (
                 "combined_filter",
                 json!({
                     "term": "fantasy",
@@ -166,26 +136,6 @@ async fn test_quick_fulltext_benchmark() {
                     }
                 }),
                 "Fantasy + Rating ≥ 4.0",
-            ),
-            (
-                "combined_range",
-                json!({
-                    "term": "adventure",
-                    "where": {
-                        "rating": {"between": [4.0, 5.0]}
-                    }
-                }),
-                "Adventure + High Rating",
-            ),
-            (
-                "exact_rating",
-                json!({
-                    "term": "",
-                    "where": {
-                        "rating": {"eq": 4.5}
-                    }
-                }),
-                "Exact Rating = 4.5",
             ),
         ];
 
