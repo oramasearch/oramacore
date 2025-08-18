@@ -504,8 +504,8 @@ impl LoadedCommittedStringField {
             {
                 let field_id = context.field_id;
                 let field_params = BM25FFieldParams {
-                    weight: 1.0, // Default field weight
-                    b: 0.75,     // Default normalization parameter
+                    weight: context.boost, // User-defined field boost as BM25F weight
+                    b: 0.75,               // Default normalization parameter
                 };
 
                 scorer.add_field(
