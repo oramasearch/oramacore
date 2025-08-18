@@ -60,19 +60,21 @@ impl Default for BM25FFieldParams {
     }
 }
 
-/// Calculate IDF (Inverse Document Frequency) component using canonical BM25F formula
+/// Calculate IDF (Inverse Document Frequency) component using Lucene-style formula
 ///
 /// # Arguments
 ///
-/// * `total_documents` - N: total documents in the collection (corpus size)
+/// * `total_documents` - N: total documents in the collection (corpus size)  
 /// * `corpus_document_frequency` - df: documents that contain this term across any searched field
 ///
 /// # Returns
 ///
-/// * `f32` - IDF score using canonical formula: ln((N - df + 0.5) / (df + 0.5))
+/// * `f32` - IDF score using Lucene formula: ln(1 + (N - df + 0.5) / (df + 0.5))
+/// This ensures positive scores for all term frequencies, avoiding negative scores for common terms
 fn calculate_idf(total_documents: f32, corpus_document_frequency: usize) -> f32 {
     let df = corpus_document_frequency as f32;
-    ((total_documents - df + 0.5) / (df + 0.5)).ln()
+    let ratio = (total_documents - df + 0.5) / (df + 0.5);
+    ratio.ln_1p() // Lucene-style: always positive
 }
 
 /// Calculate normalized term frequency for a field in BM25F
@@ -261,7 +263,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
         // Apply BM25F saturation to the weighted tf
         let term_score = bm25f_score(weighted_tf, k, idf);
 
-        if !term_score.is_nan() && term_score > 0.0 {
+        if !term_score.is_nan() {
             let final_score = term_score * boost; // phrase boost
 
             match self {
@@ -367,7 +369,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25FScorerWithThreshold<K> {
                 .map(|contrib| contrib.weight * contrib.normalized_tf)
                 .sum();
 
-            if aggregated_score > 0.0 {
+            if aggregated_score.is_normal() {
                 // Apply canonical BM25F saturation: score_t = idf(t) · (k + 1) · S_t / (k + S_t)
                 let term_score = bm25f_score(aggregated_score, k, idf);
 
@@ -471,7 +473,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25FScorerPlain<K> {
                 .map(|contrib| contrib.weight * contrib.normalized_tf)
                 .sum();
 
-            if aggregated_score > 0.0 {
+            if aggregated_score.is_normal() {
                 // Apply canonical BM25F saturation: score_t = idf(t) · (k + 1) · S_t / (k + S_t)
                 let term_score = bm25f_score(aggregated_score, k, idf);
 
@@ -527,9 +529,10 @@ mod tests {
 
         let scores = scorer.get_scores();
         assert_eq!(scores.len(), 1);
-        // With canonical IDF formula: ln((100 - 10 + 0.5) / (10 + 0.5)) ≈ 2.154
+        // With Lucene IDF formula: ln(1 + (100 - 10 + 0.5) / (10 + 0.5)) ≈ 3.065
         // Expected score will be different from the original due to canonical IDF
-        let expected_idf = ((100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln(); // ≈ 2.154
+        let ratio = (100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5);
+        let expected_idf = ratio.ln_1p(); // ≈ 3.065
         let normalized_tf = 5.0; // tf / (1 - b + b * (len/avglen)) = 5/(1-0.75+0.75*1) = 5
         let expected_score = expected_idf * (1.2 + 1.0) * normalized_tf / (1.2 + normalized_tf);
         assert_approx_eq!(scores["doc1"], expected_score, 1e-6);
@@ -636,7 +639,8 @@ mod tests {
         let scores = scorer.get_scores();
         assert_eq!(scores.len(), 1);
 
-        let expected_idf = ((100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln();
+        let ratio = (100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5);
+        let expected_idf = ratio.ln_1p();
         let normalized_tf = 5.0;
         let expected_single_field_score =
             expected_idf * (1.2 + 1.0) * normalized_tf / (1.2 + normalized_tf);
@@ -988,8 +992,9 @@ mod tests {
         let aggregated_s = title_params.weight * title_normalized_tf
             + content_params.weight * content_normalized_tf;
 
-        // IDF = ln((N - df + 0.5) / (df + 0.5)) = ln((100 - 10 + 0.5) / (10 + 0.5))
-        let idf = ((corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5)).ln();
+        // IDF = ln(1 + (N - df + 0.5) / (df + 0.5)) = ln(1 + (100 - 10 + 0.5) / (10 + 0.5))
+        let ratio = (corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5);
+        let idf = ratio.ln_1p();
 
         // Final score = idf * (k + 1) * S_t / (k + S_t)
         let expected_score = idf * (k + 1.0) * aggregated_s / (k + aggregated_s);
