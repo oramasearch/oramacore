@@ -543,14 +543,17 @@ mod tests {
             b: 0.75,
         };
 
+        // Use parameters that give positive IDF: 100 total docs, 10 with term
+        let (total_docs, term_docs) = (100.0, 10);
+
         scorer.add(
             "doc1",
             FieldId(0),
             5,
             100,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &field_params,
             1.0,
@@ -562,8 +565,8 @@ mod tests {
             5,
             100,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &field_params,
             2.0,
@@ -575,8 +578,8 @@ mod tests {
             5,
             100,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &field_params,
             0.5,
@@ -592,25 +595,25 @@ mod tests {
     fn test_bm25f_field_weights() {
         let mut scorer = BM25Scorer::plain();
 
-        // Different field weights
         let field1_params = BM25FFieldParams {
-            weight: 2.0, // Higher weight for field 1
+            weight: 2.0,
             b: 0.75,
         };
         let field2_params = BM25FFieldParams {
-            weight: 1.0, // Standard weight for field 2
+            weight: 1.0,
             b: 0.75,
         };
 
-        // Same document, different fields, same term
+        let (total_docs, term_docs) = (100.0, 10);
+
         scorer.add(
             "doc1",
             FieldId(1),
             5,
             100,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &field1_params,
             1.0,
@@ -622,8 +625,8 @@ mod tests {
             5,
             100,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &field2_params,
             1.0,
@@ -633,8 +636,11 @@ mod tests {
         let scores = scorer.get_scores();
         assert_eq!(scores.len(), 1);
 
-        // Score should be higher than a single field due to field combination
-        let expected_single_field_score = 1.2297773;
+        let expected_idf = ((100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln();
+        let normalized_tf = 5.0;
+        let expected_single_field_score =
+            expected_idf * (1.2 + 1.0) * normalized_tf / (1.2 + normalized_tf);
+
         assert!(scores["doc1"] > expected_single_field_score);
     }
 
@@ -642,25 +648,25 @@ mod tests {
     fn test_bm25f_field_normalization() {
         let mut scorer = BM25Scorer::plain();
 
-        // Different normalization parameters
         let low_b_params = BM25FFieldParams {
             weight: 1.0,
-            b: 0.2, // Less length normalization
+            b: 0.2,
         };
         let high_b_params = BM25FFieldParams {
             weight: 1.0,
-            b: 0.9, // More length normalization
+            b: 0.9,
         };
 
-        // Test with longer document
+        let (total_docs, term_docs) = (100.0, 10);
+
         scorer.add(
             "doc1",
             FieldId(0),
             5,
             200,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &low_b_params,
             1.0,
@@ -672,8 +678,8 @@ mod tests {
             5,
             200,
             100.0,
-            10.0,
-            5,
+            total_docs,
+            term_docs,
             1.2,
             &high_b_params,
             1.0,
@@ -681,8 +687,6 @@ mod tests {
         );
 
         let scores = scorer.get_scores();
-
-        // Document with lower b should score higher (less penalized for length)
         assert!(scores["doc1"] > scores["doc2"]);
     }
 
@@ -706,8 +710,8 @@ mod tests {
         let term_occurrence = 5_u32;
         let field_length = 100_u32;
         let average_field_length = 100.0_f32;
-        let total_documents = 10.0_f32;
-        let term_documents = 5_usize;
+        let total_documents = 100.0_f32;
+        let term_documents = 10_usize;
         let k = 1.2_f32;
 
         scorer_no_boost.add(
@@ -785,8 +789,8 @@ mod tests {
             3,  // term occurs 3 times in title
             50, // title is shorter
             50.0,
-            10.0,
-            5,
+            100.0,
+            10,
             1.2,
             &title_params,
             1.0,
@@ -799,8 +803,8 @@ mod tests {
             3,   // same term occurrence in content
             200, // content is longer
             200.0,
-            10.0,
-            5,
+            100.0,
+            10,
             1.2,
             &content_params,
             1.0,
@@ -813,8 +817,8 @@ mod tests {
             3,  // same term occurrence in tags
             20, // tags are shortest
             20.0,
-            10.0,
-            5,
+            100.0,
+            10,
             1.2,
             &tags_params,
             1.0,
@@ -835,8 +839,8 @@ mod tests {
             3,
             50,
             50.0,
-            10.0,
-            5,
+            100.0,
+            10,
             1.2,
             &title_params,
             1.0,
@@ -851,8 +855,8 @@ mod tests {
             3,
             200,
             200.0,
-            10.0,
-            5,
+            100.0,
+            10,
             1.2,
             &content_params,
             1.0,
@@ -883,8 +887,8 @@ mod tests {
                 5,
                 100,
                 100.0,
-                10.0,
-                5,
+                100.0,
+                10,
                 1.2,
                 &field_params,
                 1.0,
