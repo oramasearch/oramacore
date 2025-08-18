@@ -31,8 +31,8 @@ use crate::{
                         GeoPointFieldInfo,
                     },
                     merge::{merge_date_field, merge_geopoint_field},
-                    sort::SortIterator,
                 },
+                sort::SortIterator,
             },
             Offset,
         },
@@ -56,7 +56,6 @@ mod committed_field;
 mod merge;
 mod path_to_index_id_map;
 mod search_context;
-mod sort;
 mod uncommitted_field;
 
 use std::{

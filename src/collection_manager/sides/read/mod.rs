@@ -6,6 +6,7 @@ pub mod document_storage;
 mod index;
 mod logs;
 pub mod notify;
+pub mod sort;
 
 use axum::extract::State;
 use chrono::Utc;
