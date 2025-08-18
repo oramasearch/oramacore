@@ -191,39 +191,45 @@ async fn test_index_replacement_2() {
         .await
         .unwrap();
 
-    wait_for(&collection_client, |c| async move {
-        let result = c
-            .search(
-                json!({
-                    "term": "Tommaso",
-                })
-                .try_into()
-                .unwrap(),
-            )
-            .await
-            .unwrap();
+    wait_for(&collection_client, |c| {
+        async move {
+            let result = c
+                .search(
+                    json!({
+                        "term": "Tommaso",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
 
-        if result.hits.len() != 1 {
-            return Err(anyhow::anyhow!("Unexpected number of hits"));
+            if result.hits.len() != 1 {
+                return Err(anyhow::anyhow!("Unexpected number of hits"));
+            }
+
+            let Some(first) = result.hits.first() else {
+                return Err(anyhow::anyhow!("No results found"));
+            };
+            first
+                .document
+                .as_ref()
+                .and_then(|doc| doc.get("new"))
+                .and_then(|v| v.as_bool())
+                .ok_or_else(|| anyhow::anyhow!("Document does not contain 'new' field"))
+                .map(|is_new| {
+                    if is_new {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("Document 'new' field is not true"))
+                    }
+                })
         }
-        
-        let Some(first) = result.hits.first() else {
-            return Err(anyhow::anyhow!("No results found"));
-        };
-        first.document
-            .as_ref()
-            .and_then(|doc| doc.get("new"))
-            .and_then(|v| v.as_bool())
-            .ok_or_else(|| anyhow::anyhow!("Document does not contain 'new' field"))
-            .map(|is_new| {
-                if is_new {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!("Document 'new' field is not true"))
-                }
-            })
-    }.boxed())
-    .await.unwrap().unwrap();
+        .boxed()
+    })
+    .await
+    .unwrap()
+    .unwrap();
 
     let result = collection_client
         .search(
