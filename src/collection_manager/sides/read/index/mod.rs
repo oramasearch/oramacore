@@ -2014,7 +2014,50 @@ impl Index {
         for (term_index, token) in tokens.iter().enumerate() {
             scorer.reset_term();
 
-            // Add field contributions for this term from all fields
+            // Calculate corpus-level document frequency (df) for canonical BM25F
+            // We'll create a separate scorer to get unfiltered document counts for this term
+            let mut corpus_scorer = BM25Scorer::plain();
+
+            for field_id in &properties {
+                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
+                    continue;
+                };
+                let committed = committed_fields.string_fields.get(field_id);
+
+                let global_info = if let Some(committed) = committed {
+                    committed.global_info() + field.global_info()
+                } else {
+                    field.global_info()
+                };
+
+                let single_token_vec = vec![token.clone()];
+                let mut corpus_context = FullTextSearchContext {
+                    tokens: &single_token_vec,
+                    exact_match: exact,
+                    boost: 1.0,
+                    field_id: *field_id,
+                    filtered_doc_ids: None, // No filters for corpus-level df calculation
+                    global_info,
+                    uncommitted_deleted_documents,
+                    total_term_count: 1,
+                };
+
+                // Search without filters to get corpus-level document frequency
+                field
+                    .search(&mut corpus_context, &mut corpus_scorer)
+                    .context("Cannot perform corpus search")?;
+
+                if let Some(committed_field) = committed {
+                    committed_field
+                        .search(&mut corpus_context, &mut corpus_scorer, tolerance)
+                        .context("Cannot perform corpus search")?;
+                }
+            }
+
+            // Get corpus-level df from the unfiltered scorer
+            let corpus_df = corpus_scorer.current_term_document_count().max(1);
+
+            // Then, add field contributions for this term with filtering applied
             for field_id in &properties {
                 let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
                     continue;
@@ -2041,7 +2084,7 @@ impl Index {
                     total_term_count: term_index as u64 + 1,
                 };
 
-                // Search this field for this specific term
+                // Search this field for this specific term (with filters applied)
                 field
                     .search(&mut context, &mut scorer)
                     .context("Cannot perform search")?;
@@ -2052,10 +2095,6 @@ impl Index {
                         .context("Cannot perform search")?;
                 }
             }
-
-            // Calculate corpus document frequency: count distinct documents that contain this term
-            // across all searched fields. This is more accurate than the previous hardcoded value.
-            let corpus_df = scorer.current_term_document_count().max(1);
 
             match &scorer {
                 BM25Scorer::Plain(_) => {
