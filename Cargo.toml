@@ -167,6 +167,22 @@ path = "src/bin/embeddings/embeddings.rs"
 name = "hnsw"
 harness = false
 
+[[bench]]
+name = "fulltext_search"
+harness = false
+
+[[bench]]
+name = "fulltext_simple"
+harness = false
+
+[[bench]]
+name = "fulltext_minimal"
+harness = false
+
+[[bench]]
+name = "fulltext_fast"
+harness = false
+
 [features]
 default = ["writer", "reader"]
 no_auto_embedding_field_on_creation = []
