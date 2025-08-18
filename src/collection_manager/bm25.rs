@@ -60,22 +60,19 @@ impl Default for BM25FFieldParams {
     }
 }
 
-/// Calculate IDF (Inverse Document Frequency) component
+/// Calculate IDF (Inverse Document Frequency) component using canonical BM25F formula
 ///
 /// # Arguments
 ///
-/// * `total_documents_with_field` - total documents in collection that have this field
-/// * `total_documents_with_term_in_field` - documents that contain this term in this field
+/// * `total_documents` - N: total documents in the collection (corpus size)
+/// * `corpus_document_frequency` - df: documents that contain this term across any searched field
 ///
 /// # Returns
 ///
-/// * `f32` - IDF score
-fn calculate_idf(
-    total_documents_with_field: f32,
-    total_documents_with_term_in_field: usize,
-) -> f32 {
-    let ni = total_documents_with_term_in_field as f32;
-    ((total_documents_with_field - ni + 0.5_f32) / (ni + 0.5_f32)).ln_1p()
+/// * `f32` - IDF score using canonical formula: ln((N - df + 0.5) / (df + 0.5))
+fn calculate_idf(total_documents: f32, corpus_document_frequency: usize) -> f32 {
+    let df = corpus_document_frequency as f32;
+    ((total_documents - df + 0.5) / (df + 0.5)).ln()
 }
 
 /// Calculate normalized term frequency for a field in BM25F
@@ -255,7 +252,7 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
         // Apply field weight (this is where user boost should be integrated)
         let weighted_tf = field_params.weight * normalized_tf;
 
-        // Calculate corpus-level IDF (approximation using field-level data)
+        // Calculate corpus-level IDF using canonical formula
         let idf = calculate_idf(
             total_documents_with_field,
             total_documents_with_term_in_field,
@@ -289,6 +286,14 @@ impl<K: Eq + Hash + Debug + Clone> BM25Scorer<K> {
                 ?idf,
                 "BM25F score is NaN in legacy add method. Skipping term contribution"
             );
+        }
+    }
+
+    /// Get the number of distinct documents that have contributions for the current term
+    pub fn current_term_document_count(&self) -> usize {
+        match self {
+            Self::Plain(scorer) => scorer.current_term_contributions.len(),
+            Self::WithThreshold(scorer) => scorer.current_term_contributions.len(),
         }
     }
 
@@ -509,21 +514,25 @@ mod tests {
         scorer.add(
             "doc1",
             FieldId(0),
-            5,
-            100,
-            100.0,
-            10.0,
-            5,
-            1.2,
+            5,     // term_occurrence_in_field
+            100,   // field_length
+            100.0, // average_field_length
+            100.0, // total_documents_with_field
+            10,    // total_documents_with_term_in_field (less than half for positive IDF)
+            1.2,   // k parameter
             &field_params,
-            1.0,
-            0,
+            1.0, // boost
+            0,   // token_indexes
         );
 
         let scores = scorer.get_scores();
         assert_eq!(scores.len(), 1);
-        // Expected score should be similar to original BM25 since we're using default params
-        assert_approx_eq!(scores["doc1"], 1.2297773, 1e-6);
+        // With canonical IDF formula: ln((100 - 10 + 0.5) / (10 + 0.5)) ≈ 2.154
+        // Expected score will be different from the original due to canonical IDF
+        let expected_idf = ((100.0_f32 - 10.0 + 0.5) / (10.0 + 0.5)).ln(); // ≈ 2.154
+        let normalized_tf = 5.0; // tf / (1 - b + b * (len/avglen)) = 5/(1-0.75+0.75*1) = 5
+        let expected_score = expected_idf * (1.2 + 1.0) * normalized_tf / (1.2 + normalized_tf);
+        assert_approx_eq!(scores["doc1"], expected_score, 1e-6);
     }
 
     #[test]
@@ -976,7 +985,7 @@ mod tests {
             + content_params.weight * content_normalized_tf;
 
         // IDF = ln((N - df + 0.5) / (df + 0.5)) = ln((100 - 10 + 0.5) / (10 + 0.5))
-        let idf = ((corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5)).ln_1p();
+        let idf = ((corpus_docs - term_docs as f32 + 0.5) / (term_docs as f32 + 0.5)).ln();
 
         // Final score = idf * (k + 1) * S_t / (k + S_t)
         let expected_score = idf * (k + 1.0) * aggregated_s / (k + aggregated_s);

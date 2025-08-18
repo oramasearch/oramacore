@@ -2007,21 +2007,8 @@ impl Index {
             None => BM25Scorer::plain(),
         };
 
-        // Calculate the maximum total documents across all fields for IDF calculation
-        let max_total_documents = properties
-            .iter()
-            .filter_map(|field_id| {
-                let field = uncommitted_fields.string_fields.get(field_id)?;
-                let committed = committed_fields.string_fields.get(field_id);
-                let global_info = if let Some(committed) = committed {
-                    committed.global_info() + field.global_info()
-                } else {
-                    field.global_info()
-                };
-                Some(global_info.total_documents)
-            })
-            .max()
-            .unwrap_or(0) as f32;
+        // Use the collection's total document count for canonical BM25F
+        let total_documents = self.document_count as f32;
 
         // Process each term across all fields (canonical BM25F approach)
         for (term_index, token) in tokens.iter().enumerate() {
@@ -2066,15 +2053,15 @@ impl Index {
                 }
             }
 
-            // For now, use a simplified corpus df calculation
-            // TODO: Implement proper corpus-level document frequency computation
-            let corpus_df = 1; // Simplified - assume at least one document contains each term
+            // Calculate corpus document frequency: count distinct documents that contain this term
+            // across all searched fields. This is more accurate than the previous hardcoded value.
+            let corpus_df = scorer.current_term_document_count().max(1);
 
             match &scorer {
                 BM25Scorer::Plain(_) => {
                     scorer.finalize_term_plain(
                         corpus_df,
-                        max_total_documents,
+                        total_documents,
                         1.2, // k parameter
                         1.0, // phrase boost
                     );
@@ -2082,7 +2069,7 @@ impl Index {
                 BM25Scorer::WithThreshold(_) => {
                     scorer.finalize_term(
                         corpus_df,
-                        max_total_documents,
+                        total_documents,
                         1.2,             // k parameter
                         1.0,             // phrase boost
                         1 << term_index, // token_indexes: bit mask indicating which token this is
