@@ -114,7 +114,7 @@ pub async fn wait_quick<'i, 'b, I, R>(
 where
     'b: 'i,
 {
-    const MAX_ATTEMPTS: usize = 100; // Much shorter timeout
+    const MAX_ATTEMPTS: usize = 100;
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -124,7 +124,7 @@ where
                 if attempts > MAX_ATTEMPTS {
                     break Err(e);
                 }
-                sleep(Duration::from_millis(50)).await // Longer sleep, fewer attempts
+                sleep(Duration::from_millis(50)).await
             }
         }
     }
@@ -132,10 +132,9 @@ where
 
 /// Fast fulltext search benchmark
 fn bench_fulltext_fast(c: &mut Criterion) {
-    // Use a smaller runtime to avoid hanging
     let rt = Runtime::new().unwrap();
 
-    let doc_count = 1000; // Small scale for fast benchmarks
+    let doc_count = 1000;
 
     let (reader, writer, collection_id, read_api_key, write_api_key, index_id) =
         rt.block_on(async {
@@ -166,7 +165,6 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                 .await
                 .expect("Failed to create collection");
 
-            // Wait for collection
             wait_quick(&reader, |r| {
                 async move {
                     r.collection_stats(
@@ -182,7 +180,6 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             .await
             .expect("Collection setup timeout");
 
-            // Create index
             let index_id = IndexId::try_new("fast_bench_index").unwrap();
 
             writer
@@ -197,7 +194,6 @@ fn bench_fulltext_fast(c: &mut Criterion) {
                 .await
                 .expect("Failed to create index");
 
-            // Wait for index
             wait_quick(&reader, |r| {
                 async move {
                     let stats = r
@@ -221,7 +217,6 @@ fn bench_fulltext_fast(c: &mut Criterion) {
             .await
             .expect("Index setup timeout");
 
-            // Load games.json data
             let games_data =
                 fs::read_to_string("benches/games.json").expect("Failed to read games.json");
             let games: Vec<serde_json::Value> =

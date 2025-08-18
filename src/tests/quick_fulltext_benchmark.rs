@@ -45,7 +45,6 @@ async fn test_quick_fulltext_benchmark() {
 
         println!("\n=== {} ({} games) ===", scale_name, doc_count);
 
-        // Create fresh context for each scale
         let test_context = TestContext::new().await;
         let collection_client = test_context.create_collection().await.unwrap();
         let index_client = collection_client.create_index().await.unwrap();
@@ -57,7 +56,6 @@ async fn test_quick_fulltext_benchmark() {
             .unwrap();
         println!("  Insert time: {:?}", insert_start.elapsed());
 
-        // Create realistic game-based queries (reduced for speed)
         let queries = vec![
             ("RPG", "Genre search"),
             ("adventure", "Genre lowercase"),
