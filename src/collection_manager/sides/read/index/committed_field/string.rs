@@ -883,6 +883,14 @@ mod tests {
             .search(&mut search_context, &mut scorer)
             .unwrap();
 
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df - at least 1 document contains the term
+            2.0, // total_documents in test data
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
+
         assert_eq!(scorer.get_scores().len(), 2);
 
         let field_length_per_doc = uncommitted.field_length_per_doc();
@@ -908,6 +916,14 @@ mod tests {
             .search(&mut search_context, &mut scorer, None)
             .unwrap();
 
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df
+            2.0, // total_documents
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
+
         assert_eq!(scorer.get_scores().len(), 2);
 
         committed.unload(); // force unloading
@@ -917,6 +933,15 @@ mod tests {
         committed
             .search(&mut search_context, &mut scorer, None)
             .unwrap();
+
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df
+            2.0, // total_documents
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
+
         assert_eq!(scorer.get_scores().len(), 2);
     }
 }
