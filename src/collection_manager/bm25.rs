@@ -34,7 +34,11 @@
  * (coll_id, field_id, doc_id, term) => [term_occurrence_in_document]
  * ```
  */
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+};
 use tracing::error;
 
 use crate::types::FieldId;
@@ -71,6 +75,7 @@ impl Default for BM25FFieldParams {
 ///
 /// * `f32` - IDF score using Lucene formula: ln(1 + (N - df + 0.5) / (df + 0.5))
 /// This ensures positive scores for all term frequencies, avoiding negative scores for common terms
+#[inline]
 fn calculate_idf(total_documents: f32, corpus_document_frequency: usize) -> f32 {
     let df = corpus_document_frequency as f32;
     let ratio = (total_documents - df + 0.5) / (df + 0.5);
@@ -91,6 +96,7 @@ fn calculate_idf(total_documents: f32, corpus_document_frequency: usize) -> f32 
 /// # Returns
 ///
 /// * `f32` - Normalized term frequency
+#[inline]
 fn bm25f_normalized_tf(
     term_occurrence_in_field: u32,
     field_length: u32,
@@ -104,6 +110,18 @@ fn bm25f_normalized_tf(
     tf / (1.0 - b + b * (len / avglen))
 }
 
+#[inline]
+fn bm25f_normalized_tf_cached(
+    term_occurrence_in_field: u32,
+    field_length: u32,
+    cached_params: &CachedFieldParams,
+) -> f32 {
+    let tf = term_occurrence_in_field as f32;
+    let len = field_length as f32;
+
+    tf / (cached_params.one_minus_b + cached_params.b * (len / cached_params.average_field_length))
+}
+
 /// Complete BM25F score calculation using canonical formulation
 ///
 /// # Arguments
@@ -115,15 +133,24 @@ fn bm25f_normalized_tf(
 /// # Returns
 ///
 /// * `f32` - Final BM25F score for this term
+#[inline]
 fn bm25f_score(aggregated_score: f32, k: f32, idf: f32) -> f32 {
     idf * (k + 1.0) * aggregated_score / (k + aggregated_score)
 }
 
 /// Represents a field contribution to a term in BM25F scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct BM25FFieldContribution {
     normalized_tf: f32,
     weight: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedFieldParams {
+    weight: f32,
+    b: f32,
+    average_field_length: f32,
+    one_minus_b: f32, // Pre-computed (1 - b) for performance
 }
 
 pub enum BM25Scorer<K: Eq + Hash> {
@@ -418,6 +445,10 @@ pub struct BM25FScorerPlain<K: Eq + Hash> {
     document_scores: HashMap<K, f32>,
     // Current term data being accumulated
     current_term_contributions: HashMap<K, Vec<BM25FFieldContribution>>,
+    // Fast path: direct aggregation for single-field contributions
+    single_field_aggregation: HashMap<K, f32>,
+    // Track if we have contributions from multiple fields for a document
+    multi_field_docs: HashSet<K>,
 }
 
 impl<K: Eq + Hash + Debug + Clone> Default for BM25FScorerPlain<K> {
@@ -431,15 +462,21 @@ impl<K: Eq + Hash + Debug + Clone> BM25FScorerPlain<K> {
         Self {
             document_scores: HashMap::new(),
             current_term_contributions: HashMap::new(),
+            single_field_aggregation: HashMap::new(),
+            multi_field_docs: HashSet::new(),
         }
     }
 
     pub fn next_term(&mut self) {
         self.current_term_contributions.clear();
+        self.single_field_aggregation.clear();
+        self.multi_field_docs.clear();
     }
 
     pub fn reset_term(&mut self) {
         self.current_term_contributions.clear();
+        self.single_field_aggregation.clear();
+        self.multi_field_docs.clear();
     }
 
     /// Add a field contribution for the current term

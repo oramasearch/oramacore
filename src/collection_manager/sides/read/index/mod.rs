@@ -2010,13 +2010,12 @@ impl Index {
         // Use the collection's total document count for canonical BM25F
         let total_documents = self.document_count as f32;
 
-        // Process each term across all fields (canonical BM25F approach)
-        for (term_index, token) in tokens.iter().enumerate() {
-            scorer.reset_term();
+        let mut field_global_info: HashMap<FieldId, _> = HashMap::new();
+        let mut corpus_dfs: HashMap<String, usize> = HashMap::new();
 
-            // Calculate corpus-level document frequency (df) for canonical BM25F
-            // We'll create a separate scorer to get unfiltered document counts for this term
-            let mut corpus_scorer = BM25Scorer::plain();
+        // Single pass to compute both global info and corpus document frequencies
+        for token in &tokens {
+            let mut total_corpus_docs = HashSet::new();
 
             for field_id in &properties {
                 let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
@@ -2024,38 +2023,50 @@ impl Index {
                 };
                 let committed = committed_fields.string_fields.get(field_id);
 
-                let global_info = if let Some(committed) = committed {
-                    committed.global_info() + field.global_info()
-                } else {
-                    field.global_info()
-                };
+                // Compute global info only once per field
+                if !field_global_info.contains_key(field_id) {
+                    let global_info = if let Some(committed) = committed {
+                        committed.global_info() + field.global_info()
+                    } else {
+                        field.global_info()
+                    };
+                    field_global_info.insert(*field_id, global_info);
+                }
 
-                let single_token_vec = vec![token.clone()];
+                // Collect unique document IDs for this term across all fields for corpus DF calculation
+                let mut corpus_scorer = BM25Scorer::plain();
+                let single_token_slice = std::slice::from_ref(token);
                 let mut corpus_context = FullTextSearchContext {
-                    tokens: &single_token_vec,
+                    tokens: single_token_slice,
                     exact_match: exact,
                     boost: 1.0,
                     field_id: *field_id,
-                    filtered_doc_ids: None, // No filters for corpus-level df calculation
-                    global_info,
+                    filtered_doc_ids: None,
+                    global_info: field_global_info[field_id].clone(),
                     uncommitted_deleted_documents,
                     total_term_count: 1,
                 };
 
-                // Search without filters to get corpus-level document frequency
                 field
                     .search(&mut corpus_context, &mut corpus_scorer)
                     .context("Cannot perform corpus search")?;
-
                 if let Some(committed_field) = committed {
                     committed_field
                         .search(&mut corpus_context, &mut corpus_scorer, tolerance)
                         .context("Cannot perform corpus search")?;
                 }
+
+                // Add documents found in this field to the corpus count
+                total_corpus_docs.extend(corpus_scorer.get_scores().keys().cloned());
             }
 
-            // Get corpus-level df from the unfiltered scorer
-            let corpus_df = corpus_scorer.current_term_document_count().max(1);
+            corpus_dfs.insert(token.clone(), total_corpus_docs.len().max(1));
+        }
+
+        // Now perform the actual scoring with pre-computed corpus frequencies
+        for (term_index, token) in tokens.iter().enumerate() {
+            scorer.reset_term();
+            let corpus_df = corpus_dfs[token];
 
             // Then, add field contributions for this term with filtering applied
             for field_id in &properties {
@@ -2064,17 +2075,14 @@ impl Index {
                 };
                 let committed = committed_fields.string_fields.get(field_id);
 
-                let global_info = if let Some(committed) = committed {
-                    committed.global_info() + field.global_info()
-                } else {
-                    field.global_info()
-                };
+                let global_info = field_global_info[field_id].clone();
 
                 let boost = boost.get(field_id).copied().unwrap_or(1.0);
 
-                let single_token_vec = vec![token.clone()];
+                // Reuse the same token slice to avoid allocation
+                let single_token_slice = std::slice::from_ref(token);
                 let mut context = FullTextSearchContext {
-                    tokens: &single_token_vec,
+                    tokens: single_token_slice,
                     exact_match: exact,
                     boost,
                     field_id: *field_id,
