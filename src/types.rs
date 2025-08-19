@@ -1899,15 +1899,6 @@ impl std::ops::Add for Number {
     }
 }
 
-impl Number {
-    pub fn as_f64(&self) -> f64 {
-        match self {
-            Number::I32(v) => *v as f64,
-            Number::F32(v) => *v as f64,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct SerializableNumber(pub Number);
 

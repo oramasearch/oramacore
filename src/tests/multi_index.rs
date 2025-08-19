@@ -93,7 +93,8 @@ async fn test_search_multi_index_one_is_empty() -> Result<()> {
     let collection_client = test_context.create_collection().await.unwrap();
 
     let index_1_client = collection_client.create_index().await.unwrap();
-    let index_2_client = collection_client.create_index().await.unwrap();
+    // Empty index
+    collection_client.create_index().await.unwrap();
 
     let document_count = 10;
     let docs = (0..document_count)
@@ -447,13 +448,7 @@ async fn test_multi_index_sorting_bug() -> Result<()> {
             .unwrap(),
         )
         .await?;
-
-    // Expected sorted order: doc1(1), doc3(2), doc2(3), doc4(4)
-    // But BUG: sorting might only consider one index, giving incorrect order
-
     assert_eq!(result.count, 4, "Should find all 4 documents");
-
-    println!("{result:#?}");
 
     // Extract the document IDs in order
     let doc_ids: Vec<String> = result
@@ -467,10 +462,43 @@ async fn test_multi_index_sorting_bug() -> Result<()> {
         .collect();
 
     // Check if sorting considers documents from all indexes
-    // If the bug exists, we might see incomplete sorting (only from first index)
     assert_eq!(
         doc_ids,
         vec!["doc1", "doc3", "doc2", "doc4"],
+        "Documents should be sorted by priority across all indexes, got: {doc_ids:?}"
+    );
+
+    // Search and sort by priority ascending
+    let result = collection_client
+        .search(
+            json!({
+                "term": "item",
+                "sortBy": {
+                    "property": "priority",
+                    "order": "DESC"
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await?;
+    assert_eq!(result.count, 4, "Should find all 4 documents");
+
+    // Extract the document IDs in order
+    let doc_ids: Vec<String> = result
+        .hits
+        .iter()
+        .map(|hit| {
+            let doc: serde_json::Value =
+                serde_json::from_str(hit.document.as_ref().unwrap().inner.get()).unwrap();
+            doc["id"].as_str().unwrap().to_string()
+        })
+        .collect();
+
+    // Check if sorting considers documents from all indexes
+    assert_eq!(
+        doc_ids,
+        vec!["doc4", "doc2", "doc3", "doc1"],
         "Documents should be sorted by priority across all indexes, got: {doc_ids:?}"
     );
 

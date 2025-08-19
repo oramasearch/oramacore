@@ -961,6 +961,3 @@ struct DumpV1 {
 enum Dump {
     V1(DumpV1),
 }
-
-#[cfg(test)]
-mod tests {}
