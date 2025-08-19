@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -13,17 +13,16 @@ use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use hook_storage::{HookReader, HookType};
 use orama_js_pool::OutputChannel;
-use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
-    capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            context::ReadSideContext, sort::sort_and_truncate_documents,
+            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
         },
@@ -31,8 +30,7 @@ use crate::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, Limit, Number, Role, SearchOffset, SearchParams, SortBy, SortOrder,
-        TokenScore,
+        InteractionMessage, Limit, Role, SearchOffset, SearchParams, SortBy, TokenScore,
     },
 };
 
@@ -504,79 +502,22 @@ impl CollectionReader {
             limit, offset, sort_by
         );
 
-        if let Some(sort_by) = sort_by {
-            let indexes_lock = self.indexes.read().await;
-            let relevant_indexes: Vec<_> = indexes_lock
+        let indexes_lock = self.indexes.read().await;
+        let relevant_indexes: Vec<_> = if let Some(sort_by) = sort_by {
+            indexes_lock
                 .iter()
                 .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
-                .collect();
-
-            if relevant_indexes.is_empty() {
-                return Err(anyhow!(
-                    "Cannot sort by \"{}\": no index has that field",
-                    sort_by.property
-                ));
-            }
-
-            // Calculate total number of documents needed (limit + offset for pagination)
-            let desiderata = limit.0 + offset.0;
-
-            // If there's only one index, use the existing optimized path
-            // Single-index sorting is more efficient as it avoids collecting and re-sorting all results
-            if relevant_indexes.len() == 1 {
-                let output = relevant_indexes[0]
-                    .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                        process_sort_iterator(iter, desiderata)
-                    })
-                    .await?;
-
-                return Ok(truncate(token_scores, output.into_iter(), limit, offset));
-            }
-
-            // - For the relevant_indexes, we obtain the first `desiderata` items.
-            //   So `all_results` contains something like
-            //
-            //   |sorted data from index1|
-            //   |sorted data from index2|
-            //   |sorted data from index3|
-            //
-            //   which aren't globally sorted
-            //
-            // - Re-sorting the merged results to maintain global order across indexes
-            // - Truncating the results to the desired limit
-            // Note: Each index only returns up to 'desiderata' results, not all documents
-            let mut all_results = Vec::new();
-
-            for index in relevant_indexes {
-                let index_results = index
-                    .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                        process_sort_iterator(iter, desiderata)
-                    })
-                    .await?;
-
-                all_results.extend(index_results);
-            }
-
-            // Sort the merged results by their numeric values to ensure global ordering
-            all_results.sort_by_key(|(n, _)| *n);
-
-            // Apply descending order if requested by reversing the sorted results
-            if sort_by.order == SortOrder::Descending {
-                all_results.reverse();
-            }
-
-            // Apply pagination (limit/offset) and convert to final TokenScore format
-            Ok(truncate(
-                token_scores,
-                all_results.into_iter(),
-                limit,
-                offset,
-            ))
+                .collect()
         } else {
-            // No sorting requested - fall back to simple top-N selection based on token scores
-            // This is the most efficient path when only relevance ranking is needed
-            Ok(top_n(token_scores.iter(), limit.0 + offset.0))
-        }
+            Vec::new()
+        };
+
+        let result =
+            sort_and_truncate_documents(&relevant_indexes, token_scores, limit, offset, sort_by)
+                .await;
+
+        drop(indexes_lock);
+        result
     }
 
     pub async fn calculate_facets(
@@ -1004,60 +945,6 @@ fn calculate_index_to_search_on(
     Ok(res)
 }
 
-fn process_sort_iterator(
-    iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
-    desiderata: usize,
-) -> Vec<(Number, HashSet<DocumentId>)> {
-    // The worst scenario is that documents doesn't share the "number" value, so the hashset contains
-    // only one document.
-    // For a good scenario, the documents share the "number" value, so the hashset contains
-    // multiple documents.
-    // We use `desiderata / 2` to avoid excessive memory usage
-    let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
-
-    let mut total_item = 0_usize;
-    for (n, h) in iter {
-        let c = h.len();
-        index_results.push((n, h));
-        total_item += c;
-        if total_item >= desiderata {
-            break;
-        }
-    }
-
-    index_results
-}
-
-fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
-    token_scores: &HashMap<DocumentId, f32>,
-    output: I,
-    limit: Limit,
-    offset: SearchOffset,
-) -> Vec<TokenScore> {
-    let mut res = Vec::with_capacity(limit.0 + offset.0);
-    let mut k = 0_usize;
-    for (_, docs) in output {
-        for doc in docs {
-            let score = token_scores.get(&doc);
-            if let Some(score) = score {
-                if k >= offset.0 && k < limit.0 + offset.0 {
-                    res.push(TokenScore {
-                        document_id: doc,
-                        score: *score,
-                    });
-                }
-
-                k += 1;
-
-                if k > limit.0 + offset.0 {
-                    break;
-                }
-            }
-        }
-    }
-    res
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct DumpV1 {
     id: CollectionId,
@@ -1075,82 +962,5 @@ enum Dump {
     V1(DumpV1),
 }
 
-fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) -> Vec<TokenScore> {
-    let mut capped_heap = CappedHeap::new(n);
-
-    for (key, value) in map {
-        let k = match NotNan::new(*value) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        let v = key;
-        capped_heap.insert(k, v);
-    }
-
-    let result: Vec<TokenScore> = capped_heap
-        .into_top()
-        .map(|(value, key)| TokenScore {
-            document_id: *key,
-            score: value.into_inner(),
-        })
-        .collect();
-
-    result
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_top_n() {
-        let search_result = HashMap::from([
-            (DocumentId(1), 0.1),
-            (DocumentId(2), 0.2),
-            (DocumentId(3), 0.3),
-            (DocumentId(4), 0.4),
-            (DocumentId(5), 0.5),
-            (DocumentId(6), 0.6),
-            (DocumentId(7), 0.7),
-            (DocumentId(8), 0.8),
-            (DocumentId(9), 0.9),
-            (DocumentId(10), 1.0),
-            (DocumentId(11), 1.1),
-            (DocumentId(12), 1.2),
-            (DocumentId(13), 1.3),
-            (DocumentId(14), 1.4),
-            (DocumentId(15), 1.5),
-        ]);
-
-        let r1 = top_n(search_result.iter(), 5);
-        assert_eq!(r1.len(), 5);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-            ],
-            r1.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
-
-        let r2 = top_n(search_result.iter(), 10);
-        assert_eq!(r2.len(), 10);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-                DocumentId(10),
-                DocumentId(9),
-                DocumentId(8),
-                DocumentId(7),
-                DocumentId(6),
-            ],
-            r2.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
-    }
-}
+mod tests {}
