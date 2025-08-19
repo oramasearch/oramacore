@@ -19,6 +19,7 @@ mod quick_fulltext_benchmark;
 mod index_rebuild;
 mod list_documents;
 mod migrations;
+mod multi_index;
 mod offload_field;
 mod replace_doc_on_insert;
 mod replace_index;
