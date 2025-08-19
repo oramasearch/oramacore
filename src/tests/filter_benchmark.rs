@@ -26,7 +26,7 @@ async fn test_filter_operations_benchmark() {
     let doc_count = 1000; // Use subset for faster testing
     let documents = games.iter().take(doc_count).cloned().collect::<Vec<_>>();
 
-    println!("Inserting {} games for filter testing...", doc_count);
+    println!("Inserting {doc_count} games for filter testing...");
     let insert_start = Instant::now();
     index_client
         .insert_documents(json!(documents).try_into().unwrap())
@@ -146,7 +146,7 @@ async fn test_filter_operations_benchmark() {
                 );
             }
             Err(e) => {
-                println!("  {}: Error - {:?}", description, e);
+                println!("  {description}: Error - {e:?}");
             }
         }
     }
@@ -173,7 +173,7 @@ async fn test_filter_operations_benchmark() {
                 );
             }
             Err(e) => {
-                println!("  {}: Error - {:?}", description, e);
+                println!("  {description}: Error - {e:?}");
             }
         }
     }

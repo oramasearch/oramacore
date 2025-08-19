@@ -4,11 +4,10 @@ use std::fs;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use futures::{future::BoxFuture, FutureExt};
-use tempfile;
 use tokio::time::sleep;
 
 use anyhow::Context;
@@ -19,18 +18,17 @@ use oramacore::{
     build_orama,
     collection_manager::sides::{
         read::{
-            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSide,
-            ReadSideConfig,
+            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSideConfig,
         },
         write::{
-            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteSide,
+            CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
             WriteSideConfig,
         },
         InputSideChannelType, OutputSideChannelType,
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, CreateCollection, CreateIndexRequest,
-        DocumentList, IndexId, SearchParams, WriteApiKey,
+        IndexId, WriteApiKey,
     },
     web_server::HttpConfig,
     OramacoreConfig,

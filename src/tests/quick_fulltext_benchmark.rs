@@ -30,7 +30,7 @@ async fn test_quick_fulltext_benchmark() {
         }
     };
     let games_data = fs::read_to_string(&games_path)
-        .unwrap_or_else(|e| panic!("Failed to read games.json from {}: {}", games_path, e));
+        .unwrap_or_else(|e| panic!("Failed to read games.json from {games_path}: {e}"));
     let games: Vec<serde_json::Value> =
         serde_json::from_str(&games_data).expect("Failed to parse games.json");
 
@@ -43,7 +43,7 @@ async fn test_quick_fulltext_benchmark() {
         let doc_count = doc_count.min(games.len());
         let documents = games.iter().take(doc_count).cloned().collect::<Vec<_>>();
 
-        println!("\n=== {} ({} games) ===", scale_name, doc_count);
+        println!("\n=== {scale_name} ({doc_count} games) ===");
 
         let test_context = TestContext::new().await;
         let collection_client = test_context.create_collection().await.unwrap();
@@ -88,11 +88,11 @@ async fn test_quick_fulltext_benchmark() {
             }
 
             let avg_time = total_time / iterations;
-            println!("    {} average: {:?}", description, avg_time);
+            println!("    {description} average: {avg_time:?}");
         }
 
         // Test committed index performance for this scale
-        println!("  Committing {} documents...", doc_count);
+        println!("  Committing {doc_count} documents...");
         let commit_start = Instant::now();
         test_context.commit_all().await.unwrap();
         println!("  Commit time: {:?}", commit_start.elapsed());
@@ -152,7 +152,7 @@ async fn test_quick_fulltext_benchmark() {
                     );
                 }
                 Err(e) => {
-                    println!("    {}: Error - {:?}", description, e);
+                    println!("    {description}: Error - {e:?}");
                 }
             }
         }

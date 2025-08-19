@@ -116,26 +116,21 @@ async fn test_boost_no_boost_comparison() {
     // doc1 has "machine learning" in title, so title boost should increase its score significantly
     assert!(
         doc1_score_title_boost > doc1_score_no_boost,
-        "Title boost should increase doc1 score: {} vs {}",
-        doc1_score_title_boost,
-        doc1_score_no_boost
+        "Title boost should increase doc1 score: {doc1_score_title_boost} vs {doc1_score_no_boost}"
     );
 
     // The title boost should be more significant than content boost for doc1
     // (since "machine learning" appears in doc1's title)
     assert!(
         doc1_score_title_boost > doc1_score_content_boost,
-        "Title boost should be more effective for doc1: {} vs {}",
-        doc1_score_title_boost,
-        doc1_score_content_boost
+        "Title boost should be more effective for doc1: {doc1_score_title_boost} vs {doc1_score_content_boost}"
     );
 
     // Calculate boost effectiveness
     let title_boost_ratio = doc1_score_title_boost / doc1_score_no_boost;
     assert!(
         title_boost_ratio > 1.1,
-        "Title boost should provide meaningful score increase: {}",
-        title_boost_ratio
+        "Title boost should provide meaningful score increase: {title_boost_ratio}"
     );
 }
 
@@ -207,8 +202,7 @@ async fn test_multi_field_boost_ranking() {
 
         assert!(
             results.count >= 2,
-            "{}: Should find multiple documents",
-            config_name
+            "{config_name}: Should find multiple documents"
         );
 
         // Check ranking based on boost configuration
@@ -237,8 +231,7 @@ async fn test_multi_field_boost_ranking() {
                     .unwrap();
                 assert!(
                     title_match_pos < content_match_pos,
-                    "Title boost should rank title_match higher: {:?}",
-                    rankings
+                    "Title boost should rank title_match higher: {rankings:?}"
                 );
             }
             "content_heavy" => {
@@ -250,8 +243,7 @@ async fn test_multi_field_boost_ranking() {
                     .unwrap();
                 assert!(
                     content_match_pos < title_match_pos,
-                    "Content boost should rank content_match higher: {:?}",
-                    rankings
+                    "Content boost should rank content_match higher: {rankings:?}"
                 );
             }
             "category_heavy" => {
@@ -259,8 +251,7 @@ async fn test_multi_field_boost_ranking() {
                 let category_match_pos = rankings.iter().position(|id| id == "category_match");
                 assert!(
                     category_match_pos.is_some(),
-                    "Category boost should find category_match: {:?}",
-                    rankings
+                    "Category boost should find category_match: {rankings:?}"
                 );
             }
             _ => {} // no_boost baseline
@@ -368,16 +359,11 @@ async fn test_boost_with_phrase_matching() {
     // even though both have exact phrase matches
     assert!(
         exact_title_score > exact_content_score,
-        "Title boost should prioritize title matches: {} vs {}",
-        exact_title_score,
-        exact_content_score
+        "Title boost should prioritize title matches: {exact_title_score} vs {exact_content_score}"
     );
 
-    println!("Phrase matching test rankings: {:?}", rankings);
-    println!(
-        "exact_title score: {}, exact_content score: {}",
-        exact_title_score, exact_content_score
-    );
+    println!("Phrase matching test rankings: {rankings:?}");
+    println!("exact_title score: {exact_title_score}, exact_content score: {exact_content_score}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -424,13 +410,12 @@ async fn test_boost_effectiveness_ratios() {
 
         assert!(
             results.count > 0,
-            "Should find document with boost {}",
-            boost_value
+            "Should find document with boost {boost_value}"
         );
         let score = results.hits[0].score;
         scores.push(score);
 
-        println!("Boost {}: Score {}", boost_value, score);
+        println!("Boost {boost_value}: Score {score}");
     }
 
     // Verify that scores increase with boost values
@@ -449,15 +434,13 @@ async fn test_boost_effectiveness_ratios() {
     let ratio_2x = scores[1] / scores[0];
     assert!(
         ratio_2x > 1.2,
-        "2x boost should provide substantial score increase: ratio = {}",
-        ratio_2x
+        "2x boost should provide substantial score increase: ratio = {ratio_2x}"
     );
 
     // Check that 5x boost is significantly better than 1x (but with diminishing returns)
     let ratio_5x = scores[3] / scores[0];
     assert!(
         ratio_5x > 1.5,
-        "5x boost should provide major score increase: ratio = {}",
-        ratio_5x
+        "5x boost should provide major score increase: ratio = {ratio_5x}"
     );
 }

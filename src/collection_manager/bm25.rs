@@ -791,13 +791,12 @@ mod tests {
 
         // The boost should be significant (not just a tiny difference)
         let score_ratio = with_boost_scores["doc1"] / no_boost_scores["doc1"];
-        println!("Score ratio (2x boost): {:.6}", score_ratio);
+        println!("Score ratio (2x boost): {score_ratio:.6}");
         println!("No boost score: {:.6}", no_boost_scores["doc1"]);
         println!("With boost score: {:.6}", with_boost_scores["doc1"]);
         assert!(
             score_ratio > 1.05,
-            "Expected ratio > 1.05, got {:.6}",
-            score_ratio
+            "Expected ratio > 1.05, got {score_ratio:.6}"
         ); // Should be meaningfully higher due to 2x boost (canonical BM25F has diminishing returns)
     }
 
@@ -960,8 +959,7 @@ mod tests {
         );
         assert!(
             ratio_1x_to_2x > 1.0 && ratio_1x_to_2x < 1.5,
-            "2x boost should provide some increase but with diminishing returns in canonical BM25F, got ratio: {}",
-            ratio_1x_to_2x
+            "2x boost should provide some increase but with diminishing returns in canonical BM25F, got ratio: {ratio_1x_to_2x}"
         );
     }
 
@@ -1039,12 +1037,12 @@ mod tests {
         assert_approx_eq!(actual_score, expected_score, 1e-5);
 
         println!("Canonical BM25F test:");
-        println!("  Title tf': {:.6}", title_normalized_tf);
-        println!("  Content tf': {:.6}", content_normalized_tf);
-        println!("  Aggregated S_t: {:.6}", aggregated_s);
-        println!("  IDF: {:.6}", idf);
-        println!("  Expected score: {:.6}", expected_score);
-        println!("  Actual score: {:.6}", actual_score);
+        println!("  Title tf': {title_normalized_tf:.6}");
+        println!("  Content tf': {content_normalized_tf:.6}");
+        println!("  Aggregated S_t: {aggregated_s:.6}");
+        println!("  IDF: {idf:.6}");
+        println!("  Expected score: {expected_score:.6}");
+        println!("  Actual score: {actual_score:.6}");
     }
 
     #[test]
@@ -1086,8 +1084,8 @@ mod tests {
         let sum_of_individual = field1_individual + field2_individual;
 
         // Canonical BM25F should be different (typically lower due to single saturation)
-        println!("Canonical BM25F: {:.6}", canonical_score);
-        println!("Sum of individual BM25: {:.6}", sum_of_individual);
+        println!("Canonical BM25F: {canonical_score:.6}");
+        println!("Sum of individual BM25: {sum_of_individual:.6}");
         println!(
             "Ratio (canonical/sum): {:.6}",
             canonical_score / sum_of_individual
@@ -1097,9 +1095,7 @@ mod tests {
         // (this catches double-saturation issues)
         assert!(
             canonical_score <= sum_of_individual + 1e-6,
-            "Canonical BM25F ({}) should be <= sum of individual BM25 scores ({})",
-            canonical_score,
-            sum_of_individual
+            "Canonical BM25F ({canonical_score}) should be <= sum of individual BM25 scores ({sum_of_individual})"
         );
 
         // But it should still be a meaningful score
