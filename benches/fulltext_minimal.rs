@@ -6,9 +6,8 @@ use tokio::runtime::Runtime;
 // Import the necessary modules directly
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use futures::{future::BoxFuture, FutureExt};
-use tempfile;
 use tokio::time::sleep;
 
 use anyhow::Context;
@@ -286,7 +285,7 @@ fn bench_single_word_search(c: &mut Criterion) {
     let scales = [1000, 5000];
 
     for scale in scales {
-        let mut group = c.benchmark_group(format!("single_word_search_{}", scale));
+        let mut group = c.benchmark_group(format!("single_word_search_{scale}"));
         group.throughput(Throughput::Elements(scale as u64));
         group.sample_size(20);
         group.measurement_time(Duration::from_secs(5));

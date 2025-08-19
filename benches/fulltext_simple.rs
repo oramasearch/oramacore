@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use fake::{Fake, Faker};
 use serde_json::json;
 use std::time::Duration;
@@ -9,7 +9,6 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{bail, Result};
 use futures::{future::BoxFuture, FutureExt};
-use tempfile;
 use tokio::time::sleep;
 
 use anyhow::Context;
@@ -424,7 +423,7 @@ fn bench_fulltext_search_basic(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     for &scale in SCALES {
-        let mut group = c.benchmark_group(format!("fulltext_basic_{}", scale));
+        let mut group = c.benchmark_group(format!("fulltext_basic_{scale}"));
         group.throughput(Throughput::Elements(scale as u64));
         group.sample_size(10);
         group.measurement_time(Duration::from_secs(3));
@@ -474,7 +473,7 @@ fn bench_fulltext_search_committed(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     for &scale in SCALES {
-        let mut group = c.benchmark_group(format!("fulltext_committed_{}", scale));
+        let mut group = c.benchmark_group(format!("fulltext_committed_{scale}"));
         group.throughput(Throughput::Elements(scale as u64));
         group.sample_size(10);
         group.measurement_time(Duration::from_secs(3));

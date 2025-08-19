@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
+    routing::{get, post},
     Json, Router,
 };
-use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -20,13 +20,13 @@ use crate::{
     web_server::api::util::print_error,
 };
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 struct ApiKeyQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 struct GetSystemPromptQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
@@ -36,27 +36,40 @@ struct GetSystemPromptQueryParams {
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(get_system_prompt_v1())
-        .add(list_system_prompts_v1())
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/get",
+            get(get_system_prompt_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/all",
+            get(list_system_prompts_v1),
+        )
         .with_state(read_side)
 }
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .add(insert_system_prompt_v1())
-        .add(delete_system_prompt_v1())
-        .add(update_system_prompt_v1())
-        .add(validate_system_prompt_v1())
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/insert",
+            post(insert_system_prompt_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/delete",
+            post(delete_system_prompt_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/update",
+            post(update_system_prompt_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/system_prompts/validate",
+            post(validate_system_prompt_v1),
+        )
         .with_state(write_side)
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/system_prompts/get",
-    description = "Get a single system prompt by ID"
-)]
 async fn get_system_prompt_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     Query(query): Query<GetSystemPromptQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
@@ -82,13 +95,8 @@ async fn get_system_prompt_v1(
     }
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/system_prompts/all",
-    description = "Get all system prompts in a collection"
-)]
 async fn list_system_prompts_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> impl IntoResponse {
@@ -112,13 +120,8 @@ async fn list_system_prompts_v1(
     }
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/system_prompts/validate",
-    description = "Validate a system prompt"
-)]
 async fn validate_system_prompt_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(mut params): Json<InsertSystemPromptParams>,
@@ -152,13 +155,8 @@ async fn validate_system_prompt_v1(
         .map(|result| Json(json!({ "result": result })))
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/system_prompts/insert",
-    description = "Insert a new system prompt"
-)]
 async fn insert_system_prompt_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
@@ -183,13 +181,8 @@ async fn insert_system_prompt_v1(
         })
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/system_prompts/delete",
-    description = "Deletes an existing system prompt"
-)]
 async fn delete_system_prompt_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteSystemPromptParams>,
@@ -204,13 +197,8 @@ async fn delete_system_prompt_v1(
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/system_prompts/update",
-    description = "Updates an existing system prompt"
-)]
 async fn update_system_prompt_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,

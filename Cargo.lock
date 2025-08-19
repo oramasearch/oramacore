@@ -522,31 +522,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axum-openapi3"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f71986979a5ec01bd99bd3f4e2360647d1a436734327da357cf5d56f31e1e278"
-dependencies = [
- "axum 0.8.3",
- "axum-openapi3-derive",
- "once_cell",
- "serde",
- "utoipa",
-]
-
-[[package]]
-name = "axum-openapi3-derive"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91ccc1cdbfb4e620db8142508feadb834ed3a7c2fdf48949904fe00647ee318f"
-dependencies = [
- "http",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "az"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3207,7 +3182,6 @@ checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.2",
- "serde",
 ]
 
 [[package]]
@@ -4331,7 +4305,6 @@ dependencies = [
  "atomic-write-file",
  "axum 0.8.3",
  "axum-extra",
- "axum-openapi3",
  "backoff",
  "bincode",
  "bkd",
@@ -7681,29 +7654,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "utoipa"
-version = "5.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "435c6f69ef38c9017b4b4eea965dfb91e71e53d869e896db40d1cf2441dd75c0"
-dependencies = [
- "indexmap 2.9.0",
- "serde",
- "serde_json",
- "utoipa-gen",
-]
-
-[[package]]
-name = "utoipa-gen"
-version = "5.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77d306bc75294fd52f3e99b13ece67c02c1a2789190a6f31d32f736624326f7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "uuid"

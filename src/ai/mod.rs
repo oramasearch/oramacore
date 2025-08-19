@@ -1,7 +1,5 @@
 use std::{str::FromStr, time::Duration};
 
-use axum_openapi3::utoipa::ToSchema;
-use axum_openapi3::utoipa::{self};
 use backoff::ExponentialBackoff;
 use http::uri::Scheme;
 use llm_service_client::LlmServiceClient;
@@ -60,7 +58,7 @@ pub struct AIServiceLLMConfig {
     pub api_key: String,
 }
 
-#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, ToSchema, Copy, JsonSchema)]
+#[derive(Debug, Serialize, Clone, Hash, PartialEq, Eq, Display, Copy, JsonSchema)]
 pub enum RemoteLLMProvider {
     OramaCore,
     OpenAI,

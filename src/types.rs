@@ -1,5 +1,5 @@
 use crate::ai::training_sets::TrainingDestination;
-use crate::ai::{OramaModel, RemoteLLMProvider};
+use crate::ai::RemoteLLMProvider;
 
 use crate::ai::automatic_embeddings_selector::ChosenProperties;
 
@@ -8,8 +8,6 @@ use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
-use axum_openapi3::utoipa::openapi::schema::AnyOfBuilder;
-use axum_openapi3::utoipa::{self, IntoParams, PartialSchema, ToSchema};
 use nlp::locales::Locale;
 
 use async_openai::types::{
@@ -90,7 +88,7 @@ impl RawJSONDocument {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize)]
 pub struct CollectionId(StackString<128>);
 impl CollectionId {
     pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
@@ -167,13 +165,13 @@ impl TryFrom<Value> for Document {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum UpdateStrategy {
     #[serde(rename = "merge")]
     Merge,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct UpdateDocumentRequest {
     pub strategy: UpdateStrategy,
     pub documents: DocumentList,
@@ -322,12 +320,6 @@ impl IntoIterator for DocumentList {
         self.0.into_iter()
     }
 }
-impl PartialSchema for DocumentList {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        Value::schema()
-    }
-}
-impl ToSchema for DocumentList {}
 
 impl From<Vec<Document>> for DocumentList {
     fn from(docs: Vec<Document>) -> Self {
@@ -372,7 +364,7 @@ pub struct TokenScore {
     pub score: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum LanguageDTO {
     #[serde(rename = "arabic")]
     Arabic,
@@ -546,27 +538,11 @@ pub enum TypedField {
     ArrayBoolean,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateCollectionEmbeddings {
     pub model: Option<OramaModelSerializable>,
     pub document_fields: Vec<String>,
 }
-
-impl PartialSchema for OramaModelSerializable {
-    fn schema(
-    ) -> axum_openapi3::utoipa::openapi::RefOr<axum_openapi3::utoipa::openapi::schema::Schema> {
-        let b = AnyOfBuilder::new()
-            .item(OramaModel::BgeSmall.as_str_name())
-            .item(OramaModel::BgeBase.as_str_name())
-            .item(OramaModel::BgeLarge.as_str_name())
-            .item(OramaModel::MultilingualE5Small.as_str_name())
-            .item(OramaModel::MultilingualE5Base.as_str_name())
-            .item(OramaModel::MultilingualE5Large.as_str_name())
-            .item(OramaModel::JinaEmbeddingsV2BaseCode.as_str_name());
-        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
-    }
-}
-impl ToSchema for OramaModelSerializable {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Deserialize)]
 pub struct ApiKey(Secret<StackString<64>>);
@@ -589,12 +565,6 @@ impl Serialize for ApiKey {
         serializer.serialize_str(self.expose())
     }
 }
-impl PartialSchema for ApiKey {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        StackString::<64>::schema()
-    }
-}
-impl ToSchema for ApiKey {}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct ClaimLimits {
@@ -628,32 +598,24 @@ impl WriteApiKey {
     }
 }
 
-impl PartialSchema for WriteApiKey {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        ApiKey::schema()
-    }
-}
-
-impl ToSchema for WriteApiKey {}
-
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ListDocumentInCollectionRequest {
     pub id: CollectionId,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DeleteCollection {
     #[serde(rename = "collection_id_to_delete")]
     pub id: CollectionId,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DeleteIndex {
     #[serde(rename = "index_id_to_delete")]
     pub id: IndexId,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
@@ -673,12 +635,12 @@ pub struct CreateCollection {
     pub embeddings_model: Option<OramaModelSerializable>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CollectionCreated {
     pub collection_id: CollectionId,
 }
 
-#[derive(Debug, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ReindexConfig {
     pub language: LanguageDTO,
     pub embedding_model: OramaModelSerializable,
@@ -1313,7 +1275,7 @@ impl WhereFilter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct NLPSearchRequest {
     pub query: String,
     pub llm_config: Option<InteractionLLMConfig>,
@@ -1364,12 +1326,6 @@ pub struct SearchParams {
     pub sort_by: Option<SortBy>,
     #[serde(default, rename = "userID", skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-}
-impl PartialSchema for SearchParams {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        let b = AnyOfBuilder::new();
-        axum_openapi3::utoipa::openapi::RefOr::T(b.into())
-    }
 }
 
 fn deserialize_properties<'de, D>(deserializer: D) -> Result<Properties, D::Error>
@@ -1514,13 +1470,13 @@ pub struct SuggestionsRequest {
     pub max_suggestions: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct CollectionStatsRequest {
     #[serde(default)]
     pub with_keys: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Copy)]
 pub enum Role {
     #[serde(rename = "system")]
     System,
@@ -1530,7 +1486,7 @@ pub enum Role {
     User,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractionMessage {
     pub role: Role,
     pub content: String,
@@ -1565,7 +1521,7 @@ impl InteractionMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct InteractionLLMConfig {
     pub provider: RemoteLLMProvider,
     pub model: String,
@@ -1587,32 +1543,32 @@ pub struct Interaction {
     pub search_mode: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetSystemPromptQueryParams {
     #[serde(rename = "api-key")]
     pub api_key: ApiKey,
     pub system_prompt_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainingSetsQueryOptimizerParams {
     #[serde(rename = "api-key")]
     pub api_key: ApiKey,
 }
 
-#[derive(Deserialize, Clone, Serialize, ToSchema)]
+#[derive(Deserialize, Clone, Serialize)]
 pub enum ExecuteActionPayloadName {
     #[serde(rename = "search")]
     Search,
 }
 
-#[derive(Deserialize, Clone, Serialize, ToSchema)]
+#[derive(Deserialize, Clone, Serialize)]
 pub struct ExecuteActionPayload {
     pub name: ExecuteActionPayloadName,
     pub context: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertSystemPromptParams {
     pub id: Option<String>,
     pub name: String,
@@ -1621,12 +1577,12 @@ pub struct InsertSystemPromptParams {
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSystemPromptParams {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SystemPromptUsageMode {
     #[serde(rename = "automatic")]
     Automatic,
@@ -1634,7 +1590,7 @@ pub enum SystemPromptUsageMode {
     Manual,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateSystemPromptParams {
     pub id: String,
     pub name: String,
@@ -1642,7 +1598,7 @@ pub struct UpdateSystemPromptParams {
     pub usage_mode: SystemPromptUsageMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertSegmentParams {
     pub id: Option<String>,
     pub name: String,
@@ -1650,12 +1606,12 @@ pub struct InsertSegmentParams {
     pub goal: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSegmentParams {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateSegmentParams {
     pub id: String,
     pub name: String,
@@ -1663,7 +1619,7 @@ pub struct UpdateSegmentParams {
     pub goal: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertTriggerParams {
     pub id: Option<String>,
     pub name: String,
@@ -1672,12 +1628,12 @@ pub struct InsertTriggerParams {
     pub segment_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteTriggerParams {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateTriggerParams {
     pub id: String,
     pub name: String,
@@ -1700,7 +1656,7 @@ pub struct UpdateDocumentsResult {
     pub failed: usize,
 }
 
-#[derive(Debug, ToSchema, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum IndexEmbeddingsCalculation {
     None,
     Automatic,
@@ -1708,20 +1664,20 @@ pub enum IndexEmbeddingsCalculation {
     Properties(Vec<String>),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct TrainingSetQueriesOptimizerQuerySet {
     pub original: String,
     pub optimized: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct TrainingSetsQueriesOptimizerResponse {
     pub simple: Vec<TrainingSetQueriesOptimizerQuerySet>,
     pub multiple_terms: Vec<TrainingSetQueriesOptimizerQuerySet>,
     pub advanced: Vec<TrainingSetQueriesOptimizerQuerySet>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InsertTrainingSetParams {
     pub training_set: TrainingSetsQueriesOptimizerResponse,
 }
@@ -1755,14 +1711,14 @@ impl<'de> Deserialize<'de> for IndexEmbeddingsCalculation {
     }
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct CreateIndexRequest {
     #[serde(rename = "id")]
     pub index_id: IndexId,
     pub embedding: Option<IndexEmbeddingsCalculation>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReplaceIndexRequest {
     #[serde(rename = "target_index_id")]
     pub runtime_index_id: IndexId,
@@ -1771,7 +1727,7 @@ pub struct ReplaceIndexRequest {
     pub reference: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InsertToolsParams {
     pub id: String,
     pub system_prompt: Option<String>,
@@ -1780,12 +1736,12 @@ pub struct InsertToolsParams {
     pub code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteToolParams {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateToolParams {
     pub id: String,
     pub system_prompt: Option<String>,
@@ -1795,7 +1751,7 @@ pub struct UpdateToolParams {
     pub code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunToolsParams {
     pub tool_ids: Option<Vec<String>>,
     pub messages: Vec<InteractionMessage>,
@@ -2149,7 +2105,7 @@ pub enum GeoSearchFilter {
     Polygon(GeoSearchPolygonFilter),
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, ToSchema, JsonSchema)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 pub struct IndexId(StackString<64>);
 
 impl IndexId {
@@ -2169,7 +2125,7 @@ impl Display for IndexId {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Copy, Serialize, Deserialize)]
 pub struct TrainingSetId(StackString<64>);
 impl TrainingSetId {
     pub fn try_new<A: AsRef<str>>(key: A) -> Result<Self> {
@@ -2217,13 +2173,6 @@ pub struct DescribeCollectionIndexResponse {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Copy)]
 pub struct StackString<const N: usize>(ArrayString<N>);
-impl<const N: usize> PartialSchema for StackString<N> {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        // TODO: put a max length
-        String::schema()
-    }
-}
-impl<const N: usize> ToSchema for StackString<N> {}
 
 impl<const N: usize> schemars::JsonSchema for StackString<N> {
     fn schema_name() -> std::borrow::Cow<'static, str> {

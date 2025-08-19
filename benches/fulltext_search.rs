@@ -2,7 +2,6 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use fake::{Fake, Faker};
 use serde_json::json;
 use std::time::Duration;
-use tempfile;
 use tokio::runtime::Runtime;
 
 // Import the necessary modules directly since tests module is not available in bench context
@@ -492,10 +491,10 @@ fn generate_document_content(id: usize) -> String {
 
     // Add some variety with specific patterns for different document types
     match id % 4 {
-        0 => format!("Advanced {}", content),
-        1 => format!("{} This document discusses innovative approaches.", content),
-        2 => format!("Research paper: {}", content),
-        3 => format!("{} Implementation guide and best practices.", content),
+        0 => format!("Advanced {content}"),
+        1 => format!("{content} This document discusses innovative approaches."),
+        2 => format!("Research paper: {content}"),
+        3 => format!("{content} Implementation guide and best practices."),
         _ => content,
     }
 }
@@ -578,7 +577,7 @@ fn bench_fulltext_uncommitted(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     for &scale in SCALES {
-        let mut group = c.benchmark_group(format!("fulltext_uncommitted_{}", scale));
+        let mut group = c.benchmark_group(format!("fulltext_uncommitted_{scale}"));
         group.throughput(Throughput::Elements(scale as u64));
         group.sample_size(10); // Reduced sample size for faster benchmarks
         group.measurement_time(Duration::from_secs(5));
@@ -621,7 +620,7 @@ fn bench_fulltext_committed(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
 
     for &scale in SCALES {
-        let mut group = c.benchmark_group(format!("fulltext_committed_{}", scale));
+        let mut group = c.benchmark_group(format!("fulltext_committed_{scale}"));
         group.throughput(Throughput::Elements(scale as u64));
         group.sample_size(10);
         group.measurement_time(Duration::from_secs(5));

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
+    routing::post,
     Json, Router,
 };
-use axum_openapi3::{endpoint, utoipa::IntoParams, AddRoute};
 use serde::Deserialize;
 
 use crate::{
@@ -14,24 +14,23 @@ use crate::{
 };
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
-    Router::new().add(execute_action_v0()).with_state(read_side)
+    Router::new()
+        .route(
+            "/v1/{collection_id}/actions/execute",
+            post(execute_action_v0),
+        )
+        .with_state(read_side)
 }
 
-use axum_openapi3::utoipa;
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 struct ActionQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/{collection_id}/actions/execute",
-    description = "Execute an action. Typically used by the Python server to perform actions that requires access to OramaCore components."
-)]
 #[axum::debug_handler]
 async fn execute_action_v0(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<ActionQueryParams>,
     Json(params): Json<ExecuteActionPayload>,
