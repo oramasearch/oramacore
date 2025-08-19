@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use crate::collection_manager::sides::write::TempIndexCleanupConfig;
-use crate::tests::utils::create_oramacore_config;
 use crate::tests::utils::init_log;
 use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;
@@ -12,13 +10,7 @@ use serde_json::json;
 async fn test_temp_index_cleanup_enabled() {
     init_log();
 
-    let mut config = create_oramacore_config();
-    config.writer_side.config.temp_index_cleanup = TempIndexCleanupConfig {
-        cleanup_interval: Duration::from_millis(200),
-        max_age: Duration::from_millis(1_000),
-    };
-
-    let test_context = TestContext::new_with_config(config).await;
+    let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
@@ -71,6 +63,13 @@ async fn test_temp_index_cleanup_enabled() {
     // Waiting for temp index to be cleaned up
     wait_for(&collection_client, |collection_client| {
         async move {
+            // This will trigger the cleanup, sooner or later
+            collection_client
+                .writer
+                .cleanup_expired_temp_indexes(Duration::from_millis(1_000))
+                .await
+                .unwrap();
+
             let stats = collection_client.reader_stats().await.unwrap();
             if stats.indexes_stats.len() == 1 {
                 // only the index: the temp index should gone
