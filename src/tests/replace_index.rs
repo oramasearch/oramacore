@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use futures::FutureExt;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::tests::utils::{init_log, TestContext};
+use crate::tests::utils::{init_log, wait_for, TestContext};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_index_replacement() {
@@ -176,8 +177,8 @@ async fn test_index_replacement_2() {
     index_2_client
         .insert_documents(
             json!([
-                json!({ "id": "1", "name": "Tommaso", "surname": "Allevi" }),
-                json!({ "id": "2", "name": "Michele", "surname": "Riva" }),
+                json!({ "id": "1", "name": "Tommaso", "surname": "Allevi", "new": true }),
+                json!({ "id": "2", "name": "Michele", "surname": "Riva", "new": true }),
             ])
             .try_into()
             .unwrap(),
@@ -190,7 +191,45 @@ async fn test_index_replacement_2() {
         .await
         .unwrap();
 
-    sleep(Duration::from_secs(1)).await;
+    wait_for(&collection_client, |c| {
+        async move {
+            let result = c
+                .search(
+                    json!({
+                        "term": "Tommaso",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            if result.hits.len() != 1 {
+                return Err(anyhow::anyhow!("Unexpected number of hits"));
+            }
+
+            let Some(first) = result.hits.first() else {
+                return Err(anyhow::anyhow!("No results found"));
+            };
+            first
+                .document
+                .as_ref()
+                .and_then(|doc| doc.get("new"))
+                .and_then(|v| v.as_bool())
+                .ok_or_else(|| anyhow::anyhow!("Document does not contain 'new' field"))
+                .map(|is_new| {
+                    if is_new {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("Document 'new' field is not true"))
+                    }
+                })
+        }
+        .boxed()
+    })
+    .await
+    .unwrap()
+    .unwrap();
 
     let result = collection_client
         .search(

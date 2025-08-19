@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{extract::State, response::IntoResponse, Json, Router};
-use axum_openapi3::utoipa;
-use axum_openapi3::{
-    utoipa::{PartialSchema, ToSchema},
-    *,
+use axum::{
+    extract::{Path, State},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
 };
 use hook_storage::HookType;
 use serde::Deserialize;
@@ -17,25 +17,29 @@ use crate::{
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .add(set_hook_v0())
-        .add(delete_hook_v0())
-        .add(list_hook_v0())
+        .route(
+            "/v1/collections/{collection_id}/hooks/set",
+            post(set_hook_v0),
+        )
+        .route(
+            "/v1/collections/{collection_id}/hooks/delete",
+            post(delete_hook_v0),
+        )
+        .route(
+            "/v1/collections/{collection_id}/hooks/list",
+            get(list_hook_v0),
+        )
         .with_state(write_side)
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize)]
 pub struct NewHookPostParams {
     name: HookTypeWrapper,
     code: String,
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/hooks/set",
-    description = "Add a new JavaScript hook"
-)]
 async fn set_hook_v0(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
     Json(params): Json<NewHookPostParams>,
@@ -50,18 +54,13 @@ async fn set_hook_v0(
     Ok(Json(json!({ "success": true })))
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize)]
 struct DeleteHookPostParams {
     name_to_delete: HookTypeWrapper,
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/hooks/delete",
-    description = "Delete new JavaScript hook"
-)]
 async fn delete_hook_v0(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
     Json(params): Json<DeleteHookPostParams>,
@@ -76,13 +75,8 @@ async fn delete_hook_v0(
     Ok(Json(json!({ "success": true })))
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/hooks/list",
-    description = "List new JavaScript hooks"
-)]
 async fn list_hook_v0(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
 ) -> Result<impl IntoResponse, WriteError> {
@@ -98,10 +92,3 @@ async fn list_hook_v0(
 
 #[derive(Deserialize)]
 struct HookTypeWrapper(HookType);
-
-impl PartialSchema for HookTypeWrapper {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        <String as PartialSchema>::schema()
-    }
-}
-impl ToSchema for HookTypeWrapper {}

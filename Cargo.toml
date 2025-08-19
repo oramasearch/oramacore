@@ -67,7 +67,6 @@ axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10.0", features = ["typed-header"] }
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 http = "1.2.0"
-axum-openapi3 = { version = "0.2", features = ["derive"] }
 
 strum_macros = "0.26.4"
 
@@ -165,6 +164,22 @@ path = "src/bin/embeddings/embeddings.rs"
 
 [[bench]]
 name = "hnsw"
+harness = false
+
+[[bench]]
+name = "fulltext_search"
+harness = false
+
+[[bench]]
+name = "fulltext_simple"
+harness = false
+
+[[bench]]
+name = "fulltext_minimal"
+harness = false
+
+[[bench]]
+name = "fulltext_fast"
 harness = false
 
 [features]

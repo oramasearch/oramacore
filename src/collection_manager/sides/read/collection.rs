@@ -13,17 +13,16 @@ use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
 use hook_storage::{HookReader, HookType};
 use orama_js_pool::OutputChannel;
-use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
-    capped_heap::CappedHeap,
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            context::ReadSideContext, sort::sort_and_truncate_documents,
+            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
         },
@@ -493,7 +492,7 @@ impl CollectionReader {
 
     pub async fn sort_and_truncate(
         &self,
-        token_scores: HashMap<DocumentId, f32>,
+        token_scores: &HashMap<DocumentId, f32>,
         limit: Limit,
         offset: SearchOffset,
         sort_by: Option<&SortBy>,
@@ -502,34 +501,23 @@ impl CollectionReader {
             "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
             limit, offset, sort_by
         );
-        if let Some(sort_by) = sort_by {
-            let indexes_lock = self.indexes.read().await;
-            let index = indexes_lock
+
+        let indexes_lock = self.indexes.read().await;
+        let relevant_indexes: Vec<_> = if let Some(sort_by) = sort_by {
+            indexes_lock
                 .iter()
-                .find(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property));
-            let index = match index {
-                Some(index) => index,
-                None => {
-                    return Err(anyhow!(
-                        "Cannot sort by \"{}\": unknown field",
-                        sort_by.property
-                    ));
-                }
-            };
-
-            let output = index
-                .sort_data(
-                    token_scores,
-                    &sort_by.property,
-                    sort_by.order,
-                    limit.0 + offset.0,
-                )
-                .await?;
-
-            Ok(output)
+                .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
+                .collect()
         } else {
-            Ok(top_n(token_scores, limit.0 + offset.0))
-        }
+            Vec::new()
+        };
+
+        let result =
+            sort_and_truncate_documents(&relevant_indexes, token_scores, limit, offset, sort_by)
+                .await;
+
+        drop(indexes_lock);
+        result
     }
 
     pub async fn calculate_facets(
@@ -972,84 +960,4 @@ struct DumpV1 {
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
-}
-
-fn top_n(map: HashMap<DocumentId, f32>, n: usize) -> Vec<TokenScore> {
-    let mut capped_heap = CappedHeap::new(n);
-
-    for (key, value) in map {
-        let k = match NotNan::new(value) {
-            Ok(k) => k,
-            Err(_) => continue,
-        };
-        let v = key;
-        capped_heap.insert(k, v);
-    }
-
-    let result: Vec<TokenScore> = capped_heap
-        .into_top()
-        .map(|(value, key)| TokenScore {
-            document_id: key,
-            score: value.into_inner(),
-        })
-        .collect();
-
-    result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_top_n() {
-        let search_result = HashMap::from([
-            (DocumentId(1), 0.1),
-            (DocumentId(2), 0.2),
-            (DocumentId(3), 0.3),
-            (DocumentId(4), 0.4),
-            (DocumentId(5), 0.5),
-            (DocumentId(6), 0.6),
-            (DocumentId(7), 0.7),
-            (DocumentId(8), 0.8),
-            (DocumentId(9), 0.9),
-            (DocumentId(10), 1.0),
-            (DocumentId(11), 1.1),
-            (DocumentId(12), 1.2),
-            (DocumentId(13), 1.3),
-            (DocumentId(14), 1.4),
-            (DocumentId(15), 1.5),
-        ]);
-
-        let r1 = top_n(search_result.clone(), 5);
-        assert_eq!(r1.len(), 5);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-            ],
-            r1.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
-
-        let r2 = top_n(search_result.clone(), 10);
-        assert_eq!(r2.len(), 10);
-        assert_eq!(
-            vec![
-                DocumentId(15),
-                DocumentId(14),
-                DocumentId(13),
-                DocumentId(12),
-                DocumentId(11),
-                DocumentId(10),
-                DocumentId(9),
-                DocumentId(8),
-                DocumentId(7),
-                DocumentId(6),
-            ],
-            r2.iter().map(|x| x.document_id).collect::<Vec<_>>()
-        );
-    }
 }

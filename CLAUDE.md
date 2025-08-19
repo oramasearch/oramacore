@@ -22,6 +22,24 @@ cargo test test_name
 
 ```
 
+### Benchmarking
+```bash
+# Download test model first (required for benchmarks)
+bash download-test-model.sh
+
+# Run fulltext search performance benchmark (recommended)
+./benches/run_fulltext_benchmark.sh
+
+# Or run directly as test
+cargo test test_quick_fulltext_benchmark -- --nocapture
+
+# Run all traditional benchmarks (may be slower)
+cargo bench
+
+# Run specific benchmark
+cargo bench --bench hnsw
+```
+
 ### Code Quality
 ```bash
 cargo check --all-features

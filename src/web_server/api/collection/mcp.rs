@@ -5,13 +5,12 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
+    routing::post,
     Json, Router,
 };
-use axum_openapi3::{utoipa::ToSchema, *};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
-use utoipa::IntoParams;
 
 use crate::{
     ai::advanced_autoquery::QueryMappedSearchResult,
@@ -77,10 +76,12 @@ impl StructuredOutputServer {
 }
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
-    Router::new().add(mcp_endpoint()).with_state(read_side)
+    Router::new()
+        .route("/v1/collections/{collection_id}/mcp", post(mcp_endpoint))
+        .with_state(read_side)
 }
 
-#[derive(Deserialize, IntoParams, ToSchema)]
+#[derive(Deserialize)]
 struct McpQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
@@ -110,11 +111,6 @@ struct JsonRpcError {
     message: String,
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/mcp",
-    description = "MCP (Model Context Protocol) Endpoint"
-)]
 async fn mcp_endpoint(
     Path(collection_id): Path<CollectionId>,
     Query(query): Query<McpQueryParams>,
