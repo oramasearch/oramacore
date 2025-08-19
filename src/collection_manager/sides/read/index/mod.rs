@@ -21,7 +21,6 @@ use crate::{
     ai::{llms, OramaModel},
     collection_manager::{
         bm25::BM25Scorer,
-        global_info::GlobalInfo,
         sides::{
             read::{
                 context::ReadSideContext,
@@ -1995,44 +1994,125 @@ impl Index {
             None => BM25Scorer::plain(),
         };
 
-        let mut context = FullTextSearchContext {
-            tokens: &tokens,
-            exact_match: exact,
-            boost: 1.0,
-            filtered_doc_ids,
-            global_info: GlobalInfo::default(),
-            uncommitted_deleted_documents,
-            total_term_count: 0,
-        };
+        // Use the collection's total document count for canonical BM25F
+        let total_documents = self.document_count as f32;
 
-        for field_id in properties {
-            let Some(field) = uncommitted_fields.string_fields.get(&field_id) else {
-                bail!("Cannot search on field {:?}: unknown field", field_id);
-            };
-            let committed = committed_fields.string_fields.get(&field_id);
+        let mut field_global_info: HashMap<FieldId, _> = HashMap::new();
+        let mut corpus_dfs: HashMap<String, usize> = HashMap::new();
 
-            let global_info = if let Some(committed) = committed {
-                committed.global_info() + field.global_info()
-            } else {
-                field.global_info()
-            };
+        // Single pass to compute both global info and corpus document frequencies
+        for token in &tokens {
+            let mut total_corpus_docs = HashSet::new();
 
-            let boost = boost.get(&field_id).copied().unwrap_or(1.0);
+            for field_id in &properties {
+                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
+                    continue;
+                };
+                let committed = committed_fields.string_fields.get(field_id);
 
-            context.boost = boost;
-            context.global_info = global_info;
+                // Compute global info only once per field
+                if !field_global_info.contains_key(field_id) {
+                    let global_info = if let Some(committed) = committed {
+                        committed.global_info() + field.global_info()
+                    } else {
+                        field.global_info()
+                    };
+                    field_global_info.insert(*field_id, global_info);
+                }
 
-            scorer.reset_term();
+                // Collect unique document IDs for this term across all fields for corpus DF calculation
+                let mut corpus_scorer = BM25Scorer::plain();
+                let single_token_slice = std::slice::from_ref(token);
+                let mut corpus_context = FullTextSearchContext {
+                    tokens: single_token_slice,
+                    exact_match: exact,
+                    boost: 1.0,
+                    field_id: *field_id,
+                    filtered_doc_ids: None,
+                    global_info: field_global_info[field_id].clone(),
+                    uncommitted_deleted_documents,
+                    total_term_count: 1,
+                };
 
-            field
-                .search(&mut context, &mut scorer)
-                .context("Cannot perform search")?;
-            if let Some(committed) = committed {
-                scorer.reset_term();
-                committed
-                    .search(&mut context, &mut scorer, tolerance)
-                    .context("Cannot perform search")?;
+                field
+                    .search(&mut corpus_context, &mut corpus_scorer)
+                    .context("Cannot perform corpus search")?;
+                if let Some(committed_field) = committed {
+                    committed_field
+                        .search(&mut corpus_context, &mut corpus_scorer, tolerance)
+                        .context("Cannot perform corpus search")?;
+                }
+
+                // Add documents found in this field to the corpus count
+                total_corpus_docs.extend(corpus_scorer.get_scores().keys().cloned());
             }
+
+            corpus_dfs.insert(token.clone(), total_corpus_docs.len().max(1));
+        }
+
+        // Now perform the actual scoring with pre-computed corpus frequencies
+        for (term_index, token) in tokens.iter().enumerate() {
+            scorer.reset_term();
+            let corpus_df = corpus_dfs[token];
+
+            // Then, add field contributions for this term with filtering applied
+            for field_id in &properties {
+                let Some(field) = uncommitted_fields.string_fields.get(field_id) else {
+                    continue;
+                };
+                let committed = committed_fields.string_fields.get(field_id);
+
+                let global_info = field_global_info[field_id].clone();
+
+                let boost = boost.get(field_id).copied().unwrap_or(1.0);
+
+                // Reuse the same token slice to avoid allocation
+                let single_token_slice = std::slice::from_ref(token);
+                let mut context = FullTextSearchContext {
+                    tokens: single_token_slice,
+                    exact_match: exact,
+                    boost,
+                    field_id: *field_id,
+                    filtered_doc_ids,
+                    global_info,
+                    uncommitted_deleted_documents,
+                    total_term_count: term_index as u64 + 1,
+                };
+
+                // Search this field for this specific term (with filters applied)
+                field
+                    .search(&mut context, &mut scorer)
+                    .context("Cannot perform search")?;
+
+                if let Some(committed_field) = committed {
+                    committed_field
+                        .search(&mut context, &mut scorer, tolerance)
+                        .context("Cannot perform search")?;
+                }
+            }
+
+            match &scorer {
+                BM25Scorer::Plain(_) => {
+                    scorer.finalize_term_plain(
+                        corpus_df,
+                        total_documents,
+                        1.2, // k parameter
+                        1.0, // phrase boost
+                    );
+                }
+                BM25Scorer::WithThreshold(_) => {
+                    scorer.finalize_term(
+                        corpus_df,
+                        total_documents,
+                        1.2,             // k parameter
+                        1.0,             // phrase boost
+                        1 << term_index, // token_indexes: bit mask indicating which token this is
+                    );
+                }
+            }
+
+            // Move to next term
+            scorer.next_term();
         }
 
         Ok(scorer.get_scores())

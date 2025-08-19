@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 use crate::{
     collection_manager::{
-        bm25::BM25Scorer,
+        bm25::{BM25FFieldParams, BM25Scorer},
         global_info::GlobalInfo,
         sides::read::{
             index::{
@@ -499,20 +499,22 @@ impl LoadedCommittedStringField {
                 doc_id,
                 term_occurrence_in_field,
                 field_length,
-                total_documents_with_term_in_field,
+                _total_documents_with_term_in_field,
             ) in matches
             {
-                scorer.add(
+                let field_id = context.field_id;
+                let field_params = BM25FFieldParams {
+                    weight: context.boost, // User-defined field boost as BM25F weight
+                    b: 0.75,               // Default normalization parameter
+                };
+
+                scorer.add_field(
                     *doc_id,
+                    field_id,
                     term_occurrence_in_field,
                     field_length,
                     average_field_length,
-                    context.global_info.total_documents as f32,
-                    total_documents_with_term_in_field,
-                    1.2,
-                    0.75,
-                    context.boost,
-                    0,
+                    &field_params,
                 );
             }
         }
@@ -620,7 +622,7 @@ impl LoadedCommittedStringField {
             PhraseMatchStorage {
                 matches,
                 positions,
-                token_indexes,
+                token_indexes: _,
             },
         ) in storage
         {
@@ -643,27 +645,30 @@ impl LoadedCommittedStringField {
             // 2. Boost for the phrase match when the terms appear in sequence (without holes): implemented
             // 3. Boost for the phrase match when the terms appear in sequence (with holes): not implemented
             // 4. Boost for the phrase match when the terms appear in any order: implemented
-            // 5. Boost defined by the user: implemented
+            // 5. Boost defined by the user: implemented as BM25F field weight
             // We should allow the user to configure which boost to use and how much it impacts the score.
             // TODO: think about this
             let boost_any_order = positions.len() as f32;
             let boost_sequence = sequences_count as f32 * 2.0;
-            let total_boost = boost_any_order + boost_sequence + context.boost;
+            let _phrase_boost = boost_any_order + boost_sequence;
 
-            for (field_length, term_occurrence_in_field, total_documents_with_term_in_field) in
+            let field_id = context.field_id;
+
+            let field_params = BM25FFieldParams {
+                weight: context.boost, // User-defined field boost as BM25F weight
+                b: 0.75, // Default normalization parameter @todo: make this configurable?
+            };
+
+            for (field_length, term_occurrence_in_field, _total_documents_with_term_in_field) in
                 matches
             {
-                scorer.add(
+                scorer.add_field(
                     doc_id,
+                    field_id,
                     term_occurrence_in_field as u32,
                     field_length,
                     average_field_length,
-                    context.global_info.total_documents as f32,
-                    total_documents_with_term_in_field,
-                    1.2,
-                    0.75,
-                    total_boost,
-                    token_indexes,
+                    &field_params,
                 );
 
                 total_matches += 1;
@@ -866,15 +871,25 @@ mod tests {
             tokens: &["term1".to_string()],
             exact_match: false,
             boost: 1.0,
+            field_id: FieldId(1), // Use test field ID
             filtered_doc_ids: None,
             global_info: uncommitted.global_info(),
             uncommitted_deleted_documents: &HashSet::new(),
             total_term_count: 0,
         };
+        use crate::types::FieldId;
         let mut scorer: BM25Scorer<DocumentId> = BM25Scorer::plain();
         uncommitted
             .search(&mut search_context, &mut scorer)
             .unwrap();
+
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df - at least 1 document contains the term
+            2.0, // total_documents in test data
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
 
         assert_eq!(scorer.get_scores().len(), 2);
 
@@ -901,6 +916,14 @@ mod tests {
             .search(&mut search_context, &mut scorer, None)
             .unwrap();
 
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df
+            2.0, // total_documents
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
+
         assert_eq!(scorer.get_scores().len(), 2);
 
         committed.unload(); // force unloading
@@ -910,6 +933,15 @@ mod tests {
         committed
             .search(&mut search_context, &mut scorer, None)
             .unwrap();
+
+        // Finalize the BM25F scoring process
+        scorer.finalize_term_plain(
+            1,   // corpus_df
+            2.0, // total_documents
+            1.2, // k parameter
+            1.0, // phrase boost
+        );
+
         assert_eq!(scorer.get_scores().len(), 2);
     }
 }
