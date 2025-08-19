@@ -30,8 +30,8 @@ use crate::{
                         GeoPointFieldInfo,
                     },
                     merge::{merge_date_field, merge_geopoint_field},
-                    sort::SortIterator,
                 },
+                sort::SortIterator,
             },
             Offset,
         },
@@ -43,7 +43,7 @@ use crate::{
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
-        SortOrder, Threshold, TokenScore, VectorMode, WhereFilter,
+        SortOrder, Threshold, VectorMode, WhereFilter,
     },
 };
 use fs::{create_if_not_exists, BufferedFile};
@@ -55,11 +55,11 @@ mod committed_field;
 mod merge;
 mod path_to_index_id_map;
 mod search_context;
-mod sort;
 mod uncommitted_field;
 
 use std::{
     collections::{HashMap, HashSet},
+    i32,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -963,13 +963,15 @@ impl Index {
             .is_some()
     }
 
-    pub async fn sort_data(
+    pub async fn get_sort_iterator<F, R>(
         &self,
-        scores: HashMap<DocumentId, f32>,
         field_name: &str,
         order: SortOrder,
-        size: usize,
-    ) -> Result<Vec<TokenScore>> {
+        f: F,
+    ) -> Result<R>
+    where
+        F: Fn(Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>) -> R,
+    {
         let Some((field_id, field_type)) = self.path_to_index_id_map.get_filter_field(field_name)
         else {
             return Err(anyhow::anyhow!(
@@ -977,12 +979,13 @@ impl Index {
                 field_name
             ));
         };
-        let (uncommitted_lock, committed_lock) =
-            join!(self.uncommitted_fields.read(), self.committed_fields.read(),);
 
-        let sorted_stream: Box<dyn Iterator<Item = DocumentId>> = match &field_type {
+        let uncommitted_fields = self.uncommitted_fields.read().await;
+        let committed_fields = self.committed_fields.read().await;
+
+        match &field_type {
             FieldType::Number => {
-                let Some(field) = uncommitted_lock.number_fields.get(&field_id) else {
+                let Some(field) = uncommitted_fields.number_fields.get(&field_id) else {
                     return Err(anyhow::anyhow!(
                         "Field {} is not a number field",
                         field_name
@@ -990,128 +993,112 @@ impl Index {
                 };
 
                 let iter1 = field.iter();
-                let iter1: Box<dyn Iterator<Item = (Number, DocumentId)>> = match order {
-                    SortOrder::Ascending => Box::new(iter1
-                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
-                    SortOrder::Descending => Box::new(iter1.rev()
-                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
+                let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                    SortOrder::Ascending => Box::new(iter1),
+                    SortOrder::Descending => Box::new(iter1.rev()),
                 };
 
-                let iter2: Box<dyn Iterator<Item = (Number, DocumentId)>> = if let Some(field) = committed_lock.number_fields.get(&field_id) {
-                    let iter1 = field.iter();
-                    match order {
-                        SortOrder::Ascending => Box::new(iter1
-                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number.0, doc_id)))),
-                        SortOrder::Descending => Box::new(iter1.rev()
-                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number.0, doc_id)))),
-                    }
+                let r = if let Some(field) = committed_fields.number_fields.get(&field_id) {
+                    let iter2 = field.iter();
+                    let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                        SortOrder::Ascending => Box::new(iter2.map(|(number, doc_ids)| (number.0, doc_ids))),
+                        SortOrder::Descending => Box::new(iter2.rev().map(|(number, doc_ids)| (number.0, doc_ids))),
+                    };
+                    let iter = SortIterator::new(iter1, iter2, order);
+
+                    f(Box::new(iter))
                 } else {
-                    Box::new(std::iter::empty())
+                    f(iter1)
                 };
-                Box::new(SortIterator::new(iter1, iter2, order))
+
+                Ok(r)
             },
             FieldType::Date => {
-                let Some(field) = uncommitted_lock.date_fields.get(&field_id) else {
+                let Some(field) = uncommitted_fields.date_fields.get(&field_id) else {
                     return Err(anyhow::anyhow!(
                         "Field {} is not a number field",
                         field_name
                     ));
                 };
 
-                let iter1 = field.iter();
-                let iter1: Box<dyn Iterator<Item = (i64, DocumentId)>> = match order {
-                    SortOrder::Ascending => Box::new(iter1
-                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
-                    SortOrder::Descending => Box::new(iter1.rev()
-                        .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
-                };
-
-                let iter2: Box<dyn Iterator<Item = (i64, DocumentId)>> = if let Some(field) = committed_lock.date_fields.get(&field_id) {
-                    let iter1 = field.iter();
-                    match order {
-                        SortOrder::Ascending => Box::new(iter1
-                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
-                        SortOrder::Descending => Box::new(iter1.rev()
-                            .flat_map(|(number, doc_ids)| doc_ids.into_iter().map(move |doc_id| (number, doc_id)))),
-                    }
-                } else {
-                    Box::new(std::iter::empty())
-                };
-
-                Box::new(SortIterator::new(iter1, iter2, order))
-            },
-            FieldType::Bool => {
-                let Some(field) = uncommitted_lock.bool_fields.get(&field_id) else {
-                    return Err(anyhow::anyhow!(
-                        "Field {} is not a number field",
-                        field_name
-                    ));
-                };
-
-                let (uncommitted_true_document_ids, uncommitted_false_document_ids) = field.get_inner();
-                if let Some(field) = committed_lock.bool_fields.get(&field_id) {
-                    let (committed_true_document_ids, committed_false_document_ids) = field.get_inner()?;
-
-                    match order {
-                        SortOrder::Ascending => {
-                            Box::new(
-                                uncommitted_false_document_ids
-                                    .iter()
-                                    .chain(committed_false_document_ids.iter())
-                                    .chain(uncommitted_true_document_ids.iter())
-                                    .chain(committed_true_document_ids.iter())
-                                    .copied()
-                            )
-                        },
-                        SortOrder::Descending => {
-                            Box::new(
-                                uncommitted_true_document_ids
-                                    .iter()
-                                    .chain(committed_true_document_ids.iter())
-                                    .chain(uncommitted_false_document_ids.iter())
-                                    .chain(committed_false_document_ids.iter())
-                                    .copied()
-                            )
-                        }
-                    }
-                } else {
-                    match order {
-                        SortOrder::Ascending => Box::new(
-                            uncommitted_false_document_ids
-                                .iter()
-                                .chain(uncommitted_true_document_ids.iter())
-                                .copied(),
-                        ),
-                        SortOrder::Descending => Box::new(
-                            uncommitted_true_document_ids
-                                .iter()
-                                .chain(uncommitted_false_document_ids.iter())
-                                .copied(),
-                        ),
+                fn i64_to_number (i: i64) -> Number {
+                    if let Ok(i) = i32::try_from(i) {
+                        Number::I32(i)
+                    } else if i > 0 {
+                        Number::I32(i32::MAX)
+                    } else {
+                        Number::I32(i32::MIN)
                     }
                 }
+
+                let iter1 = field.iter()
+                    .map(|(timestamp, doc_ids)| (i64_to_number(timestamp), doc_ids));
+                let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                    SortOrder::Ascending => Box::new(iter1),
+                    SortOrder::Descending => Box::new(iter1.rev()),
+                };
+
+                let r = if let Some(field) = committed_fields.date_fields.get(&field_id) {
+                    let iter2 = field.iter().map(|(number, doc_ids)| (i64_to_number(number), doc_ids));
+                    let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                        SortOrder::Ascending => Box::new(iter2),
+                        SortOrder::Descending => Box::new(iter2.rev()),
+                    };
+                    let iter = SortIterator::new(iter1, iter2, order);
+
+                    f(Box::new(iter))
+                } else {
+                    f(iter1)
+                };
+
+                Ok(r)
             },
-            _ => return Err(anyhow::anyhow!(
+            FieldType::Bool => {
+                let Some(field) = uncommitted_fields.bool_fields.get(&field_id) else {
+                    return Err(anyhow::anyhow!(
+                        "Field {} is not a number field",
+                        field_name
+                    ));
+                };
+
+                fn bool_to_number (i: bool) -> Number {
+                    if i {
+                        Number::I32(1)
+                    } else {
+                        Number::I32(0)
+                    }
+                }
+
+                let (true_h, false_h) = field.clone_inner();
+                let iter1: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                    SortOrder::Ascending => Box::new(std::iter::once((bool_to_number(false), false_h))
+                        .chain(std::iter::once((bool_to_number(true), true_h)))),
+                    SortOrder::Descending => Box::new(Box::new(std::iter::once((bool_to_number(true), true_h))
+                        .chain(std::iter::once((bool_to_number(false), false_h))))),
+                };
+
+                let r = if let Some(field) = committed_fields.bool_fields.get(&field_id) {
+                    let (true_h, false_h) = field.clone_inner()?;
+                    let iter2: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_> = match order {
+                        SortOrder::Ascending => Box::new(std::iter::once((bool_to_number(false), false_h))
+                            .chain(std::iter::once((bool_to_number(true), true_h)))),
+                        SortOrder::Descending => Box::new(std::iter::once((bool_to_number(true), true_h))
+                            .chain(std::iter::once((bool_to_number(false), false_h)))),
+                    };
+                    let iter = SortIterator::new(iter1, iter2, order);
+
+                    f(Box::new(iter))
+                } else {
+                    f(iter1)
+                };
+
+                Ok(r)
+            },
+            _ => Err(anyhow::anyhow!(
                 "Only number, date or boolean fields are supported for sorting, but got {:?} for property {:?}",
                 field_type, field_name
             )),
-        };
-
-        let mut ret = Vec::with_capacity(size);
-        for doc in sorted_stream {
-            // Reach the end
-            if ret.len() >= size {
-                break;
-            }
-            if scores.contains_key(&doc) {
-                ret.push(TokenScore {
-                    document_id: doc,
-                    score: scores[&doc],
-                });
-            }
         }
-
-        Ok(ret)
     }
 
     // Since we only have one embedding model for all indexes in a collection,

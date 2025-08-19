@@ -6,6 +6,7 @@ pub mod document_storage;
 mod index;
 mod logs;
 pub mod notify;
+pub mod sort;
 
 use axum::extract::State;
 use chrono::Utc;
@@ -454,7 +455,7 @@ impl ReadSide {
         let count = token_scores.len();
 
         let top_results: Vec<TokenScore> = collection
-            .sort_and_truncate(token_scores, limit, offset, search_params.sort_by.as_ref())
+            .sort_and_truncate(&token_scores, limit, offset, search_params.sort_by.as_ref())
             .await?;
         trace!("Top results: {:?}", top_results);
 
