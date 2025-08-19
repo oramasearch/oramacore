@@ -7,24 +7,23 @@ use crate::types::{
 };
 use crate::web_server::api::util::print_error;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
+    routing::{get, post},
     Json, Router,
 };
-use axum_openapi3::{endpoint, utoipa::ToSchema};
-use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-#[derive(Deserialize, Debug, Clone, ToSchema)]
+#[derive(Deserialize, Debug, Clone)]
 struct TrainingSetsQueryBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_config: Option<InteractionLLMConfig>,
 }
 
-#[derive(Deserialize, IntoParams, ToSchema)]
+#[derive(Deserialize)]
 struct ApiKeyOnlyQuery {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
@@ -32,26 +31,32 @@ struct ApiKeyOnlyQuery {
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(generate_training_sets_v1())
-        .add(get_training_sets_v1())
+        .route(
+            "/v1/collections/{collection_id}/training_sets/{training_set}/generate",
+            post(generate_training_sets_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/training_sets/{training_set}/get",
+            get(get_training_sets_v1),
+        )
         .with_state(read_side)
 }
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .add(insert_training_sets_v1())
-        .add(delete_training_sets_v1())
+        .route(
+            "/v1/collections/{collection_id}/training_sets/{training_set}/insert",
+            post(insert_training_sets_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/training_sets/{training_set}/delete",
+            post(delete_training_sets_v1),
+        )
         .with_state(write_side)
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/training_sets/{training_set}/generate",
-    description = "Generate training set data"
-)]
 async fn generate_training_sets_v1(
-    collection_id: CollectionId,
-    training_set_destination: TrainingSetId,
+    Path((collection_id, training_set_destination)): Path<(CollectionId, TrainingSetId)>,
     Query(query_params): Query<TrainingSetsQueryOptimizerParams>,
     read_side: State<Arc<ReadSide>>,
     Json(body): Json<TrainingSetsQueryBody>,
@@ -89,14 +94,8 @@ async fn generate_training_sets_v1(
     }
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/training_sets/{training_set}/get",
-    description = "Get existing training set data"
-)]
 async fn get_training_sets_v1(
-    collection_id: CollectionId,
-    training_set: TrainingSetId,
+    Path((collection_id, training_set)): Path<(CollectionId, TrainingSetId)>,
     State(read_side): State<Arc<ReadSide>>,
     Query(query_params): Query<ApiKeyOnlyQuery>,
 ) -> impl IntoResponse {
@@ -126,14 +125,8 @@ async fn get_training_sets_v1(
     }
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/training_sets/{training_set}/insert",
-    description = "Insert a new training set"
-)]
 async fn insert_training_sets_v1(
-    collection_id: CollectionId,
-    training_set: TrainingSetId,
+    Path((collection_id, training_set)): Path<(CollectionId, TrainingSetId)>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
     Json(params): Json<InsertTrainingSetParams>,
@@ -185,14 +178,8 @@ async fn insert_training_sets_v1(
     }
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/training_sets/{training_set}/delete",
-    description = "Delete an existing training set"
-)]
 async fn delete_training_sets_v1(
-    collection_id: CollectionId,
-    training_set: TrainingSetId,
+    Path((collection_id, training_set)): Path<(CollectionId, TrainingSetId)>,
     write_side: State<Arc<WriteSide>>,
     write_api_key: WriteApiKey,
 ) -> impl IntoResponse {

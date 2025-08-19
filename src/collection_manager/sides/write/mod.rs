@@ -94,7 +94,9 @@ pub enum WriteError {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TempIndexCleanupConfig {
+    #[serde(deserialize_with = "deserialize_duration")]
     pub cleanup_interval: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
     pub max_age: Duration,
 }
 
