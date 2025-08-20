@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "oramacore"
-version = "1.1.76"
+version = "1.1.77"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -8467,9 +8467,12 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.4.1"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e662ce0f0c2c0be8475803fb1fdf4664416de83d94cc433c24da6fb514bd23fa"
+checksum = "957db524e3ae04690ecfff6b12c6fce963a454e2f1ed86d2d8c6e9cd6d48aef7"
+dependencies = [
+ "clap",
+]
 
 [[package]]
 name = "zerocopy"
