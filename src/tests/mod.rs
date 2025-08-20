@@ -2,6 +2,7 @@
 
 mod answer;
 mod api_key_chain;
+mod boost_integration;
 mod bugs;
 mod commit;
 mod concurrency;
@@ -9,13 +10,17 @@ mod delete_doc;
 mod entity_lifecycle;
 mod facets;
 mod filter;
+mod filter_benchmark;
+mod fulltext_benchmark_test;
 mod fulltext_search;
 mod geosearch;
 mod hooks;
+mod quick_fulltext_benchmark;
 // mod hurl;
 mod index_rebuild;
 mod list_documents;
 mod migrations;
+mod multi_index;
 mod offload_field;
 mod replace_doc_on_insert;
 mod replace_index;

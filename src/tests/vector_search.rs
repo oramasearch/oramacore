@@ -1,13 +1,15 @@
 use assert_approx_eq::assert_approx_eq;
+use futures::FutureExt;
 use serde_json::json;
 use tokio::time::sleep;
 
 use crate::collection_manager::sides::read::IndexFieldStatsType;
 use crate::tests::utils::init_log;
+use crate::tests::utils::wait_for;
 use crate::tests::utils::TestContext;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_vector_search() {
+async fn test_vector_search_basic() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -38,21 +40,29 @@ async fn test_vector_search() {
         .await
         .unwrap();
 
-    // Generage embeddings keeps time
-    sleep(std::time::Duration::from_millis(500)).await;
-
-    let output = collection_client
-        .search(
-            json!({
-                "term": "A cat sleeps",
-                "mode": "vector"
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-
+    let output = wait_for(&collection_client, |collection_client| {
+        async {
+            let output = collection_client
+                .search(
+                    json!({
+                        "term": "A cat sleeps",
+                        "mode": "vector"
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            if output.count == 1 {
+                Ok(output)
+            } else {
+                Err(anyhow::anyhow!("Expected 1 result, got {}", output.count))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
     assert_eq!(output.count, 1);
     assert_eq!(output.hits.len(), 1);
     assert_eq!(
@@ -61,19 +71,30 @@ async fn test_vector_search() {
     );
     assert!(output.hits[0].score > 0.);
 
-    let output = collection_client
-        .search(
-            json!({
-                "term": "A cat sleeps",
-                "mode": "vector",
-                "similarity": 0.0001
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-
+    let output = wait_for(&collection_client, |collection_client| {
+        async {
+            let output = collection_client
+                .search(
+                    json!({
+                        "term": "A cat sleeps",
+                        "mode": "vector",
+                        "similarity": 0.0001
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+            if output.count == 3 {
+                Ok(output)
+            } else {
+                Err(anyhow::anyhow!("Expected 3 results, got {}", output.count))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
     assert_eq!(output.count, 3);
     assert_eq!(output.hits.len(), 3);
     assert_eq!(
@@ -418,21 +439,34 @@ async fn test_document_chunk_long_text_for_embedding_calculation() {
         .await
         .unwrap();
 
-    sleep(std::time::Duration::from_millis(1_500)).await;
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let result = collection_client.reader_stats().await.unwrap();
 
-    let result = collection_client.reader_stats().await.unwrap();
+            let mut result = result
+                .indexes_stats
+                .into_iter()
+                .find(|i| i.id == index_client.index_id)
+                .unwrap();
+            let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats
+            else {
+                panic!("Expected vector field stats")
+            };
 
-    let mut result = result
-        .indexes_stats
-        .into_iter()
-        .find(|i| i.id == index_client.index_id)
-        .unwrap();
-    let IndexFieldStatsType::UncommittedVector(stats) = result.fields_stats.remove(0).stats else {
-        panic!("Expected vector field stats")
-    };
-
-    // Even if we insert only one document, we have two vectors because the text is chunked
-    assert_eq!(stats.vector_count, 2);
+            // Even if we insert only one document, we have two vectors because the text is chunked
+            if stats.vector_count == 2 {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "Expected 2 vectors, found {}",
+                    stats.vector_count
+                ))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     let result = collection_client
         .search(

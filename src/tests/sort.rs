@@ -342,7 +342,10 @@ async fn tests_sort_on_unknown_field() {
         .await;
 
     let err = output.unwrap_err();
-    assert!(format!("{err:?}").contains("Cannot sort by \"unknown_field\": unknown field"));
+
+    assert!(
+        format!("{err:?}").contains("Cannot sort by \"unknown_field\": no index has that field")
+    );
 
     drop(test_context);
 }

@@ -906,10 +906,6 @@ impl EmbeddingField {
                     let mut result_strings: Vec<String> = Vec::new();
                     let mut current_size: usize = 0;
 
-                    for path_group in paths.iter() {
-                        println!("  - {path_group:?}");
-                    }
-
                     // Process each path group
                     for path_group in paths.iter() {
                         // Here's where the fix comes in:

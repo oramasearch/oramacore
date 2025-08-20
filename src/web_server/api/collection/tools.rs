@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
+    routing::{get, post},
     Json, Router,
 };
-use axum_openapi3::{utoipa::IntoParams, *};
 use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -19,13 +19,13 @@ use crate::{
     },
 };
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 struct ApiKeyQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
-#[derive(Deserialize, IntoParams)]
+#[derive(Deserialize)]
 struct GetToolQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
@@ -35,27 +35,40 @@ struct GetToolQueryParams {
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(get_tool_v1())
-        .add(get_all_tools_v1())
-        .add(run_tools_v1())
+        .route(
+            "/v1/collections/{collection_id}/tools/get",
+            get(get_tool_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/tools/all",
+            get(get_all_tools_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/tools/run",
+            post(run_tools_v1),
+        )
         .with_state(read_side)
 }
 
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
-        .add(insert_tool_v1())
-        .add(delete_tool_v1())
-        .add(update_tool_v1())
+        .route(
+            "/v1/collections/{collection_id}/tools/insert",
+            post(insert_tool_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/tools/delete",
+            post(delete_tool_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/tools/update",
+            post(update_tool_v1),
+        )
         .with_state(write_side)
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/tools/get",
-    description = "Get a single tool by ID"
-)]
 async fn get_tool_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     Query(query): Query<GetToolQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> Result<impl IntoResponse, ToolError> {
@@ -74,13 +87,8 @@ async fn get_tool_v1(
     Ok(j)
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/tools/all",
-    description = "Get all tools in a collection"
-)]
 async fn get_all_tools_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     Query(query): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> Result<impl IntoResponse, ToolError> {
@@ -95,13 +103,8 @@ async fn get_all_tools_v1(
 }
 
 // #[axum::debug_handler]
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/tools/run",
-    description = "Run one or more tools"
-)]
 async fn run_tools_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_api_key: ApiKey,
     read_side: State<Arc<ReadSide>>,
     Json(params): Json<RunToolsParams>,
@@ -117,13 +120,8 @@ async fn run_tools_v1(
     Ok(Json(json!({ "results": tools_result })))
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/tools/insert",
-    description = "Insert a new tool"
-)]
 async fn insert_tool_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertToolsParams>,
@@ -147,13 +145,8 @@ async fn insert_tool_v1(
     })
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/tools/delete",
-    description = "Deletes an existing tool"
-)]
 async fn delete_tool_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<DeleteToolParams>,
@@ -168,13 +161,8 @@ async fn delete_tool_v1(
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/tools/update",
-    description = "Updates an existing tool"
-)]
 async fn update_tool_v1(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateToolParams>,

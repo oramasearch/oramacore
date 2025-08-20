@@ -1,17 +1,16 @@
 use std::{convert::Infallible, sync::Arc};
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::{sse::Event, IntoResponse, Sse},
+    routing::{get, post},
     Json, Router,
 };
-use axum_openapi3::{utoipa::ToSchema, *};
 use futures::Stream;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use utoipa::IntoParams;
 
 use crate::{
     collection_manager::sides::read::AnalyticSearchEventInvocationType, types::NLPSearchRequest,
@@ -24,26 +23,27 @@ use crate::{
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
-        .add(search())
-        .add(nlp_search())
-        .add(nlp_search_streamed())
-        .add(stats())
+        .route("/v1/collections/{collection_id}/search", post(search))
+        .route(
+            "/v1/collections/{collection_id}/nlp_search",
+            post(nlp_search),
+        )
+        .route(
+            "/v1/collections/{collection_id}/nlp_search_stream",
+            post(nlp_search_streamed),
+        )
+        .route("/v1/collections/{collection_id}/stats", get(stats))
         .with_state(read_side)
 }
 
-#[derive(Deserialize, IntoParams, ToSchema)]
+#[derive(Deserialize)]
 struct SearchQueryParams {
     #[serde(rename = "api-key")]
     api_key: ApiKey,
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/search",
-    description = "Search Endpoint"
-)]
 async fn search(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<SearchParams>,
@@ -61,13 +61,8 @@ async fn search(
         .map(Json)
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/nlp_search",
-    description = "Advanced NLP search endpoint powered by AI"
-)]
 async fn nlp_search(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<NLPSearchRequest>,
@@ -89,13 +84,8 @@ async fn nlp_search(
         .map(Json)
 }
 
-#[endpoint(
-    method = "POST",
-    path = "/v1/collections/{collection_id}/nlp_search_stream",
-    description = "Advanced NLP search endpoint powered by AI - streamed"
-)]
 async fn nlp_search_streamed(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
     Json(json): Json<NLPSearchRequest>,
@@ -150,13 +140,8 @@ async fn nlp_search_streamed(
     Sse::new(rx_stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
-#[endpoint(
-    method = "GET",
-    path = "/v1/collections/{collection_id}/stats",
-    description = "Stats Endpoint"
-)]
 async fn stats(
-    collection_id: CollectionId,
+    Path(collection_id): Path<CollectionId>,
     read_side: State<Arc<ReadSide>>,
     Query(query): Query<SearchQueryParams>,
 ) -> impl IntoResponse {

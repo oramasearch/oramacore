@@ -94,7 +94,9 @@ pub enum WriteError {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TempIndexCleanupConfig {
+    #[serde(deserialize_with = "deserialize_duration")]
     pub cleanup_interval: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
     pub max_age: Duration,
 }
 
@@ -1334,7 +1336,7 @@ fn start_temp_index_cleanup_loop(
                 }
                 _ = interval.tick() => {
                     // Cleanup expired temp indexes
-                    match write_side.collections.cleanup_expired_temp_indexes(cleanup_config.max_age).await {
+                    match write_side.cleanup_expired_temp_indexes(cleanup_config.max_age).await {
                         Ok(cleaned_count) => {
                             if cleaned_count > 0 {
                                 info!("Cleaned up {} expired temp indexes", cleaned_count);
@@ -1387,10 +1389,6 @@ fn default_temp_index_cleanup_config() -> TempIndexCleanupConfig {
         cleanup_interval: Duration::from_secs(3600), // 1 hour
         max_age: Duration::from_secs(43200),         // 12 hours
     }
-}
-
-fn default_temp_index_cleanup_enabled() -> bool {
-    true
 }
 
 pub struct HookWriterLock<'guard> {
