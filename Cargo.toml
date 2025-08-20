@@ -120,7 +120,7 @@ nlp = { path = "crates/nlp" }
 hook_storage = { path = "./crates/hook_storage" }
 fs = { path = "./crates/fs" }
 
-zebo = "0.4.1"
+zebo = "0.4.5"
 llm_json = "1.0.2"
 dateparser = "0.2.1"
 clap = { version = "4.5.39", features = ["derive"] }
