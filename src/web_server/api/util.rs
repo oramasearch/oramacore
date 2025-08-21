@@ -446,6 +446,11 @@ impl IntoResponse for AnswerError {
                 format!("Error running JS code: {e:?}"),
             )
                 .into_response(),
+            AnswerError::TitleError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error generating title: {e:?}"),
+            )
+                .into_response(),
         }
     }
 }

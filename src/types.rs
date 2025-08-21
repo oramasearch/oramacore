@@ -1470,6 +1470,12 @@ pub struct SuggestionsRequest {
     pub max_suggestions: Option<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TitleRequest {
+    pub messages: Vec<InteractionMessage>,
+    pub llm_config: Option<InteractionLLMConfig>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CollectionStatsRequest {
     #[serde(default)]
