@@ -24,8 +24,8 @@ use crate::{
     },
     types::{
         ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
-        Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
-        Similarity, SuggestionsRequest, TitleRequest, VectorMode,
+        Limit, Properties, SearchMode, SearchOffset, SearchParams, SearchResultHit, Similarity,
+        SuggestionsRequest, TitleRequest, VectorMode,
     },
 };
 
