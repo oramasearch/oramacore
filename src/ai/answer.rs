@@ -25,7 +25,7 @@ use crate::{
     types::{
         ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, InteractionMessage,
         Limit, Properties, Role, SearchMode, SearchOffset, SearchParams, SearchResultHit,
-        Similarity, SuggestionsRequest, VectorMode,
+        Similarity, SuggestionsRequest, TitleRequest, VectorMode,
     },
 };
 
@@ -40,11 +40,13 @@ pub enum SuggestionsError {
 }
 
 #[derive(Error, Debug)]
-pub enum TitleGeneratorError {
+pub enum TitleError {
     #[error("Generic error: {0}")]
     Generic(#[from] anyhow::Error),
-    #[error("Failed to serialize conversation: {0:?}")]
-    SerializeError(#[from] serde_json::Error),
+    #[error("Failed to get title: {0:?}")]
+    RepairError(#[from] JsonRepairError),
+    #[error("Failed to parse title: {0:?}")]
+    ParseError(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -60,7 +62,7 @@ pub enum AnswerError {
     #[error("JS run error: {0:?}")]
     JSError(#[from] JSRunnerError),
     #[error("Failed to get title: {0:?}")]
-    TitleGeneratorError(#[from] TitleGeneratorError),
+    TitleError(#[from] TitleError),
 }
 
 pub struct Answer {
@@ -288,20 +290,6 @@ impl Answer {
             }
         }
 
-        if interaction.include_title == Some(true) {
-            match self
-                .handle_title_generator(&interaction, llm_config.clone())
-                .await
-            {
-                Ok(title) => {
-                    sender.send(AnswerEvent::TitleGenerator(title))?;
-                }
-                Err(e) => {
-                    sender.send(AnswerEvent::FailedToGenerateTitle(e))?;
-                }
-            };
-        };
-
         let mut related_queries_params =
             llm_service.get_related_questions_params(interaction.related);
 
@@ -347,7 +335,6 @@ impl Answer {
             llm_config: suggestions_request.llm_config.clone(),
             query: suggestions_request.query.clone(),
             ragat_notation: None,
-            include_title: None,
         }
     }
 
@@ -402,7 +389,7 @@ impl Answer {
         &self,
         conversation: Vec<InteractionMessage>,
         llm_config: InteractionLLMConfig,
-    ) -> Result<String, TitleGeneratorError> {
+    ) -> Result<String, TitleError> {
         let llm_service: Arc<llms::LLMService> = self.read_side.get_llm_service();
 
         let serialized_conversation = serde_json::to_string(&conversation)?;
@@ -418,6 +405,22 @@ impl Answer {
             .await?;
 
         Ok(title_response)
+    }
+
+    pub async fn title(self, title_request: TitleRequest) -> Result<serde_json::Value, TitleError> {
+        let llm_config = title_request.llm_config.clone().unwrap_or_else(|| {
+            let (provider, model) = self.read_side.get_default_llm_config();
+            InteractionLLMConfig { model, provider }
+        });
+
+        let title = match self.get_title(title_request.messages, llm_config).await {
+            Ok(title) => title,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        return Ok(serde_json::json!({"title": title}));
     }
 
     pub async fn get_suggestions(
@@ -637,29 +640,6 @@ impl Answer {
         }
     }
 
-    async fn handle_title_generator(
-        &self,
-        interaction: &Interaction,
-        llm_config: InteractionLLMConfig,
-    ) -> Result<String, TitleGeneratorError> {
-        let conversation: Vec<InteractionMessage> = self.build_conversation(interaction).await;
-        match self.get_title(conversation, llm_config).await {
-            Ok(title) => Ok(title),
-            Err(e) => {
-                return Err(e);
-            }
-        }
-    }
-
-    async fn build_conversation(&self, interaction: &Interaction) -> Vec<InteractionMessage> {
-        let mut conversation = interaction.messages.clone();
-        conversation.push(InteractionMessage {
-            role: Role::User,
-            content: interaction.query.clone(),
-        });
-        conversation
-    }
-
     async fn handle_related_queries(
         &self,
         llm_service: &llms::LLMService,
@@ -790,6 +770,5 @@ pub enum AnswerEvent {
     FailedToRunPrompt(anyhow::Error),
     AnswerResponse(String),
     FailedToFetchAnswer(anyhow::Error),
-    TitleGenerator(String),
-    FailedToGenerateTitle(TitleGeneratorError),
+    FailedToGenerateTitle(TitleError),
 }

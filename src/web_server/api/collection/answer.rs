@@ -1,7 +1,7 @@
 use crate::ai::answer::{Answer, AnswerError, AnswerEvent};
 use crate::collection_manager::sides::read::ReadSide;
 use crate::types::{ApiKey, Interaction};
-use crate::types::{CollectionId, SuggestionsRequest};
+use crate::types::{CollectionId, SuggestionsRequest, TitleRequest};
 use anyhow::Context;
 use axum::extract::Query;
 use axum::http::StatusCode;
@@ -29,6 +29,10 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
         .route(
             "/v1/collections/{collection_id}/suggestions",
             post(answer_suggestions_v1),
+        )
+        .route(
+            "/v1/collections/{collection_id}/title",
+            post(answer_title_v1),
         )
         .route("/v1/collections/{collection_id}/logs", get(answer_logs_v1))
         .with_state(read_side)
@@ -168,6 +172,41 @@ async fn answer_suggestions_v1(
     )
 }
 
+async fn answer_title_v1(
+    collection_id: CollectionId,
+    State(read_side): State<Arc<ReadSide>>,
+    Query(query): Query<AnswerQueryParams>,
+    Json(request): Json<TitleRequest>,
+) -> impl IntoResponse {
+    let answer = match Answer::try_new(read_side.clone(), collection_id, query.api_key).await {
+        Ok(answer) => answer,
+        Err(e) => {
+            error!(error = ?e, "Failed to create Answer instance");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to initialize answer service"
+                })),
+            );
+        }
+    };
+
+    let response = match answer.title(request).await {
+        Ok(response) => response,
+        Err(e) => {
+            error!(error = ?e, "Failed to generate suggestions");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to generate suggestions"
+                })),
+            );
+        }
+    };
+
+    (StatusCode::OK, Json(response))
+}
+
 async fn answer_logs_v1(
     collection_id: CollectionId,
     State(read_side): State<Arc<ReadSide>>,
@@ -291,16 +330,6 @@ impl Serialize for AnswerEvent {
             }
             AnswerEvent::FailedToFetchAnswer(err) => {
                 s.serialize_field("message", &format!("Failed to fetch answer: {err:?}"))?;
-            }
-            AnswerEvent::TitleGenerator(title) => {
-                s.serialize_field(
-                    "message",
-                    &json!({
-                        "action": "TITLE",
-                        "result": title,
-                        "done": true,
-                    }),
-                )?;
             }
             AnswerEvent::FailedToGenerateTitle(err) => {
                 s.serialize_field("message", &format!("Failed to generate title: {err:?}"))?;
