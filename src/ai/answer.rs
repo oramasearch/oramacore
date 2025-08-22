@@ -420,7 +420,7 @@ impl Answer {
             }
         };
 
-        return Ok(serde_json::json!({"title": title}));
+        Ok(serde_json::json!({"title": title}))
     }
 
     pub async fn get_suggestions(

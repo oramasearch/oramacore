@@ -414,6 +414,8 @@ export default { beforeAnswer }
         .await
         .unwrap();
 
+    sleep(Duration::from_millis(300)).await;
+
     let lock = completition_req.read().await;
     let v = lock.clone();
     drop(lock);
