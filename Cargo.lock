@@ -8467,11 +8467,12 @@ dependencies = [
 
 [[package]]
 name = "zebo"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "957db524e3ae04690ecfff6b12c6fce963a454e2f1ed86d2d8c6e9cd6d48aef7"
+checksum = "dbee32476ea7c644cf083efcd4a32d7b7db8ceb5b0e673cbb0d1883ba7896ac5"
 dependencies = [
  "clap",
+ "tracing",
 ]
 
 [[package]]
