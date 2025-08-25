@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use hook_storage::HookOperation;
+use crate::pin_rules::PinRuleOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -172,6 +173,7 @@ pub enum CollectionWriteOperation {
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
     */
     Hook(HookOperation),
+    PinRule(PinRuleOperation),
     CreateIndex2 {
         index_id: IndexId,
         locale: Locale,
@@ -343,6 +345,14 @@ impl WriteOperation {
                 _,
                 CollectionWriteOperation::Hook(HookOperation::Insert(_, _)),
             ) => "insert_hook",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Insert(_)),
+            ) => "insert_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
+            ) => "delete_pin_rule",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },

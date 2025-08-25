@@ -370,7 +370,7 @@ impl WriteSide {
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         let CreateIndexRequest {
@@ -400,7 +400,7 @@ impl WriteSide {
     ) -> Result<(), WriteError> {
         // Get initial collection state and create temporary index
         let mut collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         collection
@@ -550,7 +550,7 @@ impl WriteSide {
         reason: ReplaceIndexReason,
     ) -> Result<(), WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         collection
@@ -573,7 +573,7 @@ impl WriteSide {
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         let CreateIndexRequest {
@@ -595,7 +595,7 @@ impl WriteSide {
         index_id: IndexId,
     ) -> Result<(), WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
@@ -616,7 +616,7 @@ impl WriteSide {
         info!(?document_count, "Inserting batch of documents");
 
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         let index = collection
@@ -683,7 +683,7 @@ impl WriteSide {
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
         let index = collection
             .get_index(index_id)
@@ -705,12 +705,14 @@ impl WriteSide {
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
         let mut collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
         let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+        let mut locked_pin_rules = collection.get_pin_rules_lock().await?;
+
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let document_count = update_document_request.documents.0.len();
@@ -787,6 +789,7 @@ impl WriteSide {
 
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
+                drop(locked_pin_rules);
                 drop(index);
                 drop(collection);
 
@@ -800,6 +803,7 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                locked_pin_rules = collection.get_pin_rules_lock().await?;
             }
 
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
@@ -829,6 +833,19 @@ impl WriteSide {
                             ))
                             .await
                             .context("Cannot send document storage operation")?;
+
+                        if let Err(e) = collection.update_pin_rules_ref_if_needed(
+                            &mut locked_pin_rules,
+                            new_document
+                                .inner
+                                .get("id")
+                                .expect("Document does not have an id")
+                                .as_str()
+                                .expect("Document id is not a string"),
+                            doc_id,
+                        ).await {
+                            error!(error = ?e, "Cannot update pin rules");
+                        }
 
                         match index
                             .process_new_document(doc_id, new_document, &mut index_operation_batch)
@@ -911,7 +928,7 @@ impl WriteSide {
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
 
         let document_ids = collection.get_document_ids().await;
@@ -1060,6 +1077,8 @@ impl WriteSide {
             None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
 
+        let mut locked_pin_rules = collection.get_pin_rules_lock().await?;
+
         let document_count = document_list.len();
 
         let mut index_operation_batch = Vec::with_capacity(document_count * 10);
@@ -1083,6 +1102,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 // We need to drop the index lock before waiting
+                drop(locked_pin_rules);
                 drop(index);
                 drop(collection);
 
@@ -1097,6 +1117,20 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
+                locked_pin_rules = collection.get_pin_rules_lock().await?;
+            }
+
+            if let Err(e) = collection.update_pin_rules_ref_if_needed(
+                &mut locked_pin_rules,
+                doc
+                    .inner
+                    .get("id")
+                    .expect("Document does not have an id")
+                    .as_str()
+                    .expect("Document id is not a string"),
+                doc_id,
+            ).await {
+                error!(error = ?e, "Cannot update pin rules");
             }
 
             match index
@@ -1138,7 +1172,7 @@ impl WriteSide {
         Ok(result)
     }
 
-    async fn get_collection_with_write_key(
+    pub async fn get_collection(
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
@@ -1173,7 +1207,7 @@ impl WriteSide {
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
     ) -> Result<()> {
-        self.get_collection_with_write_key(collection_id, write_api_key)
+        self.get_collection(collection_id, write_api_key)
             .await?;
         Ok(())
     }
@@ -1201,7 +1235,7 @@ impl WriteSide {
         collection_id: CollectionId,
     ) -> Result<HookWriterLock<'s>, WriteError> {
         let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
+            .get_collection(collection_id, write_api_key)
             .await?;
         Ok(HookWriterLock { collection })
     }

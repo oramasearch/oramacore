@@ -455,7 +455,7 @@ impl ReadSide {
         let count = token_scores.len();
 
         let top_results: Vec<TokenScore> = collection
-            .sort_and_truncate(&token_scores, limit, offset, search_params.sort_by.as_ref())
+            .sort_and_truncate(&token_scores, limit, offset, &search_params)
             .await?;
         trace!("Top results: {:?}", top_results);
 
@@ -824,6 +824,18 @@ impl ReadSide {
             },
             None => None,
         }
+    }
+
+    pub async fn list_pin_rule_ids(&self, collection_id: CollectionId, read_api_key: ApiKey) -> Result<Vec<String>, ReadError> {
+        let collection = self
+            .collections
+            .get_collection(collection_id)
+            .await
+            .ok_or_else(|| ReadError::NotFound(collection_id))?;
+        collection.check_read_api_key(read_api_key, self.master_api_key)?;
+
+        collection.list_pin_rule_ids().await
+            .map_err(|e| ReadError::Generic(anyhow::anyhow!("Failed to list pin rule IDs: {}", e)))
     }
 }
 

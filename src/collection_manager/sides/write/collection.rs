@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use hook_storage::HookWriter;
+use crate::pin_rules::{PinRule, PinRuleOperation, PinRulesWriter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -57,10 +58,10 @@ impl CollectionWriter {
         req: CreateEmptyCollection,
         context: WriteSideContext,
     ) -> Result<Self> {
-        let send_operation_cb_op_sender = context.op_sender.clone();
         let id = req.id;
 
-        let send_operation_cb = Box::new(move |op| {
+        let send_operation_cb_op_sender = context.op_sender.clone();
+        let send_hook_operation_cb = Box::new(move |op| {
             let op_sender = send_operation_cb_op_sender.clone();
             async move {
                 let _ = op_sender
@@ -89,7 +90,7 @@ impl CollectionWriter {
 
             created_at: Utc::now(),
 
-            hook: HookWriter::try_new(data_dir.join("hooks"), send_operation_cb)
+            hook: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
                 .context("Cannot create hook writer")?,
         })
     }
@@ -133,7 +134,7 @@ impl CollectionWriter {
             temp_indexes.insert(temp_index_id, index);
         }
 
-        let a = context.op_sender.clone();
+        let hook_op_sender = context.op_sender.clone();
 
         Ok(Self {
             id,
@@ -153,9 +154,9 @@ impl CollectionWriter {
             hook: HookWriter::try_new(
                 data_dir.join("hooks"),
                 Box::new(move |op| {
-                    let b = a.clone();
+                    let hook_op_sender = hook_op_sender.clone();
                     async move {
-                        let _ = b
+                        let _ = hook_op_sender
                             .send(WriteOperation::Collection(
                                 id,
                                 CollectionWriteOperation::Hook(op),
@@ -641,4 +642,28 @@ pub struct CreateEmptyCollection {
     pub read_api_key: ApiKey,
     pub default_locale: Locale,
     pub embeddings_model: OramaModel,
+}
+pub struct LockedPinRules<'lock> {
+    lock: RwLockReadGuard<'lock, PinRulesWriter>,
+    list: Vec<PinRule<String>>,
+}
+
+impl<'lock> LockedPinRules<'lock> {
+    pub fn try_new(lock: RwLockReadGuard<'lock, PinRulesWriter>) -> Result<Self> {
+        let list = lock.list_pin_rules()?;
+        Ok(Self { lock, list })
+    }
+
+    fn update_ref(&mut self, doc_id_str: &str, doc_id_to_assign: DocumentId) -> Result<Vec<String>> {
+        let ret = vec![];
+        for rule in &self.list {
+            for p in &rule.consequence.promote {
+                if p.doc_id == doc_id_str {
+                    p.doc_id_ref.set(Some(doc_id_to_assign));
+                }
+            }
+        }
+
+        Ok(ret)
+    }
 }

@@ -18,8 +18,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 
 use crate::{
-    ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
-    collection_manager::sides::{
+    ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult}, collection_manager::sides::{
         read::{
             context::ReadSideContext, sort::sort_and_truncate_documents,
             AnalyticSearchEventInvocationType, CommittedDateFieldStats,
@@ -27,11 +26,10 @@ use crate::{
             UncommittedGeoPointFieldStats,
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
-    },
-    types::{
+    }, pin_rules::PinRulesReader, types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
         InteractionMessage, Limit, Role, SearchOffset, SearchParams, SortBy, TokenScore,
-    },
+    }
 };
 
 use super::{
@@ -63,6 +61,8 @@ pub struct CollectionReader {
     temp_indexes: RwLock<Vec<Index>>,
 
     hook: RwLock<HookReader>,
+
+    pin_rules_reader: RwLock<PinRulesReader>,
 
     created_at: DateTime<Utc>,
     updated_at: RwLock<DateTime<Utc>>,
@@ -97,6 +97,7 @@ impl CollectionReader {
             temp_indexes: Default::default(),
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
+            pin_rules_reader: RwLock::new(PinRulesReader::try_new(data_dir.join("pin_rules"))?),
 
             created_at: Utc::now(),
             updated_at: RwLock::new(Utc::now()),
@@ -158,6 +159,7 @@ impl CollectionReader {
             temp_indexes: RwLock::new(temp_indexes),
 
             hook: RwLock::new(HookReader::try_new(data_dir.join("hooks"))?),
+            pin_rules_reader: RwLock::new(PinRulesReader::try_new(data_dir.join("pin_rules"))?),
 
             created_at: dump.created_at,
             updated_at: RwLock::new(dump.updated_at),
@@ -182,8 +184,9 @@ impl CollectionReader {
         // 2. We have to remove it from the in memory indexes and remove it from the disk
         // 3-4. We have to commit it and remove the temp indexes from the disk
         //
-        // NB: the document from the document_storage are removed
-        //     because the writer sends an appropriate command for that
+        // NB: For deleted index, the documents are removed
+        //     because the writer sends an appropriate command for that.
+        //     Hence, we don't need to do anything here.
 
         let indexes_lock = self.indexes.read().await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -315,6 +318,12 @@ impl CollectionReader {
                 }
             }
         }
+
+        self.pin_rules_reader
+            .write()
+            .await
+            .commit()
+            .context("Cannot commit pin rules")?;
 
         self.document_count_estimation
             .store(count, std::sync::atomic::Ordering::Relaxed);
@@ -495,8 +504,9 @@ impl CollectionReader {
         token_scores: &HashMap<DocumentId, f32>,
         limit: Limit,
         offset: SearchOffset,
-        sort_by: Option<&SortBy>,
+        search_params: &SearchParams,
     ) -> Result<Vec<TokenScore>> {
+        let sort_by = search_params.sort_by.as_ref();
         info!(
             "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
             limit, offset, sort_by
@@ -512,12 +522,26 @@ impl CollectionReader {
             Vec::new()
         };
 
+        unimplemented!("Use term to define pinning rules");
+
         let result =
             sort_and_truncate_documents(&relevant_indexes, token_scores, limit, offset, sort_by)
                 .await;
 
         drop(indexes_lock);
         result
+    }
+
+    pub async fn list_pin_rule_ids(&self) -> Result<Vec<String>> {
+        let reader = self.pin_rules_reader
+            .read()
+            .await;
+        Ok(reader.list()
+            .context("Cannot list pin rules")?
+            .into_iter()
+            .map(|rule| rule.id)
+            .collect()
+        )
     }
 
     pub async fn calculate_facets(
@@ -558,6 +582,10 @@ impl CollectionReader {
         drop(updated_at_lock);
 
         match collection_operation {
+            CollectionWriteOperation::PinRule(op) => {
+                let mut pin_rules_lock = self.pin_rules_reader.write().await;
+                pin_rules_lock.update(op).context("Cannot apply pin rule operation")?;
+            },
             CollectionWriteOperation::CreateIndex2 { index_id, locale } => {
                 let mut indexes_lock = self.indexes.write().await;
                 let index = Index::new(
