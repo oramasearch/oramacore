@@ -1133,6 +1133,7 @@ impl Index {
                     .llm_service
                     .run_known_prompt(
                         llms::KnownPrompts::Autoquery,
+                        vec![],
                         vec![("query".to_string(), mode_result.term.clone())],
                         None,
                         // @todo: determine if we want to allow the user to select which LLM to use here.

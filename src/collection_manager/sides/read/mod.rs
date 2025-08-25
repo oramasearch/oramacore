@@ -654,6 +654,7 @@ impl ReadSide {
             .llm_service
             .run_known_prompt(
                 llms::KnownPrompts::Autoquery,
+                vec![],
                 vec![("query".to_string(), query.clone())],
                 None,
                 llm_config,

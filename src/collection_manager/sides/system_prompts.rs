@@ -132,6 +132,7 @@ impl SystemPromptInterface {
             .llm_service
             .run_known_prompt(
                 KnownPrompts::ValidateSystemPrompt,
+                vec![],
                 variables,
                 None,
                 llm_config,

@@ -181,6 +181,7 @@ impl TrainingSet {
             .llm_service
             .run_known_prompt(
                 KnownPrompts::TrainingSetsQueriesGenerator,
+                vec![],
                 variables,
                 None,
                 self.llm_config.clone(),
@@ -233,6 +234,7 @@ impl TrainingSet {
                 .llm_service
                 .run_known_prompt(
                     KnownPrompts::TrainingSetsQueriesOptimizer,
+                    vec![],
                     variables,
                     None,
                     self.llm_config.clone(),

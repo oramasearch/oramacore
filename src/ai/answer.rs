@@ -152,6 +152,7 @@ impl Answer {
         let optimized_query = llm_service
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
+                vec![],
                 optimized_query_variables,
                 None,
                 Some(llm_config.clone()),
@@ -258,6 +259,7 @@ impl Answer {
         let answer_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::Answer,
+                vec![],
                 variables,
                 system_prompt,
                 Some(llm_config.clone()),
@@ -398,6 +400,7 @@ impl Answer {
         let title_response = llm_service
             .run_known_prompt(
                 llms::KnownPrompts::TitleGenerator,
+                vec![],
                 suggestion_params,
                 None,
                 Some(llm_config),
@@ -445,7 +448,7 @@ impl Answer {
         println!("Prompt: {prompt:?}");
 
         let suggestions = llm_service
-            .run_known_prompt(prompt, suggestion_params, None, Some(llm_config))
+            .run_known_prompt(prompt, vec![], suggestion_params, None, Some(llm_config))
             .await?;
 
         let repaired = match repair_json(&suggestions, &Default::default()) {
@@ -477,6 +480,7 @@ impl Answer {
         llm_service
             .run_known_prompt(
                 llms::KnownPrompts::OptimizeQuery,
+                vec![],
                 optimized_query_variables,
                 None,
                 Some(llm_config.clone()),
@@ -650,6 +654,7 @@ impl Answer {
         let related_questions_stream = llm_service
             .run_known_prompt_stream(
                 llms::KnownPrompts::GenerateRelatedQueries,
+                vec![],
                 related_queries_params,
                 None,
                 Some(llm_config),
