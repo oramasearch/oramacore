@@ -17,11 +17,16 @@ pub enum PinRulesReaderError {
 }
 
 pub struct PinRulesReader {
-    data_dir: PathBuf,
     rules: Vec<PinRule<DocumentId>>,
 }
 
 impl PinRulesReader {
+    pub fn empty() -> Self {
+        Self {
+            rules: Vec::new(),
+        }
+    }
+
     pub fn try_new(data_dir: PathBuf) -> Result<Self, PinRulesReaderError> {
         create_if_not_exists(&data_dir)?;
 
@@ -31,10 +36,8 @@ impl PinRulesReader {
                 let entry = entry.ok()?;
                 let path = entry.path();
                 if path.extension()?.to_str()? == "rules" {
-                    let rule: PinRule<DocumentId> = BufferedFile::open(path)
-                        .ok()?
-                        .read_json_data()
-                        .ok()?;
+                    let rule: PinRule<DocumentId> =
+                        BufferedFile::open(path).ok()?.read_json_data().ok()?;
                     Some(rule)
                 } else {
                     None
@@ -42,10 +45,7 @@ impl PinRulesReader {
             })
             .collect();
 
-        Ok(Self {
-            data_dir,
-            rules,
-        })
+        Ok(Self { rules })
     }
 
     pub fn update(&mut self, op: PinRuleOperation) -> Result<(), PinRulesReaderError> {
@@ -60,9 +60,9 @@ impl PinRulesReader {
         Ok(())
     }
 
-    pub fn commit(&mut self) -> Result<(), PinRulesReaderError> {
+    pub fn commit(&mut self, data_dir: PathBuf) -> Result<(), PinRulesReaderError> {
         for rule in &self.rules {
-            let file_path = self.data_dir.join(format!("{}.rules", rule.id));
+            let file_path = data_dir.join(format!("{}.rules", rule.id));
             BufferedFile::create_or_overwrite(file_path)
                 .context("Cannot create file")?
                 .write_json_data(rule)
@@ -72,20 +72,22 @@ impl PinRulesReader {
         Ok(())
     }
 
-    /// List all pin rules. Returns the content as well if present.
-    pub fn list(&self) -> Result<Vec<PinRule<DocumentId>>, PinRulesReaderError> {
-        Ok(self.rules.clone())
+    pub fn get_rule_ids(&self) -> Vec<String> {
+        self.rules.iter().map(|r| r.id.clone()).collect()
     }
 
-    pub fn apply<'s>(&'s self, term: &str) -> Result<Vec<&'s Consequence<DocumentId>>, PinRulesReaderError> {
+    pub fn apply<'s>(
+        &'s self,
+        term: &str,
+    ) -> Result<Vec<&'s Consequence<DocumentId>>, PinRulesReaderError> {
         let mut results = Vec::new();
         for rule in &self.rules {
             for c in &rule.conditions {
                 match c {
-                    Condition::Is { pattern } if pattern == term  => {
+                    Condition::Is { pattern } if pattern == term => {
                         results.push(&rule.consequence);
-                        break
-                    },
+                        break;
+                    }
                     _ => continue,
                 }
             }
@@ -115,20 +117,23 @@ mod pin_rules_tests {
     #[test]
     fn test_apply_pin_rules() {
         let base_dir = generate_new_path();
-        let reader = PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
+        let reader =
+            PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
 
-        reader.update(PinRuleOperation::Insert(PinRule {
-            id: "test-rule-1".to_string(),
-            conditions: vec![
-                Condition::Is { pattern: "test".to_string() },
-            ],
-            consequence: crate::Consequence { promote: vec![
-                PromoteItem {
-                    doc_id: 1,
-                    position: 1,
-                }
-            ] },
-        })).expect("Failed to insert rule");
+        reader
+            .update(PinRuleOperation::Insert(PinRule {
+                id: "test-rule-1".to_string(),
+                conditions: vec![Condition::Is {
+                    pattern: "test".to_string(),
+                }],
+                consequence: crate::Consequence {
+                    promote: vec![PromoteItem {
+                        doc_id: 1,
+                        position: 1,
+                    }],
+                },
+            }))
+            .expect("Failed to insert rule");
 
         let consequences = reader.apply("term").expect("Failed to apply rules");
         assert_eq!(consequences.len(), 0);
@@ -141,7 +146,8 @@ mod pin_rules_tests {
 
         reader.commit().expect("Failed to commit rules");
 
-        let reader = PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
+        let reader =
+            PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
 
         let consequences = reader.apply("term").expect("Failed to apply rules");
         assert_eq!(consequences.len(), 0);
@@ -152,14 +158,17 @@ mod pin_rules_tests {
         assert_eq!(consequences[0].promote[0].doc_id, 1);
         assert_eq!(consequences[0].promote[0].position, 1);
 
-        reader.update(PinRuleOperation::Delete("test-rule-1".to_string())).expect("Failed to delete rule");
+        reader
+            .update(PinRuleOperation::Delete("test-rule-1".to_string()))
+            .expect("Failed to delete rule");
 
         let consequences = reader.apply("test").expect("Failed to apply rules");
         assert_eq!(consequences.len(), 0);
 
         reader.commit().expect("Failed to commit rules");
 
-        let reader = PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
+        let reader =
+            PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
 
         let consequences = reader.apply("test").expect("Failed to apply rules");
         assert_eq!(consequences.len(), 0);

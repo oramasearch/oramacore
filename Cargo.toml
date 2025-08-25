@@ -118,7 +118,7 @@ filters = { path = "./crates/filters" }
 bkd = { path = "./crates/bkd" }
 nlp = { path = "crates/nlp" }
 hook_storage = { path = "./crates/hook_storage" }
-fs = { path = "./crates/fs" }
+fs = { path = "./crates/fs", features = ["generate_new_path"] }
 
 zebo = "0.4.6"
 llm_json = "1.0.2"
@@ -190,6 +190,7 @@ reader = []
 test-mem-alloc = []
 
 [workspace]
+resolver = "3"
 members = [
     "crates/hnsw2",
     "crates/filters",

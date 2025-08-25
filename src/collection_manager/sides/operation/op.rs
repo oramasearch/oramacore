@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use hook_storage::HookOperation;
 use crate::pin_rules::PinRuleOperation;
+use hook_storage::HookOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -145,6 +145,7 @@ pub enum IndexWriteOperation {
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
+    PinRule(PinRuleOperation),
 }
 
 pub type EmbeddingIndexData = Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>;
@@ -173,7 +174,6 @@ pub enum CollectionWriteOperation {
     Index(DocumentId, FieldId, DocumentFieldIndexOperation),
     */
     Hook(HookOperation),
-    PinRule(PinRuleOperation),
     CreateIndex2 {
         index_id: IndexId,
         locale: Locale,
@@ -347,14 +347,6 @@ impl WriteOperation {
             ) => "insert_hook",
             WriteOperation::Collection(
                 _,
-                CollectionWriteOperation::PinRule(PinRuleOperation::Insert(_)),
-            ) => "insert_pin_rule",
-            WriteOperation::Collection(
-                _,
-                CollectionWriteOperation::PinRule(PinRuleOperation::Delete(_)),
-            ) => "delete_pin_rule",
-            WriteOperation::Collection(
-                _,
                 CollectionWriteOperation::CreateTemporaryIndex2 { .. },
             ) => "create_temp_index",
             WriteOperation::Collection(_, CollectionWriteOperation::ReplaceIndex { .. }) => {
@@ -373,6 +365,20 @@ impl WriteOperation {
                     IndexWriteOperation::IndexEmbedding { .. },
                 ),
             ) => "index_embedding",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::PinRule(PinRuleOperation::Insert(_)),
+                )
+            ) => "insert_pin_rule",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::IndexWriteOperation(
+                    _,
+                    IndexWriteOperation::PinRule(PinRuleOperation::Delete(_)),
+                )
+            ) => "delete_pin_rule",
             WriteOperation::DocumentStorage(DocumentStorageWriteOperation::InsertDocument {
                 ..
             }) => "document_storage_insert_document",

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::{pin_rules::PinRule, types::ApiKey};
 use axum::{
     extract::{Query, State},
     response::IntoResponse,
@@ -7,22 +8,22 @@ use axum::{
     Json, Router,
 };
 use http::StatusCode;
-use crate::{pin_rules::PinRule, types::ApiKey};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::collection_manager::sides::read::ReadError;
 use crate::{
     collection_manager::sides::{read::ReadSide, write::WriteSide},
-    types::{
-        CollectionId, WriteApiKey
-    },
+    types::{CollectionId, WriteApiKey},
 };
-use crate::collection_manager::sides::read::ReadError;
+use crate::collection_manager::sides::write::WriteError;
+use crate::types::IndexId;
+use crate::web_server::api::index;
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/pin_rules/inner_list",
+            "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/ids",
             get(list_pin_rules_ids_v1),
         )
         .with_state(read_side)
@@ -31,15 +32,15 @@ pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
 pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
     Router::new()
         .route(
-            "/v1/collections/{collection_id}/pin_rules/insert",
+            "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/insert",
             post(insert_pin_rule_v1),
         )
         .route(
-            "/v1/collections/{collection_id}/pin_rules/delete",
+            "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/delete",
             get(delete_pin_rule_v1),
         )
         .route(
-            "/v1/collections/{collection_id}/pin_rules/list",
+            "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/list",
             get(list_pin_rule_v1),
         )
         .with_state(write_side)
@@ -47,66 +48,55 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
 
 async fn insert_pin_rule_v1(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(pin_rule): Json<PinRule<String>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let collection = write_side
         .get_collection(collection_id, write_api_key)
-        .await.unwrap();
+        .await?;
 
-    collection
-        .insert_pin_rule(pin_rule)
-        .await
-        .map(|_| {
-            Json(json!({ "success": true }))
-        })
-        .map_err(|e| {
-            (StatusCode::BAD_REQUEST, Json(json!({ "success": false, "error": e.to_string() })))
-        })
+    collection.insert_pin_rule(index_id, pin_rule).await?;
+
+    Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "success": true })))
 }
 
 async fn delete_pin_rule_v1(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
     Json(DeletePinRuleParams { id }): Json<DeletePinRuleParams>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let collection = write_side
         .get_collection(collection_id, write_api_key)
-        .await.unwrap();
+        .await?;
 
-    collection
-        .delete_pin_rule(id)
-        .await
-        .map(|_| {
-            Json(json!({ "success": true }))
-        })
-        .map_err(|e| {
-            (StatusCode::BAD_REQUEST, Json(json!({ "success": false, "error": e.to_string() })))
-        })
+    collection.delete_pin_rule(index_id, id).await?;
+
+    Result::<Json<serde_json::Value>, WriteError>::Ok(Json(json!({ "success": true })))
 }
 
 async fn list_pin_rule_v1(
     collection_id: CollectionId,
+    index_id: IndexId,
     write_api_key: WriteApiKey,
     write_side: State<Arc<WriteSide>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
     let collection = write_side
         .get_collection(collection_id, write_api_key)
-        .await.unwrap();
+        .await?;
 
-    collection
-        .list_pin_rules()
-        .await
-        .map(|_| {
-            Json(json!({ "success": true }))
-        })
-        .map_err(|e| {
-            (StatusCode::BAD_REQUEST, Json(json!({ "success": false, "error": e.to_string() })))
-        })
+    let Some(index) = collection.get_index(index_id).await else {
+        return Err(WriteError::IndexNotFound(collection_id, index_id));
+    };
+
+    let writer = index.get_pin_rule_writer().await;
+    let list = writer.list_pin_rules();
+
+    Ok(Json(json!({ "data": list })))
 }
-
 
 #[derive(Deserialize)]
 struct ApiKeyQueryParams {
@@ -116,13 +106,11 @@ struct ApiKeyQueryParams {
 
 async fn list_pin_rules_ids_v1(
     collection_id: CollectionId,
+    index_id: IndexId,
     Query(ApiKeyQueryParams { api_key }): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-
-    let ids = read_side
-        .list_pin_rule_ids(collection_id, api_key)
-        .await?;
+    let ids = read_side.list_pin_rule_ids(collection_id, index_id, api_key).await?;
 
     Ok::<_, ReadError>(Json(json!({ "success": true, "data": ids })))
 }

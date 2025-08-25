@@ -49,7 +49,7 @@ use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
-use crate::types::NLPSearchRequest;
+use crate::types::{IndexId, NLPSearchRequest};
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchParams, SearchResult, SearchResultHit, TokenScore,
@@ -99,6 +99,8 @@ pub enum ReadError {
     Generic(#[from] anyhow::Error),
     #[error("Not found {0}")]
     NotFound(CollectionId),
+    #[error("Index not found {0}")]
+    IndexNotFound(CollectionId, IndexId),
     #[error("Hook error: {0:?}")]
     Hook(#[from] HookReaderError),
 }
@@ -826,7 +828,12 @@ impl ReadSide {
         }
     }
 
-    pub async fn list_pin_rule_ids(&self, collection_id: CollectionId, read_api_key: ApiKey) -> Result<Vec<String>, ReadError> {
+    pub async fn list_pin_rule_ids(
+        &self,
+        collection_id: CollectionId,
+        index_id: IndexId,
+        read_api_key: ApiKey,
+    ) -> Result<Vec<String>, ReadError> {
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -834,8 +841,14 @@ impl ReadSide {
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
-        collection.list_pin_rule_ids().await
-            .map_err(|e| ReadError::Generic(anyhow::anyhow!("Failed to list pin rule IDs: {}", e)))
+        let Some(index) = collection.get_index(index_id).await else {
+            return Err(ReadError::IndexNotFound(collection_id, index_id));
+        };
+
+        let ids = index.get_pin_rule_ids().await;
+
+
+        Ok(ids)
     }
 }
 

@@ -86,6 +86,8 @@ pub use uncommitted_field::{
     UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
     UncommittedVectorFieldStats,
 };
+use crate::collection_manager::sides::CollectionWriteOperation;
+use crate::pin_rules::PinRulesReader;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeletionReason {
@@ -145,6 +147,8 @@ pub struct Index {
 
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+
+    pin_rules_reader: RwLock<PinRulesReader>,
 }
 
 impl Index {
@@ -176,6 +180,8 @@ impl Index {
 
             created_at: Utc::now(),
             updated_at: Utc::now(),
+
+            pin_rules_reader: RwLock::new(PinRulesReader::empty()),
         }
     }
 
@@ -301,6 +307,8 @@ impl Index {
 
             created_at: dump.created_at,
             updated_at: dump.updated_at,
+
+            pin_rules_reader: RwLock::new(PinRulesReader::try_new(data_dir.join("pin_rules"))?),
         })
     }
 
@@ -723,6 +731,10 @@ impl Index {
         drop(uncommitted_fields);
         drop(committed_fields);
 
+        let mut pin_rules_reader = self.pin_rules_reader.write().await;
+        pin_rules_reader.commit(data_dir.join("pin_rules"))
+            .context("Cannot commit pin rules")?;
+
         self.try_unload_fields().await;
 
         BufferedFile::create_or_overwrite(data_dir.join("index.json"))
@@ -947,6 +959,12 @@ impl Index {
                 let len = doc_ids.len() as u64;
                 self.uncommitted_deleted_documents.extend(doc_ids);
                 self.document_count = self.document_count.saturating_sub(len);
+            }
+            IndexWriteOperation::PinRule(op) => {
+                let mut pin_rules_lock = self.pin_rules_reader.get_mut();
+                pin_rules_lock
+                    .update(op)
+                    .context("Cannot apply pin rule operation")?;
             }
         };
 
@@ -2173,6 +2191,11 @@ impl Index {
         }
 
         Ok(output)
+    }
+
+    pub async fn get_pin_rule_ids(&self) -> Vec<String> {
+        let pin_rules_reader = self.pin_rules_reader.read().await;
+        pin_rules_reader.get_rule_ids()
     }
 }
 

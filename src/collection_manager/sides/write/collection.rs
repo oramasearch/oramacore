@@ -4,7 +4,6 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::FutureExt;
 use hook_storage::HookWriter;
-use crate::pin_rules::{PinRule, PinRuleOperation, PinRulesWriter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -25,7 +24,7 @@ use crate::{
 use fs::BufferedFile;
 
 use nlp::{locales::Locale, TextParser};
-
+use crate::pin_rules::PinRule;
 use super::index::Index;
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
@@ -276,16 +275,6 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn change_runtime_config(
-        &self,
-        new_default_locale: Locale,
-        new_embeddings_model: OramaModel,
-    ) {
-        let mut runtime_config = self.runtime_config.write().await;
-        runtime_config.default_locale = new_default_locale;
-        runtime_config.embeddings_model = new_embeddings_model;
-    }
-
     pub async fn create_temp_index(
         &self,
         copy_from: IndexId,
@@ -350,6 +339,16 @@ impl CollectionWriter {
         temp_indexes_lock.insert(new_index_id, index);
 
         Ok(())
+    }
+
+    pub async fn change_runtime_config(
+        &self,
+        new_default_locale: Locale,
+        new_embeddings_model: OramaModel,
+    ) {
+        let mut runtime_config = self.runtime_config.write().await;
+        runtime_config.default_locale = new_default_locale;
+        runtime_config.embeddings_model = new_embeddings_model;
     }
 
     pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>, WriteError> {
@@ -582,6 +581,26 @@ impl CollectionWriter {
     pub fn get_hook_storage(&self) -> &HookWriter {
         &self.hook
     }
+
+    pub async fn insert_pin_rule(&self, index_id: IndexId, rule: PinRule<String>) -> Result<(), WriteError> {
+        let Some(index) = self.get_index(index_id).await else {
+            return Err(WriteError::IndexNotFound(self.id, index_id));
+        };
+        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+        pin_rule_writer.insert_pin_rule(rule.clone()).await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_pin_rule(&self, index_id: IndexId, rule_id: String) -> Result<(), WriteError> {
+        let Some(index) = self.get_index(index_id).await else {
+            return Err(WriteError::IndexNotFound(self.id, index_id));
+        };
+        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+        pin_rule_writer.delete_pin_rule(&rule_id).await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -642,28 +661,4 @@ pub struct CreateEmptyCollection {
     pub read_api_key: ApiKey,
     pub default_locale: Locale,
     pub embeddings_model: OramaModel,
-}
-pub struct LockedPinRules<'lock> {
-    lock: RwLockReadGuard<'lock, PinRulesWriter>,
-    list: Vec<PinRule<String>>,
-}
-
-impl<'lock> LockedPinRules<'lock> {
-    pub fn try_new(lock: RwLockReadGuard<'lock, PinRulesWriter>) -> Result<Self> {
-        let list = lock.list_pin_rules()?;
-        Ok(Self { lock, list })
-    }
-
-    fn update_ref(&mut self, doc_id_str: &str, doc_id_to_assign: DocumentId) -> Result<Vec<String>> {
-        let ret = vec![];
-        for rule in &self.list {
-            for p in &rule.consequence.promote {
-                if p.doc_id == doc_id_str {
-                    p.doc_id_ref.set(Some(doc_id_to_assign));
-                }
-            }
-        }
-
-        Ok(ret)
-    }
 }

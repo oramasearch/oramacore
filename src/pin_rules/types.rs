@@ -1,5 +1,5 @@
 use std::future::Future;
-
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,7 +11,30 @@ pub struct PinRule<DocId> {
 }
 
 impl<DocId> PinRule<DocId> {
-    pub async fn convert_ids<F, Fut, NewId>(self, f: F) -> PinRule<NewId>
+
+    pub async fn convert_ids<F, NewId>(self, f: F) -> PinRule<NewId>
+    where
+        F: Fn(DocId) -> NewId,
+    {
+        PinRule {
+            id: self.id,
+            conditions: self.conditions,
+            consequence: Consequence {
+                promote: self.consequence.promote.into_iter()
+                    .map(|item| {
+                        let new_doc_id = f(item.doc_id);
+                        PromoteItem {
+                            doc_id: new_doc_id,
+                            position: item.position,
+                        }
+
+                    })
+                    .collect()
+            },
+        }
+    }
+
+    pub async fn async_convert_ids<F, Fut, NewId>(self, f: F) -> PinRule<NewId>
     where
         F: Fn(DocId) -> Fut + Send,
         Fut: Future<Output = NewId> + Send,
@@ -22,13 +45,18 @@ impl<DocId> PinRule<DocId> {
             id: self.id,
             conditions: self.conditions,
             consequence: Consequence {
-                promote: futures::stream::iter(self.consequence.promote).then(|item| {
-                    let doc_id_fut = f(item.doc_id);
-                    async move {
-                        
-                        PromoteItem { doc_id: doc_id_fut.await, position: item.position }
-                    }
-                }).collect().await,
+                promote: futures::stream::iter(self.consequence.promote)
+                    .then(|item| {
+                        let doc_id_fut = f(item.doc_id);
+                        async move {
+                            PromoteItem {
+                                doc_id: doc_id_fut.await,
+                                position: item.position,
+                            }
+                        }
+                    })
+                    .collect()
+                    .await,
             },
         }
     }

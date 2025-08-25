@@ -24,7 +24,8 @@ use std::{
 use super::{
     generic_kv::{KVConfig, KV},
     system_prompts::SystemPromptInterface,
-    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
+    CollectionWriteOperation, IndexWriteOperation, Offset, OperationSender, OperationSenderCreator,
+    OutputSideChannelType,
 };
 
 use anyhow::{Context, Result};
@@ -45,6 +46,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::pin_rules::{PinRuleOperation, PinRulesWriterError};
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -90,6 +92,8 @@ pub enum WriteError {
     TempIndexNotFound(CollectionId, IndexId),
     #[error("Error in hook")]
     HookWriterError(#[from] HookWriterError),
+    #[error("Error in pin rule")]
+    PinRulesError(#[from] PinRulesWriterError)
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -369,9 +373,7 @@ impl WriteSide {
         collection_id: CollectionId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let CreateIndexRequest {
             index_id,
@@ -399,9 +401,7 @@ impl WriteSide {
         reference: Option<String>,
     ) -> Result<(), WriteError> {
         // Get initial collection state and create temporary index
-        let mut collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let mut collection = self.get_collection(collection_id, write_api_key).await?;
 
         collection
             .change_runtime_config(language.into(), model)
@@ -549,9 +549,7 @@ impl WriteSide {
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         collection
             .replace_index(
@@ -572,9 +570,7 @@ impl WriteSide {
         copy_from: IndexId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let CreateIndexRequest {
             index_id: new_index_id,
@@ -594,9 +590,7 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
@@ -615,9 +609,7 @@ impl WriteSide {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let index = collection
             .get_index(index_id)
@@ -682,9 +674,7 @@ impl WriteSide {
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
         let index = collection
             .get_index(index_id)
             .await
@@ -704,14 +694,12 @@ impl WriteSide {
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
-        let mut collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let mut collection = self.get_collection(collection_id, write_api_key).await?;
         let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-        let mut locked_pin_rules = collection.get_pin_rules_lock().await?;
+        let mut pin_rules_writer = index.get_pin_rule_writer().await;
 
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
@@ -789,7 +777,7 @@ impl WriteSide {
 
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                drop(locked_pin_rules);
+                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -803,7 +791,7 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
-                locked_pin_rules = collection.get_pin_rules_lock().await?;
+                pin_rules_writer = index.get_pin_rule_writer().await;
             }
 
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
@@ -834,17 +822,45 @@ impl WriteSide {
                             .await
                             .context("Cannot send document storage operation")?;
 
-                        if let Err(e) = collection.update_pin_rules_ref_if_needed(
-                            &mut locked_pin_rules,
+                        match pin_rules_writer.get_matching_rules(
                             new_document
                                 .inner
                                 .get("id")
                                 .expect("Document does not have an id")
                                 .as_str()
                                 .expect("Document id is not a string"),
-                            doc_id,
-                        ).await {
-                            error!(error = ?e, "Cannot update pin rules");
+                        ) {
+                            Ok(rules) => {
+                                let mut new_rules_ops = Vec::new();
+                                let storage = index.get_document_id_storage().await;
+                                let storage = &*storage;
+                                for rule in rules {
+                                    let new_rule = rule
+                                        .convert_ids(|id| {
+                                            // DocumentId(0) is never used, so this is equal to say
+                                            // "ignore this rules"
+                                            storage.get(&id).unwrap_or(DocumentId(0)).clone()
+                                        })
+                                        .await;
+                                    new_rules_ops.push(WriteOperation::Collection(
+                                        collection_id,
+                                        CollectionWriteOperation::IndexWriteOperation(
+                                            index_id,
+                                            IndexWriteOperation::PinRule(PinRuleOperation::Insert(
+                                                new_rule,
+                                            )),
+                                        ),
+                                    ));
+                                }
+
+                                self.op_sender
+                                    .send_batch(new_rules_ops)
+                                    .await
+                                    .context("Cannot send operation")?;
+                            }
+                            Err(e) => {
+                                error!(err = ?e, "Cannot update matching rules. Ignore the error and continue with the flow")
+                            }
                         }
 
                         match index
@@ -927,9 +943,7 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let document_ids = collection.get_document_ids().await;
 
@@ -1076,8 +1090,7 @@ impl WriteSide {
             Some(index) => index,
             None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
-
-        let mut locked_pin_rules = collection.get_pin_rules_lock().await?;
+        let mut pin_rules_writer = index.get_pin_rule_writer().await;
 
         let document_count = document_list.len();
 
@@ -1102,7 +1115,7 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 // We need to drop the index lock before waiting
-                drop(locked_pin_rules);
+                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -1117,20 +1130,46 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
-                locked_pin_rules = collection.get_pin_rules_lock().await?;
+                pin_rules_writer = index.get_pin_rule_writer().await;
             }
 
-            if let Err(e) = collection.update_pin_rules_ref_if_needed(
-                &mut locked_pin_rules,
+            match pin_rules_writer.get_matching_rules(
                 doc
                     .inner
                     .get("id")
                     .expect("Document does not have an id")
                     .as_str()
                     .expect("Document id is not a string"),
-                doc_id,
-            ).await {
-                error!(error = ?e, "Cannot update pin rules");
+            ) {
+                Ok(rules) => {
+                    let mut new_rules_ops = Vec::new();
+                    let storage = index.get_document_id_storage().await;
+                    let storage = &*storage;
+                    for rule in rules {
+                        let new_rule = rule
+                            .convert_ids(|id| {
+                                storage.get(&id).unwrap_or(DocumentId(0)).clone()
+                            })
+                            .await;
+                        new_rules_ops.push(WriteOperation::Collection(
+                            collection_id,
+                            CollectionWriteOperation::IndexWriteOperation(
+                                index_id,
+                                IndexWriteOperation::PinRule(PinRuleOperation::Insert(
+                                    new_rule,
+                                )),
+                            ),
+                        ));
+                    }
+
+                    self.op_sender
+                        .send_batch(new_rules_ops)
+                        .await
+                        .context("Cannot send operation")?;
+                }
+                Err(e) => {
+                    error!(err = ?e, "Cannot update matching rules. Ignore the error and continue with the flow")
+                }
             }
 
             match index
@@ -1207,8 +1246,7 @@ impl WriteSide {
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
     ) -> Result<()> {
-        self.get_collection(collection_id, write_api_key)
-            .await?;
+        self.get_collection(collection_id, write_api_key).await?;
         Ok(())
     }
 
@@ -1234,9 +1272,7 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<HookWriterLock<'s>, WriteError> {
-        let collection = self
-            .get_collection(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
         Ok(HookWriterLock { collection })
     }
 

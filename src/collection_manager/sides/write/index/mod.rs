@@ -22,19 +22,23 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
-    ai::OramaModel, collection_manager::sides::{
+    ai::OramaModel,
+    collection_manager::sides::{
         field_names_to_paths, write::context::WriteSideContext, CollectionWriteOperation,
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
-    }, pin_rules::PinRulesWriter, types::{
+    },
+    pin_rules::PinRulesWriter,
+    types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
-    }
+    },
 };
 use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+use crate::pin_rules::PinRule;
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -97,7 +101,7 @@ impl Index {
 
             runtime_index_id,
 
-            pin_rules_writer: RwLock::new(PinRulesWriter::try_new(data_dir.join("pin_rules"))?),
+            pin_rules_writer: RwLock::new(PinRulesWriter::empty()?),
         })
     }
 
@@ -135,7 +139,7 @@ impl Index {
             .map(|d| IndexScoreField::load_from(d, collection_id, index_id, context.clone()))
             .collect();
 
-        let doc_id_storage = DocIdStorage::load(data_dir)?;
+        let doc_id_storage = DocIdStorage::load(data_dir.clone())?;
 
         Ok(Self {
             collection_id,
@@ -290,6 +294,10 @@ impl Index {
             .context("Cannot create info.json file")?
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
+
+        let mut pin_rules_writer = self.pin_rules_writer.write().await;
+        pin_rules_writer.commit(data_dir.join("pin_rules"))
+            .context("Cannot commit index")?;
 
         let doc_id_storage = self.doc_id_storage.read().await;
         doc_id_storage
@@ -693,7 +701,19 @@ impl Index {
         Ok(())
     }
 
+    pub async fn insert_pin_rule(&self, rule: PinRule<String>) {
 
+    }
+
+    pub async fn get_pin_rule_writer(&self) -> tokio::sync::RwLockReadGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.read().await
+    }
+
+    pub async fn get_write_pin_rule_writer(&self) -> tokio::sync::RwLockWriteGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.write().await
+    }
+
+    /*
     pub async fn get_pin_rules_lock(
         &self,
     ) -> Result<LockedPinRules<'_>> {
@@ -759,6 +779,7 @@ impl Index {
         drop(lock);
         rules.context("Failed to list pin rules")
     }
+    */
 }
 
 fn calculate_fields_for(
