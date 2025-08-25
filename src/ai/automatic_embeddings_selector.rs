@@ -184,6 +184,7 @@ impl AutomaticEmbeddingsSelector {
                 .llm_service
                 .run_known_prompt(
                     super::llms::KnownPrompts::AutomaticEmbeddingsSelector,
+                    vec![],
                     variables,
                     None,
                     self.llm_config.clone(),

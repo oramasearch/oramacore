@@ -1179,6 +1179,7 @@ impl AdvancedAutoqueryStateMachine {
             .llm_service
             .run_known_prompt(
                 KnownPrompts::AdvancedAutoqueryQueryAnalyzer,
+                vec![],
                 variables,
                 None,
                 self.llm_config.clone(),
@@ -1209,6 +1210,7 @@ impl AdvancedAutoqueryStateMachine {
                 ];
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryPropertiesSelector,
+                    vec![],
                     variables,
                     None,
                     self.llm_config.clone(),
@@ -1275,6 +1277,7 @@ impl AdvancedAutoqueryStateMachine {
             .map(|variables| {
                 self.llm_service.run_known_prompt(
                     KnownPrompts::AdvancedAutoQueryQueryComposer,
+                    vec![],
                     variables,
                     None,
                     self.llm_config.clone(),

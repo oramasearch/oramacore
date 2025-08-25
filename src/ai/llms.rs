@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, ChatCompletionTool, ChatCompletionToolType,
-        CreateChatCompletionRequestArgs, FunctionCall, FunctionObject,
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequestArgs, FunctionCall,
+        FunctionObject,
     },
 };
 use futures::{Stream, StreamExt};
@@ -14,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 
-use crate::types::{InteractionLLMConfig, RelatedRequest, SuggestionsRequest};
+use crate::types::{InteractionLLMConfig, InteractionMessage, RelatedRequest, SuggestionsRequest};
 use crate::{collection_manager::sides::system_prompts::SystemPrompt, types::RelatedQueriesFormat};
 
 use super::{AIServiceLLMConfig, RemoteLLMProvider, RemoteLLMsConfig};
@@ -471,13 +472,20 @@ impl LLMService {
     pub async fn run_known_prompt(
         &self,
         prompt: KnownPrompts,
+        conversation: Vec<InteractionMessage>,
         variables: Vec<(String, String)>,
         custom_system_prompt: Option<SystemPrompt>,
         llm_config: Option<InteractionLLMConfig>,
     ) -> Result<String> {
         let mut acc = String::new();
         let mut stream = self
-            .run_known_prompt_stream(prompt, variables, custom_system_prompt, llm_config)
+            .run_known_prompt_stream(
+                prompt,
+                conversation,
+                variables,
+                custom_system_prompt,
+                llm_config,
+            )
             .await
             .context("An error occurred while initializing the stream from remote LLM instance")?;
 
@@ -498,6 +506,7 @@ impl LLMService {
     pub async fn run_known_prompt_stream(
         &self,
         prompt: KnownPrompts,
+        conversation: Vec<InteractionMessage>,
         variables: Vec<(String, String)>,
         custom_system_prompt: Option<SystemPrompt>,
         llm_config: Option<InteractionLLMConfig>,
@@ -516,21 +525,58 @@ impl LLMService {
         let chosen_model = self.get_chosen_model(llm_config.clone());
         let llm_client = self.get_chosen_llm_client(llm_config);
 
+        let mut full_conversation: Vec<ChatCompletionRequestMessage> = Vec::new();
+
+        // Add system prompt as the first message
+        full_conversation.push(
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(prompts.system)
+                .build()
+                .unwrap()
+                .into(),
+        );
+
+        // Serialize the whole conversation
+        for message in conversation {
+            match message.role {
+                crate::types::Role::User => {
+                    full_conversation.push(
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(message.content)
+                            .build()
+                            .unwrap()
+                            .into(),
+                    );
+                }
+                crate::types::Role::Assistant => {
+                    full_conversation.push(
+                        ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(message.content)
+                            .build()
+                            .unwrap()
+                            .into(),
+                    );
+                }
+                _ => {
+                    let serialized = serde_json::to_string(&message.role)?;
+                    error!("Unknown message role: {}", serialized);
+                }
+            }
+        }
+
+        // Add the last message with its own set of variables
+        full_conversation.push(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(format_prompt(prompts.user, variables_map))
+                .build()
+                .unwrap()
+                .into(),
+        );
+
         let request = CreateChatCompletionRequestArgs::default()
             .model(chosen_model)
             .stream(true)
-            .messages([
-                ChatCompletionRequestSystemMessageArgs::default()
-                    .content(prompts.system)
-                    .build()
-                    .unwrap()
-                    .into(),
-                ChatCompletionRequestUserMessageArgs::default()
-                    .content(format_prompt(prompts.user, variables_map))
-                    .build()
-                    .unwrap()
-                    .into(),
-            ])
+            .messages(full_conversation)
             .build()
             .context("Unable to build KnownPrompt LLM request body")?;
 

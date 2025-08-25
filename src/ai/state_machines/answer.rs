@@ -1279,6 +1279,7 @@ impl AnswerStateMachine {
             .llm_service
             .run_known_prompt(
                 KnownPrompts::OptimizeQuery,
+                vec![],
                 variables,
                 None,
                 Some(llm_config),
@@ -1300,6 +1301,7 @@ impl AnswerStateMachine {
             .llm_service
             .run_known_prompt(
                 KnownPrompts::DetermineQueryStrategy,
+                vec![],
                 variables,
                 None,
                 Some(llm_config),
@@ -1486,6 +1488,7 @@ impl AnswerStateMachine {
             .llm_service
             .run_known_prompt_stream(
                 KnownPrompts::Answer,
+                interaction.messages,
                 variables,
                 system_prompt,
                 Some(llm_config.clone()),
