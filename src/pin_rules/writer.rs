@@ -144,23 +144,20 @@ impl PinRulesWriter {
 #[cfg(test)]
 mod pin_rules_tests {
     use super::*;
-    use crate::pin_rules::PinRuleOperation;
+    use crate::pin_rules::{PinRuleOperation, Consequence};
     use fs::generate_new_path;
-    use futures::FutureExt;
 
     #[tokio::test]
     async fn test_simple() {
         let path = generate_new_path();
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PinRuleOperation>();
-
-        let writer = PinRulesWriter::try_new(path).unwrap();
+        let mut writer = PinRulesWriter::empty().unwrap();
 
         writer
             .insert_pin_rule(PinRule {
                 id: "test-rule-1".to_string(),
                 conditions: vec![],
-                consequence: crate::Consequence { promote: vec![] },
+                consequence: Consequence { promote: vec![] },
             })
             .await
             .unwrap();
@@ -169,19 +166,27 @@ mod pin_rules_tests {
             .insert_pin_rule(PinRule {
                 id: "test-rule-2".to_string(),
                 conditions: vec![],
-                consequence: crate::Consequence { promote: vec![] },
+                consequence: Consequence { promote: vec![] },
             })
             .await
             .unwrap();
 
-        let rules = writer.list_pin_rules().unwrap();
+        let rules = writer.list_pin_rules();
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].id, "test-rule-1");
         assert_eq!(rules[1].id, "test-rule-2");
 
         writer.delete_pin_rule("test-rule-1").await.unwrap();
 
-        let rules = writer.list_pin_rules().unwrap();
+        let rules = writer.list_pin_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].id, "test-rule-2");
+
+        writer.commit(path.clone()).unwrap();
+
+        let mut rules =  PinRulesWriter::try_new(path).unwrap();
+
+        let rules = writer.list_pin_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].id, "test-rule-2");
     }
