@@ -1488,7 +1488,7 @@ impl AnswerStateMachine {
             .llm_service
             .run_known_prompt_stream(
                 KnownPrompts::Answer,
-                vec![],
+                interaction.messages,
                 variables,
                 system_prompt,
                 Some(llm_config.clone()),
