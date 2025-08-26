@@ -515,16 +515,17 @@ impl CollectionReader {
             Vec::new()
         };
 
-        let pins = if let SearchMode::FullText(f) = &search_params.mode {
-            let mut consequences: Vec<_> = Vec::new();
-            for index in indexes_lock.iter() {
-                let pin_rules = index.get_read_lock_on_pin_rules().await;
-                consequences.extend(pin_rules.apply(&f.term));
-            }
-            consequences
-        } else {
-            Vec::new()
+        let t = match &search_params.mode {
+            SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
+            SearchMode::Hybrid(h) => &h.term,
+            SearchMode::Vector(v) => &v.term,
+            SearchMode::Auto(a) => &a.term,
         };
+        let mut pins: Vec<_> = Vec::new();
+        for index in indexes_lock.iter() {
+            let pin_rules = index.get_read_lock_on_pin_rules().await;
+            pins.extend(pin_rules.apply(t));
+        }
 
         let result =
             sort_and_truncate_documents(

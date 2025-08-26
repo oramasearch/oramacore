@@ -107,12 +107,7 @@ impl<'de> Deserialize<'de> for Condition {
     where
         D: Deserializer<'de>
     {
-        println!("AA {}", std::any::type_name::<D>());
-
-
         let c = SerdeCondition::deserialize(deserializer)?;
-
-        println!("c {:?}", c);
 
         match c.anchoring.as_str() {
             "is" => {

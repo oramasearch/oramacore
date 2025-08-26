@@ -984,3 +984,10 @@ impl TestIndexClient {
         Ok(())
     }
 }
+
+pub fn extrapolate_ids_from_result(result: &SearchResult) -> Vec<String> {
+    result.hits.iter().map(|h| {
+        let id = h.id.clone();
+        id.split(":").skip(1).next().map(|id| id.to_string()).unwrap()
+    }).collect()
+}

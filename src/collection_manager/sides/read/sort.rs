@@ -213,8 +213,18 @@ pub async fn sort_and_truncate_documents(
         ))
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
-        // This is the most efficient path when only relevance ranking is needed
-        let top = top_n(token_scores.iter(), limit.0 + offset.0);
+        let top_count = if pins.is_empty() {
+            limit.0 + offset.0
+        } else {
+            // The user could ask 0-x documents,
+            // but one of them appear after x due to pin rules.
+            // In this case we need to have the next item,
+            // but it falls in the next page.
+            // So, we have to have the double of the asked item.
+            (limit.0 + offset.0) * 2
+        };
+
+        let top = top_n(token_scores.iter(), top_count);
 
         let top = if !pins.is_empty() {
             apply_pin_rules(pins, token_scores, top)
@@ -229,9 +239,59 @@ pub async fn sort_and_truncate_documents(
 fn apply_pin_rules(
     pins: Vec<Consequence<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
-    top: Vec<TokenScore>
+    mut top: Vec<TokenScore>
 ) -> Vec<TokenScore> {
-    unimplemented!("implement `apply_pin_rules`")
+    if pins.is_empty() {
+        return top;
+    }
+
+    // Collect all promote items from all pin rule consequences
+    let mut promote_items = Vec::new();
+    for consequence in pins {
+        promote_items.extend(consequence.promote);
+    }
+
+    // If no promote items, return original results
+    if promote_items.is_empty() {
+        return top;
+    }
+
+    let doc_ids_to_promote: HashSet<_> = promote_items.iter().map(|p| p.doc_id)
+        .collect();
+
+    // If re want to remove all the doc_ids that are already present in `top`
+    // This:
+    // - avoid document duplication
+    // - handle the pagination correctly
+    top.retain(|ts| {
+        !doc_ids_to_promote.contains(&ts.document_id)
+    });
+
+    // Sort promote items by position to handle them in order
+    promote_items.sort_by_key(|item| item.position);
+
+    // Make sure in the below loop there's no continuous re-allocation.
+    top.reserve(promote_items.len());
+
+    for promote_item in promote_items {
+        let target_position = promote_item.position as usize;
+        
+        // Skip if target position is beyond the vector size
+        if target_position >= top.len() {
+            continue;
+        }
+
+        if let Some(score) = token_scores.get(&promote_item.doc_id) {
+            // Insert it at the target position.
+            // The other are shifted.
+            top.insert(target_position, TokenScore {
+                document_id: promote_item.doc_id,
+                score: *score,
+            });
+        }
+    }
+
+    top
 }
 
 #[cfg(test)]
