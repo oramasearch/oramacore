@@ -43,7 +43,7 @@ use super::{
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
-use crate::types::NLPSearchRequest;
+use crate::types::{NLPSearchRequest, SearchMode};
 use fs::*;
 use nlp::locales::Locale;
 
@@ -506,7 +506,7 @@ impl CollectionReader {
         );
 
         let indexes_lock = self.indexes.read().await;
-        let relevant_indexes: Vec<_> = if let Some(sort_by) = sort_by {
+        let relevant_indexes_for_sorting: Vec<_> = if let Some(sort_by) = sort_by {
             indexes_lock
                 .iter()
                 .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
@@ -515,10 +515,26 @@ impl CollectionReader {
             Vec::new()
         };
 
-        unimplemented!("Use term to define pinning rules");
+        let pins = if let SearchMode::FullText(f) = &search_params.mode {
+            let mut consequences: Vec<_> = Vec::new();
+            for index in indexes_lock.iter() {
+                let pin_rules = index.get_read_lock_on_pin_rules().await;
+                consequences.extend(pin_rules.apply(&f.term));
+            }
+            consequences
+        } else {
+            Vec::new()
+        };
 
         let result =
-            sort_and_truncate_documents(&relevant_indexes, token_scores, limit, offset, sort_by)
+            sort_and_truncate_documents(
+                &relevant_indexes_for_sorting,
+                pins,
+                token_scores,
+                limit,
+                offset,
+                sort_by
+            )
                 .await;
 
         drop(indexes_lock);

@@ -24,7 +24,8 @@ use crate::{
 use fs::BufferedFile;
 
 use nlp::{locales::Locale, TextParser};
-use crate::pin_rules::PinRule;
+use crate::collection_manager::sides::IndexWriteOperation;
+use crate::pin_rules::{PinRule, PinRuleOperation};
 use super::index::Index;
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
@@ -588,6 +589,17 @@ impl CollectionWriter {
         };
         let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
         pin_rule_writer.insert_pin_rule(rule.clone()).await?;
+
+        let storage = index.get_document_id_storage().await;
+        let new_rule = rule
+            .convert_ids(|id| {
+                // DocumentId(0) is never used, so this is equal to say
+                // "ignore this rules"
+                storage.get(&id).unwrap_or(DocumentId(0)).clone()
+            })
+            .await;
+
+        self.context.op_sender.send(WriteOperation::Collection(self.id, CollectionWriteOperation::IndexWriteOperation(index_id, IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule))))).await?;
 
         Ok(())
     }

@@ -50,6 +50,7 @@ use crate::{
     OramacoreConfig,
 };
 use anyhow::Context;
+use crate::pin_rules::PinRule;
 
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {
@@ -945,6 +946,40 @@ impl TestIndexClient {
             .await?;
 
         sleep(Duration::from_millis(100)).await;
+
+        Ok(())
+    }
+
+    pub async fn insert_pin_rules(&self, rule: PinRule<String>) -> Result<()> {
+        let collection = self.writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let rule_id = rule.id.clone();
+
+        collection.insert_pin_rule(self.index_id, rule).await
+            .context("Failed to insert pin_rule")?;
+
+        wait_for(self, |s| {
+            let reader = s.reader.clone();
+            let read_api_key = s.read_api_key;
+            let collection_id = s.collection_id;
+            let index_id = s.index_id;
+            let r = &rule_id;
+            async move {
+                let ids = reader.list_pin_rule_ids(collection_id, index_id, read_api_key).await?;
+
+                if ids.contains(r)
+                {
+                    return Ok(());
+                }
+
+                bail!("Pin rule does not exist");
+            }
+                .boxed()
+        })
+            .await?;
+
 
         Ok(())
     }

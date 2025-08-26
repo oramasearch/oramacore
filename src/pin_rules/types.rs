@@ -1,6 +1,7 @@
 use std::future::Future;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use crate::types::SearchParams;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -62,12 +63,68 @@ impl<DocId> PinRule<DocId> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg(test)]
+impl TryFrom<serde_json::Value> for PinRule<String> {
+    type Error = serde_json::Error;
+
+    fn try_from(value: serde_json::Value) -> anyhow::Result<Self, Self::Error> {
+        serde_json::from_value(value)
+    }
+}
+
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(tag = "anchoring")]
 pub enum Condition {
-    #[serde(rename = "is")]
     Is { pattern: String },
+}
+
+/// Required for the bincode deserialization
+/// In fact, bincode doesn't support deserialize_any
+/// So, we implemented it manually
+#[derive(Serialize, Deserialize, Debug)]
+struct SerdeCondition {
+    anchoring: String,
+    pattern: Option<String>,
+}
+
+impl Serialize for Condition {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let c = match self {
+            Condition::Is { pattern} => SerdeCondition {
+                anchoring: "is".to_string(),
+                pattern: Some(pattern.clone()),
+            }
+        };
+        c.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Condition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        println!("AA {}", std::any::type_name::<D>());
+
+
+        let c = SerdeCondition::deserialize(deserializer)?;
+
+        println!("c {:?}", c);
+
+        match c.anchoring.as_str() {
+            "is" => {
+                if let Some(pattern) = c.pattern {
+                    Ok(Condition::Is { pattern })
+                } else {
+                    Err(serde::de::Error::custom("Unexpected pattern"))
+                }
+            },
+            _ => Err(serde::de::Error::custom("Unexpected anchoring")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]

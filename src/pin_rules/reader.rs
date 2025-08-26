@@ -4,6 +4,7 @@ use anyhow::Context;
 use fs::*;
 use thiserror::Error;
 use tracing::error;
+use crate::pin_rules::file_util::{get_rule_file_name, is_rule_file, remove_rule_file};
 use crate::types::DocumentId;
 
 use super::{Condition, Consequence, PinRule, PinRuleOperation};
@@ -37,7 +38,7 @@ impl PinRulesReader {
             .filter_map(|entry| {
                 let entry = entry.ok()?;
                 let path = entry.path();
-                if path.extension()?.to_str()? == "rules" {
+                if is_rule_file(&path) {
                     let rule: PinRule<DocumentId> =
                         BufferedFile::open(path).ok()?.read_json_data().ok()?;
                     Some(rule)
@@ -72,7 +73,7 @@ impl PinRulesReader {
         create_if_not_exists(&data_dir)?;
 
         for rule in &self.rules {
-            let file_path = data_dir.join(format!("{}.rules", rule.id));
+            let file_path = data_dir.join(get_rule_file_name(&rule.id));
             BufferedFile::create_or_overwrite(file_path)
                 .context("Cannot create file")?
                 .write_json_data(rule)
@@ -80,14 +81,8 @@ impl PinRulesReader {
         }
 
         for rule_id_to_remove in self.rule_ids_to_delete.drain(..) {
-            let file_path = data_dir.join(format!("{}.rules", rule_id_to_remove));
-            match std::fs::remove_file(&file_path) {
-                Ok(_) => {},
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-                Err(e) => {
-                    error!(error = ?e, "Cannot remove pin rule file");
-                },
-            }
+            let file_path = data_dir.join(get_rule_file_name(&rule_id_to_remove));
+            remove_rule_file(file_path);
         }
 
         Ok(())
@@ -97,23 +92,24 @@ impl PinRulesReader {
         self.rules.iter().map(|r| r.id.clone()).collect()
     }
 
-    pub fn apply<'s>(
-        &'s self,
+    pub fn apply(
+        &self,
         term: &str,
-    ) -> Result<Vec<&'s Consequence<DocumentId>>, PinRulesReaderError> {
+    ) -> Vec<Consequence<DocumentId>> {
         let mut results = Vec::new();
         for rule in &self.rules {
             for c in &rule.conditions {
                 match c {
                     Condition::Is { pattern } if pattern == term => {
-                        results.push(&rule.consequence);
+                        results.push(rule.consequence.clone());
                         break;
                     }
                     _ => continue,
                 }
             }
         }
-        Ok(results)
+
+        results
     }
 }
 
@@ -131,7 +127,7 @@ mod pin_rules_tests {
         assert_eq!(ids.len(), 0);
 
         // Test applying rules
-        let consequences = reader.apply("test").expect("Failed to apply rules");
+        let consequences = reader.apply("test");
         assert!(consequences.is_empty());
     }
 
@@ -156,10 +152,10 @@ mod pin_rules_tests {
             }))
             .expect("Failed to insert rule");
 
-        let consequences = reader.apply("term").expect("Failed to apply rules");
+        let consequences = reader.apply("term");
         assert_eq!(consequences.len(), 0);
 
-        let consequences = reader.apply("test").expect("Failed to apply rules");
+        let consequences = reader.apply("test");
         assert_eq!(consequences.len(), 1);
         assert_eq!(consequences[0].promote.len(), 1);
         assert_eq!(consequences[0].promote[0].doc_id, DocumentId(1));
@@ -170,10 +166,10 @@ mod pin_rules_tests {
         let mut reader =
             PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
 
-        let consequences = reader.apply("term").expect("Failed to apply rules");
+        let consequences = reader.apply("term");
         assert_eq!(consequences.len(), 0);
 
-        let consequences = reader.apply("test").expect("Failed to apply rules");
+        let consequences = reader.apply("test");
         assert_eq!(consequences.len(), 1);
         assert_eq!(consequences[0].promote.len(), 1);
         assert_eq!(consequences[0].promote[0].doc_id, DocumentId(1));
@@ -183,7 +179,7 @@ mod pin_rules_tests {
             .update(PinRuleOperation::Delete("test-rule-1".to_string()))
             .expect("Failed to delete rule");
 
-        let consequences = reader.apply("test").expect("Failed to apply rules");
+        let consequences = reader.apply("test");
         assert_eq!(consequences.len(), 0);
 
         reader.commit(base_dir.clone()).expect("Failed to commit rules");
@@ -191,10 +187,7 @@ mod pin_rules_tests {
         let reader =
             PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
 
-        let consequences = reader.apply("test").expect("Failed to apply rules");
-
-        println!("{:#?}", consequences);
-
+        let consequences = reader.apply("test");
         assert_eq!(consequences.len(), 0);
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, SortOrder, TokenScore},
 };
-
+use crate::pin_rules::Consequence;
 use super::index::Index;
 
 pub struct SortIterator<'s1, 's2, T: Ord + Clone> {
@@ -143,6 +143,7 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
 /// Main sorting and truncation logic for documents
 pub async fn sort_and_truncate_documents(
     relevant_indexes: &[&Index],
+    pins: Vec<Consequence<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
     limit: Limit,
     offset: SearchOffset,
@@ -213,8 +214,24 @@ pub async fn sort_and_truncate_documents(
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
         // This is the most efficient path when only relevance ranking is needed
-        Ok(top_n(token_scores.iter(), limit.0 + offset.0))
+        let top = top_n(token_scores.iter(), limit.0 + offset.0);
+
+        let top = if !pins.is_empty() {
+            apply_pin_rules(pins, token_scores, top)
+        } else {
+            top
+        };
+
+        Ok(top)
     }
+}
+
+fn apply_pin_rules(
+    pins: Vec<Consequence<DocumentId>>,
+    token_scores: &HashMap<DocumentId, f32>,
+    top: Vec<TokenScore>
+) -> Vec<TokenScore> {
+    unimplemented!("implement `apply_pin_rules`")
 }
 
 #[cfg(test)]

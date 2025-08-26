@@ -13,7 +13,7 @@ use merge::{
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
 
@@ -2196,6 +2196,10 @@ impl Index {
     pub async fn get_pin_rule_ids(&self) -> Vec<String> {
         let pin_rules_reader = self.pin_rules_reader.read().await;
         pin_rules_reader.get_rule_ids()
+    }
+
+    pub async fn get_read_lock_on_pin_rules(&self) -> RwLockReadGuard<'_, PinRulesReader> {
+        self.pin_rules_reader.read().await
     }
 }
 

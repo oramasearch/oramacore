@@ -4,6 +4,7 @@ use anyhow::Context;
 use debug_panic::debug_panic;
 use thiserror::Error;
 use tracing::error;
+use crate::pin_rules::file_util::{is_rule_file, remove_rule_file};
 use super::PinRule;
 
 #[derive(Error, Debug)]
@@ -16,14 +17,14 @@ pub enum PinRulesWriterError {
 
 pub struct PinRulesWriter {
     rules: Vec<PinRule<String>>,
-    rules_to_delete: Vec<String>,
+    rule_ids_to_delete: Vec<String>,
 }
 
 impl PinRulesWriter {
     pub fn empty() -> Result<Self, PinRulesWriterError> {
         Ok(Self {
             rules: Vec::new(),
-            rules_to_delete: Vec::new(),
+            rule_ids_to_delete: Vec::new(),
         })
     }
 
@@ -39,11 +40,11 @@ impl PinRulesWriter {
         for entry in dir {
             let Ok(entry) = entry else {
                 debug_panic!("This shouldn't happen");
+                error!("Error occurred while trying to read pin rule entry. Rule skipped");
                 continue;
             };
-            let file_name = entry.file_name();
 
-            if entry.path().extension().map(|os| os.as_encoded_bytes()) == Some("rules".as_bytes()) {
+            if is_rule_file(&entry.path()) {
                 let rule = BufferedFile::open(entry.path())
                     .context("cannot open rules file")?
                     .read_json_data()
@@ -54,31 +55,12 @@ impl PinRulesWriter {
 
         Ok(Self {
             rules,
-            rules_to_delete: Vec::new(),
+            rule_ids_to_delete: Vec::new(),
         })
     }
 
     pub fn commit(&mut self, data_dir: PathBuf) -> Result<(), PinRulesWriterError> {
         create_if_not_exists(&data_dir)?;
-
-        let mut rules: Vec<PinRule<String>> = self.rules.drain(..).collect();
-        rules.reverse();
-
-        let mut r = HashMap::with_capacity(rules.len());
-        for rule in rules {
-            if r.contains_key(&rule.id) {
-                continue;
-            }
-            r.insert(rule.id.clone(), rule);
-        }
-
-        // Add "rule-id-1" -> Delete "rule-id-1" -> Add "rule-id-1"
-        // should work correctly. IE we shouldn't remove a rule if it is in `r`
-        self.rules_to_delete.retain(|rule_id| {
-            !r.contains_key(rule_id)
-        });
-
-        self.rules = r.into_values().collect();
 
         for rule in &self.rules {
             let p = data_dir.join(format!("{}.rule", rule.id));
@@ -88,11 +70,9 @@ impl PinRulesWriter {
                 .context("Cannot write to file")?;
         }
 
-        for rule_id in self.rules_to_delete.drain(..) {
-            let p = data_dir.join(format!("{}.rule", rule_id));
-            if let Err(e) = std::fs::remove_file(&p).context("Cannot remove file") {
-                error!(error = ?e, "Cannot remove rule file {:?} from disk", p);
-            }
+        for rule_id_to_remove in self.rule_ids_to_delete.drain(..) {
+            let file_path = data_dir.join(format!("{}.rule", rule_id_to_remove));
+            remove_rule_file(file_path);
         }
 
         Ok(())
@@ -101,12 +81,13 @@ impl PinRulesWriter {
     pub async fn insert_pin_rule(&mut self, rule: PinRule<String>) -> Result<(), PinRulesWriterError> {
         self.rules.retain(|r| r.id != rule.id);
         self.rules.push(rule);
+
         Ok(())
     }
 
     pub async fn delete_pin_rule(&mut self, id: &str) -> Result<(), PinRulesWriterError> {
         self.rules.retain(|r| r.id != id);
-        self.rules_to_delete.push(id.to_string());
+        self.rule_ids_to_delete.push(id.to_string());
 
         Ok(())
     }
@@ -184,7 +165,7 @@ mod pin_rules_tests {
 
         writer.commit(path.clone()).unwrap();
 
-        let mut rules =  PinRulesWriter::try_new(path).unwrap();
+        let writer =  PinRulesWriter::try_new(path).unwrap();
 
         let rules = writer.list_pin_rules();
         assert_eq!(rules.len(), 1);
