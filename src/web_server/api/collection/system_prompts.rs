@@ -216,10 +216,10 @@ async fn update_system_prompt_v1(
         handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
 
     let system_prompt = SystemPrompt {
-        id: params.id.clone(),
-        name: params.name.clone(),
-        prompt: params.prompt.clone(),
-        usage_mode: params.usage_mode.clone(),
+        id: params.id,
+        name: params.name,
+        prompt: params.prompt,
+        usage_mode: params.usage_mode,
     };
 
     let system_prompts_manager = write_side
