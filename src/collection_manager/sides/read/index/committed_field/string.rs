@@ -28,6 +28,8 @@ use crate::{
 };
 use fs::create_if_not_exists;
 
+const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
+
 #[derive(Debug)]
 pub struct CommittedStringField {
     inner: RwLock<
@@ -445,9 +447,9 @@ impl LoadedCommittedStringField {
         for token in context.tokens {
             context.increment_term_count();
 
-            let iter: Box<dyn Iterator<Item = u64>> = if context.exact_match {
+            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
                 if let Some(posting_list_id) = self.index.search_exact(token) {
-                    Box::new(vec![posting_list_id].into_iter())
+                    Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
@@ -458,10 +460,13 @@ impl LoadedCommittedStringField {
             };
 
             let matches = iter
-                .flat_map(|posting_list_id| self.posting_storage.get_posting(&posting_list_id))
-                .flat_map(|postings| {
-                    let total_documents_with_term_in_field = postings.len();
-
+                .flat_map(|(is_exact, posting_list_id)| {
+                    self.posting_storage
+                        .get_posting(&posting_list_id)
+                        .into_iter()
+                        .map(move |posting| (is_exact, posting))
+                })
+                .flat_map(|(is_exact, postings)| {
                     let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
                     let exact_match = context.exact_match;
                     let filtered_doc_ids = context.filtered_doc_ids;
@@ -486,26 +491,23 @@ impl LoadedCommittedStringField {
                                 return None;
                             }
 
-                            Some((
-                                doc_id,
-                                term_occurrence_in_field,
-                                field_length,
-                                total_documents_with_term_in_field,
-                            ))
+                            Some((doc_id, term_occurrence_in_field, field_length, is_exact))
                         })
                 });
 
-            for (
-                doc_id,
-                term_occurrence_in_field,
-                field_length,
-                _total_documents_with_term_in_field,
-            ) in matches
-            {
+            for (doc_id, term_occurrence_in_field, field_length, is_exact) in matches {
                 let field_id = context.field_id;
+
+                // User-defined field boost as BM25F weight
+                // But we boost more if the match is exact
+                let weight = if is_exact {
+                    context.boost * EXACT_MATCH_BOOST_MULTIPLIER
+                } else {
+                    context.boost
+                };
                 let field_params = BM25FFieldParams {
-                    weight: context.boost, // User-defined field boost as BM25F weight
-                    b: 0.75,               // Default normalization parameter
+                    weight,
+                    b: 0.75, // Default normalization parameter
                 };
 
                 scorer.add_field(
@@ -534,7 +536,7 @@ impl LoadedCommittedStringField {
 
         struct PhraseMatchStorage {
             positions: HashSet<usize>,
-            matches: Vec<(u32, usize, usize)>,
+            matches: Vec<(u32, usize, usize, bool)>,
             token_indexes: u32,
         }
         let mut storage: HashMap<DocumentId, PhraseMatchStorage> = HashMap::new();
@@ -542,9 +544,9 @@ impl LoadedCommittedStringField {
         for (token_index, token) in context.tokens.iter().enumerate() {
             context.increment_term_count();
 
-            let iter: Box<dyn Iterator<Item = u64>> = if context.exact_match {
+            let iter: Box<dyn Iterator<Item = (bool, u64)>> = if context.exact_match {
                 if let Some(posting_list_id) = self.index.search_exact(token) {
-                    Box::new(vec![posting_list_id].into_iter())
+                    Box::new(vec![(true, posting_list_id)].into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
@@ -555,8 +557,12 @@ impl LoadedCommittedStringField {
             };
 
             let iter = iter
-                .filter_map(|posting_id| self.posting_storage.get_posting(&posting_id))
-                .flat_map(|postings| {
+                .filter_map(|(is_exact, posting_id)| {
+                    self.posting_storage
+                        .get_posting(&posting_id)
+                        .map(move |posting| (is_exact, posting))
+                })
+                .flat_map(|(is_exact, postings)| {
                     let total_documents_with_term_in_field = postings.len();
 
                     let uncommitted_deleted_documents = context.uncommitted_deleted_documents;
@@ -594,11 +600,14 @@ impl LoadedCommittedStringField {
                                 field_lenght,
                                 positions,
                                 total_documents_with_term_in_field,
+                                is_exact,
                             ))
                         })
                 });
 
-            for (doc_id, field_length, positions, total_documents_with_term_in_field) in iter {
+            for (doc_id, field_length, positions, total_documents_with_term_in_field, is_exact) in
+                iter
+            {
                 let v = storage
                     .entry(*doc_id)
                     .or_insert_with(|| PhraseMatchStorage {
@@ -610,6 +619,7 @@ impl LoadedCommittedStringField {
                     field_length,
                     positions.len(),
                     total_documents_with_term_in_field,
+                    is_exact,
                 ));
                 v.positions.extend(positions);
                 v.token_indexes |= 1 << token_index;
@@ -641,7 +651,7 @@ impl LoadedCommittedStringField {
                 .count();
 
             // We have different kind of boosting:
-            // 1. Boost for the exact match: not implemented
+            // 1. Boost for the exact match: implemented
             // 2. Boost for the phrase match when the terms appear in sequence (without holes): implemented
             // 3. Boost for the phrase match when the terms appear in sequence (with holes): not implemented
             // 4. Boost for the phrase match when the terms appear in any order: implemented
@@ -654,14 +664,22 @@ impl LoadedCommittedStringField {
 
             let field_id = context.field_id;
 
-            let field_params = BM25FFieldParams {
+            let mut field_params = BM25FFieldParams {
                 weight: context.boost, // User-defined field boost as BM25F weight
                 b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
-            for (field_length, term_occurrence_in_field, _total_documents_with_term_in_field) in
-                matches
+            for (
+                field_length,
+                term_occurrence_in_field,
+                _total_documents_with_term_in_field,
+                is_exact,
+            ) in matches
             {
+                if is_exact {
+                    field_params.weight *= EXACT_MATCH_BOOST_MULTIPLIER
+                }
+
                 scorer.add_field(
                     doc_id,
                     field_id,

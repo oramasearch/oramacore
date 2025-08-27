@@ -75,7 +75,7 @@ impl FSTIndex {
         &'s self,
         token: &'input str,
         tolerance: Option<u8>,
-    ) -> Result<Box<dyn Iterator<Item = u64> + 's>>
+    ) -> Result<Box<dyn Iterator<Item = (bool, u64)> + 's>>
     where
         'input: 's,
     {
@@ -86,6 +86,7 @@ impl FSTIndex {
                 self.inner.search(automaton).into_stream();
 
             Ok(Box::new(FTSLevenshteinIter {
+                term: token.as_bytes(),
                 stream: Some(stream),
             }))
         } else {
@@ -94,6 +95,7 @@ impl FSTIndex {
                 self.inner.search(automaton).into_stream();
 
             Ok(Box::new(FTSIter {
+                term: token.as_bytes(),
                 stream: Some(stream),
             }))
         }
@@ -125,32 +127,34 @@ impl FSTIndex {
 }
 
 pub struct FTSIter<'stream, 'input> {
+    term: &'input [u8],
     stream: Option<fst::map::Stream<'stream, StartsWith<fst::automaton::Str<'input>>>>,
 }
 impl Iterator for FTSIter<'_, '_> {
-    type Item = u64;
+    type Item = (bool, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
         let stream = match &mut self.stream {
             Some(stream) => stream,
             None => return None,
         };
-        stream.next().map(|(_, value)| value)
+        stream.next().map(|(m, value)| (m == self.term, value))
     }
 }
 
-pub struct FTSLevenshteinIter<'stream> {
+pub struct FTSLevenshteinIter<'stream, 'input> {
+    term: &'input [u8],
     stream: Option<fst::map::Stream<'stream, fst::automaton::Levenshtein>>,
 }
-impl Iterator for FTSLevenshteinIter<'_> {
-    type Item = u64;
+impl Iterator for FTSLevenshteinIter<'_, '_> {
+    type Item = (bool, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
         let stream = match &mut self.stream {
             Some(stream) => stream,
             None => return None,
         };
-        stream.next().map(|(_, value)| value)
+        stream.next().map(|(m, value)| (m == self.term, value))
     }
 }
 
@@ -194,7 +198,7 @@ mod tests {
         fn test(paged_index: &FSTIndex) -> Result<()> {
             assert_eq!(
                 paged_index.search("f", None).unwrap().collect::<Vec<_>>(),
-                vec![2, 1]
+                vec![(false, 2), (false, 1)]
             );
             Ok(())
         }
@@ -246,18 +250,31 @@ mod tests {
         let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
 
         // No tolerance
-        let output: Vec<u64> = paged_index.search("firt", Some(0))?.collect();
-        assert_eq!(output, Vec::<u64>::new());
+        let output: Vec<(bool, u64)> = paged_index.search("firt", Some(0))?.collect();
+        assert_eq!(output, vec![]);
         // No tolerance
-        let output: Vec<u64> = paged_index.search("firt", None)?.collect();
-        assert_eq!(output, Vec::<u64>::new());
+        let output: Vec<(bool, u64)> = paged_index.search("firt", None)?.collect();
+        assert_eq!(output, vec![]);
 
         // With tolerance 1
         let output: Vec<_> = paged_index.search("firt", Some(1))?.collect();
-        assert_eq!(output, vec![1]);
+        assert_eq!(output, vec![(false, 1)]);
 
         let output: Vec<_> = paged_index.search("firsta", Some(1))?.collect();
-        assert_eq!(output, vec![1]);
+        assert_eq!(output, vec![(false, 1)]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exact_match() -> Result<()> {
+        let data = vec![("serve".as_bytes(), 1), ("server".as_bytes(), 2)];
+        let data_dir = generate_new_path();
+        let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
+
+        // No tolerance
+        let output: Vec<(bool, u64)> = paged_index.search("serve", None)?.collect();
+        assert_eq!(output, vec![(true, 1), (false, 2)]);
 
         Ok(())
     }
