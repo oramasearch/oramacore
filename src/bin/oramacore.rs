@@ -7,8 +7,8 @@ use config::Config;
 use itertools::Itertools;
 use oramacore::build_info::get_build_version;
 use oramacore::{start, OramacoreConfig};
-use tracing::instrument;
 use tracing::level_filters::LevelFilter;
+use tracing::{error, instrument};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, EnvFilter, Registry};
 
@@ -41,7 +41,9 @@ fn main() -> anyhow::Result<()> {
     let oramacore_config = match load_config() {
         Ok(config) => config,
         Err(e) => {
+            error!("Failed to load configuration {e:?}");
             eprintln!("Failed to load configuration: {e:?}");
+            println!("Failed to load configuration: {e:?}");
             return Err(anyhow!("Failed to load configuration"));
         }
     };
@@ -63,11 +65,17 @@ fn main() -> anyhow::Result<()> {
         sentry_guard = Some(_guard);
     }
 
-    tokio::runtime::Builder::new_multi_thread()
+    let res = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .unwrap()
-        .block_on(async { run(oramacore_config).await })?;
+        .map(|runtime| runtime.block_on(async { run(oramacore_config).await }))
+        .context("Failed to start Runtime");
+    if let Err(e) = res {
+        error!(error = ?e, "Failed to run the oramacore runtime");
+        eprintln!("{e:#?}");
+        println!("{e:#?}");
+        return Err(e);
+    }
 
     drop(sentry_guard);
 

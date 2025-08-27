@@ -46,11 +46,11 @@ pub struct LogConfig {
     pub file_path: Option<PathBuf>,
     pub sentry_dns: Option<String>,
     pub sentry_environment: Option<String>,
-    #[serde(deserialize_with = "deserialize_levels", default)]
+    #[serde(deserialize_with = "deserialize_log_levels", default)]
     pub levels: HashMap<String, LevelFilter>,
 }
 
-fn deserialize_levels<'de, D>(deserializer: D) -> Result<HashMap<String, LevelFilter>, D::Error>
+fn deserialize_log_levels<'de, D>(deserializer: D) -> Result<HashMap<String, LevelFilter>, D::Error>
 where
     D: serde::de::Deserializer<'de>,
 {
