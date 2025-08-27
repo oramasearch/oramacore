@@ -58,6 +58,7 @@ impl PinRulesReader {
         match op {
             PinRuleOperation::Insert(rule) => {
                 self.rule_ids_to_delete.retain(|id| id != &rule.id);
+                self.rules.retain(|rule| rule.id != rule.id);
                 self.rules.push(rule);
 
             }

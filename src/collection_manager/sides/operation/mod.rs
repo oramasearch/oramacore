@@ -82,6 +82,9 @@ impl OperationSender {
     }
 
     pub async fn send_batch(&self, operations: Vec<WriteOperation>) -> Result<()> {
+        if operations.is_empty() {
+            return Ok(());
+        }
         trace!("Sending operation: {:?}", operations);
         match self {
             OperationSender::InMemory {

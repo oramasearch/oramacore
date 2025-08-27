@@ -699,7 +699,6 @@ impl WriteSide {
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
-        let mut pin_rules_writer = index.get_pin_rule_writer().await;
 
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
@@ -777,7 +776,6 @@ impl WriteSide {
 
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
-                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -791,7 +789,6 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
-                pin_rules_writer = index.get_pin_rule_writer().await;
             }
 
             if let Some(doc_id_str) = document_ids_map.get(&doc_id) {
@@ -821,47 +818,6 @@ impl WriteSide {
                             ))
                             .await
                             .context("Cannot send document storage operation")?;
-
-                        match pin_rules_writer.get_matching_rules(
-                            new_document
-                                .inner
-                                .get("id")
-                                .expect("Document does not have an id")
-                                .as_str()
-                                .expect("Document id is not a string"),
-                        ) {
-                            Ok(rules) => {
-                                let mut new_rules_ops = Vec::new();
-                                let storage = index.get_document_id_storage().await;
-                                let storage = &*storage;
-                                for rule in rules {
-                                    let new_rule = rule
-                                        .convert_ids(|id| {
-                                            // DocumentId(0) is never used, so this is equal to say
-                                            // "ignore this rules"
-                                            storage.get(&id).unwrap_or(DocumentId(0)).clone()
-                                        })
-                                        .await;
-                                    new_rules_ops.push(WriteOperation::Collection(
-                                        collection_id,
-                                        CollectionWriteOperation::IndexWriteOperation(
-                                            index_id,
-                                            IndexWriteOperation::PinRule(PinRuleOperation::Insert(
-                                                new_rule,
-                                            )),
-                                        ),
-                                    ));
-                                }
-
-                                self.op_sender
-                                    .send_batch(new_rules_ops)
-                                    .await
-                                    .context("Cannot send operation")?;
-                            }
-                            Err(e) => {
-                                error!(err = ?e, "Cannot update matching rules. Ignore the error and continue with the flow")
-                            }
-                        }
 
                         match index
                             .process_new_document(doc_id, new_document, &mut index_operation_batch)
@@ -1090,7 +1046,6 @@ impl WriteSide {
             Some(index) => index,
             None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
         };
-        let mut pin_rules_writer = index.get_pin_rule_writer().await;
 
         let document_count = document_list.len();
 
@@ -1115,7 +1070,6 @@ impl WriteSide {
             // Check for pending write operations and yield if needed
             if self.write_operation_counter.load(Ordering::Relaxed) > 0 {
                 // We need to drop the index lock before waiting
-                drop(pin_rules_writer);
                 drop(index);
                 drop(collection);
 
@@ -1130,46 +1084,6 @@ impl WriteSide {
                     Some(index) => index,
                     None => return Err(WriteError::IndexNotFound(collection_id, index_id)),
                 };
-                pin_rules_writer = index.get_pin_rule_writer().await;
-            }
-
-            match pin_rules_writer.get_matching_rules(
-                doc
-                    .inner
-                    .get("id")
-                    .expect("Document does not have an id")
-                    .as_str()
-                    .expect("Document id is not a string"),
-            ) {
-                Ok(rules) => {
-                    let mut new_rules_ops = Vec::new();
-                    let storage = index.get_document_id_storage().await;
-                    let storage = &*storage;
-                    for rule in rules {
-                        let new_rule = rule
-                            .convert_ids(|id| {
-                                storage.get(&id).unwrap_or(DocumentId(0)).clone()
-                            })
-                            .await;
-                        new_rules_ops.push(WriteOperation::Collection(
-                            collection_id,
-                            CollectionWriteOperation::IndexWriteOperation(
-                                index_id,
-                                IndexWriteOperation::PinRule(PinRuleOperation::Insert(
-                                    new_rule,
-                                )),
-                            ),
-                        ));
-                    }
-
-                    self.op_sender
-                        .send_batch(new_rules_ops)
-                        .await
-                        .context("Cannot send operation")?;
-                }
-                Err(e) => {
-                    error!(err = ?e, "Cannot update matching rules. Ignore the error and continue with the flow")
-                }
             }
 
             match index

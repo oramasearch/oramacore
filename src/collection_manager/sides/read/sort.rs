@@ -87,20 +87,19 @@ fn process_sort_iterator(
     index_results
 }
 
-/// Truncate results based on limit and offset, applying token scores
+/// Truncate results based on top_count, applying token scores
 fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
     token_scores: &HashMap<DocumentId, f32>,
     output: I,
-    limit: Limit,
-    offset: SearchOffset,
+    top_count: usize,
 ) -> Vec<TokenScore> {
-    let mut res = Vec::with_capacity(limit.0 + offset.0);
+    let mut res = Vec::with_capacity(top_count);
     let mut k = 0_usize;
     for (_, docs) in output {
         for doc in docs {
             let score = token_scores.get(&doc);
             if let Some(score) = score {
-                if k >= offset.0 && k < limit.0 + offset.0 {
+                if k < top_count {
                     res.push(TokenScore {
                         document_id: doc,
                         score: *score,
@@ -109,7 +108,7 @@ fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
 
                 k += 1;
 
-                if k > limit.0 + offset.0 {
+                if k > top_count {
                     break;
                 }
             }
@@ -149,7 +148,18 @@ pub async fn sort_and_truncate_documents(
     offset: SearchOffset,
     sort_by: Option<&SortBy>,
 ) -> Result<Vec<TokenScore>> {
-    if let Some(sort_by) = sort_by {
+    let top_count = if pins.is_empty() {
+        limit.0 + offset.0
+    } else {
+        // The user could ask 0 to N documents,
+        // but a pin rules can move it after N.
+        // In this case, we have to remove it and get the next item.
+        // Anyway, it would fall on the next page, and we don't have it.
+        // This is why we double the limit, so we have the next page ready.
+        (limit.0 + offset.0) * 2
+    };
+
+    let top = if let Some(sort_by) = sort_by {
         if relevant_indexes.is_empty() {
             return Err(anyhow!(
                 "Cannot sort by \"{}\": no index has that field",
@@ -157,83 +167,69 @@ pub async fn sort_and_truncate_documents(
             ));
         }
 
-        // Calculate total number of documents needed (limit + offset for pagination)
-        let desiderata = limit.0 + offset.0;
-
-        // If there's only one index, use the existing optimized path
-        // Single-index sorting is more efficient as it avoids collecting and re-sorting all results
         if relevant_indexes.len() == 1 {
+            // If there's only one index, use the existing optimized path
             let output = relevant_indexes[0]
                 .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                    process_sort_iterator(iter, desiderata)
+                    process_sort_iterator(iter, top_count)
                 })
                 .await?;
 
-            return Ok(truncate(token_scores, output.into_iter(), limit, offset));
+            truncate(token_scores, output.into_iter(), top_count)
+        } else {
+            // - For the relevant_indexes, we obtain the first `top_count` items.
+            //   So `all_results` contains something like
+            //
+            //   |sorted data from index1|
+            //   |sorted data from index2|
+            //   |sorted data from index3|
+            //
+            //   which aren't globally sorted
+            //
+            // - Re-sorting the merged results to maintain global order across indexes
+            // - Truncating the results to the desired limit
+            // Note: Each index only returns up to 'top_count' results, not all documents
+            // NB: this is not optimal because we collect all the data and sort it again.
+            //     we can optimize it, without collecting them and re-order.
+            let mut all_results = Vec::new();
+
+            for index in relevant_indexes {
+                let index_results = index
+                    .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
+                        process_sort_iterator(iter, top_count)
+                    })
+                    .await?;
+
+                all_results.extend(index_results);
+            }
+
+            // Sort the merged results by their numeric values to ensure global ordering
+            all_results.sort_by_key(|(n, _)| *n);
+
+            // Apply descending order if requested by reversing the sorted results
+            if sort_by.order == SortOrder::Descending {
+                all_results.reverse();
+            }
+
+            // Get top
+            truncate(
+                token_scores,
+                all_results.into_iter(),
+                top_count,
+            )
         }
-
-        // - For the relevant_indexes, we obtain the first `desiderata` items.
-        //   So `all_results` contains something like
-        //
-        //   |sorted data from index1|
-        //   |sorted data from index2|
-        //   |sorted data from index3|
-        //
-        //   which aren't globally sorted
-        //
-        // - Re-sorting the merged results to maintain global order across indexes
-        // - Truncating the results to the desired limit
-        // Note: Each index only returns up to 'desiderata' results, not all documents
-        let mut all_results = Vec::new();
-
-        for index in relevant_indexes {
-            let index_results = index
-                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                    process_sort_iterator(iter, desiderata)
-                })
-                .await?;
-
-            all_results.extend(index_results);
-        }
-
-        // Sort the merged results by their numeric values to ensure global ordering
-        all_results.sort_by_key(|(n, _)| *n);
-
-        // Apply descending order if requested by reversing the sorted results
-        if sort_by.order == SortOrder::Descending {
-            all_results.reverse();
-        }
-
-        // Apply pagination (limit/offset) and convert to final TokenScore format
-        Ok(truncate(
-            token_scores,
-            all_results.into_iter(),
-            limit,
-            offset,
-        ))
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
-        let top_count = if pins.is_empty() {
-            limit.0 + offset.0
-        } else {
-            // The user could ask 0-x documents,
-            // but one of them appear after x due to pin rules.
-            // In this case we need to have the next item,
-            // but it falls in the next page.
-            // So, we have to have the double of the asked item.
-            (limit.0 + offset.0) * 2
-        };
+        top_n(token_scores.iter(), top_count)
+    };
 
-        let top = top_n(token_scores.iter(), top_count);
+    let top = if !pins.is_empty() {
+        apply_pin_rules(pins, token_scores, top)
+    } else {
+        top
+    };
 
-        let top = if !pins.is_empty() {
-            apply_pin_rules(pins, token_scores, top)
-        } else {
-            top
-        };
-
-        Ok(top)
-    }
+    Ok(top)
 }
 
 fn apply_pin_rules(

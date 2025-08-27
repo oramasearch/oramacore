@@ -38,7 +38,7 @@ use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
-use crate::pin_rules::PinRule;
+use crate::pin_rules::{PinRule, PinRuleOperation};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -379,11 +379,47 @@ impl Index {
         }
         drop(doc_id_storage);
 
+        self.update_pin_rules(&doc, index_operation_batch).await;
+
         self.process_document(doc_id, doc, index_operation_batch)
             .await
             .context("Cannot process document")?;
 
         Ok(old_document_id)
+    }
+
+    async fn update_pin_rules(&self, new_document: &Document, index_operation_batch: &mut Vec<WriteOperation>) {
+        let mut pin_rules_writer = self.pin_rules_writer.write().await;
+        let rules = pin_rules_writer.get_matching_rules(
+            new_document
+                .inner
+                .get("id")
+                .expect("Document does not have an id")
+                .as_str()
+                .expect("Document id is not a string"),
+        );
+        if !rules.is_empty() {
+            let storage = self.get_document_id_storage().await;
+            let storage = &*storage;
+            for rule in rules {
+                let new_rule = rule
+                    .convert_ids(|id| {
+                        // DocumentId(u64::MAX) is never used, so this is equal to say
+                        // "ignore this rules"
+                        storage.get(&id).unwrap_or(DocumentId(u64::MAX)).clone()
+                    })
+                    .await;
+                index_operation_batch.push(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::PinRule(PinRuleOperation::Insert(
+                            new_rule,
+                        )),
+                    ),
+                ));
+            }
+        }
     }
 
     async fn process_document(

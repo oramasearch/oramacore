@@ -80,6 +80,7 @@ impl PinRulesWriter {
 
     pub async fn insert_pin_rule(&mut self, rule: PinRule<String>) -> Result<(), PinRulesWriterError> {
         self.rules.retain(|r| r.id != rule.id);
+        self.rule_ids_to_delete.retain(|id| id != &rule.id);
         self.rules.push(rule);
 
         Ok(())
@@ -112,13 +113,13 @@ impl PinRulesWriter {
     pub fn get_matching_rules(
         &self,
         doc_id_str: &str,
-    ) -> Result<Vec<PinRule<String>>, PinRulesWriterError> {
+    ) -> Vec<PinRule<String>> {
         let rules = self.list_pin_rules();
 
-        Ok(rules.into_iter()
+        rules.into_iter()
             .filter(|rule| rule.consequence.promote.iter().any(|p| p.doc_id == doc_id_str))
             .cloned()
-            .collect())
+            .collect()
     }
 }
 

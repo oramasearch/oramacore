@@ -593,9 +593,9 @@ impl CollectionWriter {
         let storage = index.get_document_id_storage().await;
         let new_rule = rule
             .convert_ids(|id| {
-                // DocumentId(0) is never used, so this is equal to say
+                // DocumentId(u64::MAX) is never used, so this is equal to say
                 // "ignore this rules"
-                storage.get(&id).unwrap_or(DocumentId(0)).clone()
+                storage.get(&id).unwrap_or(DocumentId(u64::MAX)).clone()
             })
             .await;
 

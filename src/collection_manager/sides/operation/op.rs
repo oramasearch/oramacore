@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use std::fmt::{Debug, Formatter};
 use crate::pin_rules::PinRuleOperation;
 use hook_storage::HookOperation;
 use serde::{ser::SerializeTuple, Deserialize, Serialize};
@@ -127,7 +127,7 @@ pub enum IndexWriteOperationFieldType {
     Embedding(OramaModelSerializable),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum IndexWriteOperation {
     CreateField2 {
         field_id: FieldId,
@@ -149,6 +149,42 @@ pub enum IndexWriteOperation {
 }
 
 pub type EmbeddingIndexData = Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>;
+
+impl Debug for IndexWriteOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CreateField2{field_id, field_path, is_array, field_type} => {
+                f.debug_struct("CreateField2")
+                    .field("field_id", field_id)
+                    .field("field_path", field_path)
+                    .field("is_array", is_array)
+                    .field("field_type", field_type)
+                    .finish()
+            },
+            Self::Index{doc_id, indexed_values} => {
+                f.debug_struct("Index")
+                    .field("doc_id", doc_id)
+                    .field("indexed_values", indexed_values)
+                    .finish()
+            },
+            Self::IndexEmbedding{ data} => {
+                f.debug_struct("IndexEmbedding")
+                    // Avoid log embedding
+                    .finish_non_exhaustive()
+            },
+            Self::PinRule(rule) => {
+                f.debug_struct("PinRule")
+                    .field("rule", rule)
+                    .finish()
+            },
+            Self::DeleteDocuments { doc_ids } => {
+                f.debug_struct("DeleteDocuments")
+                    .field("doc_ids", doc_ids)
+                    .finish()
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplaceIndexReason {
