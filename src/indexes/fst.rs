@@ -268,10 +268,7 @@ mod tests {
 
     #[test]
     fn test_exact_match() -> Result<()> {
-        let data = vec![
-            ("serve".as_bytes(), 1),
-            ("server".as_bytes(), 2),
-        ];
+        let data = vec![("serve".as_bytes(), 1), ("server".as_bytes(), 2)];
         let data_dir = generate_new_path();
         let paged_index = FSTIndex::from_iter(data.into_iter(), data_dir.clone())?;
 

@@ -461,7 +461,8 @@ impl LoadedCommittedStringField {
 
             let matches = iter
                 .flat_map(|(is_exact, posting_list_id)| {
-                    self.posting_storage.get_posting(&posting_list_id)
+                    self.posting_storage
+                        .get_posting(&posting_list_id)
                         .into_iter()
                         .map(move |posting| (is_exact, posting))
                 })
@@ -490,22 +491,11 @@ impl LoadedCommittedStringField {
                                 return None;
                             }
 
-                            Some((
-                                doc_id,
-                                term_occurrence_in_field,
-                                field_length,
-                                is_exact,
-                            ))
+                            Some((doc_id, term_occurrence_in_field, field_length, is_exact))
                         })
                 });
 
-            for (
-                doc_id,
-                term_occurrence_in_field,
-                field_length,
-                is_exact,
-            ) in matches
-            {
+            for (doc_id, term_occurrence_in_field, field_length, is_exact) in matches {
                 let field_id = context.field_id;
 
                 // User-defined field boost as BM25F weight
@@ -517,7 +507,7 @@ impl LoadedCommittedStringField {
                 };
                 let field_params = BM25FFieldParams {
                     weight,
-                    b: 0.75,               // Default normalization parameter
+                    b: 0.75, // Default normalization parameter
                 };
 
                 scorer.add_field(
@@ -568,7 +558,8 @@ impl LoadedCommittedStringField {
 
             let iter = iter
                 .filter_map(|(is_exact, posting_id)| {
-                    self.posting_storage.get_posting(&posting_id)
+                    self.posting_storage
+                        .get_posting(&posting_id)
                         .map(move |posting| (is_exact, posting))
                 })
                 .flat_map(|(is_exact, postings)| {
@@ -614,7 +605,9 @@ impl LoadedCommittedStringField {
                         })
                 });
 
-            for (doc_id, field_length, positions, total_documents_with_term_in_field, is_exact) in iter {
+            for (doc_id, field_length, positions, total_documents_with_term_in_field, is_exact) in
+                iter
+            {
                 let v = storage
                     .entry(*doc_id)
                     .or_insert_with(|| PhraseMatchStorage {
@@ -676,8 +669,12 @@ impl LoadedCommittedStringField {
                 b: 0.75, // Default normalization parameter @todo: make this configurable?
             };
 
-            for (field_length, term_occurrence_in_field, _total_documents_with_term_in_field, is_exact) in
-                matches
+            for (
+                field_length,
+                term_occurrence_in_field,
+                _total_documents_with_term_in_field,
+                is_exact,
+            ) in matches
             {
                 if is_exact {
                     field_params.weight *= EXACT_MATCH_BOOST_MULTIPLIER
