@@ -184,9 +184,9 @@ class ModelGroups(Enum):
         OramaModelInfo.MultilingualMiniLML12V2,
     ]
     small = [
-        OramaModelInfo.BGESmallRaw,
+        # OramaModelInfo.BGESmallRaw,
         OramaModelInfo.BGESmall,
-        OramaModelInfo.MultilingualE5Small,
+        # OramaModelInfo.MultilingualE5Small,
     ]
     code = [OramaModelInfo.JinaEmbeddingsV2BaseCode]
     all = [
