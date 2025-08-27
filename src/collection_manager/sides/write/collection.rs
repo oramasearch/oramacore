@@ -23,10 +23,10 @@ use crate::{
 };
 use fs::BufferedFile;
 
-use nlp::{locales::Locale, TextParser};
+use super::index::Index;
 use crate::collection_manager::sides::IndexWriteOperation;
 use crate::pin_rules::{PinRule, PinRuleOperation};
-use super::index::Index;
+use nlp::{locales::Locale, TextParser};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
@@ -583,7 +583,11 @@ impl CollectionWriter {
         &self.hook
     }
 
-    pub async fn insert_pin_rule(&self, index_id: IndexId, rule: PinRule<String>) -> Result<(), WriteError> {
+    pub async fn insert_pin_rule(
+        &self,
+        index_id: IndexId,
+        rule: PinRule<String>,
+    ) -> Result<(), WriteError> {
         let Some(index) = self.get_index(index_id).await else {
             return Err(WriteError::IndexNotFound(self.id, index_id));
         };
@@ -595,16 +599,29 @@ impl CollectionWriter {
             .convert_ids(|id| {
                 // DocumentId(u64::MAX) is never used, so this is equal to say
                 // "ignore this rules"
-                storage.get(&id).unwrap_or(DocumentId(u64::MAX)).clone()
+                storage.get(&id).unwrap_or(DocumentId(u64::MAX))
             })
             .await;
 
-        self.context.op_sender.send(WriteOperation::Collection(self.id, CollectionWriteOperation::IndexWriteOperation(index_id, IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule))))).await?;
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
+                ),
+            ))
+            .await?;
 
         Ok(())
     }
 
-    pub async fn delete_pin_rule(&self, index_id: IndexId, rule_id: String) -> Result<(), WriteError> {
+    pub async fn delete_pin_rule(
+        &self,
+        index_id: IndexId,
+        rule_id: String,
+    ) -> Result<(), WriteError> {
         let Some(index) = self.get_index(index_id).await else {
             return Err(WriteError::IndexNotFound(self.id, index_id));
         };

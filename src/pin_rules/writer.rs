@@ -1,11 +1,11 @@
-use fs::*;
-use std::{collections::HashMap, fmt::Debug, path::PathBuf};
+use super::PinRule;
+use crate::pin_rules::file_util::{is_rule_file, remove_rule_file};
 use anyhow::Context;
 use debug_panic::debug_panic;
+use fs::*;
+use std::{collections::HashMap, fmt::Debug, path::PathBuf};
 use thiserror::Error;
 use tracing::error;
-use crate::pin_rules::file_util::{is_rule_file, remove_rule_file};
-use super::PinRule;
 
 #[derive(Error, Debug)]
 pub enum PinRulesWriterError {
@@ -28,13 +28,10 @@ impl PinRulesWriter {
         })
     }
 
-    pub fn try_new(
-        data_dir: PathBuf
-    ) -> Result<Self, PinRulesWriterError> {
+    pub fn try_new(data_dir: PathBuf) -> Result<Self, PinRulesWriterError> {
         create_if_not_exists(&data_dir)?;
 
-        let dir = std::fs::read_dir(data_dir)
-            .context("Cannot read dir")?;
+        let dir = std::fs::read_dir(data_dir).context("Cannot read dir")?;
 
         let mut rules = Vec::new();
         for entry in dir {
@@ -71,14 +68,17 @@ impl PinRulesWriter {
         }
 
         for rule_id_to_remove in self.rule_ids_to_delete.drain(..) {
-            let file_path = data_dir.join(format!("{}.rule", rule_id_to_remove));
+            let file_path = data_dir.join(format!("{rule_id_to_remove}.rule"));
             remove_rule_file(file_path);
         }
 
         Ok(())
     }
 
-    pub async fn insert_pin_rule(&mut self, rule: PinRule<String>) -> Result<(), PinRulesWriterError> {
+    pub async fn insert_pin_rule(
+        &mut self,
+        rule: PinRule<String>,
+    ) -> Result<(), PinRulesWriterError> {
         self.rules.retain(|r| r.id != rule.id);
         self.rule_ids_to_delete.retain(|id| id != &rule.id);
         self.rules.push(rule);
@@ -110,14 +110,17 @@ impl PinRulesWriter {
         Ok(ret)
     }
 
-    pub fn get_matching_rules(
-        &self,
-        doc_id_str: &str,
-    ) -> Vec<PinRule<String>> {
+    pub fn get_matching_rules(&self, doc_id_str: &str) -> Vec<PinRule<String>> {
         let rules = self.list_pin_rules();
 
-        rules.into_iter()
-            .filter(|rule| rule.consequence.promote.iter().any(|p| p.doc_id == doc_id_str))
+        rules
+            .iter()
+            .filter(|rule| {
+                rule.consequence
+                    .promote
+                    .iter()
+                    .any(|p| p.doc_id == doc_id_str)
+            })
             .cloned()
             .collect()
     }
@@ -126,7 +129,7 @@ impl PinRulesWriter {
 #[cfg(test)]
 mod pin_rules_tests {
     use super::*;
-    use crate::pin_rules::{PinRuleOperation, Consequence};
+    use crate::pin_rules::Consequence;
     use fs::generate_new_path;
 
     #[tokio::test]
@@ -166,7 +169,7 @@ mod pin_rules_tests {
 
         writer.commit(path.clone()).unwrap();
 
-        let writer =  PinRulesWriter::try_new(path).unwrap();
+        let writer = PinRulesWriter::try_new(path).unwrap();
 
         let rules = writer.list_pin_rules();
         assert_eq!(rules.len(), 1);

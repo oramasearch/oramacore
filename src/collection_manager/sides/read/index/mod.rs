@@ -76,6 +76,7 @@ use crate::{
     types::FieldId,
 };
 
+use crate::pin_rules::PinRulesReader;
 pub use committed_field::{
     CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
     CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
@@ -86,8 +87,6 @@ pub use uncommitted_field::{
     UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
     UncommittedVectorFieldStats,
 };
-use crate::collection_manager::sides::CollectionWriteOperation;
-use crate::pin_rules::PinRulesReader;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeletionReason {
@@ -732,7 +731,8 @@ impl Index {
         drop(committed_fields);
 
         let mut pin_rules_reader = self.pin_rules_reader.write().await;
-        pin_rules_reader.commit(data_dir.join("pin_rules"))
+        pin_rules_reader
+            .commit(data_dir.join("pin_rules"))
             .context("Cannot commit pin rules")?;
 
         self.try_unload_fields().await;
@@ -961,7 +961,7 @@ impl Index {
                 self.document_count = self.document_count.saturating_sub(len);
             }
             IndexWriteOperation::PinRule(op) => {
-                let mut pin_rules_lock = self.pin_rules_reader.get_mut();
+                let pin_rules_lock = self.pin_rules_reader.get_mut();
                 pin_rules_lock
                     .update(op)
                     .context("Cannot apply pin rule operation")?;

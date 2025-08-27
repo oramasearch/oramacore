@@ -24,8 +24,7 @@ use std::{
 use super::{
     generic_kv::{KVConfig, KV},
     system_prompts::SystemPromptInterface,
-    CollectionWriteOperation, IndexWriteOperation, Offset, OperationSender, OperationSenderCreator,
-    OutputSideChannelType,
+    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
 };
 
 use anyhow::{Context, Result};
@@ -46,7 +45,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
-use crate::pin_rules::{PinRuleOperation, PinRulesWriterError};
+use crate::pin_rules::PinRulesWriterError;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -93,7 +92,7 @@ pub enum WriteError {
     #[error("Error in hook")]
     HookWriterError(#[from] HookWriterError),
     #[error("Error in pin rule")]
-    PinRulesError(#[from] PinRulesWriterError)
+    PinRulesError(#[from] PinRulesWriterError),
 }
 
 #[derive(Debug, Deserialize, Clone)]

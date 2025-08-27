@@ -7,18 +7,16 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use http::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::collection_manager::sides::read::ReadError;
+use crate::collection_manager::sides::write::WriteError;
+use crate::types::IndexId;
 use crate::{
     collection_manager::sides::{read::ReadSide, write::WriteSide},
     types::{CollectionId, WriteApiKey},
 };
-use crate::collection_manager::sides::write::WriteError;
-use crate::types::IndexId;
-use crate::web_server::api::index;
 
 pub fn read_apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
@@ -110,7 +108,9 @@ async fn list_pin_rules_ids_v1(
     Query(ApiKeyQueryParams { api_key }): Query<ApiKeyQueryParams>,
     read_side: State<Arc<ReadSide>>,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
-    let ids = read_side.list_pin_rule_ids(collection_id, index_id, api_key).await?;
+    let ids = read_side
+        .list_pin_rule_ids(collection_id, index_id, api_key)
+        .await?;
 
     Ok::<_, ReadError>(Json(json!({ "success": true, "data": ids })))
 }

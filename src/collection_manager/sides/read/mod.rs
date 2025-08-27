@@ -49,11 +49,11 @@ use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
-use crate::types::{IndexId, NLPSearchRequest};
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchParams, SearchResult, SearchResultHit, TokenScore,
 };
+use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
 use fs::BufferedFile;
 use nlp::NLPService;
@@ -846,7 +846,6 @@ impl ReadSide {
         };
 
         let ids = index.get_pin_rule_ids().await;
-
 
         Ok(ids)
     }

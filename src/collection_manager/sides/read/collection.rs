@@ -28,10 +28,9 @@ use crate::{
         },
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
-    pin_rules::PinRulesReader,
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, Limit, Role, SearchOffset, SearchParams, SortBy, TokenScore,
+        InteractionMessage, Limit, Role, SearchOffset, SearchParams, TokenScore,
     },
 };
 
@@ -527,16 +526,15 @@ impl CollectionReader {
             pins.extend(pin_rules.apply(t));
         }
 
-        let result =
-            sort_and_truncate_documents(
-                &relevant_indexes_for_sorting,
-                pins,
-                token_scores,
-                limit,
-                offset,
-                sort_by
-            )
-                .await;
+        let result = sort_and_truncate_documents(
+            &relevant_indexes_for_sorting,
+            pins,
+            token_scores,
+            limit,
+            offset,
+            sort_by,
+        )
+        .await;
 
         drop(indexes_lock);
         result

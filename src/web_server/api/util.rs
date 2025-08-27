@@ -419,7 +419,8 @@ impl IntoResponse for ReadError {
             Self::IndexNotFound(collection_id, index_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Index {index_id:?} not found in Collection {collection_id:?}"),
-            ).into_response()
+            )
+                .into_response(),
         }
     }
 }

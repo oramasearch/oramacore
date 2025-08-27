@@ -37,8 +37,8 @@ use crate::{
 use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
-pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 use crate::pin_rules::{PinRule, PinRuleOperation};
+pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
@@ -296,7 +296,8 @@ impl Index {
             .context("Cannot serialize collection info")?;
 
         let mut pin_rules_writer = self.pin_rules_writer.write().await;
-        pin_rules_writer.commit(data_dir.join("pin_rules"))
+        pin_rules_writer
+            .commit(data_dir.join("pin_rules"))
             .context("Cannot commit index")?;
 
         let doc_id_storage = self.doc_id_storage.read().await;
@@ -388,8 +389,12 @@ impl Index {
         Ok(old_document_id)
     }
 
-    async fn update_pin_rules(&self, new_document: &Document, index_operation_batch: &mut Vec<WriteOperation>) {
-        let mut pin_rules_writer = self.pin_rules_writer.write().await;
+    async fn update_pin_rules(
+        &self,
+        new_document: &Document,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) {
+        let pin_rules_writer = self.pin_rules_writer.write().await;
         let rules = pin_rules_writer.get_matching_rules(
             new_document
                 .inner
@@ -406,16 +411,14 @@ impl Index {
                     .convert_ids(|id| {
                         // DocumentId(u64::MAX) is never used, so this is equal to say
                         // "ignore this rules"
-                        storage.get(&id).unwrap_or(DocumentId(u64::MAX)).clone()
+                        storage.get(&id).unwrap_or(DocumentId(u64::MAX))
                     })
                     .await;
                 index_operation_batch.push(WriteOperation::Collection(
                     self.collection_id,
                     CollectionWriteOperation::IndexWriteOperation(
                         self.index_id,
-                        IndexWriteOperation::PinRule(PinRuleOperation::Insert(
-                            new_rule,
-                        )),
+                        IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
                     ),
                 ));
             }
@@ -737,85 +740,17 @@ impl Index {
         Ok(())
     }
 
-    pub async fn insert_pin_rule(&self, rule: PinRule<String>) {
-
-    }
+    pub async fn insert_pin_rule(&self, rule: PinRule<String>) {}
 
     pub async fn get_pin_rule_writer(&self) -> tokio::sync::RwLockReadGuard<'_, PinRulesWriter> {
         self.pin_rules_writer.read().await
     }
 
-    pub async fn get_write_pin_rule_writer(&self) -> tokio::sync::RwLockWriteGuard<'_, PinRulesWriter> {
+    pub async fn get_write_pin_rule_writer(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, PinRulesWriter> {
         self.pin_rules_writer.write().await
     }
-
-    /*
-    pub async fn get_pin_rules_lock(
-        &self,
-    ) -> Result<LockedPinRules<'_>> {
-        let lock = self.pin_rules_writer.read().await;
-        LockedPinRules::try_new(lock)
-    }
-
-    pub async fn update_pin_rules_ref_if_needed(
-        &self, locked_pin_rules: &mut LockedPinRules<'_>, doc_id_str: &str, doc_id_to_assign: DocumentId
-    ) -> Result<()> {
-
-        let updated_rules = locked_pin_rules.update_ref(doc_id_str, doc_id_to_assign)?;
-
-        Ok(())
-    }
-
-    pub async fn insert_pin_rule(&self, rule: PinRule<String>) -> Result<()> {
-        let lock = self.pin_rules_writer.write().await;
-        lock.insert_pin_rule(rule.clone()).await?;
-        drop(lock);
-
-        let lock = self.indexes.read().await;
-        let guards = lock.values().collect::<Vec<_>>();
-        let rule: PinRule<DocumentId> = rule.convert_ids(|doc_id| {
-            let guards = guards.clone();
-            async move {
-                for i in guards {
-                    let d = i.get_document_id_storage().await;
-                    if let Some(doc_id) = d.get(&doc_id) {
-                        return doc_id;
-                    }
-                }
-
-                DocumentId(0)
-            }
-        }).await;
-        drop(lock);
-
-        self.context.op_sender.send(WriteOperation::Collection(
-            self.id,
-            CollectionWriteOperation::PinRule(PinRuleOperation::Insert(rule)),
-        )).await.context("Cannot send operation")?;
-
-        Ok(())
-    }
-
-    pub async fn delete_pin_rule(&self, rule_id: String) -> Result<()> {
-        let lock = self.pin_rules_writer.write().await;
-        lock.delete_pin_rule(&rule_id).await?;
-        drop(lock);
-
-        self.context.op_sender.send(WriteOperation::Collection(
-            self.id,
-            CollectionWriteOperation::PinRule(PinRuleOperation::Delete(rule_id)),
-        )).await.context("Cannot send operation")?;
-
-        Ok(())
-    }
-
-    pub async fn list_pin_rules(&self) -> Result<Vec<PinRule<String>>> {
-        let lock = self.pin_rules_writer.read().await;
-        let rules = lock.list_pin_rules();
-        drop(lock);
-        rules.context("Failed to list pin rules")
-    }
-    */
 }
 
 fn calculate_fields_for(

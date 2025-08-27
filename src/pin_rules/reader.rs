@@ -1,11 +1,11 @@
 use std::{fmt::Debug, path::PathBuf};
 
+use crate::pin_rules::file_util::{get_rule_file_name, is_rule_file, remove_rule_file};
+use crate::types::DocumentId;
 use anyhow::Context;
 use fs::*;
 use thiserror::Error;
 use tracing::error;
-use crate::pin_rules::file_util::{get_rule_file_name, is_rule_file, remove_rule_file};
-use crate::types::DocumentId;
 
 use super::{Condition, Consequence, PinRule, PinRuleOperation};
 
@@ -60,10 +60,9 @@ impl PinRulesReader {
                 self.rule_ids_to_delete.retain(|id| id != &rule.id);
                 self.rules.retain(|rule| rule.id != rule.id);
                 self.rules.push(rule);
-
             }
             PinRuleOperation::Delete(rule_id) => {
-                self.rules.retain(|r| &r.id != &rule_id);
+                self.rules.retain(|r| r.id != rule_id);
                 self.rule_ids_to_delete.push(rule_id);
             }
         }
@@ -93,10 +92,7 @@ impl PinRulesReader {
         self.rules.iter().map(|r| r.id.clone()).collect()
     }
 
-    pub fn apply(
-        &self,
-        term: &str,
-    ) -> Vec<Consequence<DocumentId>> {
+    pub fn apply(&self, term: &str) -> Vec<Consequence<DocumentId>> {
         let mut results = Vec::new();
         for rule in &self.rules {
             for c in &rule.conditions {
@@ -116,8 +112,8 @@ impl PinRulesReader {
 
 #[cfg(test)]
 mod pin_rules_tests {
-    use crate::pin_rules::PromoteItem;
     use super::*;
+    use crate::pin_rules::PromoteItem;
 
     #[test]
     fn test_pin_rules_reader_empty() {
@@ -135,8 +131,7 @@ mod pin_rules_tests {
     #[test]
     fn test_apply_pin_rules() {
         let base_dir = generate_new_path();
-        let mut reader =
-            PinRulesReader::empty();
+        let mut reader = PinRulesReader::empty();
 
         reader
             .update(PinRuleOperation::Insert(PinRule {
@@ -162,7 +157,9 @@ mod pin_rules_tests {
         assert_eq!(consequences[0].promote[0].doc_id, DocumentId(1));
         assert_eq!(consequences[0].promote[0].position, 1);
 
-        reader.commit(base_dir.clone()).expect("Failed to commit rules");
+        reader
+            .commit(base_dir.clone())
+            .expect("Failed to commit rules");
 
         let mut reader =
             PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");
@@ -183,7 +180,9 @@ mod pin_rules_tests {
         let consequences = reader.apply("test");
         assert_eq!(consequences.len(), 0);
 
-        reader.commit(base_dir.clone()).expect("Failed to commit rules");
+        reader
+            .commit(base_dir.clone())
+            .expect("Failed to commit rules");
 
         let reader =
             PinRulesReader::try_new(base_dir.clone()).expect("Failed to create PinRulesReader");

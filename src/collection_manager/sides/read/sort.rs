@@ -4,12 +4,12 @@ use std::iter::Peekable;
 use anyhow::{anyhow, Result};
 use ordered_float::NotNan;
 
+use super::index::Index;
+use crate::pin_rules::Consequence;
 use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, SortOrder, TokenScore},
 };
-use crate::pin_rules::Consequence;
-use super::index::Index;
 
 pub struct SortIterator<'s1, 's2, T: Ord + Clone> {
     iter1: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>>,
@@ -212,11 +212,7 @@ pub async fn sort_and_truncate_documents(
             }
 
             // Get top
-            truncate(
-                token_scores,
-                all_results.into_iter(),
-                top_count,
-            )
+            truncate(token_scores, all_results.into_iter(), top_count)
         }
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
@@ -235,7 +231,7 @@ pub async fn sort_and_truncate_documents(
 fn apply_pin_rules(
     pins: Vec<Consequence<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
-    mut top: Vec<TokenScore>
+    mut top: Vec<TokenScore>,
 ) -> Vec<TokenScore> {
     if pins.is_empty() {
         return top;
@@ -252,16 +248,13 @@ fn apply_pin_rules(
         return top;
     }
 
-    let doc_ids_to_promote: HashSet<_> = promote_items.iter().map(|p| p.doc_id)
-        .collect();
+    let doc_ids_to_promote: HashSet<_> = promote_items.iter().map(|p| p.doc_id).collect();
 
     // If re want to remove all the doc_ids that are already present in `top`
     // This:
     // - avoid document duplication
     // - handle the pagination correctly
-    top.retain(|ts| {
-        !doc_ids_to_promote.contains(&ts.document_id)
-    });
+    top.retain(|ts| !doc_ids_to_promote.contains(&ts.document_id));
 
     // Sort promote items by position to handle them in order
     promote_items.sort_by_key(|item| item.position);
@@ -271,7 +264,7 @@ fn apply_pin_rules(
 
     for promote_item in promote_items {
         let target_position = promote_item.position as usize;
-        
+
         // Skip if target position is beyond the vector size
         if target_position >= top.len() {
             continue;
@@ -280,10 +273,13 @@ fn apply_pin_rules(
         if let Some(score) = token_scores.get(&promote_item.doc_id) {
             // Insert it at the target position.
             // The other are shifted.
-            top.insert(target_position, TokenScore {
-                document_id: promote_item.doc_id,
-                score: *score,
-            });
+            top.insert(
+                target_position,
+                TokenScore {
+                    document_id: promote_item.doc_id,
+                    score: *score,
+                },
+            );
         }
     }
 

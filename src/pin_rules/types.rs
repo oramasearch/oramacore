@@ -1,7 +1,6 @@
-use std::future::Future;
 use futures::StreamExt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use crate::types::SearchParams;
+use std::future::Future;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -12,7 +11,6 @@ pub struct PinRule<DocId> {
 }
 
 impl<DocId> PinRule<DocId> {
-
     pub async fn convert_ids<F, NewId>(self, f: F) -> PinRule<NewId>
     where
         F: Fn(DocId) -> NewId,
@@ -21,16 +19,18 @@ impl<DocId> PinRule<DocId> {
             id: self.id,
             conditions: self.conditions,
             consequence: Consequence {
-                promote: self.consequence.promote.into_iter()
+                promote: self
+                    .consequence
+                    .promote
+                    .into_iter()
                     .map(|item| {
                         let new_doc_id = f(item.doc_id);
                         PromoteItem {
                             doc_id: new_doc_id,
                             position: item.position,
                         }
-
                     })
-                    .collect()
+                    .collect(),
             },
         }
     }
@@ -90,13 +90,13 @@ struct SerdeCondition {
 impl Serialize for Condition {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let c = match self {
-            Condition::Is { pattern} => SerdeCondition {
+            Condition::Is { pattern } => SerdeCondition {
                 anchoring: "is".to_string(),
                 pattern: Some(pattern.clone()),
-            }
+            },
         };
         c.serialize(serializer)
     }
@@ -105,7 +105,7 @@ impl Serialize for Condition {
 impl<'de> Deserialize<'de> for Condition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         let c = SerdeCondition::deserialize(deserializer)?;
 
@@ -116,7 +116,7 @@ impl<'de> Deserialize<'de> for Condition {
                 } else {
                     Err(serde::de::Error::custom("Unexpected pattern"))
                 }
-            },
+            }
             _ => Err(serde::de::Error::custom("Unexpected anchoring")),
         }
     }
