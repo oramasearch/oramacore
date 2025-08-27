@@ -45,6 +45,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
+use crate::pin_rules::PinRulesWriterError;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -90,6 +91,8 @@ pub enum WriteError {
     TempIndexNotFound(CollectionId, IndexId),
     #[error("Error in hook")]
     HookWriterError(#[from] HookWriterError),
+    #[error("Error in pin rule")]
+    PinRulesError(#[from] PinRulesWriterError),
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -369,9 +372,7 @@ impl WriteSide {
         collection_id: CollectionId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let CreateIndexRequest {
             index_id,
@@ -399,9 +400,7 @@ impl WriteSide {
         reference: Option<String>,
     ) -> Result<(), WriteError> {
         // Get initial collection state and create temporary index
-        let mut collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let mut collection = self.get_collection(collection_id, write_api_key).await?;
 
         collection
             .change_runtime_config(language.into(), model)
@@ -549,9 +548,7 @@ impl WriteSide {
         req: ReplaceIndexRequest,
         reason: ReplaceIndexReason,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         collection
             .replace_index(
@@ -572,9 +569,7 @@ impl WriteSide {
         copy_from: IndexId,
         req: CreateIndexRequest,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let CreateIndexRequest {
             index_id: new_index_id,
@@ -594,9 +589,7 @@ impl WriteSide {
         collection_id: CollectionId,
         index_id: IndexId,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let document_to_remove = collection.delete_index(index_id).await?;
 
@@ -615,9 +608,7 @@ impl WriteSide {
         let document_count = document_list.len();
         info!(?document_count, "Inserting batch of documents");
 
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let index = collection
             .get_index(index_id)
@@ -682,9 +673,7 @@ impl WriteSide {
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
         let index = collection
             .get_index(index_id)
             .await
@@ -704,13 +693,12 @@ impl WriteSide {
         index_id: IndexId,
         update_document_request: UpdateDocumentRequest,
     ) -> Result<UpdateDocumentsResult, WriteError> {
-        let mut collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let mut collection = self.get_collection(collection_id, write_api_key).await?;
         let mut index = collection
             .get_index(index_id)
             .await
             .ok_or_else(|| WriteError::IndexNotFound(collection_id, index_id))?;
+
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let document_count = update_document_request.documents.0.len();
@@ -910,9 +898,7 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<Vec<Document>, WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
 
         let document_ids = collection.get_document_ids().await;
 
@@ -1138,7 +1124,7 @@ impl WriteSide {
         Ok(result)
     }
 
-    async fn get_collection_with_write_key(
+    pub async fn get_collection(
         &self,
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
@@ -1173,8 +1159,7 @@ impl WriteSide {
         collection_id: CollectionId,
         write_api_key: WriteApiKey,
     ) -> Result<()> {
-        self.get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        self.get_collection(collection_id, write_api_key).await?;
         Ok(())
     }
 
@@ -1200,9 +1185,7 @@ impl WriteSide {
         write_api_key: WriteApiKey,
         collection_id: CollectionId,
     ) -> Result<HookWriterLock<'s>, WriteError> {
-        let collection = self
-            .get_collection_with_write_key(collection_id, write_api_key)
-            .await?;
+        let collection = self.get_collection(collection_id, write_api_key).await?;
         Ok(HookWriterLock { collection })
     }
 

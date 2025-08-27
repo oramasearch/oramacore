@@ -32,6 +32,7 @@ mod capped_heap;
 mod metrics;
 
 mod merger;
+mod pin_rules;
 
 pub mod build_info;
 

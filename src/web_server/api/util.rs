@@ -328,6 +328,10 @@ impl IntoResponse for WriteError {
                 let body = format!("Invalid hook: {e:?}");
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
+            WriteError::PinRulesError(e) => {
+                let body = format!("Invalid hook: {e:?}");
+                (StatusCode::BAD_REQUEST, body).into_response()
+            }
         }
     }
 }
@@ -412,6 +416,11 @@ impl IntoResponse for ReadError {
             Self::Hook(e) => {
                 (StatusCode::BAD_REQUEST, format!("Hook error: {e:?}")).into_response()
             }
+            Self::IndexNotFound(collection_id, index_id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Index {index_id:?} not found in Collection {collection_id:?}"),
+            )
+                .into_response(),
         }
     }
 }

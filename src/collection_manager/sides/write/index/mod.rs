@@ -28,6 +28,7 @@ use crate::{
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
     },
+    pin_rules::PinRulesWriter,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
@@ -36,6 +37,7 @@ use crate::{
 use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
+use crate::pin_rules::{PinRule, PinRuleOperation};
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]
@@ -63,6 +65,8 @@ pub struct Index {
     created_at: DateTime<Utc>,
 
     runtime_index_id: Option<IndexId>,
+
+    pin_rules_writer: RwLock<PinRulesWriter>,
 }
 
 impl Index {
@@ -96,6 +100,8 @@ impl Index {
             created_at: Utc::now(),
 
             runtime_index_id,
+
+            pin_rules_writer: RwLock::new(PinRulesWriter::empty()?),
         })
     }
 
@@ -133,7 +139,7 @@ impl Index {
             .map(|d| IndexScoreField::load_from(d, collection_id, index_id, context.clone()))
             .collect();
 
-        let doc_id_storage = DocIdStorage::load(data_dir)?;
+        let doc_id_storage = DocIdStorage::load(data_dir.clone())?;
 
         Ok(Self {
             collection_id,
@@ -153,6 +159,8 @@ impl Index {
             created_at: dump.created_at,
 
             runtime_index_id: dump.runtime_index_id,
+
+            pin_rules_writer: RwLock::new(PinRulesWriter::try_new(data_dir.join("pin_rules"))?),
         })
     }
 
@@ -287,6 +295,11 @@ impl Index {
             .write_json_data(&dump)
             .context("Cannot serialize collection info")?;
 
+        let mut pin_rules_writer = self.pin_rules_writer.write().await;
+        pin_rules_writer
+            .commit(data_dir.join("pin_rules"))
+            .context("Cannot commit index")?;
+
         let doc_id_storage = self.doc_id_storage.read().await;
         doc_id_storage
             .commit(data_dir)
@@ -367,11 +380,49 @@ impl Index {
         }
         drop(doc_id_storage);
 
+        self.update_pin_rules(&doc, index_operation_batch).await;
+
         self.process_document(doc_id, doc, index_operation_batch)
             .await
             .context("Cannot process document")?;
 
         Ok(old_document_id)
+    }
+
+    async fn update_pin_rules(
+        &self,
+        new_document: &Document,
+        index_operation_batch: &mut Vec<WriteOperation>,
+    ) {
+        let pin_rules_writer = self.pin_rules_writer.write().await;
+        let rules = pin_rules_writer.get_matching_rules(
+            new_document
+                .inner
+                .get("id")
+                .expect("Document does not have an id")
+                .as_str()
+                .expect("Document id is not a string"),
+        );
+        if !rules.is_empty() {
+            let storage = self.get_document_id_storage().await;
+            let storage = &*storage;
+            for rule in rules {
+                let new_rule = rule
+                    .convert_ids(|id| {
+                        // DocumentId(u64::MAX) is never used, so this is equal to say
+                        // "ignore this rules"
+                        storage.get(&id).unwrap_or(DocumentId(u64::MAX))
+                    })
+                    .await;
+                index_operation_batch.push(WriteOperation::Collection(
+                    self.collection_id,
+                    CollectionWriteOperation::IndexWriteOperation(
+                        self.index_id,
+                        IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
+                    ),
+                ));
+            }
+        }
     }
 
     async fn process_document(
@@ -687,6 +738,18 @@ impl Index {
             .context("Cannot send add fields operation")?;
 
         Ok(())
+    }
+
+    pub async fn insert_pin_rule(&self, rule: PinRule<String>) {}
+
+    pub async fn get_pin_rule_writer(&self) -> tokio::sync::RwLockReadGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.read().await
+    }
+
+    pub async fn get_write_pin_rule_writer(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, PinRulesWriter> {
+        self.pin_rules_writer.write().await
     }
 }
 

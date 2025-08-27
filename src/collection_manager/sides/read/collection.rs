@@ -30,7 +30,7 @@ use crate::{
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, Limit, Role, SearchOffset, SearchParams, SortBy, TokenScore,
+        InteractionMessage, Limit, Role, SearchOffset, SearchParams, TokenScore,
     },
 };
 
@@ -42,7 +42,7 @@ use super::{
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
-use crate::types::NLPSearchRequest;
+use crate::types::{NLPSearchRequest, SearchMode};
 use fs::*;
 use nlp::locales::Locale;
 
@@ -182,8 +182,9 @@ impl CollectionReader {
         // 2. We have to remove it from the in memory indexes and remove it from the disk
         // 3-4. We have to commit it and remove the temp indexes from the disk
         //
-        // NB: the document from the document_storage are removed
-        //     because the writer sends an appropriate command for that
+        // NB: For deleted index, the documents are removed
+        //     because the writer sends an appropriate command for that.
+        //     Hence, we don't need to do anything here.
 
         let indexes_lock = self.indexes.read().await;
         let mut index_ids = Vec::with_capacity(indexes_lock.len());
@@ -495,15 +496,16 @@ impl CollectionReader {
         token_scores: &HashMap<DocumentId, f32>,
         limit: Limit,
         offset: SearchOffset,
-        sort_by: Option<&SortBy>,
+        search_params: &SearchParams,
     ) -> Result<Vec<TokenScore>> {
+        let sort_by = search_params.sort_by.as_ref();
         info!(
             "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
             limit, offset, sort_by
         );
 
         let indexes_lock = self.indexes.read().await;
-        let relevant_indexes: Vec<_> = if let Some(sort_by) = sort_by {
+        let relevant_indexes_for_sorting: Vec<_> = if let Some(sort_by) = sort_by {
             indexes_lock
                 .iter()
                 .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
@@ -512,9 +514,27 @@ impl CollectionReader {
             Vec::new()
         };
 
-        let result =
-            sort_and_truncate_documents(&relevant_indexes, token_scores, limit, offset, sort_by)
-                .await;
+        let t = match &search_params.mode {
+            SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
+            SearchMode::Hybrid(h) => &h.term,
+            SearchMode::Vector(v) => &v.term,
+            SearchMode::Auto(a) => &a.term,
+        };
+        let mut pins: Vec<_> = Vec::new();
+        for index in indexes_lock.iter() {
+            let pin_rules = index.get_read_lock_on_pin_rules().await;
+            pins.extend(pin_rules.apply(t));
+        }
+
+        let result = sort_and_truncate_documents(
+            &relevant_indexes_for_sorting,
+            pins,
+            token_scores,
+            limit,
+            offset,
+            sort_by,
+        )
+        .await;
 
         drop(indexes_lock);
         result

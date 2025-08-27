@@ -26,6 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
+use crate::pin_rules::PinRule;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
@@ -948,4 +949,53 @@ impl TestIndexClient {
 
         Ok(())
     }
+
+    pub async fn insert_pin_rules(&self, rule: PinRule<String>) -> Result<()> {
+        let collection = self
+            .writer
+            .get_collection(self.collection_id, self.write_api_key)
+            .await?;
+
+        let rule_id = rule.id.clone();
+
+        collection
+            .insert_pin_rule(self.index_id, rule)
+            .await
+            .context("Failed to insert pin_rule")?;
+
+        wait_for(self, |s| {
+            let reader = s.reader.clone();
+            let read_api_key = s.read_api_key;
+            let collection_id = s.collection_id;
+            let index_id = s.index_id;
+            let r = &rule_id;
+            async move {
+                let ids = reader
+                    .list_pin_rule_ids(collection_id, index_id, read_api_key)
+                    .await?;
+
+                if ids.contains(r) {
+                    return Ok(());
+                }
+
+                bail!("Pin rule does not exist");
+            }
+            .boxed()
+        })
+        .await?;
+
+        Ok(())
+    }
+}
+
+pub fn extrapolate_ids_from_result(result: &SearchResult) -> Vec<String> {
+    result
+        .hits
+        .iter()
+        .map(|h| {
+            let id = h.id.clone();
+            assert!(h.document.is_some(), "Document not found");
+            id.split(":").nth(1).map(|id| id.to_string()).unwrap()
+        })
+        .collect()
 }

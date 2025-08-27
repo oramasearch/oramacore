@@ -23,9 +23,10 @@ use crate::{
 };
 use fs::BufferedFile;
 
-use nlp::{locales::Locale, TextParser};
-
 use super::index::Index;
+use crate::collection_manager::sides::IndexWriteOperation;
+use crate::pin_rules::{PinRule, PinRuleOperation};
+use nlp::{locales::Locale, TextParser};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 
@@ -57,10 +58,10 @@ impl CollectionWriter {
         req: CreateEmptyCollection,
         context: WriteSideContext,
     ) -> Result<Self> {
-        let send_operation_cb_op_sender = context.op_sender.clone();
         let id = req.id;
 
-        let send_operation_cb = Box::new(move |op| {
+        let send_operation_cb_op_sender = context.op_sender.clone();
+        let send_hook_operation_cb = Box::new(move |op| {
             let op_sender = send_operation_cb_op_sender.clone();
             async move {
                 let _ = op_sender
@@ -89,7 +90,7 @@ impl CollectionWriter {
 
             created_at: Utc::now(),
 
-            hook: HookWriter::try_new(data_dir.join("hooks"), send_operation_cb)
+            hook: HookWriter::try_new(data_dir.join("hooks"), send_hook_operation_cb)
                 .context("Cannot create hook writer")?,
         })
     }
@@ -133,7 +134,7 @@ impl CollectionWriter {
             temp_indexes.insert(temp_index_id, index);
         }
 
-        let a = context.op_sender.clone();
+        let hook_op_sender = context.op_sender.clone();
 
         Ok(Self {
             id,
@@ -153,9 +154,9 @@ impl CollectionWriter {
             hook: HookWriter::try_new(
                 data_dir.join("hooks"),
                 Box::new(move |op| {
-                    let b = a.clone();
+                    let hook_op_sender = hook_op_sender.clone();
                     async move {
-                        let _ = b
+                        let _ = hook_op_sender
                             .send(WriteOperation::Collection(
                                 id,
                                 CollectionWriteOperation::Hook(op),
@@ -275,16 +276,6 @@ impl CollectionWriter {
         Ok(())
     }
 
-    pub async fn change_runtime_config(
-        &self,
-        new_default_locale: Locale,
-        new_embeddings_model: OramaModel,
-    ) {
-        let mut runtime_config = self.runtime_config.write().await;
-        runtime_config.default_locale = new_default_locale;
-        runtime_config.embeddings_model = new_embeddings_model;
-    }
-
     pub async fn create_temp_index(
         &self,
         copy_from: IndexId,
@@ -349,6 +340,16 @@ impl CollectionWriter {
         temp_indexes_lock.insert(new_index_id, index);
 
         Ok(())
+    }
+
+    pub async fn change_runtime_config(
+        &self,
+        new_default_locale: Locale,
+        new_embeddings_model: OramaModel,
+    ) {
+        let mut runtime_config = self.runtime_config.write().await;
+        runtime_config.default_locale = new_default_locale;
+        runtime_config.embeddings_model = new_embeddings_model;
     }
 
     pub async fn delete_index(&self, index_id: IndexId) -> Result<Vec<DocumentId>, WriteError> {
@@ -580,6 +581,54 @@ impl CollectionWriter {
 
     pub fn get_hook_storage(&self) -> &HookWriter {
         &self.hook
+    }
+
+    pub async fn insert_pin_rule(
+        &self,
+        index_id: IndexId,
+        rule: PinRule<String>,
+    ) -> Result<(), WriteError> {
+        let Some(index) = self.get_index(index_id).await else {
+            return Err(WriteError::IndexNotFound(self.id, index_id));
+        };
+        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+        pin_rule_writer.insert_pin_rule(rule.clone()).await?;
+
+        let storage = index.get_document_id_storage().await;
+        let new_rule = rule
+            .convert_ids(|id| {
+                // DocumentId(u64::MAX) is never used, so this is equal to say
+                // "ignore this rules"
+                storage.get(&id).unwrap_or(DocumentId(u64::MAX))
+            })
+            .await;
+
+        self.context
+            .op_sender
+            .send(WriteOperation::Collection(
+                self.id,
+                CollectionWriteOperation::IndexWriteOperation(
+                    index_id,
+                    IndexWriteOperation::PinRule(PinRuleOperation::Insert(new_rule)),
+                ),
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_pin_rule(
+        &self,
+        index_id: IndexId,
+        rule_id: String,
+    ) -> Result<(), WriteError> {
+        let Some(index) = self.get_index(index_id).await else {
+            return Err(WriteError::IndexNotFound(self.id, index_id));
+        };
+        let mut pin_rule_writer = index.get_write_pin_rule_writer().await;
+        pin_rule_writer.delete_pin_rule(&rule_id).await?;
+
+        Ok(())
     }
 }
 

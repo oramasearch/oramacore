@@ -11,6 +11,7 @@ mod answer;
 mod generate;
 mod hooks;
 mod mcp;
+mod pin_rules;
 mod search;
 mod system_prompts;
 mod tools;
@@ -26,6 +27,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(tools::write_apis(write_side.clone()))
             .merge(system_prompts::write_apis(write_side.clone()))
             .merge(training_sets::write_apis(write_side.clone()))
+            .merge(pin_rules::write_apis(write_side.clone()))
     } else {
         collection_router
     };
@@ -41,6 +43,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(system_prompts::read_apis(read_side.clone()))
             .merge(training_sets::read_apis(read_side.clone()))
             .merge(mcp::apis(read_side.clone()))
+            .merge(pin_rules::read_apis(read_side.clone()))
     } else {
         collection_router
     }
