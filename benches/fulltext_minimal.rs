@@ -290,7 +290,7 @@ fn bench_single_word_search(c: &mut Criterion) {
         group.sample_size(20);
         group.measurement_time(Duration::from_secs(5));
 
-        let (bench_context, index_id) = rt.block_on(async {
+        let (bench_context, _) = rt.block_on(async {
             let bench_context = BenchContext::new().await;
             let index_id = bench_context.create_index().await;
 

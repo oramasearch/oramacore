@@ -173,7 +173,7 @@ impl Debug for IndexWriteOperation {
                 .field("doc_id", doc_id)
                 .field("indexed_values", indexed_values)
                 .finish(),
-            Self::IndexEmbedding { data } => {
+            Self::IndexEmbedding { .. } => {
                 f.debug_struct("IndexEmbedding")
                     // Avoid log embedding
                     .finish_non_exhaustive()
@@ -195,21 +195,6 @@ pub enum ReplaceIndexReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectionWriteOperation {
-    /*
-    InsertDocument {
-        doc_id: DocumentId,
-        doc: DocumentToInsert,
-    },
-    DeleteDocuments {
-        doc_ids: Vec<DocumentId>,
-    },
-    CreateField {
-        field_id: FieldId,
-        field_name: String,
-        field: TypedFieldWrapper,
-    },
-    Index(DocumentId, FieldId, DocumentFieldIndexOperation),
-    */
     Hook(HookOperation),
     CreateIndex2 {
         index_id: IndexId,

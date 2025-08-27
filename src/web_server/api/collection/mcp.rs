@@ -89,7 +89,8 @@ struct McpQueryParams {
 
 #[derive(Deserialize)]
 struct JsonRpcRequest {
-    jsonrpc: String,
+    #[serde(rename = "jsonrpc")]
+    _jsonrpc: String,
     id: Option<serde_json::Value>,
     method: String,
     params: Option<serde_json::Value>,

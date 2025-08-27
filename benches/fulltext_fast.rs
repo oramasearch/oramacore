@@ -134,112 +134,111 @@ fn bench_fulltext_fast(c: &mut Criterion) {
 
     let doc_count = 1000;
 
-    let (reader, writer, collection_id, read_api_key, write_api_key, index_id) =
-        rt.block_on(async {
-            let config = create_minimal_config();
-            let master_api_key = config.writer_side.master_api_key;
+    let (reader, writer, collection_id, read_api_key, _, _) = rt.block_on(async {
+        let config = create_minimal_config();
+        let master_api_key = config.writer_side.master_api_key;
 
-            let (writer, reader) = build_orama(config).await.expect("Failed to build orama");
-            let writer = writer.expect("Writer should be enabled");
-            let reader = reader.expect("Reader should be enabled");
+        let (writer, reader) = build_orama(config).await.expect("Failed to build orama");
+        let writer = writer.expect("Writer should be enabled");
+        let reader = reader.expect("Reader should be enabled");
 
-            // Create collection
-            let collection_id = CollectionId::try_new("fast_bench_collection").unwrap();
-            let write_api_key = ApiKey::try_new("fast_bench_write_key").unwrap();
-            let read_api_key = ApiKey::try_new("fast_bench_read_key").unwrap();
+        // Create collection
+        let collection_id = CollectionId::try_new("fast_bench_collection").unwrap();
+        let write_api_key = ApiKey::try_new("fast_bench_write_key").unwrap();
+        let read_api_key = ApiKey::try_new("fast_bench_read_key").unwrap();
 
-            writer
-                .create_collection(
-                    master_api_key,
-                    CreateCollection {
-                        id: collection_id,
-                        description: None,
-                        read_api_key,
-                        write_api_key,
-                        language: None,
-                        embeddings_model: None,
-                    },
+        writer
+            .create_collection(
+                master_api_key,
+                CreateCollection {
+                    id: collection_id,
+                    description: None,
+                    read_api_key,
+                    write_api_key,
+                    language: None,
+                    embeddings_model: None,
+                },
+            )
+            .await
+            .expect("Failed to create collection");
+
+        wait_quick(&reader, |r| {
+            async move {
+                r.collection_stats(
+                    read_api_key,
+                    collection_id,
+                    CollectionStatsRequest { with_keys: false },
                 )
                 .await
-                .expect("Failed to create collection");
+                .context("Collection not ready")
+            }
+            .boxed()
+        })
+        .await
+        .expect("Collection setup timeout");
 
-            wait_quick(&reader, |r| {
-                async move {
-                    r.collection_stats(
+        let index_id = IndexId::try_new("fast_bench_index").unwrap();
+
+        writer
+            .create_index(
+                WriteApiKey::from_api_key(write_api_key),
+                collection_id,
+                CreateIndexRequest {
+                    index_id,
+                    embedding: None,
+                },
+            )
+            .await
+            .expect("Failed to create index");
+
+        wait_quick(&reader, |r| {
+            async move {
+                let stats = r
+                    .collection_stats(
                         read_api_key,
                         collection_id,
                         CollectionStatsRequest { with_keys: false },
                     )
-                    .await
-                    .context("Collection not ready")
-                }
-                .boxed()
-            })
-            .await
-            .expect("Collection setup timeout");
+                    .await?;
 
-            let index_id = IndexId::try_new("fast_bench_index").unwrap();
+                stats
+                    .indexes_stats
+                    .iter()
+                    .find(|idx| idx.id == index_id)
+                    .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
 
-            writer
-                .create_index(
-                    WriteApiKey::from_api_key(write_api_key),
-                    collection_id,
-                    CreateIndexRequest {
-                        index_id,
-                        embedding: None,
-                    },
-                )
-                .await
-                .expect("Failed to create index");
+                Ok(())
+            }
+            .boxed()
+        })
+        .await
+        .expect("Index setup timeout");
 
-            wait_quick(&reader, |r| {
-                async move {
-                    let stats = r
-                        .collection_stats(
-                            read_api_key,
-                            collection_id,
-                            CollectionStatsRequest { with_keys: false },
-                        )
-                        .await?;
+        let games_data =
+            fs::read_to_string("benches/games.json").expect("Failed to read games.json");
+        let games: Vec<serde_json::Value> =
+            serde_json::from_str(&games_data).expect("Failed to parse games.json");
+        let documents = games.into_iter().take(doc_count).collect::<Vec<_>>();
 
-                    stats
-                        .indexes_stats
-                        .iter()
-                        .find(|idx| idx.id == index_id)
-                        .ok_or_else(|| anyhow::anyhow!("Index not found"))?;
-
-                    Ok(())
-                }
-                .boxed()
-            })
-            .await
-            .expect("Index setup timeout");
-
-            let games_data =
-                fs::read_to_string("benches/games.json").expect("Failed to read games.json");
-            let games: Vec<serde_json::Value> =
-                serde_json::from_str(&games_data).expect("Failed to parse games.json");
-            let documents = games.into_iter().take(doc_count).collect::<Vec<_>>();
-
-            writer
-                .insert_documents(
-                    WriteApiKey::from_api_key(write_api_key),
-                    collection_id,
-                    index_id,
-                    json!(documents).try_into().unwrap(),
-                )
-                .await
-                .expect("Failed to insert documents");
-
-            (
-                reader,
-                writer,
-                collection_id,
-                read_api_key,
+        writer
+            .insert_documents(
                 WriteApiKey::from_api_key(write_api_key),
+                collection_id,
                 index_id,
+                json!(documents).try_into().unwrap(),
             )
-        });
+            .await
+            .expect("Failed to insert documents");
+
+        (
+            reader,
+            writer,
+            collection_id,
+            read_api_key,
+            WriteApiKey::from_api_key(write_api_key),
+            index_id,
+        )
+    });
 
     // Game-based search benchmarks
     c.bench_function("fulltext_rpg_search", |b| {

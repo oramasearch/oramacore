@@ -419,21 +419,33 @@ async fn test_offload_vector_field() {
         "Field should be loaded again after search"
     );
 
-    // Verify field still works correctly with different search
-    let search_result = collection_client
-        .search(
-            json!({
-                "mode": "vector",
-                // The first document
-                "term": "Research paper on neural networks and deep learning",
-            })
-            .try_into()
-            .unwrap(),
-        )
-        .await
-        .unwrap();
+    let search_result = wait_for(&collection_client, |collection_client| {
+        async move {
+            // Verify field still works correctly with different search
+            let search_result = collection_client
+                .search(
+                    json!({
+                        "mode": "vector",
+                        // The first document
+                        "term": "Research paper on neural networks and deep learning",
+                    })
+                    .try_into()
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
 
-    assert_eq!(search_result.count, 1);
+            if search_result.count > 0 {
+                Ok(search_result)
+            } else {
+                Err(anyhow::anyhow!("result not found"))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
+
     assert_eq!(search_result.hits.len(), 1);
     assert_eq!(
         search_result.hits[0].id,

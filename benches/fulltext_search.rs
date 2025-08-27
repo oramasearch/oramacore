@@ -219,7 +219,6 @@ impl TestContext {
             collection_id,
             write_api_key,
             read_api_key,
-            master_api_key: self.master_api_key,
             reader: self.reader.clone(),
             writer: self.writer.clone(),
         })
@@ -247,7 +246,6 @@ pub struct TestCollectionClient {
     pub collection_id: CollectionId,
     pub write_api_key: WriteApiKey,
     pub read_api_key: ApiKey,
-    master_api_key: ApiKey,
     pub reader: Arc<ReadSide>,
     pub writer: Arc<WriteSide>,
 }

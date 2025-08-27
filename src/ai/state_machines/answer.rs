@@ -1066,6 +1066,7 @@ impl AnswerStateMachine {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn transition_to_execute_before_answer_hook(
         &self,
         interaction: Interaction,

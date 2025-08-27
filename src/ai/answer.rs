@@ -492,7 +492,7 @@ impl Answer {
     async fn get_composed_results(
         &self,
         interaction: &Interaction,
-        notation: &String,
+        notation: &str,
     ) -> Vec<SearchResultHit> {
         let parsed = RAGAtParser::parse(notation);
 

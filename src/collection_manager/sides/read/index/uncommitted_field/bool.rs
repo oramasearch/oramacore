@@ -64,10 +64,6 @@ impl UncommittedBoolField {
     pub fn clone_inner(&self) -> (HashSet<DocumentId>, HashSet<DocumentId>) {
         self.inner.clone()
     }
-
-    pub fn get_inner(&self) -> &(HashSet<DocumentId>, HashSet<DocumentId>) {
-        &self.inner
-    }
 }
 
 fn f(d: &DocumentId) -> DocumentId {

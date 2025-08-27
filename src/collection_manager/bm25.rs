@@ -74,6 +74,7 @@ impl Default for BM25FFieldParams {
 /// # Returns
 ///
 /// * `f32` - IDF score using Lucene formula: ln(1 + (N - df + 0.5) / (df + 0.5))
+///
 /// This ensures positive scores for all term frequencies, avoiding negative scores for common terms
 #[inline]
 fn calculate_idf(total_documents: f32, corpus_document_frequency: usize) -> f32 {

@@ -117,7 +117,6 @@ mod pin_rules_tests {
 
     #[test]
     fn test_pin_rules_reader_empty() {
-        let base_dir = generate_new_path();
         let reader = PinRulesReader::empty();
 
         let ids = reader.get_rule_ids();

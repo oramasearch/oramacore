@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::error;
 
 pub fn get_rule_file_name(id: &str) -> String {
     format!("{id}.rule")
 }
 
-pub fn is_rule_file(p: &PathBuf) -> bool {
+pub fn is_rule_file(p: &Path) -> bool {
     p.extension().and_then(|os| os.to_str()) == Some("rule")
 }
 

@@ -59,7 +59,6 @@ mod uncommitted_field;
 
 use std::{
     collections::{HashMap, HashSet},
-    i32,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -1405,21 +1404,21 @@ impl Index {
                 stats: IndexFieldStatsType::CommittedStringFilter(v.stats(with_keys)),
             }
         }));
-        fields_stats.extend(committed_fields.string_fields.iter().filter_map(|(k, v)| {
+        fields_stats.extend(committed_fields.string_fields.iter().map(|(k, v)| {
             let path = v.field_path().join(".");
-            Some(IndexFieldStats {
+            IndexFieldStats {
                 field_id: *k,
                 field_path: path,
                 stats: IndexFieldStatsType::CommittedString(v.stats()),
-            })
+            }
         }));
-        fields_stats.extend(committed_fields.vector_fields.iter().filter_map(|(k, v)| {
+        fields_stats.extend(committed_fields.vector_fields.iter().map(|(k, v)| {
             let path = v.field_path().join(".");
-            Some(IndexFieldStats {
+            IndexFieldStats {
                 field_id: *k,
                 field_path: path,
                 stats: IndexFieldStatsType::CommittedVector(v.stats()),
-            })
+            }
         }));
 
         fields_stats.sort_by_key(|e| e.field_id.0);

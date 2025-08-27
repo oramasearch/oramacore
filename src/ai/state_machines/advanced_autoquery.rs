@@ -1326,8 +1326,6 @@ impl AdvancedAutoqueryStateMachine {
         for (i, query) in tracked_queries.into_iter().enumerate() {
             let tx = tx.clone();
             let read_side = self.read_side.clone();
-            let collection_id = collection_id;
-            let read_api_key = read_api_key;
 
             let handle = tokio::spawn(async move {
                 let result = Self::execute_single_hook_with_retry(
@@ -1811,17 +1809,6 @@ impl AdvancedAutoqueryStateMachine {
         let counts = self.retry_count.lock().await;
         counts.clone()
     }
-
-    async fn get_system_prompt(
-        &self,
-        _collection_id: CollectionId,
-        _read_api_key: ApiKey,
-    ) -> Result<
-        Option<crate::collection_manager::sides::system_prompts::SystemPrompt>,
-        AdvancedAutoqueryError,
-    > {
-        Ok(None)
-    }
 }
 
 // ==== Helper Types and Functions ====
@@ -1845,6 +1832,7 @@ struct FieldStats {
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
+#[allow(dead_code)]
 enum FieldStatType {
     #[serde(rename = "uncommitted_bool")]
     UncommittedBoolean {

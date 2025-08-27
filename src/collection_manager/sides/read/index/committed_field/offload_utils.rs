@@ -1,8 +1,8 @@
+//! Common offload utility functions that can be used by field types that support loading/unloading.
+
 use crate::collection_manager::sides::read::OffloadFieldConfig;
 use invocation_counter::InvocationCounter;
 use std::time::UNIX_EPOCH;
-
-/// Common offload utility functions that can be used by field types that support loading/unloading.
 
 /// Utility function to get current Unix timestamp
 pub fn now() -> u64 {

@@ -37,7 +37,7 @@ use crate::{
 use fs::BufferedFile;
 use nlp::{locales::Locale, TextParser};
 
-use crate::pin_rules::{PinRule, PinRuleOperation};
+use crate::pin_rules::PinRuleOperation;
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
 
 #[derive(Clone)]

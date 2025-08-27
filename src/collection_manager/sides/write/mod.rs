@@ -1146,6 +1146,7 @@ impl WriteSide {
         Ok(collection)
     }
 
+    #[allow(clippy::result_large_err)]
     fn check_master_api_key(&self, master_api_key: ApiKey) -> Result<(), WriteError> {
         if self.master_api_key != master_api_key {
             return Err(WriteError::InvalidMasterApiKey);

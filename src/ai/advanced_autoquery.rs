@@ -331,6 +331,7 @@ impl AdvancedAutoQuery {
     }
 
     /// Runs the complete auto-query pipeline
+    #[allow(clippy::too_many_arguments)]
     pub async fn run(
         self,
         read_side: State<Arc<ReadSide>>,
@@ -373,6 +374,7 @@ impl AdvancedAutoQuery {
     }
 
     /// Runs the auto-query pipeline as a stream of steps. Useful for real-time feedback in UIs.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_stream(
         mut self,
         read_side: State<Arc<ReadSide>>,
