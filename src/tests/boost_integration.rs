@@ -1,4 +1,4 @@
-use crate::tests::utils::{init_log, TestContext};
+use crate::tests::utils::{extrapolate_ids_from_result, init_log, TestContext};
 use serde_json::json;
 
 /// Test boost functionality with real search scenarios
@@ -443,4 +443,49 @@ async fn test_boost_effectiveness_ratios() {
         ratio_5x > 1.29,
         "5x boost should provide major score increase: ratio = {ratio_5x}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_boost_match_exact() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert a simple document for controlled testing
+    let documents = json!([
+        {
+            "id": "1",
+            "content": "serve",
+        },
+        {
+            "id": "2",
+            "content": "server",
+        },
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "serve",
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(results.count, 2);
+    assert_eq!(results.hits.len(), 2);
+
+    let ids = extrapolate_ids_from_result(&results);
+    assert_eq!(ids, ["1", "2"]);
+
+    assert!(results.hits[0].score > results.hits[1].score);
+
+    drop(test_context);
 }
