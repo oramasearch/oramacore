@@ -740,8 +740,6 @@ impl Index {
         Ok(())
     }
 
-    pub async fn insert_pin_rule(&self, rule: PinRule<String>) {}
-
     pub async fn get_pin_rule_writer(&self) -> tokio::sync::RwLockReadGuard<'_, PinRulesWriter> {
         self.pin_rules_writer.read().await
     }
