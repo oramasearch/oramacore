@@ -511,3 +511,88 @@ async fn test_pin_rules_after_insert_with_sort() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_pin_rules_promote_non_matching_documents() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert documents
+    index_client
+        .insert_documents(
+            json!([
+                { "id": "1", "name": "Blue Jeans" },
+                { "id": "2", "name": "Red T-Shirt" },
+                { "id": "3", "name": "Green Hoodie" },
+                { "id": "4", "name": "Yellow Socks" }
+            ])
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Create pin rule that promotes document "2" when searching for "Blue Jeans"
+    // Document "2" won't be in the original search results since it doesn't match "Blue Jeans"
+    index_client
+        .insert_pin_rules(
+            json!({
+              "id": "test_rule",
+              "conditions": [
+                {
+                  "anchoring": "is",
+                  "pattern": "Blue Jeans"
+                }
+              ],
+              "consequence": {
+                "promote": [
+                  {
+                    "doc_id": "2",
+                    "position": 1
+                  }
+                ]
+              }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let result = collection_client
+        .search(
+            json!({
+                "term": "Blue Jeans"
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let ids = extrapolate_ids_from_result(&result);
+    // We expect both documents: "1" (matches the search) and "2" (promoted by pin rule)
+    assert_eq!(result.hits.len(), 2);
+    assert_eq!(&ids, &["1", "2"]);
+
+    // Verify the promoted document has a score of 0.0 since it wasn't in original results
+    let doc_2_hit = result
+        .hits
+        .iter()
+        .find(|hit| hit.id.ends_with(":2"))
+        .unwrap();
+    assert_eq!(doc_2_hit.score, 0.0);
+
+    // Verify the original matching document has a positive score
+    let doc_1_hit = result
+        .hits
+        .iter()
+        .find(|hit| hit.id.ends_with(":1"))
+        .unwrap();
+    assert!(doc_1_hit.score > 0.0);
+
+    drop(test_context);
+}
