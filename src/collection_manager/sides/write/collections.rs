@@ -14,8 +14,6 @@ use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
 use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
 use crate::collection_manager::sides::{OperationSender, WriteOperation};
-use crate::metrics::commit::COMMIT_CALCULATION_TIME;
-use crate::metrics::Empty;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
 use fs::{create_if_not_exists, BufferedFile};
@@ -171,7 +169,6 @@ impl CollectionsWriter {
         let data_dir = &self.config.data_dir.join("collections");
         create_if_not_exists(data_dir).context("Cannot create data directory")?;
 
-        let m = COMMIT_CALCULATION_TIME.create(Empty);
         for (collection_id, collection) in collections.iter_mut() {
             let collection_dir = data_dir.join(collection_id.as_str());
 
@@ -186,8 +183,6 @@ impl CollectionsWriter {
                 collection_ids: collections.keys().cloned().collect::<Vec<_>>(),
             }))
             .context("Cannot write info.json")?;
-
-        drop(m);
 
         // Now it is safe to drop the lock
         // because we save everything to disk

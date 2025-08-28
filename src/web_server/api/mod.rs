@@ -60,7 +60,9 @@ pub fn api_config(
 }
 
 async fn prometheus_handler(prometheus_handle: State<Arc<PrometheusHandle>>) -> impl IntoResponse {
-    prometheus_handle.render()
+    let output = prometheus_handle.render();
+    prometheus_handle.run_upkeep();
+    output
 }
 
 static INDEX_MESSAGE: &str = "OramaCore is up and running.";

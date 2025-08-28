@@ -46,9 +46,6 @@ use crate::collection_manager::sides::read::analytics::{
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
-use crate::metrics::operations::OPERATION_COUNT;
-use crate::metrics::search::SEARCH_CALCULATION_TIME;
-use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchParams, SearchResult, SearchResultHit, TokenScore,
@@ -320,8 +317,6 @@ impl ReadSide {
     pub async fn update(&self, (offset, op): (Offset, WriteOperation)) -> Result<()> {
         trace!(offset=?offset, "Updating read side");
 
-        let m = OPERATION_COUNT.create(Empty);
-
         // We stop commit operations while we are updating
         // The lock is released at the end of this function
         let commit_insert_mutex_lock = self.commit_insert_mutex.lock().await;
@@ -389,8 +384,6 @@ impl ReadSide {
             }
         }
 
-        drop(m);
-
         let mut lock = self.operation_counter.write().await;
         *lock += 1;
         let should_commit = if *lock >= self.insert_batch_commit_size {
@@ -434,13 +427,6 @@ impl ReadSide {
             .await
             .ok_or_else(|| ReadError::NotFound(collection_id))?;
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
-
-        let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
-            collection: collection_id.to_string().into(),
-            mode: search_params.mode.as_str(),
-            has_filter: if has_filter { "true" } else { "false" },
-            has_facet: if has_facets { "true" } else { "false" },
-        });
 
         let token_scores = collection.search(&search_params).await?;
 
@@ -488,8 +474,6 @@ impl ReadSide {
                 }
             })
             .collect();
-
-        drop(m);
 
         let result = SearchResult {
             count,

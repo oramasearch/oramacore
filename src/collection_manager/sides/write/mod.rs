@@ -59,7 +59,6 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
-    metrics::{document_insertion::DOCUMENTS_INSERTION_TIME, Empty},
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
@@ -620,8 +619,6 @@ impl WriteSide {
         // we use the original index id
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
-        let metric = DOCUMENTS_INSERTION_TIME.create(Empty);
-
         debug!("Inserting documents {}", document_count);
         let doc_ids = self
             .add_documents_to_storage(&mut document_list, target_index_id)
@@ -645,8 +642,6 @@ impl WriteSide {
             .await
             .context("Cannot process documents")?;
         info!("All documents are inserted");
-
-        drop(metric);
 
         let mut lock = self.operation_counter.write().await;
         *lock += document_count as u64;

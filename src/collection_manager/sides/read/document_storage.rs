@@ -6,7 +6,6 @@ use zebo::{Zebo, ZeboInfo};
 
 use crate::{
     collection_manager::sides::{DocumentStorageWriteOperation, DocumentToInsert},
-    metrics::{commit::DOCUMENT_COMMIT_CALCULATION_TIME, Empty},
     types::{DocumentId, RawJSONDocument},
 };
 use anyhow::{Context, Result};
@@ -212,8 +211,6 @@ impl DocumentStorage {
     pub async fn commit(&self) -> Result<()> {
         info!("Commit documents");
 
-        let m = DOCUMENT_COMMIT_CALCULATION_TIME.create(Empty {});
-
         let uncommitted_lock = self.uncommitted.read().await;
         let uncommitted_docs: Vec<_> = uncommitted_lock.clone();
         drop(uncommitted_lock);
@@ -230,8 +227,6 @@ impl DocumentStorage {
         let mut uncommitted_lock = self.uncommitted.write().await;
         uncommitted_lock.clear();
         drop(uncommitted_lock);
-
-        drop(m);
 
         info!("Documents committed");
 

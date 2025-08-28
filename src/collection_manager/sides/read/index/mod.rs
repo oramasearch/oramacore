@@ -36,10 +36,6 @@ use crate::{
             Offset,
         },
     },
-    metrics::{
-        search::{MATCHING_COUNT_CALCULTATION_COUNT, MATCHING_PERC_CALCULATION_COUNT},
-        CollectionLabels,
-    },
     types::{
         DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
         Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
@@ -1272,19 +1268,6 @@ impl Index {
             }
             SearchMode::Auto(_) => unreachable!(),
         };
-
-        MATCHING_COUNT_CALCULTATION_COUNT.track_usize(
-            CollectionLabels {
-                collection: self.id.to_string(),
-            },
-            results.len(),
-        );
-        MATCHING_PERC_CALCULATION_COUNT.track(
-            CollectionLabels {
-                collection: self.id.to_string(),
-            },
-            results.len() as f64 / self.document_count as f64,
-        );
 
         debug!("token_scores: {:?}", results);
 
