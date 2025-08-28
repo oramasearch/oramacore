@@ -265,22 +265,29 @@ fn apply_pin_rules(
     for promote_item in promote_items {
         let target_position = promote_item.position as usize;
 
-        // Skip if target position is beyond the vector size
-        if target_position >= top.len() {
-            continue;
-        }
+        // If target position is beyond the current vector size, append at the end
+        let insertion_position = if target_position >= top.len() {
+            top.len()
+        } else {
+            target_position
+        };
 
-        if let Some(score) = token_scores.get(&promote_item.doc_id) {
-            // Insert it at the target position.
-            // The other are shifted.
-            top.insert(
-                target_position,
-                TokenScore {
-                    document_id: promote_item.doc_id,
-                    score: *score,
-                },
-            );
-        }
+        // Get the score from token_scores if it exists, otherwise use a default score of 0.0
+        // This allows promoted documents that weren't in the original search results to be included
+        let score = token_scores
+            .get(&promote_item.doc_id)
+            .copied()
+            .unwrap_or(0.0);
+
+        // Insert it at the calculated insertion position.
+        // The other items are shifted.
+        top.insert(
+            insertion_position,
+            TokenScore {
+                document_id: promote_item.doc_id,
+                score,
+            },
+        );
     }
 
     top
