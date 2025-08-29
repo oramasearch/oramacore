@@ -46,6 +46,7 @@ use crate::collection_manager::sides::read::analytics::{
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;
+use crate::metrics::{SearchMetricsLabel, SEARCH_COUNTER, SEARCH_DURATION};
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
     SearchParams, SearchResult, SearchResultHit, TokenScore,
@@ -421,6 +422,20 @@ impl ReadSide {
         let has_filter = !search_params.where_filter.is_empty();
         let has_facets = !search_params.facets.is_empty();
 
+        let search_duration_timer = SEARCH_DURATION.create(SearchMetricsLabel {
+            collection_id,
+            has_filter,
+            has_facets,
+        });
+        SEARCH_COUNTER.increment(
+            SearchMetricsLabel {
+                collection_id,
+                has_filter,
+                has_facets,
+            },
+            1,
+        );
+
         let collection = self
             .collections
             .get_collection(collection_id)
@@ -483,6 +498,8 @@ impl ReadSide {
         let result_for_analytics = result.clone();
 
         let search_time = start.elapsed();
+
+        drop(search_duration_timer);
 
         if let Some(analytics_storage) = self.analytics_storage.as_ref() {
             if let Err(e) = analytics_storage.add_event(AnalyticSearchEvent {

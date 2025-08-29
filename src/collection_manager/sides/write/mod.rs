@@ -59,7 +59,11 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
-    metrics::{CollectionIdLabel, INSERT_DOCUMENTS_COUNTER, INSERT_DOCUMENTS_DURATION, UPDATE_DOCUMENTS_COUNTER, UPDATE_DOCUMENTS_DURATION, DELETE_DOCUMENTS_COUNTER, DELETE_DOCUMENTS_DURATION},
+    metrics::{
+        CollectionIdLabel, DELETE_DOCUMENTS_COUNTER, DELETE_DOCUMENTS_DURATION,
+        INSERT_DOCUMENTS_COUNTER, INSERT_DOCUMENTS_DURATION, UPDATE_DOCUMENTS_COUNTER,
+        UPDATE_DOCUMENTS_DURATION,
+    },
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
@@ -609,10 +613,12 @@ impl WriteSide {
 
         // Start timing the insert_documents operation
         // The timer will automatically record the duration when it goes out of scope (Drop trait)
-        let insert_duration_timer = INSERT_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+        let insert_duration_timer =
+            INSERT_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
 
         // Increment Prometheus counter for insert_documents method invocations
-        INSERT_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+        INSERT_DOCUMENTS_COUNTER
+            .increment(CollectionIdLabel { collection_id }, document_count as u64);
 
         info!(?document_count, "Inserting batch of documents");
 
@@ -684,10 +690,12 @@ impl WriteSide {
 
         // Start timing the delete_documents operation
         // The timer will automatically record the duration when it goes out of scope (Drop trait)
-        let delete_duration_timer = DELETE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+        let delete_duration_timer =
+            DELETE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
 
         // Increment Prometheus counter for delete_documents method invocations
-        DELETE_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+        DELETE_DOCUMENTS_COUNTER
+            .increment(CollectionIdLabel { collection_id }, document_count as u64);
 
         info!(?document_count, "Deleting batch of documents");
 
@@ -725,8 +733,10 @@ impl WriteSide {
 
         let document_count = update_document_request.documents.0.len();
 
-        let update_duration_timer = UPDATE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
-        UPDATE_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+        let update_duration_timer =
+            UPDATE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+        UPDATE_DOCUMENTS_COUNTER
+            .increment(CollectionIdLabel { collection_id }, document_count as u64);
 
         info!(?document_count, "Updating batch of documents");
 

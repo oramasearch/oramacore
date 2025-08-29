@@ -6,46 +6,50 @@ use crate::{
     types::{CollectionId, FieldId},
 };
 
-// Define counter metric for insert_documents method invocations
+const COLLECTION_ID_LABEL_KEY: &str = "collection_id";
+
 create_counter!(
     INSERT_DOCUMENTS_COUNTER,
     "oramacore_insert_documents_total",
     CollectionIdLabel
 );
 
-// Define time histogram metric for insert_documents duration
 create_time_histogram!(
     INSERT_DOCUMENTS_DURATION,
     "oramacore_insert_documents_duration_seconds",
     CollectionIdLabel
 );
 
-// Define counter metric for update_documents method invocations
 create_counter!(
     UPDATE_DOCUMENTS_COUNTER,
     "oramacore_update_documents_total",
     CollectionIdLabel
 );
 
-// Define time histogram metric for update_documents duration
 create_time_histogram!(
     UPDATE_DOCUMENTS_DURATION,
     "oramacore_update_documents_duration_seconds",
     CollectionIdLabel
 );
 
-// Define counter metric for delete_documents method invocations
 create_counter!(
     DELETE_DOCUMENTS_COUNTER,
     "oramacore_delete_documents_total",
     CollectionIdLabel
 );
 
-// Define time histogram metric for delete_documents duration
 create_time_histogram!(
     DELETE_DOCUMENTS_DURATION,
     "oramacore_delete_documents_duration_seconds",
     CollectionIdLabel
+);
+
+create_counter!(SEARCH_COUNTER, "oramacore_search_total", SearchMetricsLabel);
+
+create_time_histogram!(
+    SEARCH_DURATION,
+    "oramacore_search_duration_seconds",
+    SearchMetricsLabel
 );
 
 pub struct Empty;
@@ -61,7 +65,29 @@ pub struct CollectionIdLabel {
 
 impl From<CollectionIdLabel> for Vec<Label> {
     fn from(label: CollectionIdLabel) -> Self {
-        vec![Label::new("collection_id", label.collection_id)]
+        vec![Label::new(COLLECTION_ID_LABEL_KEY, label.collection_id)]
+    }
+}
+
+pub struct SearchMetricsLabel {
+    pub collection_id: CollectionId,
+    pub has_filter: bool,
+    pub has_facets: bool,
+}
+
+impl From<SearchMetricsLabel> for Vec<Label> {
+    fn from(label: SearchMetricsLabel) -> Self {
+        vec![
+            Label::new(COLLECTION_ID_LABEL_KEY, label.collection_id),
+            Label::new(
+                "has_filter",
+                if label.has_filter { "true" } else { "false" },
+            ),
+            Label::new(
+                "has_facets",
+                if label.has_facets { "true" } else { "false" },
+            ),
+        ]
     }
 }
 
