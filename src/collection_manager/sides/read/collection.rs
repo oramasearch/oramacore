@@ -21,7 +21,7 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, sort::sort_and_truncate_documents,
+            context::ReadSideContext,
             AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
@@ -34,9 +34,9 @@ use crate::{
     },
 };
 
-use super::{index::{Index, IndexStats}, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats};
+use super::{index::{Index, IndexStats}, sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats};
 
-use crate::types::{GroupByConfig, NLPSearchRequest, SearchMode, SortBy};
+use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
 use fs::*;
 use nlp::locales::Locale;
 
@@ -492,43 +492,17 @@ impl CollectionReader {
         offset: SearchOffset,
         search_params: &SearchParams,
     ) -> Result<Vec<TokenScore>> {
-        let sort_by = search_params.sort_by.as_ref();
-        info!(
-            "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
-            limit, offset, sort_by
-        );
-
         let indexes_lock = self.indexes.read().await;
-        let relevant_indexes_for_sorting: Vec<_> = if let Some(sort_by) = sort_by {
-            indexes_lock
-                .iter()
-                .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
-                .collect()
-        } else {
-            Vec::new()
-        };
 
-        let t = match &search_params.mode {
-            SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
-            SearchMode::Hybrid(h) => &h.term,
-            SearchMode::Vector(v) => &v.term,
-            SearchMode::Auto(a) => &a.term,
-        };
-        let mut pins: Vec<_> = Vec::new();
-        for index in indexes_lock.iter() {
-            let pin_rules = index.get_read_lock_on_pin_rules().await;
-            pins.extend(pin_rules.apply(t));
-        }
-
-        let result = sort_and_truncate_documents(
-            &relevant_indexes_for_sorting,
-            pins,
+        let context = SortContext {
+            indexes: &*indexes_lock,
             token_scores,
+            search_params,
             limit,
             offset,
-            sort_by,
-        )
-        .await;
+        };
+
+        let result = sort_with_context(context).await;
 
         drop(indexes_lock);
         result

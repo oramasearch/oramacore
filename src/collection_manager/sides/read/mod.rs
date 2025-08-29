@@ -14,6 +14,7 @@ use duration_string::DurationString;
 use futures::{Stream, StreamExt};
 use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
+pub use sort::{sort_with_context, SortContext};
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;

@@ -1,15 +1,26 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use ordered_float::NotNan;
+use tracing::info;
 
 use super::index::Index;
 use crate::pin_rules::Consequence;
+use crate::types::{SearchMode, SearchParams};
 use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, SortOrder, TokenScore},
 };
+
+/// Context structure that encapsulates all parameters needed for sorting operations
+pub struct SortContext<'a> {
+    pub indexes: &'a [Index],
+    pub token_scores: &'a HashMap<DocumentId, f32>,
+    pub search_params: &'a SearchParams,
+    pub limit: Limit,
+    pub offset: SearchOffset,
+}
 
 pub struct SortIterator<'s1, 's2, T: Ord + Clone> {
     iter1: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>>,
@@ -140,13 +151,12 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
 }
 
 /// Main sorting and truncation logic for documents
-pub async fn sort_and_truncate_documents(
-    relevant_indexes: &[&Index],
+async fn sort_and_truncate_documents(
+    relevant_indexes: Option<(&SortBy, Vec<&Index>)>,
     pins: Vec<Consequence<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
     limit: Limit,
     offset: SearchOffset,
-    sort_by: Option<&SortBy>,
 ) -> Result<Vec<TokenScore>> {
     let top_count = if pins.is_empty() {
         limit.0 + offset.0
@@ -159,14 +169,7 @@ pub async fn sort_and_truncate_documents(
         (limit.0 + offset.0) * 2
     };
 
-    let top = if let Some(sort_by) = sort_by {
-        if relevant_indexes.is_empty() {
-            return Err(anyhow!(
-                "Cannot sort by \"{}\": no index has that field",
-                sort_by.property
-            ));
-        }
-
+    let top = if let Some((sort_by, relevant_indexes)) = relevant_indexes {
         if relevant_indexes.len() == 1 {
             // If there's only one index, use the existing optimized path
             let output = relevant_indexes[0]
@@ -284,6 +287,60 @@ fn apply_pin_rules(
     }
 
     top
+}
+
+fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
+    match &search_params.mode {
+        SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
+        SearchMode::Hybrid(h) => &h.term,
+        SearchMode::Vector(v) => &v.term,
+        SearchMode::Auto(a) => &a.term,
+    }
+}
+
+async fn extract_pin_rules(context: &SortContext<'_>) -> Vec<Consequence<DocumentId>> {
+    let term = extract_term_from_search_mode(&context.search_params);
+    let mut pins: Vec<_> = Vec::with_capacity(context.indexes.len());
+    for index in context.indexes {
+        let pin_rules = index.get_read_lock_on_pin_rules().await;
+        pins.extend(pin_rules.apply(term));
+    }
+    pins
+}
+
+pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScore>> {
+    let sort_by = context.search_params.sort_by.as_ref();
+    info!(
+        "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
+        context.limit, context.offset, sort_by
+    );
+
+    // Identify relevant indexes for sorting
+    let relevant_indexes_for_sorting: Option<(&SortBy, Vec<_>)> = if let Some(sort_by) = sort_by {
+        let indexes: Vec<_> = context
+            .indexes
+            .iter()
+            .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
+            .collect();
+        if indexes.is_empty() {
+            bail!("Cannot sort by {:?}: no index has that field", sort_by.property);
+        }
+        Some((sort_by, indexes))
+    } else {
+        None
+    };
+
+    let pins = extract_pin_rules(&context).await;
+
+    // Call the existing sort_and_truncate_documents function
+    sort_and_truncate_documents(
+        relevant_indexes_for_sorting,
+        pins,
+        context.token_scores,
+        context.limit,
+        context.offset,
+    )
+    .await
 }
 
 #[cfg(test)]
