@@ -1883,9 +1883,9 @@ impl std::ops::Add for Number {
     }
 }
 
-impl Into<Value> for Number {
-    fn into(self) -> Value {
-        match self {
+impl From<Number> for Value {
+    fn from(val: Number) -> Self {
+        match val {
             Number::I32(value) => Value::Number(value.into()),
             Number::F32(value) => (value as f64).into(),
         }

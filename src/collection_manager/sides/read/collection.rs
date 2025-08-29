@@ -1,3 +1,5 @@
+use anyhow::{anyhow, bail, Context, Result};
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     io::ErrorKind,
@@ -5,8 +7,6 @@ use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
 };
-use std::collections::HashSet;
-use anyhow::{anyhow, bail, Context, Result};
 
 use axum::extract::State;
 use chrono::{DateTime, Utc};
@@ -21,8 +21,7 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            context::ReadSideContext,
-            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
         },
@@ -34,7 +33,14 @@ use crate::{
     },
 };
 
-use super::{index::{Index, IndexStats}, sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats};
+use super::{
+    index::{Index, IndexStats},
+    sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
+    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext,
+    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
+};
 
 use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
 use fs::*;
@@ -495,7 +501,7 @@ impl CollectionReader {
         let indexes_lock = self.indexes.read().await;
 
         let context = SortContext {
-            indexes: &*indexes_lock,
+            indexes: &indexes_lock,
             token_scores,
             search_params,
             limit,
@@ -540,11 +546,10 @@ impl CollectionReader {
         token_scores: &HashMap<DocumentId, f32>,
         user_index: Option<&Vec<IndexId>>,
         group_by_config: &GroupByConfig,
-        sort_by: Option<&SortBy>
+        sort_by: Option<&SortBy>,
     ) -> Result<HashMap<Vec<GroupValue>, HashSet<DocumentId>>> {
         let indexes_lock = self.indexes.read().await;
-        let indexes_to_search_on =
-            calculate_index_to_search_on(&indexes_lock, user_index)?;
+        let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
 
         let mut results = HashMap::new();
         for index in indexes_lock.iter() {
@@ -560,9 +565,7 @@ impl CollectionReader {
                 .await?
         }
 
-        if let Some(sort_by) = sort_by {
-
-        }
+        if let Some(sort_by) = sort_by {}
 
         Ok(results)
     }

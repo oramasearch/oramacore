@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use ordered_float::NotNan;
 use tracing::info;
 
@@ -299,7 +299,7 @@ fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
 }
 
 async fn extract_pin_rules(context: &SortContext<'_>) -> Vec<Consequence<DocumentId>> {
-    let term = extract_term_from_search_mode(&context.search_params);
+    let term = extract_term_from_search_mode(context.search_params);
     let mut pins: Vec<_> = Vec::with_capacity(context.indexes.len());
     for index in context.indexes {
         let pin_rules = index.get_read_lock_on_pin_rules().await;
@@ -323,7 +323,10 @@ pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScor
             .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
             .collect();
         if indexes.is_empty() {
-            bail!("Cannot sort by {:?}: no index has that field", sort_by.property);
+            bail!(
+                "Cannot sort by {:?}: no index has that field",
+                sort_by.property
+            );
         }
         Some((sort_by, indexes))
     } else {

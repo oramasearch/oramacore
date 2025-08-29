@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 use crate::tests::utils::{init_log, TestContext};
 
@@ -37,22 +37,28 @@ async fn test_group_by_number() {
                 },
                 "limit": 0,
             })
-                .try_into()
-                .unwrap(),
+            .try_into()
+            .unwrap(),
         )
         .await
         .unwrap();
     let Some(groups) = output.groups else {
         panic!("`groups` should be there");
     };
-    let values = groups.iter().map(|g| g.values.clone()).collect::<HashSet<_>>();
-    assert_eq!(values, HashSet::<Vec<Value>>::from([
-        vec![4.into()],
-        vec![3.into()],
-        vec![2.into()],
-        vec![1.into()],
-        vec![0.into()],
-    ]));
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into()],
+            vec![3.into()],
+            vec![2.into()],
+            vec![1.into()],
+            vec![0.into()],
+        ])
+    );
     for g in groups {
         assert!(g.result.len() < 5);
     }
@@ -76,19 +82,25 @@ async fn test_group_by_number() {
     let Some(groups) = output.groups else {
         panic!("`groups` should be there");
     };
-    let values = groups.iter().map(|g| g.values.clone()).collect::<HashSet<_>>();
-    assert_eq!(values, HashSet::<Vec<Value>>::from([
-        vec![4.into(), true.into()],
-        vec![4.into(), false.into()],
-        vec![3.into(), true.into()],
-        vec![3.into(), false.into()],
-        vec![2.into(), true.into()],
-        vec![2.into(), false.into()],
-        vec![1.into(), true.into()],
-        vec![1.into(), false.into()],
-        vec![0.into(), true.into()],
-        vec![0.into(), false.into()],
-    ]));
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into(), true.into()],
+            vec![4.into(), false.into()],
+            vec![3.into(), true.into()],
+            vec![3.into(), false.into()],
+            vec![2.into(), true.into()],
+            vec![2.into(), false.into()],
+            vec![1.into(), true.into()],
+            vec![1.into(), false.into()],
+            vec![0.into(), true.into()],
+            vec![0.into(), false.into()],
+        ])
+    );
     for g in groups {
         assert!(g.result.len() < 5);
     }
@@ -103,8 +115,8 @@ async fn test_group_by_number() {
                 },
                 "limit": 0,
             })
-                .try_into()
-                .unwrap(),
+            .try_into()
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -112,39 +124,45 @@ async fn test_group_by_number() {
     let Some(groups) = output.groups else {
         panic!("`groups` should be there");
     };
-    let values = groups.iter().map(|g| g.values.clone()).collect::<HashSet<_>>();
-    assert_eq!(values, HashSet::<Vec<Value>>::from([
-        vec![4.into(), true.into(), "s0".into()],
-        vec![4.into(), true.into(), "s1".into()],
-        vec![4.into(), true.into(), "s2".into()],
-        vec![4.into(), false.into(), "s0".into()],
-        vec![4.into(), false.into(), "s1".into()],
-        vec![4.into(), false.into(), "s2".into()],
-        vec![3.into(), true.into(), "s0".into()],
-        vec![3.into(), true.into(), "s1".into()],
-        vec![3.into(), true.into(), "s2".into()],
-        vec![3.into(), false.into(), "s0".into()],
-        vec![3.into(), false.into(), "s1".into()],
-        vec![3.into(), false.into(), "s2".into()],
-        vec![2.into(), true.into(), "s0".into()],
-        vec![2.into(), true.into(), "s1".into()],
-        vec![2.into(), true.into(), "s2".into()],
-        vec![2.into(), false.into(), "s0".into()],
-        vec![2.into(), false.into(), "s1".into()],
-        vec![2.into(), false.into(), "s2".into()],
-        vec![1.into(), true.into(), "s0".into()],
-        vec![1.into(), true.into(), "s1".into()],
-        vec![1.into(), true.into(), "s2".into()],
-        vec![1.into(), false.into(), "s0".into()],
-        vec![1.into(), false.into(), "s1".into()],
-        vec![1.into(), false.into(), "s2".into()],
-        vec![0.into(), true.into(), "s0".into()],
-        vec![0.into(), true.into(), "s1".into()],
-        vec![0.into(), true.into(), "s2".into()],
-        vec![0.into(), false.into(), "s0".into()],
-        vec![0.into(), false.into(), "s1".into()],
-        vec![0.into(), false.into(), "s2".into()],
-    ]));
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into(), true.into(), "s0".into()],
+            vec![4.into(), true.into(), "s1".into()],
+            vec![4.into(), true.into(), "s2".into()],
+            vec![4.into(), false.into(), "s0".into()],
+            vec![4.into(), false.into(), "s1".into()],
+            vec![4.into(), false.into(), "s2".into()],
+            vec![3.into(), true.into(), "s0".into()],
+            vec![3.into(), true.into(), "s1".into()],
+            vec![3.into(), true.into(), "s2".into()],
+            vec![3.into(), false.into(), "s0".into()],
+            vec![3.into(), false.into(), "s1".into()],
+            vec![3.into(), false.into(), "s2".into()],
+            vec![2.into(), true.into(), "s0".into()],
+            vec![2.into(), true.into(), "s1".into()],
+            vec![2.into(), true.into(), "s2".into()],
+            vec![2.into(), false.into(), "s0".into()],
+            vec![2.into(), false.into(), "s1".into()],
+            vec![2.into(), false.into(), "s2".into()],
+            vec![1.into(), true.into(), "s0".into()],
+            vec![1.into(), true.into(), "s1".into()],
+            vec![1.into(), true.into(), "s2".into()],
+            vec![1.into(), false.into(), "s0".into()],
+            vec![1.into(), false.into(), "s1".into()],
+            vec![1.into(), false.into(), "s2".into()],
+            vec![0.into(), true.into(), "s0".into()],
+            vec![0.into(), true.into(), "s1".into()],
+            vec![0.into(), true.into(), "s2".into()],
+            vec![0.into(), false.into(), "s0".into()],
+            vec![0.into(), false.into(), "s1".into()],
+            vec![0.into(), false.into(), "s2".into()],
+        ])
+    );
     for g in groups {
         assert!(g.result.len() < 5);
     }

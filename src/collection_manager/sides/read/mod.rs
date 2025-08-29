@@ -50,7 +50,10 @@ use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
-use crate::types::{ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore};
+use crate::types::{
+    ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode,
+    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore,
+};
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
 use fs::BufferedFile;
@@ -454,8 +457,13 @@ impl ReadSide {
 
         let groups = if let Some(group_by) = &search_params.group_by {
             let groups = collection
-                    .calculate_groups(&token_scores, search_params.indexes.as_ref(), group_by, search_params.sort_by.as_ref())
-                    .await?;
+                .calculate_groups(
+                    &token_scores,
+                    search_params.indexes.as_ref(),
+                    group_by,
+                    search_params.sort_by.as_ref(),
+                )
+                .await?;
 
             let groups: Vec<_> = futures::stream::iter(groups.into_iter())
                 .filter_map(|(k, ids)| async {
@@ -468,10 +476,11 @@ impl ReadSide {
 
                     Some(GroupedResult {
                         values: k.into_iter().map(|v| v.into()).collect(),
-                        result: docs.into_iter().zip(ids.into_iter())
+                        result: docs
+                            .into_iter()
+                            .zip(ids.into_iter())
                             .take(group_by.max_results)
                             .map(|(document, doc_id)| {
-
                                 let id = document
                                     .as_ref()
                                     .and_then(|d| d.id.clone())
@@ -482,7 +491,8 @@ impl ReadSide {
                                     score: *token_scores.get(&doc_id).unwrap_or(&0.0),
                                     document,
                                 }
-                            }).collect(),
+                            })
+                            .collect(),
                     })
                 })
                 .collect()
