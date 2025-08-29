@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
 };
-
+use std::collections::HashSet;
 use anyhow::{anyhow, bail, Context, Result};
 
 use axum::extract::State;
@@ -34,15 +34,9 @@ use crate::{
     },
 };
 
-use super::{
-    index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
-    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
-    UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
-};
+use super::{index::{Index, IndexStats}, CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats, UncommittedVectorFieldStats};
 
-use crate::types::{NLPSearchRequest, SearchMode};
+use crate::types::{GroupByConfig, NLPSearchRequest, SearchMode, SortBy};
 use fs::*;
 use nlp::locales::Locale;
 
@@ -565,6 +559,38 @@ impl CollectionReader {
         }
 
         Ok(result)
+    }
+
+    pub async fn calculate_groups(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        user_index: Option<&Vec<IndexId>>,
+        group_by_config: &GroupByConfig,
+        sort_by: Option<&SortBy>
+    ) -> Result<HashMap<Vec<GroupValue>, HashSet<DocumentId>>> {
+        let indexes_lock = self.indexes.read().await;
+        let indexes_to_search_on =
+            calculate_index_to_search_on(&indexes_lock, user_index)?;
+
+        let mut results = HashMap::new();
+        for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+
+            index
+                .calculate_groups(token_scores, group_by_config, &mut results)
+                .await?
+        }
+
+        if let Some(sort_by) = sort_by {
+
+        }
+
+        Ok(results)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {

@@ -14,6 +14,7 @@ mod filter_benchmark;
 mod fulltext_benchmark_test;
 mod fulltext_search;
 mod geosearch;
+mod groupby;
 mod hooks;
 // mod hurl;
 mod index_rebuild;

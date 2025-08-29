@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use uncommitted_field::*;
+use group::{Groupable};
 
 use crate::{
     ai::{llms, OramaModel},
@@ -41,8 +42,8 @@ use crate::{
         CollectionLabels,
     },
     types::{
-        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, HybridMode, IndexId, Limit,
-        Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, Similarity,
+        DocumentId, FacetDefinition, FacetResult, Filter, FulltextMode, GroupedResult, HybridMode, IndexId, Limit,
+        Number, NumberFilter, Properties, SearchMode, SearchModeResult, SearchParams, SearchResultHit, Similarity,
         SortOrder, Threshold, VectorMode, WhereFilter,
     },
 };
@@ -56,6 +57,7 @@ mod merge;
 mod path_to_index_id_map;
 mod search_context;
 mod uncommitted_field;
+mod group;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -67,7 +69,8 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-
+use debug_panic::debug_panic;
+use itertools::{all, Itertools};
 use crate::{
     collection_manager::sides::{
         write::index::IndexedValue, IndexWriteOperation, IndexWriteOperationFieldType,
@@ -86,6 +89,7 @@ pub use uncommitted_field::{
     UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
     UncommittedVectorFieldStats,
 };
+pub use group::GroupValue;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DeletionReason {
@@ -1617,6 +1621,116 @@ impl Index {
             }
 
             facet_definition.count += facet_definition.values.len();
+        }
+
+        Ok(())
+    }
+
+    fn generate_group_combinations(
+        field_ids: &[FieldId],
+        all_variants: &HashMap<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>,
+        current_combination: &mut Vec<(FieldId, GroupValue)>,
+        result: &mut Vec<Vec<(FieldId, GroupValue)>>,
+    ) {
+        if current_combination.len() == field_ids.len() {
+            result.push(current_combination.clone());
+            return;
+        }
+
+        let field_id = field_ids[current_combination.len()];
+        if let Some(variants) = all_variants.get(&field_id) {
+            for group_value in variants.keys() {
+                current_combination.push((field_id, group_value.clone()));
+                Self::generate_group_combinations(field_ids, all_variants, current_combination, result);
+                current_combination.pop();
+            }
+        }
+    }
+
+    pub async fn calculate_groups(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        group_config: &crate::types::GroupByConfig,
+        results: &mut HashMap<Vec<GroupValue>, HashSet<DocumentId>>
+    ) ->  Result<()> {
+        let Some(properties) = group_config.properties.iter()
+            .map(|field_name| self.path_to_index_id_map.get_filter_field(field_name))
+            .collect::<Option<Vec<_>>>() else {
+            // Index has to contain all the property.
+            // Otherwise, its document cannot be inside the buckets
+            return Ok(());
+        };
+
+        let committed = self.committed_fields.read().await;
+        let uncommitted = self.uncommitted_fields.read().await;
+
+        let mut all_variants = HashMap::<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>::new();
+        for (field_id, field_type) in &properties {
+            let groupable: Box<&dyn Groupable> = match field_type {
+                FieldType::Bool => {
+                    let f = uncommitted.bool_fields.get(&field_id).unwrap();
+                    Box::new(f)
+                },
+                FieldType::Number => {
+                    let f = uncommitted.number_fields.get(&field_id).unwrap();
+                    Box::new(f)
+                },
+                FieldType::StringFilter => {
+                    let f = uncommitted.string_filter_fields.get(&field_id).unwrap();
+                    Box::new(f)
+                },
+                FieldType::GeoPoint => {
+                    bail!("Cannot calculate group on a GeoPoint field");
+                }
+                _ => {
+                    debug_panic!("Invalid field type {:?} for group", field_type);
+                    bail!("Cannot calculate group on {:?} field", field_type);
+                },
+            };
+
+            let variants: Vec<_> = groupable.get_values().collect();
+            if variants.len() > 50 {
+                // Should we group by a field with more than 50 variant???
+                // TODO: think about it. For now, no.
+                bail!("Cannot calculate groups on a field with more than 50 variant");
+            }
+
+            for variant in &variants {
+                let docs: HashSet<_> = groupable.get_doc_ids(variant)
+                    .collect();
+                let doc_ids_per_variant = all_variants.entry(*field_id)
+                    .or_default();
+                doc_ids_per_variant.insert(variant.clone(), docs);
+            }
+        }
+
+        drop(committed);
+        drop(uncommitted);
+
+        let field_ids: Vec<_> = properties.iter().map(|(field_id, _)| *field_id).collect();
+        let mut groups = Vec::new();
+        Self::generate_group_combinations(&field_ids, &all_variants, &mut Vec::new(), &mut groups);
+
+        // Filter groups by documents that are in token_scores and create final result
+        for group_combination in groups {
+            // Find intersection of all document sets for this combination
+            let mut intersection: HashSet<DocumentId> = token_scores.keys().cloned().collect();
+            let mut group_values = Vec::new();
+            
+            for (field_id, group_value) in group_combination {
+                let Some(docs) = all_variants.get(&field_id).and_then(|map| map.get(&group_value)) else {
+                    debug_panic!("Cannot calculate group values on field {:?}", field_id);
+                    continue
+                };
+
+                intersection = intersection.intersection(docs).cloned().collect();
+
+                group_values.push(group_value);
+            }
+
+            let doc_ids_for_key = results.entry(group_values)
+                .or_default();
+            doc_ids_for_key.extend(intersection);
         }
 
         Ok(())

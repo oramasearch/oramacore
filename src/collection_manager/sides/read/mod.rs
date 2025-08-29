@@ -11,7 +11,7 @@ pub mod sort;
 use axum::extract::State;
 use chrono::Utc;
 use duration_string::DurationString;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use hook_storage::{HookReader, HookReaderError};
 pub use index::*;
 
@@ -49,10 +49,7 @@ use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
-use crate::types::{
-    ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
-    SearchParams, SearchResult, SearchResultHit, TokenScore,
-};
+use crate::types::{ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore};
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
 use fs::BufferedFile;
@@ -454,6 +451,47 @@ impl ReadSide {
             None
         };
 
+        let groups = if let Some(group_by) = &search_params.group_by {
+            let groups = collection
+                    .calculate_groups(&token_scores, search_params.indexes.as_ref(), group_by, search_params.sort_by.as_ref())
+                    .await?;
+
+            let groups: Vec<_> = futures::stream::iter(groups.into_iter())
+                .filter_map(|(k, ids)| async {
+                    let ids: Vec<_> = ids.into_iter().collect();
+                    let docs = self
+                        .document_storage
+                        .get_documents_by_ids(ids.clone())
+                        .await
+                        .ok()?;
+
+                    Some(GroupedResult {
+                        values: k.into_iter().map(|v| v.into()).collect(),
+                        result: docs.into_iter().zip(ids.into_iter())
+                            .take(group_by.max_results)
+                            .map(|(document, doc_id)| {
+
+                                let id = document
+                                    .as_ref()
+                                    .and_then(|d| d.id.clone())
+                                    .unwrap_or_default();
+
+                                SearchResultHit {
+                                    id,
+                                    score: *token_scores.get(&doc_id).unwrap_or(&0.0),
+                                    document,
+                                }
+                            }).collect(),
+                    })
+                })
+                .collect()
+                .await;
+
+            Some(groups)
+        } else {
+            None
+        };
+
         let count = token_scores.len();
 
         let top_results: Vec<TokenScore> = collection
@@ -495,6 +533,7 @@ impl ReadSide {
             count,
             hits,
             facets,
+            groups,
         };
         let result_for_analytics = result.clone();
 
