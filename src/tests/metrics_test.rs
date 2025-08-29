@@ -3,11 +3,8 @@ use serde_json::json;
 
 use crate::tests::utils::{init_log, TestContext};
 use crate::types::{
-    DocumentList, FacetDefinition, Filter, FulltextMode, Limit, Properties, SearchMode,
-    SearchOffset, SearchParams, StringFacetDefinition, UpdateDocumentRequest, UpdateStrategy,
-    WhereFilter,
+    DocumentList, SearchParams, UpdateDocumentRequest, UpdateStrategy,
 };
-use std::collections::HashMap;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics() {
@@ -66,73 +63,27 @@ async fn test_metrics() {
 
     // Perform search operations to trigger search metrics
     // Search 1: No filter, no facets
-    let search_params1 = SearchParams {
-        mode: SearchMode::FullText(FulltextMode {
-            term: "First".to_string(),
-            threshold: None,
-            exact: false,
-            tolerance: None,
-        }),
-        limit: Limit(10),
-        offset: SearchOffset(0),
-        boost: HashMap::new(),
-        properties: Properties::Star,
-        where_filter: WhereFilter::default(),
-        facets: HashMap::new(),
-        indexes: None,
-        sort_by: None,
-        user_id: None,
-    };
+    let search_params1: SearchParams = json!({
+        "term": "First"
+    }).try_into().unwrap();
     collection_client.search(search_params1).await.unwrap();
 
     // Search 2: With filter, no facets
-    let mut where_filter = WhereFilter::default();
-    where_filter.filter_on_fields.push((
-        "title".to_string(),
-        Filter::String("First Document".to_string()),
-    ));
-    let search_params2 = SearchParams {
-        mode: SearchMode::FullText(FulltextMode {
-            term: "Document".to_string(),
-            threshold: None,
-            exact: false,
-            tolerance: None,
-        }),
-        limit: Limit(10),
-        offset: SearchOffset(0),
-        boost: HashMap::new(),
-        properties: Properties::Star,
-        where_filter,
-        facets: HashMap::new(),
-        indexes: None,
-        sort_by: None,
-        user_id: None,
-    };
+    let search_params2: SearchParams = json!({
+        "term": "Document",
+        "where": {
+            "title": "First Document"
+        }
+    }).try_into().unwrap();
     collection_client.search(search_params2).await.unwrap();
 
     // Search 3: No filter, with facets
-    let mut facets = HashMap::new();
-    facets.insert(
-        "title".to_string(),
-        FacetDefinition::String(StringFacetDefinition),
-    );
-    let search_params3 = SearchParams {
-        mode: SearchMode::FullText(FulltextMode {
-            term: "Content".to_string(),
-            threshold: None,
-            exact: false,
-            tolerance: None,
-        }),
-        limit: Limit(10),
-        offset: SearchOffset(0),
-        boost: HashMap::new(),
-        properties: Properties::Star,
-        where_filter: WhereFilter::default(),
-        facets,
-        indexes: None,
-        sort_by: None,
-        user_id: None,
-    };
+    let search_params3: SearchParams = json!({
+        "term": "Content",
+        "facets": {
+            "title": {}
+        }
+    }).try_into().unwrap();
     collection_client.search(search_params3).await.unwrap();
 
     // Get metrics output as string
