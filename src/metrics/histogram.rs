@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use metrics::{histogram, Label};
+use metrics::{counter, histogram, Label};
 use num_traits::cast;
 use tracing::error;
 
@@ -21,6 +21,17 @@ macro_rules! create_time_histogram {
         #[allow(dead_code)]
         pub static $name: $crate::metrics::histogram::TimeHistogram<$type> =
             $crate::metrics::histogram::TimeHistogram {
+                key: $key,
+                phantom: std::marker::PhantomData,
+            };
+    };
+}
+#[macro_export]
+macro_rules! create_counter {
+    ($name:ident, $key:expr, $type: ident) => {
+        #[allow(dead_code)]
+        pub static $name: $crate::metrics::histogram::Counter<$type> =
+            $crate::metrics::histogram::Counter {
                 key: $key,
                 phantom: std::marker::PhantomData,
             };
@@ -78,5 +89,15 @@ impl Drop for TimeHistogramImpl {
         self.already_recorded = true;
         let elapsed = self.created_at.elapsed().as_secs_f64();
         histogram!(self.key, self.labels.clone()).record(elapsed);
+    }
+}
+
+pub struct Counter<Labels> {
+    pub key: &'static str,
+    pub phantom: std::marker::PhantomData<Labels>,
+}
+impl<Labels: Into<Vec<Label>>> Counter<Labels> {
+    pub fn increment(&self, labels: Labels, value: u64) {
+        counter!(self.key, labels.into()).increment(value);
     }
 }

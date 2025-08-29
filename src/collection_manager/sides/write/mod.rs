@@ -59,6 +59,7 @@ use crate::{
         write::jwt_manager::{JwtConfig, JwtManager},
         DocumentStorageWriteOperation, DocumentToInsert, ReplaceIndexReason, WriteOperation,
     },
+    metrics::{CollectionIdLabel, INSERT_DOCUMENTS_COUNTER, INSERT_DOCUMENTS_DURATION, UPDATE_DOCUMENTS_COUNTER, UPDATE_DOCUMENTS_DURATION, DELETE_DOCUMENTS_COUNTER, DELETE_DOCUMENTS_DURATION},
     types::{
         ApiKey, CollectionCreated, CollectionId, CreateCollection, CreateIndexRequest,
         DeleteDocuments, DescribeCollectionResponse, Document, DocumentId, DocumentList,
@@ -605,6 +606,14 @@ impl WriteSide {
         mut document_list: DocumentList,
     ) -> Result<InsertDocumentsResult, WriteError> {
         let document_count = document_list.len();
+
+        // Start timing the insert_documents operation
+        // The timer will automatically record the duration when it goes out of scope (Drop trait)
+        let insert_duration_timer = INSERT_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+
+        // Increment Prometheus counter for insert_documents method invocations
+        INSERT_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+
         info!(?document_count, "Inserting batch of documents");
 
         let collection = self.get_collection(collection_id, write_api_key).await?;
@@ -616,7 +625,7 @@ impl WriteSide {
 
         // The doc_id_str is the composition of index_id + document_id
         // Anyway, for temp indexes, instead of using the temp index id,
-        // we use the original index id
+        // we use the original index id, so, when swapped, we can avoid to update it.
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         debug!("Inserting documents {}", document_count);
@@ -641,6 +650,9 @@ impl WriteSide {
             .inner_process_documents(collection_id, index_id, document_list, doc_ids)
             .await
             .context("Cannot process documents")?;
+
+        drop(insert_duration_timer);
+
         info!("All documents are inserted");
 
         let mut lock = self.operation_counter.write().await;
@@ -668,6 +680,17 @@ impl WriteSide {
         index_id: IndexId,
         document_ids_to_delete: DeleteDocuments,
     ) -> Result<(), WriteError> {
+        let document_count = document_ids_to_delete.len();
+
+        // Start timing the delete_documents operation
+        // The timer will automatically record the duration when it goes out of scope (Drop trait)
+        let delete_duration_timer = DELETE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+
+        // Increment Prometheus counter for delete_documents method invocations
+        DELETE_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+
+        info!(?document_count, "Deleting batch of documents");
+
         let collection = self.get_collection(collection_id, write_api_key).await?;
         let index = collection
             .get_index(index_id)
@@ -677,6 +700,10 @@ impl WriteSide {
         let doc_ids = index.delete_documents(document_ids_to_delete).await?;
 
         self.document_storage.remove(doc_ids).await;
+
+        drop(delete_duration_timer);
+
+        info!("All documents are deleted");
 
         Ok(())
     }
@@ -697,6 +724,11 @@ impl WriteSide {
         let target_index_id = index.get_runtime_index_id().unwrap_or(index_id);
 
         let document_count = update_document_request.documents.0.len();
+
+        let update_duration_timer = UPDATE_DOCUMENTS_DURATION.create(CollectionIdLabel { collection_id });
+        UPDATE_DOCUMENTS_COUNTER.increment(CollectionIdLabel { collection_id }, document_count as u64);
+
+        info!(?document_count, "Updating batch of documents");
 
         // Prepare document ID mapping
         let document_id_storage = index.get_document_id_storage().await;
@@ -850,6 +882,8 @@ impl WriteSide {
         }
 
         self.document_storage.remove(docs_to_remove).await;
+
+        drop(update_duration_timer);
 
         debug!("All documents");
 

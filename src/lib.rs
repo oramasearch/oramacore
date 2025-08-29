@@ -86,6 +86,8 @@ pub async fn start(config: OramacoreConfig) -> Result<()> {
     let prometheus_hadler = if config.http.with_prometheus {
         Some(
             PrometheusBuilder::new()
+                .set_quantiles(&[0.5, 0.9, 0.999])
+                .expect("quantiles always succeeds")
                 .install_recorder()
                 .context("failed to install recorder")?,
         )
