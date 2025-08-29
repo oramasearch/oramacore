@@ -2,9 +2,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use serde_json::json;
 
 use crate::tests::utils::{init_log, TestContext};
-use crate::types::{
-    DocumentList, SearchParams, UpdateDocumentRequest, UpdateStrategy,
-};
+use crate::types::{DocumentList, SearchParams, UpdateDocumentRequest, UpdateStrategy};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics() {
@@ -65,7 +63,9 @@ async fn test_metrics() {
     // Search 1: No filter, no facets
     let search_params1: SearchParams = json!({
         "term": "First"
-    }).try_into().unwrap();
+    })
+    .try_into()
+    .unwrap();
     collection_client.search(search_params1).await.unwrap();
 
     // Search 2: With filter, no facets
@@ -74,7 +74,9 @@ async fn test_metrics() {
         "where": {
             "title": "First Document"
         }
-    }).try_into().unwrap();
+    })
+    .try_into()
+    .unwrap();
     collection_client.search(search_params2).await.unwrap();
 
     // Search 3: No filter, with facets
@@ -83,7 +85,9 @@ async fn test_metrics() {
         "facets": {
             "title": {}
         }
-    }).try_into().unwrap();
+    })
+    .try_into()
+    .unwrap();
     collection_client.search(search_params3).await.unwrap();
 
     // Get metrics output as string
