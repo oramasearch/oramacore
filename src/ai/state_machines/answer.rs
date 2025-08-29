@@ -600,6 +600,11 @@ impl AnswerStateMachine {
                         )
                         .await?;
 
+                    self.send_event(AnswerEvent::SearchResults {
+                        results: search_results.clone(),
+                    })
+                    .await;
+
                     self.send_event(AnswerEvent::StateChanged {
                         state: "execute_search".to_string(),
                         message: "Executing search".to_string(),
