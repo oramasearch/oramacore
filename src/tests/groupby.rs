@@ -280,12 +280,12 @@ async fn test_group_sort_by_field_ascending() {
         if group.values.contains(&json!("food")) {
             // Food group should be sorted by price ascending: banana(10) first
             let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(group.result.len() >= 1);
+            assert!(!group.result.is_empty());
             assert!(ids[0].contains("doc2")); // banana (lowest price first)
         } else if group.values.contains(&json!("tech")) {
             // Tech group should be sorted by price ascending: laptop(100) first
             let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(group.result.len() >= 1);
+            assert!(!group.result.is_empty());
             assert!(ids[0].contains("doc5")); // laptop (lowest price first)
         }
     }

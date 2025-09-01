@@ -1,17 +1,17 @@
 use std::collections::{HashMap, HashSet};
-use std::iter::Peekable;
 
 use anyhow::{bail, Result};
 use ordered_float::NotNan;
 use tracing::info;
 
 use super::index::Index;
-use super::GroupValue;
+use super::{GroupValue, SortedField};
+use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
 use crate::pin_rules::Consequence;
 use crate::types::{SearchMode, SearchParams};
 use crate::{
     capped_heap::CappedHeap,
-    types::{DocumentId, Limit, Number, SearchOffset, SortBy, SortOrder, TokenScore},
+    types::{DocumentId, Limit, Number, SearchOffset, SortBy, TokenScore},
 };
 
 /// Context structure that encapsulates all parameters needed for sorting operations
@@ -21,57 +21,6 @@ pub struct SortContext<'a> {
     pub search_params: &'a SearchParams,
     pub limit: Limit,
     pub offset: SearchOffset,
-}
-
-pub struct SortIterator<'s1, 's2, T: Ord + Clone> {
-    iter1: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>>,
-    iter2: Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>>,
-    order: SortOrder,
-}
-
-impl<'s1, 's2, T: Ord + Clone> SortIterator<'s1, 's2, T> {
-    pub fn new(
-        iter1: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's1>,
-        iter2: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 's2>,
-        order: SortOrder,
-    ) -> Self {
-        Self {
-            iter1: iter1.peekable(),
-            iter2: iter2.peekable(),
-            order,
-        }
-    }
-}
-
-impl<T: Ord + Clone> Iterator for SortIterator<'_, '_, T> {
-    type Item = (T, HashSet<DocumentId>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let el1 = self.iter1.peek();
-        let el2 = self.iter2.peek();
-
-        match (el1, el2) {
-            (None, None) => None,
-            (Some((_, _)), None) => self.iter1.next(),
-            (None, Some((_, _))) => self.iter2.next(),
-            (Some((k1, _)), Some((k2, _))) => match self.order {
-                SortOrder::Ascending => {
-                    if k1 < k2 {
-                        self.iter1.next()
-                    } else {
-                        self.iter2.next()
-                    }
-                }
-                SortOrder::Descending => {
-                    if k1 > k2 {
-                        self.iter1.next()
-                    } else {
-                        self.iter2.next()
-                    }
-                }
-            },
-        }
-    }
 }
 
 /// Truncate results based on top_count, applying token scores
@@ -126,75 +75,6 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
         .collect()
 }
 
-async fn sort_and_truncate_documents_by_field2(
-    doc_ids: HashSet<DocumentId>,
-    sort_by: &SortBy,
-    relevant_indexes: &[&Index],
-    token_scores: &HashMap<DocumentId, f32>,
-    top_count: usize,
-) -> Result<Vec<DocumentId>> {
-    fn process_sort_iterator(
-        iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
-        desiderata: usize,
-        doc_ids: &HashSet<DocumentId>,
-    ) -> Vec<DocumentId> {
-        iter.flat_map(|(_, dd)| dd.into_iter())
-            .filter(|id| doc_ids.contains(id))
-            .take(desiderata)
-            .collect()
-    }
-
-    let v = if relevant_indexes.len() == 1 {
-        // If there's only one index, use the existing optimized path
-        let output = relevant_indexes[0]
-            .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                process_sort_iterator(iter, top_count, &doc_ids)
-            })
-            .await?;
-
-        // truncate(token_scores, output.into_iter(), top_count)
-    } else {
-        // - For the relevant_indexes, we obtain the first `top_count` items.
-        //   So `all_results` contains something like
-        //
-        //   |sorted data from index1|
-        //   |sorted data from index2|
-        //   |sorted data from index3|
-        //
-        //   which aren't globally sorted
-        //
-        // - Re-sorting the merged results to maintain global order across indexes
-        // - Truncating the results to the desired limit
-        // Note: Each index only returns up to 'top_count' results, not all documents
-        // NB: this is not optimal because we collect all the data and sort it again.
-        //     we can optimize it, without collecting them and re-order.
-        let mut all_results = Vec::new();
-
-        for index in relevant_indexes {
-            let index_results = index
-                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                    process_sort_iterator(iter, top_count, &doc_ids)
-                })
-                .await?;
-
-            all_results.extend(index_results);
-        }
-
-        // Sort the merged results by their numeric values to ensure global ordering
-        // all_results.sort_by_key(|(n, _)| *n);
-
-        // Apply descending order if requested by reversing the sorted results
-        // if sort_by.order == SortOrder::Descending {
-        //     all_results.reverse();
-        // }
-
-        // Get top
-        // truncate(token_scores, all_results.into_iter(), top_count)
-    };
-    panic!()
-    // Ok(v)
-}
-
 async fn sort_and_truncate_documents_by_field(
     sort_by: &SortBy,
     relevant_indexes: &[&Index],
@@ -227,50 +107,28 @@ async fn sort_and_truncate_documents_by_field(
 
     let v = if relevant_indexes.len() == 1 {
         // If there's only one index, use the existing optimized path
-        let output = relevant_indexes[0]
-            .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                process_sort_iterator(iter, top_count)
-            })
+        let sorted_field = relevant_indexes[0]
+            .get_sort_iterator2(&sort_by.property, sort_by.order)
             .await?;
+        let output = process_sort_iterator(sorted_field.iter(), top_count);
 
         truncate(token_scores, output.into_iter(), top_count)
     } else {
-        // - For the relevant_indexes, we obtain the first `top_count` items.
-        //   So `all_results` contains something like
-        //
-        //   |sorted data from index1|
-        //   |sorted data from index2|
-        //   |sorted data from index3|
-        //
-        //   which aren't globally sorted
-        //
-        // - Re-sorting the merged results to maintain global order across indexes
-        // - Truncating the results to the desired limit
-        // Note: Each index only returns up to 'top_count' results, not all documents
-        // NB: this is not optimal because we collect all the data and sort it again.
-        //     we can optimize it, without collecting them and re-order.
-        let mut all_results = Vec::new();
-
+        let mut sorted_fields = Vec::with_capacity(relevant_indexes.len());
         for index in relevant_indexes {
-            let index_results = index
-                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                    process_sort_iterator(iter, top_count)
-                })
+            let sorted_field = index
+                .get_sort_iterator2(&sort_by.property, sort_by.order)
                 .await?;
-
-            all_results.extend(index_results);
+            sorted_fields.push(sorted_field);
         }
 
-        // Sort the merged results by their numeric values to ensure global ordering
-        all_results.sort_by_key(|(n, _)| *n);
-
-        // Apply descending order if requested by reversing the sorted results
-        if sort_by.order == SortOrder::Descending {
-            all_results.reverse();
+        let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
+        for i in &sorted_fields {
+            merge_sorted_iterator.add(i.iter());
         }
 
         // Get top
-        truncate(token_scores, all_results.into_iter(), top_count)
+        truncate(token_scores, merge_sorted_iterator, top_count)
     };
     Ok(v)
 }
@@ -436,7 +294,7 @@ pub async fn sort_documents_in_groups(
 
     for (group_key, doc_set) in groups {
         let docs = if let Some(sort_by) = sort_by {
-            top_n_documents_by_field(
+            top_n_documents_in_group_by_field(
                 doc_set,
                 sort_by,
                 relevant_indexes,
@@ -445,7 +303,7 @@ pub async fn sort_documents_in_groups(
             )
             .await?
         } else {
-            top_n_documents_by_score(doc_set, token_scores, max_results)
+            top_n_documents_in_group_by_score(doc_set, token_scores, max_results)
         };
 
         sorted_groups.insert(group_key, docs);
@@ -454,7 +312,7 @@ pub async fn sort_documents_in_groups(
     Ok(sorted_groups)
 }
 
-fn top_n_documents_by_score(
+fn top_n_documents_in_group_by_score(
     docs: HashSet<DocumentId>,
     token_scores: &HashMap<DocumentId, f32>,
     max_results: usize,
@@ -472,87 +330,56 @@ fn top_n_documents_by_score(
     capped_heap.into_top().map(|(_, doc_id)| doc_id).collect()
 }
 
-async fn top_n_documents_by_field(
+async fn top_n_documents_in_group_by_field(
     docs: HashSet<DocumentId>,
     sort_by: &SortBy,
     relevant_indexes: &[&Index],
     token_scores: &HashMap<DocumentId, f32>,
     max_results: usize,
 ) -> Result<Vec<DocumentId>> {
-    panic!()
-    /*
-    sort_and_truncate_documents_by_field(
+    let v: Vec<_> = if relevant_indexes.len() == 1 {
+        let output = relevant_indexes[0]
+            .get_sort_iterator2(&sort_by.property, sort_by.order)
+            .await?;
 
-        sort_by,
-        relevant_indexes,
-        token_scores,
-        max_results,
-    ).await
-     */
-}
+        output
+            .iter()
+            .flat_map(|(_, h)| h.into_iter())
+            .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
+            .take(max_results)
+            .collect()
+    } else {
+        let mut v: Vec<_> = Vec::with_capacity(relevant_indexes.len());
+        for index in relevant_indexes {
+            let index_results: SortedField = index
+                .get_sort_iterator2(&sort_by.property, sort_by.order)
+                .await?;
+            v.push(index_results);
+        }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::{DocumentId, SortOrder};
+        let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
+        for i in &v {
+            merge_sorted_iterator.add(i.iter());
+        }
 
-    #[test]
-    fn test_sort_iterator_ascending() {
-        let data1 = vec![(1, 10), (3, 30), (5, 50)];
-        let data2 = vec![(2, 20), (4, 40), (6, 60)];
-        let iter = SortIterator::new(make_iter(data1), make_iter(data2), SortOrder::Ascending);
-        let result: Vec<u64> = iter.flat_map(|(_, doc_ids)| doc_ids).map(|d| d.0).collect();
-        assert_eq!(result, vec![10, 20, 30, 40, 50, 60]);
-    }
+        merge_sorted_iterator
+            .flat_map(|(_, h)| h.into_iter())
+            .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
+            .take(max_results)
+            .collect()
+    };
 
-    #[test]
-    fn test_sort_iterator_descending() {
-        let data1 = vec![(6, 60), (4, 40), (2, 20)];
-        let data2 = vec![(5, 50), (3, 30), (1, 10)];
-        let iter = SortIterator::new(make_iter(data1), make_iter(data2), SortOrder::Descending);
-        let result: Vec<u64> = iter.flat_map(|(_, doc_ids)| doc_ids).map(|d| d.0).collect();
-
-        assert_eq!(result, vec![60, 50, 40, 30, 20, 10]);
-    }
-
-    #[test]
-    fn test_sort_iterator_mixed_lengths() {
-        let data1 = vec![(1, 10), (3, 30)];
-        let data2 = vec![(2, 20), (4, 40), (5, 50)];
-        let iter = SortIterator::new(make_iter(data1), make_iter(data2), SortOrder::Ascending);
-        let result: Vec<u64> = iter.flat_map(|(_, doc_ids)| doc_ids).map(|d| d.0).collect();
-        assert_eq!(result, vec![10, 20, 30, 40, 50]);
-    }
-
-    #[test]
-    fn test_sort_iterator_with_duplicates() {
-        // Both iterators contain the same key and value
-        let data1 = vec![(1, 10), (2, 20), (3, 30)];
-        let data2 = vec![(2, 20), (3, 30), (4, 40)];
-        let iter = SortIterator::new(make_iter(data1), make_iter(data2), SortOrder::Ascending);
-        let result: Vec<u64> = iter.flat_map(|(_, doc_ids)| doc_ids).map(|d| d.0).collect();
-
-        assert_eq!(result, vec![10, 20, 20, 30, 30, 40]);
-    }
-
-    fn make_iter(data: Vec<(u64, u64)>) -> Box<dyn Iterator<Item = (u64, HashSet<DocumentId>)>> {
-        Box::new(
-            data.into_iter()
-                .map(|(k, v)| (k, HashSet::from([DocumentId(v)]))),
-        )
-    }
+    Ok(v)
 }
 
 mod sort_iter {
-    use crate::types::{DocumentId, SortOrder};
+    use crate::types::{DocumentId, Number, SortOrder};
     use std::collections::HashSet;
     use std::fmt::Debug;
     use std::iter::Peekable;
 
-    pub trait OrderedKey: Ord + Eq + Clone + Debug {
-        fn min_value() -> Self;
-        fn max_value() -> Self;
-    }
+    pub trait OrderedKey: Ord + Eq + Clone + Debug {}
+    impl OrderedKey for Number {}
 
     pub struct MergeSortedIterator<'iter, T: OrderedKey> {
         iters: Vec<Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 'iter>>>,
@@ -587,10 +414,7 @@ mod sort_iter {
                 .iters
                 .iter_mut()
                 .enumerate()
-                .filter_map(|(index, iter)| {
-                    iter.peek()
-                            .map(|(n, _)| (index, n.clone()))
-                });
+                .filter_map(|(index, iter)| iter.peek().map(|(n, _)| (index, n.clone())));
             let index_key_pair = match self.order {
                 SortOrder::Ascending => iter.min_by(cmp_pair),
                 SortOrder::Descending => iter.max_by(cmp_pair),
@@ -604,22 +428,8 @@ mod sort_iter {
     mod sort_iter_test {
         use super::*;
 
-        impl OrderedKey for u8 {
-            fn min_value() -> Self {
-                0
-            }
-            fn max_value() -> Self {
-                u8::MAX
-            }
-        }
-        impl OrderedKey for i16 {
-            fn min_value() -> Self {
-                i16::MIN
-            }
-            fn max_value() -> Self {
-                i16::MAX
-            }
-        }
+        impl OrderedKey for u8 {}
+        impl OrderedKey for i16 {}
 
         #[test]
         fn test_empty() {
