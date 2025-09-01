@@ -1,7 +1,5 @@
-use crate::collection_manager::sides::read::index::uncommitted_field::{
-    UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
-};
-use crate::types::{DocumentId, Number, NumberFilter};
+use crate::collection_manager::sides::read::index::uncommitted_field::{UncommittedBoolField, UncommittedDateFilterField, UncommittedNumberField, UncommittedStringFilterField};
+use crate::types::{DateFilter, DocumentId, Number, NumberFilter, OramaDate};
 use std::hash::Hash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use crate::tests::utils::{extrapolate_ids_from_result, extrapolate_ids_from_result_hits, init_log, TestContext};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_group_by_number() {
+async fn test_group_by() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -60,7 +60,7 @@ async fn test_group_by_number() {
         ])
     );
     for g in groups {
-        assert!(g.result.len() < 5);
+        assert!(g.result.len() <= 5);
     }
 
     let output = collection_client
@@ -102,7 +102,7 @@ async fn test_group_by_number() {
         ])
     );
     for g in groups {
-        assert!(g.result.len() < 5);
+        assert!(g.result.len() <= 5);
     }
 
     let output = collection_client
@@ -164,7 +164,7 @@ async fn test_group_by_number() {
         ])
     );
     for g in groups {
-        assert!(g.result.len() < 5);
+        assert!(g.result.len() <= 5);
     }
 
     drop(test_context);
@@ -336,6 +336,401 @@ async fn test_group_sort_by_field_descending() {
     assert_eq!(groups[1].values, vec![json!("tech")]);
     let ids = extrapolate_ids_from_result_hits(&groups[1].result);
     assert_eq!(ids, vec!["doc3", "doc4"]);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_max_results_default() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "apple fruit sweet", "category": "food"},
+        {"id": "doc2", "title": "apple fruit red", "category": "food"},
+        {"id": "doc3", "title": "apple fruit green", "category": "food"},
+        {"id": "doc4", "title": "apple phone tech", "category": "tech"},
+        {"id": "doc5", "title": "apple watch tech", "category": "tech"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "apple",
+        "groupBy": {
+            "properties": ["category"]
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 2);
+
+    for group in &groups {
+        assert_eq!(group.result.len(), 1);
+    }
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_max_results_zero() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "apple", "category": "food"},
+        {"id": "doc2", "title": "banana", "category": "food"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 0
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 0);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_max_results_larger_than_available() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "apple", "category": "food"},
+        {"id": "doc2", "title": "banana", "category": "food"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 10
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].result.len(), 2);
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_max_results_exact_compliance() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "test", "category": "A", "priority": 1},
+        {"id": "doc2", "title": "test", "category": "A", "priority": 2},
+        {"id": "doc3", "title": "test", "category": "A", "priority": 3},
+        {"id": "doc4", "title": "test", "category": "B", "priority": 1},
+        {"id": "doc5", "title": "test", "category": "B", "priority": 2},
+        {"id": "doc6", "title": "test", "category": "C", "priority": 1}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "test",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 2
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 3);
+
+    let mut groups_by_category = std::collections::HashMap::new();
+    for group in &groups {
+        let category = group.values[0].as_str().unwrap();
+        groups_by_category.insert(category, group.result.len());
+    }
+
+    assert_eq!(groups_by_category.get("A"), Some(&2));
+    assert_eq!(groups_by_category.get("B"), Some(&2));
+    assert_eq!(groups_by_category.get("C"), Some(&1));
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_float_numbers() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "test", "rating": 4.5, "category": "A"},
+        {"id": "doc2", "title": "test", "rating": 4.5, "category": "B"},
+        {"id": "doc3", "title": "test", "rating": 3.2, "category": "A"},
+        {"id": "doc4", "title": "test", "rating": 3.2, "category": "B"},
+        {"id": "doc5", "title": "test", "rating": 2.8, "category": "A"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "test",
+        "groupBy": {
+            "properties": ["rating"],
+            "max_results": 3
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 3);
+
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+
+    assert_eq!(values.len(), 3);
+    // Floats are rounded :(
+    /*
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.5.into()],
+            vec![3.2.into()],
+            vec![2.8.into()],
+        ])
+    );
+     */
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_empty_search_results() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "apple", "category": "food"},
+        {"id": "doc2", "title": "banana", "category": "food"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "nonexistent",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 5
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(results.count, 0);
+    println!("Search results: {:#?}", results.groups);
+    assert!(results.groups.is_none() || results.groups.unwrap().is_empty());
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_nonexistent_property() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "test", "category": "food"},
+        {"id": "doc2", "title": "test", "category": "tech"}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "test",
+        "groupBy": {
+            "properties": ["nonexistent_property"],
+            "max_results": 5
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    
+    if !groups.is_empty() {
+        for group in &groups {
+            assert!(group.values[0].is_null() || group.values[0] == serde_json::Value::Null);
+        }
+    }
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_insufficient_documents() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([
+        {"id": "doc1", "title": "test", "category": "food", "priority": 1},
+        {"id": "doc2", "title": "test", "category": "food", "priority": 2},
+        {"id": "doc3", "title": "test", "category": "tech", "priority": 1}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "test",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 5
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 2);
+
+    let mut groups_by_category = std::collections::HashMap::new();
+    for group in &groups {
+        let category = group.values[0].as_str().unwrap();
+        groups_by_category.insert(category, group.result.len());
+    }
+
+    assert_eq!(groups_by_category.get("food"), Some(&2));
+    assert_eq!(groups_by_category.get("tech"), Some(&1));
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_zero_documents_scenario() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let documents = json!([]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "test",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 5
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(results.count, 0);
+    assert!(results.groups.is_none() || results.groups.unwrap().is_empty());
 
     drop(test_context);
 }

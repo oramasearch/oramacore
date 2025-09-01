@@ -467,6 +467,10 @@ impl ReadSide {
 
             let groups: Vec<_> = futures::stream::iter(groups.into_iter())
                 .filter_map(|(k, ids)| async {
+                    if ids.is_empty() {
+                        return None;
+                    }
+
                     let docs = self
                         .document_storage
                         .get_documents_by_ids(ids.clone())
