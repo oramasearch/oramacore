@@ -545,11 +545,11 @@ mod tests {
 
 mod sort_iter {
     use crate::types::{DocumentId, SortOrder};
-    use itertools::Itertools;
     use std::collections::HashSet;
+    use std::fmt::Debug;
     use std::iter::Peekable;
 
-    pub trait OrderedKey: Ord + Eq + Clone {
+    pub trait OrderedKey: Ord + Eq + Clone + Debug {
         fn min_value() -> Self;
         fn max_value() -> Self;
     }
@@ -557,9 +557,6 @@ mod sort_iter {
     pub struct MergeSortedIterator<'iter, T: OrderedKey> {
         iters: Vec<Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 'iter>>>,
         order: SortOrder,
-        min: T,
-
-        inner_cache: Vec<(usize, T)>,
     }
 
     impl<'iter, T: OrderedKey> MergeSortedIterator<'iter, T> {
@@ -567,8 +564,6 @@ mod sort_iter {
             Self {
                 iters: vec![],
                 order,
-                min: T::min_value(),
-                inner_cache: vec![],
             }
         }
 
@@ -581,54 +576,27 @@ mod sort_iter {
         type Item = (T, HashSet<DocumentId>);
 
         fn next(&mut self) -> Option<Self::Item> {
-            let min = self.min.clone();
+            fn cmp_pair<T: Ord>(
+                (_, key1): &(usize, T),
+                (_, key2): &(usize, T),
+            ) -> std::cmp::Ordering {
+                key1.cmp(key2)
+            }
 
-            // Eq case
-            let el = self
+            let iter = self
                 .iters
                 .iter_mut()
-                .filter_map(|iter| match iter.peek() {
-                    Some((n, _)) if *n == min => Some(iter.next().unwrap()),
-                    _ => None,
-                })
-                .next();
-            if let Some(el) = el {
-                return Some(el);
-            }
-
-            self.inner_cache.clear();
-            self.inner_cache
-                .extend(
-                    self.iters
-                        .iter_mut()
-                        .enumerate()
-                        .filter_map(|(index, iter)| match iter.peek() {
-                            Some((n, _)) => Some((index, n.clone())),
-                            _ => None,
-                        }),
-                );
-
-            // All iters returns None
-            if self.inner_cache.is_empty() {
-                return None;
-            }
-
-            let index = if self.order == SortOrder::Ascending {
-                self.inner_cache
-                    .iter()
-                    .min_by(|(_, key1), (_, key2)| key1.cmp(key2))
-            } else {
-                self.inner_cache
-                    .iter()
-                    .max_by(|(_, key1), (_, key2)| key1.cmp(key2))
+                .enumerate()
+                .filter_map(|(index, iter)| {
+                    iter.peek()
+                            .map(|(n, _)| (index, n.clone()))
+                });
+            let index_key_pair = match self.order {
+                SortOrder::Ascending => iter.min_by(cmp_pair),
+                SortOrder::Descending => iter.max_by(cmp_pair),
             };
 
-            if let Some((index, _)) = index {
-                let iter = self.iters.get_mut(*index).unwrap();
-                iter.next()
-            } else {
-                None
-            }
+            index_key_pair.and_then(|(index, _)| self.iters[index].next())
         }
     }
 
@@ -642,6 +610,14 @@ mod sort_iter {
             }
             fn max_value() -> Self {
                 u8::MAX
+            }
+        }
+        impl OrderedKey for i16 {
+            fn min_value() -> Self {
+                i16::MIN
+            }
+            fn max_value() -> Self {
+                i16::MAX
             }
         }
 
@@ -681,6 +657,473 @@ mod sort_iter {
                     )
                 ]
             );
+        }
+
+        #[test]
+        fn test_multiple_iterators_ascending() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator 1: [1, 5, 9]
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(10)])),
+                    (5, HashSet::from([DocumentId(50)])),
+                    (9, HashSet::from([DocumentId(90)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 2: [2, 6, 10]
+            merged.add(Box::new(
+                vec![
+                    (2, HashSet::from([DocumentId(20)])),
+                    (6, HashSet::from([DocumentId(60)])),
+                    (10, HashSet::from([DocumentId(100)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 3: [3, 4, 7, 8]
+            merged.add(Box::new(
+                vec![
+                    (3, HashSet::from([DocumentId(30)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                    (7, HashSet::from([DocumentId(70)])),
+                    (8, HashSet::from([DocumentId(80)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+            // Verify document IDs are preserved correctly
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(10)]));
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(20)]));
+            assert_eq!(collected[9].1, HashSet::from([DocumentId(100)]));
+        }
+
+        #[test]
+        fn test_multiple_iterators_descending() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Descending);
+
+            // Iterator 1: [9, 5, 1] (descending)
+            merged.add(Box::new(
+                vec![
+                    (9, HashSet::from([DocumentId(90)])),
+                    (5, HashSet::from([DocumentId(50)])),
+                    (1, HashSet::from([DocumentId(10)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 2: [10, 6, 2] (descending)
+            merged.add(Box::new(
+                vec![
+                    (10, HashSet::from([DocumentId(100)])),
+                    (6, HashSet::from([DocumentId(60)])),
+                    (2, HashSet::from([DocumentId(20)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 3: [8, 7, 4, 3] (descending)
+            merged.add(Box::new(
+                vec![
+                    (8, HashSet::from([DocumentId(80)])),
+                    (7, HashSet::from([DocumentId(70)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                    (3, HashSet::from([DocumentId(30)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+
+            // Verify document IDs are preserved correctly
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(100)]));
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(90)]));
+            assert_eq!(collected[9].1, HashSet::from([DocumentId(10)]));
+        }
+
+        #[test]
+        fn test_duplicate_keys_across_iterators() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator 1: [1, 3, 5]
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(10)])),
+                    (3, HashSet::from([DocumentId(30)])),
+                    (5, HashSet::from([DocumentId(50)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 2: [1, 3, 4] - has duplicate keys 1 and 3
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(11)])),
+                    (3, HashSet::from([DocumentId(31)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            // Should preserve all items, including duplicates
+            assert_eq!(keys, vec![1, 1, 3, 3, 4, 5]);
+
+            // Verify both document sets for key 1 are preserved
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(10)]));
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(11)]));
+
+            // Verify both document sets for key 3 are preserved
+            assert_eq!(collected[2].1, HashSet::from([DocumentId(30)]));
+            assert_eq!(collected[3].1, HashSet::from([DocumentId(31)]));
+        }
+
+        #[test]
+        fn test_duplicate_keys_same_iterator() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Single iterator with duplicate keys
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(10)])),
+                    (1, HashSet::from([DocumentId(11)])),
+                    (2, HashSet::from([DocumentId(20)])),
+                    (2, HashSet::from([DocumentId(21)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 1, 2, 2]);
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(10)]));
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(11)]));
+            assert_eq!(collected[2].1, HashSet::from([DocumentId(20)]));
+            assert_eq!(collected[3].1, HashSet::from([DocumentId(21)]));
+        }
+
+        #[test]
+        fn test_single_empty_iterator() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Add a single empty iterator
+            merged.add(Box::new(std::iter::empty()));
+
+            let collected: Vec<_> = merged.collect();
+            assert!(collected.is_empty());
+        }
+
+        #[test]
+        fn test_mix_empty_and_non_empty_iterators() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Empty iterator
+            merged.add(Box::new(std::iter::empty()));
+
+            // Non-empty iterator
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(10)])),
+                    (3, HashSet::from([DocumentId(30)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Another empty iterator
+            merged.add(Box::new(std::iter::empty()));
+
+            // Another non-empty iterator
+            merged.add(Box::new(
+                vec![
+                    (2, HashSet::from([DocumentId(20)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            // Should only get results from non-empty iterators
+            assert_eq!(keys, vec![1, 2, 3, 4]);
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(10)]));
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(20)]));
+            assert_eq!(collected[2].1, HashSet::from([DocumentId(30)]));
+            assert_eq!(collected[3].1, HashSet::from([DocumentId(40)]));
+        }
+
+        #[test]
+        fn test_all_iterators_exhausted_simultaneously() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator 1: [1]
+            merged.add(Box::new(
+                vec![(1, HashSet::from([DocumentId(10)]))].into_iter(),
+            ));
+
+            // Iterator 2: [2]
+            merged.add(Box::new(
+                vec![(2, HashSet::from([DocumentId(20)]))].into_iter(),
+            ));
+
+            // Iterator 3: [3]
+            merged.add(Box::new(
+                vec![(3, HashSet::from([DocumentId(30)]))].into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 2, 3]);
+            assert_eq!(collected.len(), 3);
+        }
+
+        #[test]
+        fn test_iterators_different_lengths() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Short iterator: [1, 2]
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(10)])),
+                    (2, HashSet::from([DocumentId(20)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Long iterator: [3, 4, 5, 6, 7, 8]
+            merged.add(Box::new(
+                vec![
+                    (3, HashSet::from([DocumentId(30)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                    (5, HashSet::from([DocumentId(50)])),
+                    (6, HashSet::from([DocumentId(60)])),
+                    (7, HashSet::from([DocumentId(70)])),
+                    (8, HashSet::from([DocumentId(80)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Medium iterator: [9, 10, 11]
+            merged.add(Box::new(
+                vec![
+                    (9, HashSet::from([DocumentId(90)])),
+                    (10, HashSet::from([DocumentId(100)])),
+                    (11, HashSet::from([DocumentId(110)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+            assert_eq!(collected.len(), 11);
+        }
+
+        #[test]
+        fn test_one_iterator_much_longer() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Descending);
+
+            // Very short iterator: [100]
+            merged.add(Box::new(
+                vec![(100, HashSet::from([DocumentId(1000)]))].into_iter(),
+            ));
+
+            // Much longer iterator: [99, 98, 97, 96, 95, 94, 93, 92, 91, 90]
+            merged.add(Box::new(
+                vec![
+                    (99, HashSet::from([DocumentId(990)])),
+                    (98, HashSet::from([DocumentId(980)])),
+                    (97, HashSet::from([DocumentId(970)])),
+                    (96, HashSet::from([DocumentId(960)])),
+                    (95, HashSet::from([DocumentId(950)])),
+                    (94, HashSet::from([DocumentId(940)])),
+                    (93, HashSet::from([DocumentId(930)])),
+                    (92, HashSet::from([DocumentId(920)])),
+                    (91, HashSet::from([DocumentId(910)])),
+                    (90, HashSet::from([DocumentId(900)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![100, 99, 98, 97, 96, 95, 94, 93, 92, 91, 90]);
+
+            // Verify first item comes from the shorter iterator
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(1000)]));
+
+            // Verify remaining items come from the longer iterator
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(990)]));
+            assert_eq!(collected[10].1, HashSet::from([DocumentId(900)]));
+        }
+
+        #[test]
+        fn test_document_id_set_merging() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator with multiple documents per key
+            merged.add(Box::new(
+                vec![
+                    (
+                        1,
+                        HashSet::from([DocumentId(10), DocumentId(11), DocumentId(12)]),
+                    ),
+                    (3, HashSet::from([DocumentId(30), DocumentId(31)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator with single documents per key
+            merged.add(Box::new(
+                vec![
+                    (2, HashSet::from([DocumentId(20)])),
+                    (4, HashSet::from([DocumentId(40)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 2, 3, 4]);
+
+            // Verify multi-document sets are preserved
+            assert_eq!(
+                collected[0].1,
+                HashSet::from([DocumentId(10), DocumentId(11), DocumentId(12)])
+            );
+            assert_eq!(collected[1].1, HashSet::from([DocumentId(20)]));
+            assert_eq!(
+                collected[2].1,
+                HashSet::from([DocumentId(30), DocumentId(31)])
+            );
+            assert_eq!(collected[3].1, HashSet::from([DocumentId(40)]));
+        }
+
+        #[test]
+        fn test_overlapping_document_sets() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator 1: contains DocumentId(100) in multiple sets
+            merged.add(Box::new(
+                vec![
+                    (1, HashSet::from([DocumentId(100), DocumentId(101)])),
+                    (3, HashSet::from([DocumentId(100), DocumentId(103)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator 2: also contains DocumentId(100)
+            merged.add(Box::new(
+                vec![
+                    (2, HashSet::from([DocumentId(100), DocumentId(102)])),
+                    (4, HashSet::from([DocumentId(104)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![1, 2, 3, 4]);
+
+            // Each set should maintain its own DocumentId combinations
+            // DocumentId(100) appears in multiple sets, which is expected behavior
+            assert_eq!(
+                collected[0].1,
+                HashSet::from([DocumentId(100), DocumentId(101)])
+            );
+            assert_eq!(
+                collected[1].1,
+                HashSet::from([DocumentId(100), DocumentId(102)])
+            );
+            assert_eq!(
+                collected[2].1,
+                HashSet::from([DocumentId(100), DocumentId(103)])
+            );
+            assert_eq!(collected[3].1, HashSet::from([DocumentId(104)]));
+        }
+
+        #[test]
+        fn test_min_max_value_usage() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+
+            // Iterator with min and max values
+            merged.add(Box::new(
+                vec![
+                    (u8::MIN, HashSet::from([DocumentId(0)])),
+                    (1, HashSet::from([DocumentId(1)])),
+                    (u8::MAX, HashSet::from([DocumentId(255)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator with intermediate values
+            merged.add(Box::new(
+                vec![
+                    (2, HashSet::from([DocumentId(2)])),
+                    (127, HashSet::from([DocumentId(127)])),
+                    (254, HashSet::from([DocumentId(254)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<u8> = collected.iter().map(|(k, _)| *k).collect();
+
+            assert_eq!(keys, vec![0, 1, 2, 127, 254, 255]);
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(0)]));
+            assert_eq!(collected[5].1, HashSet::from([DocumentId(255)]));
+        }
+
+        #[test]
+        fn test_custom_ordered_key_type() {
+            // Test with a different OrderedKey type (using i16 to have different bounds)
+
+            let mut merged = MergeSortedIterator::<i16>::new(SortOrder::Descending);
+
+            // Iterator with negative values
+            merged.add(Box::new(
+                vec![
+                    (i16::MAX, HashSet::from([DocumentId(32767)])),
+                    (0, HashSet::from([DocumentId(0)])),
+                    (i16::MIN, HashSet::from([DocumentId(32768)])),
+                ]
+                .into_iter(),
+            ));
+
+            // Iterator with other values
+            merged.add(Box::new(
+                vec![
+                    (1000, HashSet::from([DocumentId(1000)])),
+                    (-1000, HashSet::from([DocumentId(2000)])),
+                ]
+                .into_iter(),
+            ));
+
+            let collected: Vec<_> = merged.collect();
+            let keys: Vec<i16> = collected.iter().map(|(k, _)| *k).collect();
+
+            // Should be in descending order
+            assert_eq!(keys, vec![32767, 1000, 0, -1000, -32768]);
+            assert_eq!(collected[0].1, HashSet::from([DocumentId(32767)]));
+            assert_eq!(collected[4].1, HashSet::from([DocumentId(32768)]));
         }
     }
 }
