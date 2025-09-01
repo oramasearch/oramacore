@@ -108,7 +108,7 @@ async fn sort_and_truncate_documents_by_field(
     let v = if relevant_indexes.len() == 1 {
         // If there's only one index, use the existing optimized path
         let sorted_field = relevant_indexes[0]
-            .get_sort_iterator2(&sort_by.property, sort_by.order)
+            .get_sort_iterator(&sort_by.property, sort_by.order)
             .await?;
         let output = process_sort_iterator(sorted_field.iter(), top_count);
 
@@ -117,7 +117,7 @@ async fn sort_and_truncate_documents_by_field(
         let mut sorted_fields = Vec::with_capacity(relevant_indexes.len());
         for index in relevant_indexes {
             let sorted_field = index
-                .get_sort_iterator2(&sort_by.property, sort_by.order)
+                .get_sort_iterator(&sort_by.property, sort_by.order)
                 .await?;
             sorted_fields.push(sorted_field);
         }
@@ -177,7 +177,6 @@ fn apply_pin_rules(
         return top;
     }
 
-    // Collect all promote items from all pin rule consequences
     let mut promote_items = Vec::new();
     for consequence in pins {
         promote_items.extend(consequence.promote);
@@ -350,7 +349,6 @@ pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScor
 
     let pins = extract_pin_rules(&context).await;
 
-    // Call the existing sort_and_truncate_documents function
     sort_and_truncate_documents(
         relevant_indexes_for_sorting,
         pins,
@@ -453,7 +451,7 @@ async fn top_n_documents_in_group_by_field(
 
     let v: Vec<_> = if relevant_indexes.len() == 1 {
         let output = relevant_indexes[0]
-            .get_sort_iterator2(&sort_by.property, sort_by.order)
+            .get_sort_iterator(&sort_by.property, sort_by.order)
             .await?;
 
         output
@@ -466,7 +464,7 @@ async fn top_n_documents_in_group_by_field(
         let mut v: Vec<_> = Vec::with_capacity(relevant_indexes.len());
         for index in relevant_indexes {
             let index_results: SortedField = index
-                .get_sort_iterator2(&sort_by.property, sort_by.order)
+                .get_sort_iterator(&sort_by.property, sort_by.order)
                 .await?;
             v.push(index_results);
         }
