@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
 use ordered_float::NotNan;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::index::Index;
 use super::{GroupValue, SortedField};
@@ -160,7 +160,7 @@ async fn sort_and_truncate_documents(
     };
 
     let top = if !pins.is_empty() {
-        apply_pin_rules(pins, token_scores, top)
+        apply_pin_rules(&pins, token_scores, top)
     } else {
         top
     };
@@ -168,58 +168,84 @@ async fn sort_and_truncate_documents(
     Ok(top)
 }
 
-fn apply_pin_rules(
-    pins: Vec<Consequence<DocumentId>>,
+// Maximum number of promoted items to prevent excessive memory usage
+const MAX_PROMOTED_ITEMS: usize = 10_000;
+
+/// Internal shared implementation for applying pin rules with optional document filtering
+fn apply_pin_rules_internal<F>(
+    pins: &[Consequence<DocumentId>],
     token_scores: &HashMap<DocumentId, f32>,
     mut top: Vec<TokenScore>,
-) -> Vec<TokenScore> {
+    document_filter: Option<F>,
+) -> Vec<TokenScore>
+where
+    F: Fn(&DocumentId) -> bool,
+{
     if pins.is_empty() {
         return top;
     }
 
-    let mut promote_items = Vec::new();
-    for consequence in pins {
-        promote_items.extend(consequence.promote);
+    // Estimate the total number of promote items to avoid excessive memory allocation
+    let estimated_promote_items: usize = pins.iter().map(|c| c.promote.len()).sum();
+    if estimated_promote_items > MAX_PROMOTED_ITEMS {
+        // Log warning but continue with a truncated set
+        warn!(
+            "Pin rules contain {} promote items, which exceeds the limit of {}. This may impact performance.",
+            estimated_promote_items,
+            MAX_PROMOTED_ITEMS
+        );
     }
 
-    // If no promote items, return original results
+    let mut promote_items = Vec::with_capacity(estimated_promote_items.min(MAX_PROMOTED_ITEMS));
+    if let Some(ref filter) = document_filter {
+        for consequence in pins {
+            promote_items.extend(
+                consequence
+                    .promote
+                    .iter()
+                    .filter(|item| filter(&item.doc_id))
+                    .cloned(),
+            );
+        }
+    } else {
+        for consequence in pins {
+            promote_items.extend(consequence.promote.iter().cloned());
+        }
+    }
+
     if promote_items.is_empty() {
+        // Early return if no promote items after filtering
         return top;
     }
 
-    let doc_ids_to_promote: HashSet<_> = promote_items.iter().map(|p| p.doc_id).collect();
+    let promoted_doc_ids: HashSet<_> = promote_items.iter().map(|item| item.doc_id).collect();
 
-    // If re want to remove all the doc_ids that are already present in `top`
-    // This:
-    // - avoid document duplication
-    // - handle the pagination correctly
-    top.retain(|ts| !doc_ids_to_promote.contains(&ts.document_id));
+    // Remove documents that are being promoted from original results
+    // This prevents document duplication and handles pagination correctly
+    top.retain(|token_score| !promoted_doc_ids.contains(&token_score.document_id));
 
-    // Sort promote items by position to handle them in order
+    // Sort promote items by position to handle them in the correct order
     promote_items.sort_by_key(|item| item.position);
 
-    // Make sure in the below loop there's no continuous re-allocation.
+    // Pre-allocate space to avoid continuous re-allocation during insertions
     top.reserve(promote_items.len());
 
     for promote_item in promote_items {
         let target_position = promote_item.position as usize;
 
-        // If target position is beyond the current vector size, append at the end
-        let insertion_position = if target_position >= top.len() {
-            top.len()
-        } else {
-            target_position
-        };
+        // Cap insertion position to vector bounds to prevent out-of-bounds insertion
+        // If position is beyond current length, append at the end
+        let insertion_position = target_position.min(top.len());
 
-        // Get the score from token_scores if it exists, otherwise use a default score of 0.0
-        // This allows promoted documents that weren't in the original search results to be included
+        // Retrieve the document's score from token_scores, or use 0.0 as default
+        // This allows promoted documents that weren't in original search results to be included
         let score = token_scores
             .get(&promote_item.doc_id)
             .copied()
             .unwrap_or(0.0);
 
-        // Insert it at the calculated insertion position.
-        // The other items are shifted.
+        // Insert the promoted document at the calculated position
+        // Other documents are automatically shifted to accommodate the insertion
         top.insert(
             insertion_position,
             TokenScore {
@@ -232,75 +258,26 @@ fn apply_pin_rules(
     top
 }
 
+fn apply_pin_rules(
+    pins: &[Consequence<DocumentId>],
+    token_scores: &HashMap<DocumentId, f32>,
+    top: Vec<TokenScore>,
+) -> Vec<TokenScore> {
+    apply_pin_rules_internal(pins, token_scores, top, None::<fn(&DocumentId) -> bool>)
+}
+
 fn apply_pin_rules_to_group(
     all_document_ids: HashSet<DocumentId>,
-    pins: Vec<Consequence<DocumentId>>,
+    pins: &[Consequence<DocumentId>],
     token_scores: &HashMap<DocumentId, f32>,
-    mut top: Vec<TokenScore>,
+    top: Vec<TokenScore>,
 ) -> Vec<TokenScore> {
-    if pins.is_empty() {
-        return top;
-    }
-
-    // Collect all promote items from all pin rule consequences
-    let mut promote_items = Vec::new();
-    for consequence in pins {
-        promote_items.extend(
-            consequence
-                .promote
-                .into_iter()
-                .filter(|p| all_document_ids.contains(&p.doc_id)),
-        );
-    }
-
-    // If no promote items, return original results
-    if promote_items.is_empty() {
-        return top;
-    }
-
-    let doc_ids_to_promote: HashSet<_> = promote_items.iter().map(|p| p.doc_id).collect();
-
-    // If re want to remove all the doc_ids that are already present in `top`
-    // This:
-    // - avoid document duplication
-    // - handle the pagination correctly
-    top.retain(|ts| !doc_ids_to_promote.contains(&ts.document_id));
-
-    // Sort promote items by position to handle them in order
-    promote_items.sort_by_key(|item| item.position);
-
-    // Make sure in the below loop there's no continuous re-allocation.
-    top.reserve(promote_items.len());
-
-    for promote_item in promote_items {
-        let target_position = promote_item.position as usize;
-
-        // If target position is beyond the current vector size, append at the end
-        let insertion_position = if target_position >= top.len() {
-            top.len()
-        } else {
-            target_position
-        };
-
-        // Get the score from token_scores if it exists, otherwise use a default score of 0.0
-        // This allows promoted documents that weren't in the original search results to be included
-        let score = token_scores
-            .get(&promote_item.doc_id)
-            .copied()
-            .unwrap_or(0.0);
-
-        // Insert it at the calculated insertion position.
-        // The other items are shifted.
-        top.insert(
-            insertion_position,
-            TokenScore {
-                document_id: promote_item.doc_id,
-                score,
-            },
-        );
-    }
-
-    top
+    apply_pin_rules_internal(
+        pins,
+        token_scores,
+        top,
+        Some(|doc_id: &DocumentId| all_document_ids.contains(doc_id)),
+    )
 }
 
 pub fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
@@ -423,7 +400,7 @@ fn top_n_documents_in_group_by_score(
 
     // Apply pin rules to this group's documents
     if !pin_rules.is_empty() {
-        result = apply_pin_rules_to_group(docs, pin_rules.to_vec(), token_scores, result);
+        result = apply_pin_rules_to_group(docs, pin_rules, token_scores, result);
     }
 
     // Truncate to max_results and extract document IDs
@@ -494,7 +471,7 @@ async fn top_n_documents_in_group_by_field(
 
         // Apply pin rules
         token_scores_vec =
-            apply_pin_rules_to_group(docs, pin_rules.to_vec(), token_scores, token_scores_vec);
+            apply_pin_rules_to_group(docs, pin_rules, token_scores, token_scores_vec);
 
         // Extract document IDs and truncate to max_results
         Ok(token_scores_vec
