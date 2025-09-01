@@ -51,6 +51,7 @@ use crate::{
     OramacoreConfig,
 };
 use anyhow::Context;
+use crate::types::SearchResultHit;
 
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {
@@ -989,8 +990,11 @@ impl TestIndexClient {
 }
 
 pub fn extrapolate_ids_from_result(result: &SearchResult) -> Vec<String> {
-    result
-        .hits
+    extrapolate_ids_from_result_hits(&result.hits)
+}
+
+pub fn extrapolate_ids_from_result_hits(hits: &[SearchResultHit]) -> Vec<String> {
+    hits
         .iter()
         .map(|h| {
             let id = h.id.clone();

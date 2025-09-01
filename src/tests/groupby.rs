@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-use crate::tests::utils::{init_log, TestContext};
+use crate::tests::utils::{extrapolate_ids_from_result, extrapolate_ids_from_result_hits, init_log, TestContext};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_group_by_number() {
@@ -33,7 +33,7 @@ async fn test_group_by_number() {
                 "term": "text",
                 "groupBy": {
                     "properties": ["number"],
-                    "maxResult": 5,
+                    "max_results": 5,
                 },
                 "limit": 0,
             })
@@ -69,7 +69,7 @@ async fn test_group_by_number() {
                 "term": "text",
                 "groupBy": {
                     "properties": ["number", "bool"],
-                    "maxResult": 5,
+                    "max_results": 5,
                 },
                 "limit": 0,
             })
@@ -111,7 +111,7 @@ async fn test_group_by_number() {
                 "term": "text",
                 "groupBy": {
                     "properties": ["number", "bool", "string_filter"],
-                    "maxResult": 5,
+                    "max_results": 5,
                 },
                 "limit": 0,
             })
@@ -170,8 +170,6 @@ async fn test_group_by_number() {
     drop(test_context);
 }
 
-// New tests for group sorting functionality
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_group_sort_by_score_default() {
     init_log();
@@ -180,7 +178,6 @@ async fn test_group_sort_by_score_default() {
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert documents with different relevance
     let documents = json!([
         {"id": "doc1", "title": "apple fruit", "category": "food", "price": 10},
         {"id": "doc2", "title": "apple phone", "category": "tech", "price": 100},
@@ -193,12 +190,11 @@ async fn test_group_sort_by_score_default() {
         .await
         .unwrap();
 
-    // Search for "apple" and group by category - should sort by relevance score within groups
     let search_params = json!({
         "term": "apple",
         "groupBy": {
             "properties": ["category"],
-            "maxResults": 10,
+            "max_results": 10,
         }
     });
 
@@ -207,25 +203,26 @@ async fn test_group_sort_by_score_default() {
         .await
         .unwrap();
 
-    // Should have groups
-    assert!(results.groups.is_some());
-    let groups = results.groups.unwrap();
+    let ids = extrapolate_ids_from_result(&results);
+    assert_eq!(ids, vec!["doc1", "doc2"]);
 
-    // Should have two groups: "food" and "tech"
+    assert!(results.groups.is_some());
+    let mut groups = results.groups.unwrap();
     assert_eq!(groups.len(), 2);
 
-    // Check that documents within each group are sorted by score (relevance)
-    for group in &groups {
-        if group.values.contains(&json!("food")) {
-            // In food group, "apple fruit" should come first (higher relevance)
-            assert_eq!(group.result.len(), 1);
-            assert!(group.result[0].id.contains("doc1"));
-        } else if group.values.contains(&json!("tech")) {
-            // In tech group, "apple phone" should come first (higher relevance)
-            assert_eq!(group.result.len(), 1);
-            assert!(group.result[0].id.contains("doc2"));
-        }
-    }
+    groups.sort_by(|g1, g2| {
+        g1.values[0].as_str().cmp(&g2.values[0].as_str())
+    });
+
+    assert_eq!(groups[0].values, Vec::from([json!("food")]));
+    let ids = extrapolate_ids_from_result_hits(&groups[0].result);
+    assert_eq!(ids, vec!["doc1"]);
+
+    assert_eq!(groups[1].values, Vec::from([json!("tech")]));
+    let ids = extrapolate_ids_from_result_hits(&groups[1].result);
+    assert_eq!(ids, vec!["doc2"]);
+
+    drop(test_context);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -236,7 +233,6 @@ async fn test_group_sort_by_field_ascending() {
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert documents with different prices in same categories
     let documents = json!([
         {"id": "doc1", "title": "apple", "category": "food", "price": 30},
         {"id": "doc2", "title": "banana", "category": "food", "price": 10},
@@ -250,12 +246,11 @@ async fn test_group_sort_by_field_ascending() {
         .await
         .unwrap();
 
-    // Group by category and sort by price ascending
     let search_params = json!({
         "term": "",
         "groupBy": {
             "properties": ["category"],
-            "maxResults": 10,
+            "max_results": 10,
         },
         "sortBy": {
             "property": "price",
@@ -268,27 +263,23 @@ async fn test_group_sort_by_field_ascending() {
         .await
         .unwrap();
 
-    // Should have groups
     assert!(results.groups.is_some());
-    let groups = results.groups.unwrap();
-
-    // Should have two groups
+    let mut groups = results.groups.unwrap();
     assert_eq!(groups.len(), 2);
 
-    // Check sorting within groups by checking document ID order
-    for group in &groups {
-        if group.values.contains(&json!("food")) {
-            // Food group should be sorted by price ascending: banana(10) first
-            let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(!group.result.is_empty());
-            assert!(ids[0].contains("doc2")); // banana (lowest price first)
-        } else if group.values.contains(&json!("tech")) {
-            // Tech group should be sorted by price ascending: laptop(100) first
-            let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(!group.result.is_empty());
-            assert!(ids[0].contains("doc5")); // laptop (lowest price first)
-        }
-    }
+    groups.sort_by(|g1, g2| {
+        g1.values[0].as_str().cmp(&g2.values[0].as_str())
+    });
+
+    assert_eq!(groups[0].values, vec![json!("food")]);
+    let ids = extrapolate_ids_from_result_hits(&groups[0].result);
+    assert_eq!(ids, vec!["doc2", "doc3", "doc1"]); // banana, cherry, apple
+
+    assert_eq!(groups[1].values, vec![json!("tech")]);
+    let ids = extrapolate_ids_from_result_hits(&groups[1].result);
+    assert_eq!(ids, vec!["doc5", "doc4"]); // laptop, phone
+
+    drop(test_context);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -299,7 +290,6 @@ async fn test_group_sort_by_field_descending() {
     let collection_client = test_context.create_collection().await.unwrap();
     let index_client = collection_client.create_index().await.unwrap();
 
-    // Insert documents
     let documents = json!([
         {"id": "doc1", "title": "apple", "category": "food", "price": 30},
         {"id": "doc2", "title": "banana", "category": "food", "price": 10},
@@ -312,12 +302,11 @@ async fn test_group_sort_by_field_descending() {
         .await
         .unwrap();
 
-    // Group by category and sort by price descending
     let search_params = json!({
         "term": "",
         "groupBy": {
             "properties": ["category"],
-            "maxResults": 10,
+            "max_results": 10,
         },
         "sortBy": {
             "property": "price",
@@ -332,18 +321,21 @@ async fn test_group_sort_by_field_descending() {
 
     // Should have groups
     assert!(results.groups.is_some());
-    let groups = results.groups.unwrap();
+    let mut groups = results.groups.unwrap();
 
-    // Check sorting within groups by checking document ID order
-    for group in &groups {
-        if group.values.contains(&json!("food")) {
-            // Food group should be sorted by price descending: apple(30) first
-            let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(ids[0].contains("doc1")); // apple (highest price first)
-        } else if group.values.contains(&json!("tech")) {
-            // Tech group should be sorted by price descending: phone(200) first
-            let ids: Vec<String> = group.result.iter().map(|hit| hit.id.clone()).collect();
-            assert!(ids[0].contains("doc3")); // phone (highest price first)
-        }
-    }
+    assert_eq!(groups.len(), 2);
+
+    groups.sort_by(|g1, g2| {
+        g1.values[0].as_str().cmp(&g2.values[0].as_str())
+    });
+
+    assert_eq!(groups[0].values, vec![json!("food")]);
+    let ids = extrapolate_ids_from_result_hits(&groups[0].result);
+    assert_eq!(ids, vec!["doc1", "doc2"]);
+
+    assert_eq!(groups[1].values, vec![json!("tech")]);
+    let ids = extrapolate_ids_from_result_hits(&groups[1].result);
+    assert_eq!(ids, vec!["doc3", "doc4"]);
+
+    drop(test_context);
 }
