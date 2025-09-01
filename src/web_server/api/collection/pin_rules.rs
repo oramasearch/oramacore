@@ -35,7 +35,7 @@ pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
         )
         .route(
             "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/delete",
-            get(delete_pin_rule_v1),
+            post(delete_pin_rule_v1),
         )
         .route(
             "/v1/collections/{collection_id}/indexes/{index_id}/pin_rules/list",
