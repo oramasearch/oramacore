@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-use super::sort::{sort_documents_in_groups, extract_term_from_search_mode};
+use super::sort::{extract_term_from_search_mode, sort_documents_in_groups};
 use super::{
     index::{Index, IndexStats},
     sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
@@ -562,7 +562,7 @@ impl CollectionReader {
             }
 
             index
-                .calculate_groups(token_scores, group_by_config, &mut results)
+                .calculate_groups(&group_by_config.properties, &mut results)
                 .await?
         }
 

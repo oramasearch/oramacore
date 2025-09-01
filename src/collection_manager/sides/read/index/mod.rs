@@ -1726,12 +1726,10 @@ impl Index {
 
     pub async fn calculate_groups(
         &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        group_config: &crate::types::GroupByConfig,
+        properties_on_group: &[String],
         results: &mut HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
     ) -> Result<()> {
-        let Some(properties) = group_config
-            .properties
+        let Some(properties) = properties_on_group
             .iter()
             .map(|field_name| self.path_to_index_id_map.get_filter_field(field_name))
             .collect::<Option<Vec<_>>>()
@@ -1792,7 +1790,7 @@ impl Index {
         // Filter groups by documents that are in token_scores and create final result
         for group_combination in groups {
             // Find intersection of all document sets for this combination
-            let mut intersection: HashSet<DocumentId> = token_scores.keys().cloned().collect();
+            let mut intersection: Option<HashSet<DocumentId>> = None;
             let mut group_values = Vec::new();
 
             for (field_id, group_value) in group_combination {
@@ -1804,13 +1802,19 @@ impl Index {
                     continue;
                 };
 
-                intersection = intersection.intersection(docs).cloned().collect();
+                intersection = if let Some(intersection) = intersection {
+                    Some(intersection.intersection(docs).cloned().collect())
+                } else {
+                    Some(docs.clone())
+                };
 
                 group_values.push(group_value);
             }
 
             let doc_ids_for_key = results.entry(group_values).or_default();
-            doc_ids_for_key.extend(intersection);
+            if let Some(intersection) = intersection {
+                doc_ids_for_key.extend(intersection);
+            }
         }
 
         Ok(())

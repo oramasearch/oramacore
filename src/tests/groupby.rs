@@ -792,7 +792,7 @@ async fn test_group_by_with_pin_rules_score_based() {
         .await
         .unwrap();
 
-    println!("{:#?}", results);
+    println!("{results:#?}");
 
     assert!(results.groups.is_some());
     let mut groups = results.groups.unwrap();
@@ -801,18 +801,14 @@ async fn test_group_by_with_pin_rules_score_based() {
     // Sort groups by category name for predictable testing
     groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
 
-    // Check "food" group - should have doc3 (banana) pinned at position 1
     assert_eq!(groups[0].values, vec![json!("food")]);
     let food_ids = extrapolate_ids_from_result_hits(&groups[0].result);
-    assert_eq!(food_ids[0], "doc3"); // banana should be pinned first
-    assert_eq!(food_ids[1], "doc1"); // apple fruit should be second
+    assert_eq!(food_ids, vec!["doc1", "doc3"]);
 
-    // Check "tech" group - should have doc3 (banana) pinned at position 1 even though it's not in tech category
     assert_eq!(groups[1].values, vec![json!("tech")]);
     let tech_ids = extrapolate_ids_from_result_hits(&groups[1].result);
-    assert_eq!(tech_ids[0], "doc3"); // banana should be pinned first
-    // The remaining tech docs should follow in score order
-    
+    assert_eq!(tech_ids, vec!["doc2", "doc5"]);
+
     drop(test_context);
 }
 
@@ -829,7 +825,8 @@ async fn test_group_by_with_pin_rules_field_based_sorting() {
         {"id": "doc1", "title": "apple fruit", "category": "food", "price": 30},
         {"id": "doc2", "title": "apple phone", "category": "tech", "price": 100},
         {"id": "doc3", "title": "banana fruit", "category": "food", "price": 10},
-        {"id": "doc4", "title": "apple laptop", "category": "tech", "price": 200}
+        {"id": "doc4", "title": "apple laptop", "category": "tech", "price": 200},
+        {"id": "doc5", "title": "baz", "category": "tech", "price": 200},
     ]);
 
     index_client
@@ -851,8 +848,8 @@ async fn test_group_by_with_pin_rules_field_based_sorting() {
               "consequence": {
                 "promote": [
                   {
-                    "doc_id": "doc4",
-                    "position": 2
+                    "doc_id": "doc5",
+                    "position": 0
                   }
                 ]
               }
@@ -884,20 +881,15 @@ async fn test_group_by_with_pin_rules_field_based_sorting() {
     let mut groups = results.groups.unwrap();
     assert_eq!(groups.len(), 2);
 
-    // Sort groups by category name for predictable testing
     groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
 
-    // Check "food" group - doc4 should be pinned at position 2 despite not being in this category
     assert_eq!(groups[0].values, vec![json!("food")]);
     let food_ids = extrapolate_ids_from_result_hits(&groups[0].result);
-    assert_eq!(food_ids.len(), 3);
-    assert_eq!(food_ids[1], "doc4"); // laptop should be pinned at position 2
+    assert_eq!(food_ids, vec!["doc1"]);
 
-    // Check "tech" group - doc4 should be pinned at position 2
     assert_eq!(groups[1].values, vec![json!("tech")]);
     let tech_ids = extrapolate_ids_from_result_hits(&groups[1].result);
-    assert_eq!(tech_ids.len(), 3);
-    assert_eq!(tech_ids[1], "doc4"); // laptop should be pinned at position 2
-    
+    assert_eq!(tech_ids, vec!["doc5", "doc2", "doc4"]);
+
     drop(test_context);
 }
