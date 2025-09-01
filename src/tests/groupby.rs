@@ -730,3 +730,174 @@ async fn test_group_by_zero_documents_scenario() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_with_pin_rules_score_based() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert test documents
+    let documents = json!([
+        {"id": "doc1", "title": "apple fruit", "category": "food", "price": 10},
+        {"id": "doc2", "title": "apple phone", "category": "tech", "price": 100},
+        {"id": "doc3", "title": "banana fruit", "category": "food", "price": 5},
+        {"id": "doc4", "title": "orange tech", "category": "tech", "price": 50},
+        {"id": "doc5", "title": "apple laptop", "category": "tech", "price": 200}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Insert pin rule to promote doc3 in all groups
+    index_client
+        .insert_pin_rules(
+            json!({
+              "id": "promote-banana",
+              "conditions": [
+                {
+                  "pattern": "apple",
+                  "anchoring": "is"
+                }
+              ],
+              "consequence": {
+                "promote": [
+                  {
+                    "doc_id": "doc3",
+                    "position": 1
+                  }
+                ]
+              }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "apple",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 3,
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    println!("{:#?}", results);
+
+    assert!(results.groups.is_some());
+    let mut groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 2);
+
+    // Sort groups by category name for predictable testing
+    groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
+
+    // Check "food" group - should have doc3 (banana) pinned at position 1
+    assert_eq!(groups[0].values, vec![json!("food")]);
+    let food_ids = extrapolate_ids_from_result_hits(&groups[0].result);
+    assert_eq!(food_ids[0], "doc3"); // banana should be pinned first
+    assert_eq!(food_ids[1], "doc1"); // apple fruit should be second
+
+    // Check "tech" group - should have doc3 (banana) pinned at position 1 even though it's not in tech category
+    assert_eq!(groups[1].values, vec![json!("tech")]);
+    let tech_ids = extrapolate_ids_from_result_hits(&groups[1].result);
+    assert_eq!(tech_ids[0], "doc3"); // banana should be pinned first
+    // The remaining tech docs should follow in score order
+    
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_with_pin_rules_field_based_sorting() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    // Insert test documents
+    let documents = json!([
+        {"id": "doc1", "title": "apple fruit", "category": "food", "price": 30},
+        {"id": "doc2", "title": "apple phone", "category": "tech", "price": 100},
+        {"id": "doc3", "title": "banana fruit", "category": "food", "price": 10},
+        {"id": "doc4", "title": "apple laptop", "category": "tech", "price": 200}
+    ]);
+
+    index_client
+        .insert_documents(documents.try_into().unwrap())
+        .await
+        .unwrap();
+
+    // Insert pin rule to promote doc4 (most expensive apple laptop) to position 2
+    index_client
+        .insert_pin_rules(
+            json!({
+              "id": "promote-laptop",
+              "conditions": [
+                {
+                  "pattern": "apple",
+                  "anchoring": "is"
+                }
+              ],
+              "consequence": {
+                "promote": [
+                  {
+                    "doc_id": "doc4",
+                    "position": 2
+                  }
+                ]
+              }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let search_params = json!({
+        "term": "apple",
+        "groupBy": {
+            "properties": ["category"],
+            "max_results": 3,
+        },
+        "sortBy": {
+            "property": "price",
+            "order": "ASC"
+        }
+    });
+
+    let results = collection_client
+        .search(search_params.try_into().unwrap())
+        .await
+        .unwrap();
+
+    assert!(results.groups.is_some());
+    let mut groups = results.groups.unwrap();
+    assert_eq!(groups.len(), 2);
+
+    // Sort groups by category name for predictable testing
+    groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
+
+    // Check "food" group - doc4 should be pinned at position 2 despite not being in this category
+    assert_eq!(groups[0].values, vec![json!("food")]);
+    let food_ids = extrapolate_ids_from_result_hits(&groups[0].result);
+    assert_eq!(food_ids.len(), 3);
+    assert_eq!(food_ids[1], "doc4"); // laptop should be pinned at position 2
+
+    // Check "tech" group - doc4 should be pinned at position 2
+    assert_eq!(groups[1].values, vec![json!("tech")]);
+    let tech_ids = extrapolate_ids_from_result_hits(&groups[1].result);
+    assert_eq!(tech_ids.len(), 3);
+    assert_eq!(tech_ids[1], "doc4"); // laptop should be pinned at position 2
+    
+    drop(test_context);
+}

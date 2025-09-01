@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-use super::sort::sort_documents_in_groups;
+use super::sort::{sort_documents_in_groups, extract_term_from_search_mode};
 use super::{
     index::{Index, IndexStats},
     sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
@@ -547,6 +547,7 @@ impl CollectionReader {
         user_index: Option<&Vec<IndexId>>,
         group_by_config: &GroupByConfig,
         sort_by: Option<&SortBy>,
+        search_params: &SearchParams,
     ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
         let indexes_lock = self.indexes.read().await;
         let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
@@ -565,6 +566,20 @@ impl CollectionReader {
                 .await?
         }
 
+        // Extract pin rules from relevant indexes
+        let term = extract_term_from_search_mode(search_params);
+        let mut pin_rules = Vec::new();
+        for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+            let pin_rules_reader = index.get_read_lock_on_pin_rules().await;
+            pin_rules.extend(pin_rules_reader.apply(term));
+        }
+
         // Sort documents within each group
         let sorted_results = sort_documents_in_groups(
             results,
@@ -575,6 +590,7 @@ impl CollectionReader {
                 .filter(|index| !index.is_deleted() && indexes_to_search_on.contains(&index.id()))
                 .collect::<Vec<_>>(),
             group_by_config.max_results,
+            &pin_rules,
         )
         .await?;
 

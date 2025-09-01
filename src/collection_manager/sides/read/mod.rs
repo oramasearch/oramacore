@@ -462,6 +462,7 @@ impl ReadSide {
                     search_params.indexes.as_ref(),
                     group_by,
                     search_params.sort_by.as_ref(),
+                    &search_params,
                 )
                 .await?;
 

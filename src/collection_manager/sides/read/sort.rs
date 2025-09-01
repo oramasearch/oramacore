@@ -226,7 +226,7 @@ fn apply_pin_rules(
     top
 }
 
-fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
+pub fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
     match &search_params.mode {
         SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
         SearchMode::Hybrid(h) => &h.term,
@@ -289,6 +289,7 @@ pub async fn sort_documents_in_groups(
     sort_by: Option<&SortBy>,
     relevant_indexes: &[&Index],
     max_results: usize,
+    pin_rules: &[Consequence<DocumentId>],
 ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
     let mut sorted_groups = HashMap::with_capacity(groups.len());
 
@@ -300,10 +301,11 @@ pub async fn sort_documents_in_groups(
                 relevant_indexes,
                 token_scores,
                 max_results,
+                pin_rules,
             )
             .await?
         } else {
-            top_n_documents_in_group_by_score(doc_set, token_scores, max_results)
+            top_n_documents_in_group_by_score(doc_set, token_scores, max_results, pin_rules)
         };
 
         sorted_groups.insert(group_key, docs);
@@ -316,8 +318,16 @@ fn top_n_documents_in_group_by_score(
     docs: HashSet<DocumentId>,
     token_scores: &HashMap<DocumentId, f32>,
     max_results: usize,
+    pin_rules: &[Consequence<DocumentId>],
 ) -> Vec<DocumentId> {
-    let mut capped_heap = CappedHeap::new(max_results);
+    // Increase limit to account for potential pin rule insertions
+    let expanded_limit = if pin_rules.is_empty() {
+        max_results
+    } else {
+        max_results * 2 // Double the limit like we do in the main sort function
+    };
+
+    let mut capped_heap = CappedHeap::new(expanded_limit);
 
     for doc_id in docs {
         if let Some(score) = token_scores.get(&doc_id) {
@@ -327,7 +337,25 @@ fn top_n_documents_in_group_by_score(
         }
     }
 
-    capped_heap.into_top().map(|(_, doc_id)| doc_id).collect()
+    let mut result: Vec<TokenScore> = capped_heap
+        .into_top()
+        .map(|(score, doc_id)| TokenScore {
+            document_id: doc_id,
+            score: score.into_inner(),
+        })
+        .collect();
+
+    // Apply pin rules to this group's documents
+    if !pin_rules.is_empty() {
+        result = apply_pin_rules(pin_rules.to_vec(), token_scores, result);
+    }
+
+    // Truncate to max_results and extract document IDs
+    result
+        .into_iter()
+        .take(max_results)
+        .map(|ts| ts.document_id)
+        .collect()
 }
 
 async fn top_n_documents_in_group_by_field(
@@ -336,7 +364,15 @@ async fn top_n_documents_in_group_by_field(
     relevant_indexes: &[&Index],
     token_scores: &HashMap<DocumentId, f32>,
     max_results: usize,
+    pin_rules: &[Consequence<DocumentId>],
 ) -> Result<Vec<DocumentId>> {
+    // Increase limit to account for potential pin rule insertions
+    let expanded_limit = if pin_rules.is_empty() {
+        max_results
+    } else {
+        max_results * 2 // Double the limit like we do in the main sort function
+    };
+
     let v: Vec<_> = if relevant_indexes.len() == 1 {
         let output = relevant_indexes[0]
             .get_sort_iterator2(&sort_by.property, sort_by.order)
@@ -346,7 +382,7 @@ async fn top_n_documents_in_group_by_field(
             .iter()
             .flat_map(|(_, h)| h.into_iter())
             .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
-            .take(max_results)
+            .take(expanded_limit)
             .collect()
     } else {
         let mut v: Vec<_> = Vec::with_capacity(relevant_indexes.len());
@@ -365,11 +401,33 @@ async fn top_n_documents_in_group_by_field(
         merge_sorted_iterator
             .flat_map(|(_, h)| h.into_iter())
             .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
-            .take(max_results)
+            .take(expanded_limit)
             .collect()
     };
 
-    Ok(v)
+    // Apply pin rules if any exist
+    if !pin_rules.is_empty() {
+        // Convert document IDs to TokenScore for pin rule application
+        let mut token_scores_vec: Vec<TokenScore> = v
+            .into_iter()
+            .map(|doc_id| TokenScore {
+                document_id: doc_id,
+                score: *token_scores.get(&doc_id).unwrap_or(&0.0),
+            })
+            .collect();
+
+        // Apply pin rules
+        token_scores_vec = apply_pin_rules(pin_rules.to_vec(), token_scores, token_scores_vec);
+
+        // Extract document IDs and truncate to max_results
+        Ok(token_scores_vec
+            .into_iter()
+            .take(max_results)
+            .map(|ts| ts.document_id)
+            .collect())
+    } else {
+        Ok(v.into_iter().take(max_results).collect())
+    }
 }
 
 mod sort_iter {
