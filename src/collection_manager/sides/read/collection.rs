@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Context, Result};
-use std::collections::HashSet;
 use std::{
     collections::HashMap,
     io::ErrorKind,
@@ -33,6 +32,7 @@ use crate::{
     },
 };
 
+use super::sort::sort_documents_in_groups;
 use super::{
     index::{Index, IndexStats},
     sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
@@ -547,7 +547,7 @@ impl CollectionReader {
         user_index: Option<&Vec<IndexId>>,
         group_by_config: &GroupByConfig,
         sort_by: Option<&SortBy>,
-    ) -> Result<HashMap<Vec<GroupValue>, HashSet<DocumentId>>> {
+    ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
         let indexes_lock = self.indexes.read().await;
         let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
 
@@ -565,9 +565,20 @@ impl CollectionReader {
                 .await?
         }
 
-        if let Some(sort_by) = sort_by {}
+        // Sort documents within each group
+        let sorted_results = sort_documents_in_groups(
+            results,
+            token_scores,
+            sort_by,
+            &indexes_lock
+                .iter()
+                .filter(|index| !index.is_deleted() && indexes_to_search_on.contains(&index.id()))
+                .collect::<Vec<_>>(),
+            group_by_config.max_results,
+        )
+        .await?;
 
-        Ok(results)
+        Ok(sorted_results)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {

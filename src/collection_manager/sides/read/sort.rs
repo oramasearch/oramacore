@@ -6,6 +6,7 @@ use ordered_float::NotNan;
 use tracing::info;
 
 use super::index::Index;
+use super::GroupValue;
 use crate::pin_rules::Consequence;
 use crate::types::{SearchMode, SearchParams};
 use crate::{
@@ -73,31 +74,6 @@ impl<T: Ord + Clone> Iterator for SortIterator<'_, '_, T> {
     }
 }
 
-/// Process sort iterator and limit results to desired count
-fn process_sort_iterator(
-    iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
-    desiderata: usize,
-) -> Vec<(Number, HashSet<DocumentId>)> {
-    // The worst scenario is that documents doesn't share the "number" value, so the hashset contains
-    // only one document.
-    // For a good scenario, the documents share the "number" value, so the hashset contains
-    // multiple documents.
-    // We use `desiderata / 2` to avoid excessive memory usage
-    let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
-
-    let mut total_item = 0_usize;
-    for (n, h) in iter {
-        let c = h.len();
-        index_results.push((n, h));
-        total_item += c;
-        if total_item >= desiderata {
-            break;
-        }
-    }
-
-    index_results
-}
-
 /// Truncate results based on top_count, applying token scores
 fn truncate<I: Iterator<Item = (Number, HashSet<DocumentId>)>>(
     token_scores: &HashMap<DocumentId, f32>,
@@ -150,7 +126,155 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
         .collect()
 }
 
-/// Main sorting and truncation logic for documents
+async fn sort_and_truncate_documents_by_field2(
+    doc_ids: HashSet<DocumentId>,
+    sort_by: &SortBy,
+    relevant_indexes: &[&Index],
+    token_scores: &HashMap<DocumentId, f32>,
+    top_count: usize,
+) -> Result<Vec<DocumentId>> {
+    fn process_sort_iterator(
+        iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
+        desiderata: usize,
+        doc_ids: &HashSet<DocumentId>,
+    ) -> Vec<DocumentId> {
+        iter.flat_map(|(_, dd)| dd.into_iter())
+            .filter(|id| doc_ids.contains(id))
+            .take(desiderata)
+            .collect()
+    }
+
+    let v = if relevant_indexes.len() == 1 {
+        // If there's only one index, use the existing optimized path
+        let output = relevant_indexes[0]
+            .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
+                process_sort_iterator(iter, top_count, &doc_ids)
+            })
+            .await?;
+
+        // truncate(token_scores, output.into_iter(), top_count)
+    } else {
+        // - For the relevant_indexes, we obtain the first `top_count` items.
+        //   So `all_results` contains something like
+        //
+        //   |sorted data from index1|
+        //   |sorted data from index2|
+        //   |sorted data from index3|
+        //
+        //   which aren't globally sorted
+        //
+        // - Re-sorting the merged results to maintain global order across indexes
+        // - Truncating the results to the desired limit
+        // Note: Each index only returns up to 'top_count' results, not all documents
+        // NB: this is not optimal because we collect all the data and sort it again.
+        //     we can optimize it, without collecting them and re-order.
+        let mut all_results = Vec::new();
+
+        for index in relevant_indexes {
+            let index_results = index
+                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
+                    process_sort_iterator(iter, top_count, &doc_ids)
+                })
+                .await?;
+
+            all_results.extend(index_results);
+        }
+
+        // Sort the merged results by their numeric values to ensure global ordering
+        // all_results.sort_by_key(|(n, _)| *n);
+
+        // Apply descending order if requested by reversing the sorted results
+        // if sort_by.order == SortOrder::Descending {
+        //     all_results.reverse();
+        // }
+
+        // Get top
+        // truncate(token_scores, all_results.into_iter(), top_count)
+    };
+    panic!()
+    // Ok(v)
+}
+
+async fn sort_and_truncate_documents_by_field(
+    sort_by: &SortBy,
+    relevant_indexes: &[&Index],
+    token_scores: &HashMap<DocumentId, f32>,
+    top_count: usize,
+) -> Result<Vec<TokenScore>> {
+    fn process_sort_iterator(
+        iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
+        desiderata: usize,
+    ) -> Vec<(Number, HashSet<DocumentId>)> {
+        // The worst scenario is that documents doesn't share the "number" value, so the hashset contains
+        // only one document.
+        // For a good scenario, the documents share the "number" value, so the hashset contains
+        // multiple documents.
+        // We use `desiderata / 2` to avoid excessive memory usage
+        let mut index_results = Vec::with_capacity((desiderata / 2).min(1000));
+
+        let mut total_item = 0_usize;
+        for (n, h) in iter {
+            let c = h.len();
+            index_results.push((n, h));
+            total_item += c;
+            if total_item >= desiderata {
+                break;
+            }
+        }
+
+        index_results
+    }
+
+    let v = if relevant_indexes.len() == 1 {
+        // If there's only one index, use the existing optimized path
+        let output = relevant_indexes[0]
+            .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
+                process_sort_iterator(iter, top_count)
+            })
+            .await?;
+
+        truncate(token_scores, output.into_iter(), top_count)
+    } else {
+        // - For the relevant_indexes, we obtain the first `top_count` items.
+        //   So `all_results` contains something like
+        //
+        //   |sorted data from index1|
+        //   |sorted data from index2|
+        //   |sorted data from index3|
+        //
+        //   which aren't globally sorted
+        //
+        // - Re-sorting the merged results to maintain global order across indexes
+        // - Truncating the results to the desired limit
+        // Note: Each index only returns up to 'top_count' results, not all documents
+        // NB: this is not optimal because we collect all the data and sort it again.
+        //     we can optimize it, without collecting them and re-order.
+        let mut all_results = Vec::new();
+
+        for index in relevant_indexes {
+            let index_results = index
+                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
+                    process_sort_iterator(iter, top_count)
+                })
+                .await?;
+
+            all_results.extend(index_results);
+        }
+
+        // Sort the merged results by their numeric values to ensure global ordering
+        all_results.sort_by_key(|(n, _)| *n);
+
+        // Apply descending order if requested by reversing the sorted results
+        if sort_by.order == SortOrder::Descending {
+            all_results.reverse();
+        }
+
+        // Get top
+        truncate(token_scores, all_results.into_iter(), top_count)
+    };
+    Ok(v)
+}
+
 async fn sort_and_truncate_documents(
     relevant_indexes: Option<(&SortBy, Vec<&Index>)>,
     pins: Vec<Consequence<DocumentId>>,
@@ -170,53 +294,8 @@ async fn sort_and_truncate_documents(
     };
 
     let top = if let Some((sort_by, relevant_indexes)) = relevant_indexes {
-        if relevant_indexes.len() == 1 {
-            // If there's only one index, use the existing optimized path
-            let output = relevant_indexes[0]
-                .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                    process_sort_iterator(iter, top_count)
-                })
-                .await?;
-
-            truncate(token_scores, output.into_iter(), top_count)
-        } else {
-            // - For the relevant_indexes, we obtain the first `top_count` items.
-            //   So `all_results` contains something like
-            //
-            //   |sorted data from index1|
-            //   |sorted data from index2|
-            //   |sorted data from index3|
-            //
-            //   which aren't globally sorted
-            //
-            // - Re-sorting the merged results to maintain global order across indexes
-            // - Truncating the results to the desired limit
-            // Note: Each index only returns up to 'top_count' results, not all documents
-            // NB: this is not optimal because we collect all the data and sort it again.
-            //     we can optimize it, without collecting them and re-order.
-            let mut all_results = Vec::new();
-
-            for index in relevant_indexes {
-                let index_results = index
-                    .get_sort_iterator(&sort_by.property, sort_by.order, |iter| {
-                        process_sort_iterator(iter, top_count)
-                    })
-                    .await?;
-
-                all_results.extend(index_results);
-            }
-
-            // Sort the merged results by their numeric values to ensure global ordering
-            all_results.sort_by_key(|(n, _)| *n);
-
-            // Apply descending order if requested by reversing the sorted results
-            if sort_by.order == SortOrder::Descending {
-                all_results.reverse();
-            }
-
-            // Get top
-            truncate(token_scores, all_results.into_iter(), top_count)
-        }
+        sort_and_truncate_documents_by_field(sort_by, &relevant_indexes, token_scores, top_count)
+            .await?
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
         top_n(token_scores.iter(), top_count)
@@ -346,6 +425,72 @@ pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScor
     .await
 }
 
+pub async fn sort_documents_in_groups(
+    groups: HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
+    token_scores: &HashMap<DocumentId, f32>,
+    sort_by: Option<&SortBy>,
+    relevant_indexes: &[&Index],
+    max_results: usize,
+) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
+    let mut sorted_groups = HashMap::with_capacity(groups.len());
+
+    for (group_key, doc_set) in groups {
+        let docs = if let Some(sort_by) = sort_by {
+            top_n_documents_by_field(
+                doc_set,
+                sort_by,
+                relevant_indexes,
+                token_scores,
+                max_results,
+            )
+            .await?
+        } else {
+            top_n_documents_by_score(doc_set, token_scores, max_results)
+        };
+
+        sorted_groups.insert(group_key, docs);
+    }
+
+    Ok(sorted_groups)
+}
+
+fn top_n_documents_by_score(
+    docs: HashSet<DocumentId>,
+    token_scores: &HashMap<DocumentId, f32>,
+    max_results: usize,
+) -> Vec<DocumentId> {
+    let mut capped_heap = CappedHeap::new(max_results);
+
+    for doc_id in docs {
+        if let Some(score) = token_scores.get(&doc_id) {
+            if let Ok(k) = NotNan::new(*score) {
+                capped_heap.insert(k, doc_id);
+            }
+        }
+    }
+
+    capped_heap.into_top().map(|(_, doc_id)| doc_id).collect()
+}
+
+async fn top_n_documents_by_field(
+    docs: HashSet<DocumentId>,
+    sort_by: &SortBy,
+    relevant_indexes: &[&Index],
+    token_scores: &HashMap<DocumentId, f32>,
+    max_results: usize,
+) -> Result<Vec<DocumentId>> {
+    panic!()
+    /*
+    sort_and_truncate_documents_by_field(
+
+        sort_by,
+        relevant_indexes,
+        token_scores,
+        max_results,
+    ).await
+     */
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,5 +540,147 @@ mod tests {
             data.into_iter()
                 .map(|(k, v)| (k, HashSet::from([DocumentId(v)]))),
         )
+    }
+}
+
+mod sort_iter {
+    use crate::types::{DocumentId, SortOrder};
+    use itertools::Itertools;
+    use std::collections::HashSet;
+    use std::iter::Peekable;
+
+    pub trait OrderedKey: Ord + Eq + Clone {
+        fn min_value() -> Self;
+        fn max_value() -> Self;
+    }
+
+    pub struct MergeSortedIterator<'iter, T: OrderedKey> {
+        iters: Vec<Peekable<Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 'iter>>>,
+        order: SortOrder,
+        min: T,
+
+        inner_cache: Vec<(usize, T)>,
+    }
+
+    impl<'iter, T: OrderedKey> MergeSortedIterator<'iter, T> {
+        pub fn new(order: SortOrder) -> Self {
+            Self {
+                iters: vec![],
+                order,
+                min: T::min_value(),
+                inner_cache: vec![],
+            }
+        }
+
+        pub fn add(&mut self, iter: Box<dyn Iterator<Item = (T, HashSet<DocumentId>)> + 'iter>) {
+            self.iters.push(iter.peekable());
+        }
+    }
+
+    impl<T: OrderedKey> Iterator for MergeSortedIterator<'_, T> {
+        type Item = (T, HashSet<DocumentId>);
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let min = self.min.clone();
+
+            // Eq case
+            let el = self
+                .iters
+                .iter_mut()
+                .filter_map(|iter| match iter.peek() {
+                    Some((n, _)) if *n == min => Some(iter.next().unwrap()),
+                    _ => None,
+                })
+                .next();
+            if let Some(el) = el {
+                return Some(el);
+            }
+
+            self.inner_cache.clear();
+            self.inner_cache
+                .extend(
+                    self.iters
+                        .iter_mut()
+                        .enumerate()
+                        .filter_map(|(index, iter)| match iter.peek() {
+                            Some((n, _)) => Some((index, n.clone())),
+                            _ => None,
+                        }),
+                );
+
+            // All iters returns None
+            if self.inner_cache.is_empty() {
+                return None;
+            }
+
+            let index = if self.order == SortOrder::Ascending {
+                self.inner_cache
+                    .iter()
+                    .min_by(|(_, key1), (_, key2)| key1.cmp(key2))
+            } else {
+                self.inner_cache
+                    .iter()
+                    .max_by(|(_, key1), (_, key2)| key1.cmp(key2))
+            };
+
+            if let Some((index, _)) = index {
+                let iter = self.iters.get_mut(*index).unwrap();
+                iter.next()
+            } else {
+                None
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod sort_iter_test {
+        use super::*;
+
+        impl OrderedKey for u8 {
+            fn min_value() -> Self {
+                0
+            }
+            fn max_value() -> Self {
+                u8::MAX
+            }
+        }
+
+        #[test]
+        fn test_empty() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            assert!(merged.next().is_none());
+        }
+
+        #[test]
+        fn test_one() {
+            let mut merged = MergeSortedIterator::<u8>::new(SortOrder::Ascending);
+            merged.add(Box::new(
+                vec![
+                    (
+                        0,
+                        HashSet::from([DocumentId(1), DocumentId(2), DocumentId(3)]),
+                    ),
+                    (
+                        2,
+                        HashSet::from([DocumentId(6), DocumentId(8), DocumentId(9)]),
+                    ),
+                ]
+                .into_iter(),
+            ));
+            let collected: Vec<_> = merged.collect();
+            assert_eq!(
+                collected,
+                vec![
+                    (
+                        0,
+                        HashSet::from([DocumentId(1), DocumentId(2), DocumentId(3)])
+                    ),
+                    (
+                        2,
+                        HashSet::from([DocumentId(6), DocumentId(8), DocumentId(9)])
+                    )
+                ]
+            );
+        }
     }
 }
