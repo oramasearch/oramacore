@@ -1,7 +1,9 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-use crate::tests::utils::{extrapolate_ids_from_result, extrapolate_ids_from_result_hits, init_log, TestContext};
+use crate::tests::utils::{
+    extrapolate_ids_from_result, extrapolate_ids_from_result_hits, init_log, TestContext,
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_group_by() {
@@ -210,9 +212,7 @@ async fn test_group_sort_by_score_default() {
     let mut groups = results.groups.unwrap();
     assert_eq!(groups.len(), 2);
 
-    groups.sort_by(|g1, g2| {
-        g1.values[0].as_str().cmp(&g2.values[0].as_str())
-    });
+    groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
 
     assert_eq!(groups[0].values, Vec::from([json!("food")]));
     let ids = extrapolate_ids_from_result_hits(&groups[0].result);
@@ -267,9 +267,7 @@ async fn test_group_sort_by_field_ascending() {
     let mut groups = results.groups.unwrap();
     assert_eq!(groups.len(), 2);
 
-    groups.sort_by(|g1, g2| {
-        g1.values[0].as_str().cmp(&g2.values[0].as_str())
-    });
+    groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
 
     assert_eq!(groups[0].values, vec![json!("food")]);
     let ids = extrapolate_ids_from_result_hits(&groups[0].result);
@@ -325,9 +323,7 @@ async fn test_group_sort_by_field_descending() {
 
     assert_eq!(groups.len(), 2);
 
-    groups.sort_by(|g1, g2| {
-        g1.values[0].as_str().cmp(&g2.values[0].as_str())
-    });
+    groups.sort_by(|g1, g2| g1.values[0].as_str().cmp(&g2.values[0].as_str()));
 
     assert_eq!(groups[0].values, vec![json!("food")]);
     let ids = extrapolate_ids_from_result_hits(&groups[0].result);
@@ -643,7 +639,7 @@ async fn test_group_by_nonexistent_property() {
 
     assert!(results.groups.is_some());
     let groups = results.groups.unwrap();
-    
+
     if !groups.is_empty() {
         for group in &groups {
             assert!(group.values[0].is_null() || group.values[0] == serde_json::Value::Null);

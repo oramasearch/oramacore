@@ -66,7 +66,6 @@ use crate::{
 };
 use anyhow::{bail, Context, Result};
 use debug_panic::debug_panic;
-use itertools::Itertools;
 use std::iter::Peekable;
 use std::{
     collections::{HashMap, HashSet},
