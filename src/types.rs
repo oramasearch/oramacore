@@ -1300,6 +1300,20 @@ pub struct SortBy {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct GroupByConfig {
+    pub properties: Vec<String>,
+    #[serde(default = "default_group_by_max_results")]
+    pub max_results: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct GroupedResult {
+    pub values: Vec<Value>,
+    pub result: Vec<SearchResultHit>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SearchParams {
     #[serde(flatten)]
     pub mode: SearchMode,
@@ -1324,6 +1338,8 @@ pub struct SearchParams {
     pub indexes: Option<Vec<IndexId>>,
     #[serde(default, rename = "sortBy", skip_serializing_if = "Option::is_none")]
     pub sort_by: Option<SortBy>,
+    #[serde(default, rename = "groupBy", skip_serializing_if = "Option::is_none")]
+    pub group_by: Option<GroupByConfig>,
     #[serde(default, rename = "userID", skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
 }
@@ -1390,6 +1406,10 @@ impl TryFrom<serde_json::Value> for SearchParams {
     }
 }
 
+fn default_group_by_max_results() -> usize {
+    1
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SearchResultHit {
@@ -1433,6 +1453,8 @@ pub struct SearchResult {
     pub count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub facets: Option<HashMap<String, FacetResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<GroupedResult>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1857,6 +1879,15 @@ impl std::ops::Add for Number {
             (Number::I32(a), Number::F32(b)) => (a as f32 + b).into(),
             (Number::F32(a), Number::F32(b)) => (a + b).into(),
             (Number::F32(a), Number::I32(b)) => (a + b as f32).into(),
+        }
+    }
+}
+
+impl From<Number> for Value {
+    fn from(val: Number) -> Self {
+        match val {
+            Number::I32(value) => Value::Number(value.into()),
+            Number::F32(value) => (value as f64).into(),
         }
     }
 }
@@ -3016,6 +3047,7 @@ mod tests {
                 similarity: Similarity(1.0),
             }),
             sort_by: None,
+            group_by: None,
         };
         let search_params_value = serde_json::to_value(&search_params).unwrap();
 

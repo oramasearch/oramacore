@@ -27,6 +27,7 @@ use tonic::{transport::Server, Status};
 use tracing::warn;
 
 use crate::pin_rules::PinRule;
+use crate::types::SearchResultHit;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
@@ -989,9 +990,11 @@ impl TestIndexClient {
 }
 
 pub fn extrapolate_ids_from_result(result: &SearchResult) -> Vec<String> {
-    result
-        .hits
-        .iter()
+    extrapolate_ids_from_result_hits(&result.hits)
+}
+
+pub fn extrapolate_ids_from_result_hits(hits: &[SearchResultHit]) -> Vec<String> {
+    hits.iter()
         .map(|h| {
             let id = h.id.clone();
             assert!(h.document.is_some(), "Document not found");

@@ -1,12 +1,15 @@
-use std::{sync::Arc, time::Duration};
-
+use anyhow::anyhow;
+use futures::FutureExt;
 use hook_storage::HookType;
 use itertools::Itertools;
+use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     time::sleep,
 };
 
+use crate::collection_manager::sides::read::IndexFieldStatsType;
+use crate::tests::utils::wait_for;
 use crate::{
     ai::answer::{Answer, AnswerEvent},
     tests::utils::{create_ai_server_mock, create_oramacore_config, init_log, TestContext},
@@ -384,7 +387,28 @@ export default { beforeAnswer }
         .await
         .unwrap();
 
-    sleep(Duration::from_millis(2_000)).await;
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let stats = collection_client.reader_stats().await.unwrap();
+            let index_stats = &stats.indexes_stats[0];
+            let field_stats = index_stats
+                .fields_stats
+                .iter()
+                .find(|fs| &fs.field_path == "___orama_auto_embedding")
+                .unwrap();
+            let IndexFieldStatsType::UncommittedVector(field_stats) = &field_stats.stats else {
+                panic!()
+            };
+            if field_stats.document_count == 2 {
+                Ok(())
+            } else {
+                Err(anyhow!("embedding not yet arrived"))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     let interaction = Interaction {
         conversation_id: "the-conversation-id".to_string(),
@@ -422,7 +446,7 @@ export default { beforeAnswer }
 
     assert_eq!(v.len(), 2);
     // The first message contains the original question
-    assert!(v[0]
+    let message = v[0]
         .get("messages")
         .unwrap()
         .as_array()
@@ -432,11 +456,14 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains("How is Tommaso?"));
+        .unwrap();
+    assert!(
+        message.contains("How is Tommaso?"),
+        "Current message: {message:?}"
+    );
 
     // The second message contains the original question
-    assert!(v[1]
+    let message = v[1]
         .get("messages")
         .unwrap()
         .as_array()
@@ -446,10 +473,14 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains("How is Tommaso?"));
+        .unwrap();
+    assert!(
+        message.contains("How is Tommaso?"),
+        "Current message: {message:?}"
+    );
+
     // The second message contains also the search response
-    assert!(v[1]
+    let message = v[1]
         .get("messages")
         .unwrap()
         .as_array()
@@ -459,8 +490,11 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains(r#""id":"1""#)); // Tommaso
+        .unwrap();
+    assert!(
+        message.contains(r#""id":"1""#),
+        "Current message: {message:?}"
+    ); // Tommaso
 
     let mut buffer = vec![];
     answer_receiver.recv_many(&mut buffer, 100).await;

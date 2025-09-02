@@ -218,10 +218,9 @@ impl<T: Copy + PartialOrd + Debug, D: Debug> BKDTree<T, D> {
 }
 
 // Helper function to find the axis with the largest spread
-fn find_largest_spread_axis<T: Copy + PartialOrd, D>(points: &[Point<T, D>]) -> usize
-where
-    T: num_traits::Float,
-{
+fn find_largest_spread_axis<T: Copy + PartialOrd + num_traits::Float, D>(
+    points: &[Point<T, D>],
+) -> usize {
     let mut max_spread = T::zero();
     let mut axis = 0;
     for i in 0..2 {
