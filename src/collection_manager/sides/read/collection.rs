@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail, Context, Result};
 use std::{
     collections::HashMap,
     io::ErrorKind,
@@ -5,8 +6,6 @@ use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
 };
-
-use anyhow::{anyhow, bail, Context, Result};
 
 use axum::extract::State;
 use chrono::{DateTime, Utc};
@@ -21,8 +20,7 @@ use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
         read::{
-            context::ReadSideContext, sort::sort_and_truncate_documents,
-            AnalyticSearchEventInvocationType, CommittedDateFieldStats,
+            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
             CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
             UncommittedGeoPointFieldStats,
         },
@@ -34,15 +32,17 @@ use crate::{
     },
 };
 
+use super::sort::{extract_term_from_search_mode, sort_documents_in_groups};
 use super::{
     index::{Index, IndexStats},
-    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
-    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
-    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
+    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
+    DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext,
+    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
-use crate::types::{NLPSearchRequest, SearchMode};
+use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
 use fs::*;
 use nlp::locales::Locale;
 
@@ -498,43 +498,17 @@ impl CollectionReader {
         offset: SearchOffset,
         search_params: &SearchParams,
     ) -> Result<Vec<TokenScore>> {
-        let sort_by = search_params.sort_by.as_ref();
-        info!(
-            "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
-            limit, offset, sort_by
-        );
-
         let indexes_lock = self.indexes.read().await;
-        let relevant_indexes_for_sorting: Vec<_> = if let Some(sort_by) = sort_by {
-            indexes_lock
-                .iter()
-                .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
-                .collect()
-        } else {
-            Vec::new()
-        };
 
-        let t = match &search_params.mode {
-            SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
-            SearchMode::Hybrid(h) => &h.term,
-            SearchMode::Vector(v) => &v.term,
-            SearchMode::Auto(a) => &a.term,
-        };
-        let mut pins: Vec<_> = Vec::new();
-        for index in indexes_lock.iter() {
-            let pin_rules = index.get_read_lock_on_pin_rules().await;
-            pins.extend(pin_rules.apply(t));
-        }
-
-        let result = sort_and_truncate_documents(
-            &relevant_indexes_for_sorting,
-            pins,
+        let context = SortContext {
+            indexes: &indexes_lock,
             token_scores,
+            search_params,
             limit,
             offset,
-            sort_by,
-        )
-        .await;
+        };
+
+        let result = sort_with_context(context).await;
 
         drop(indexes_lock);
         result
@@ -565,6 +539,62 @@ impl CollectionReader {
         }
 
         Ok(result)
+    }
+
+    pub async fn calculate_groups(
+        &self,
+        token_scores: &HashMap<DocumentId, f32>,
+        user_index: Option<&Vec<IndexId>>,
+        group_by_config: &GroupByConfig,
+        sort_by: Option<&SortBy>,
+        search_params: &SearchParams,
+    ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
+        let indexes_lock = self.indexes.read().await;
+        let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
+
+        let mut results = HashMap::new();
+        for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+
+            index
+                .calculate_groups(&group_by_config.properties, &mut results)
+                .await?
+        }
+
+        // Extract pin rules from relevant indexes
+        let term = extract_term_from_search_mode(search_params);
+        let mut pin_rules = Vec::new();
+        for index in indexes_lock.iter() {
+            if index.is_deleted() {
+                continue;
+            }
+            if !indexes_to_search_on.contains(&index.id()) {
+                continue;
+            }
+            let pin_rules_reader = index.get_read_lock_on_pin_rules().await;
+            pin_rules.extend(pin_rules_reader.apply(term));
+        }
+
+        // Sort documents within each group
+        let sorted_results = sort_documents_in_groups(
+            results,
+            token_scores,
+            sort_by,
+            &indexes_lock
+                .iter()
+                .filter(|index| !index.is_deleted() && indexes_to_search_on.contains(&index.id()))
+                .collect::<Vec<_>>(),
+            group_by_config.max_results,
+            &pin_rules,
+        )
+        .await?;
+
+        Ok(sorted_results)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {

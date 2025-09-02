@@ -192,6 +192,7 @@ impl Answer {
                 indexes: None, // Search all indexes
                 sort_by: None,
                 user_id: None, // @todo: handle user_id if needed
+                group_by: None,
             };
 
             let hook_storage = self
@@ -552,6 +553,7 @@ impl Answer {
             indexes: None, // Search all indexes
             sort_by: None,
             user_id: None, // @todo: handle user_id if needed
+            group_by: None,
         };
 
         let hook_storage = self
@@ -737,6 +739,7 @@ impl Answer {
                     indexes: Some(index_ids),
                     sort_by: None,
                     user_id: None, // @todo: handle user_id if needed
+                    group_by: None,
                 },
                 AnalyticSearchEventInvocationType::Answer,
             )
