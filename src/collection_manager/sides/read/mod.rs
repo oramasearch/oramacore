@@ -51,7 +51,7 @@ use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
 use crate::types::{
     ApiKey, CollectionStatsRequest, InteractionLLMConfig, SearchMode, SearchModeResult,
-    SearchParams, SearchResult, SearchResultHit, TokenScore,
+    SearchParams, SearchResult, SearchResultHit, TokenScore, WhereFilter,
 };
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
@@ -445,9 +445,37 @@ impl ReadSide {
         let token_scores = collection.search(&search_params).await?;
 
         let facets = if has_facets {
+            // Orama provides a UI component that shows the search results
+            // and the number of how many documents fall in each variant of field value (facets).
+            // By default, the "all" category is selected and list all the results,
+            // but if a user clicks on a category, it will see the results filtered by that category.
+            // Hence, the second call has filters.
+            // Anyway, the second call re-ask the number for each variant. That means,
+            // the call contains facets and filters, and the returned facets are affected by the chosen category.
+            // So, the user will see the facets number change when it clicks on a category.
+            // And this is weird.
+            // So, the pair (facets, filters) has to be reconsidered:
+            // - we calculate directly the facets if there are no filters
+            // - we recalculate the score without any filters and after the facets
+            // NB: This is not performant, but required for a good UI.
+            //     The FE could reuse the facets calculation of the first call
+            //     keeping the results in memory.
+            let token_scores = if search_params.where_filter.is_empty() {
+                &token_scores
+            } else {
+                let mut search_params_without_filters = search_params.clone();
+                search_params_without_filters.where_filter = WhereFilter {
+                    filter_on_fields: vec![],
+                    and: None,
+                    not: None,
+                    or: None,
+                };
+                &collection.search(&search_params_without_filters).await?
+            };
+
             Some(
                 collection
-                    .calculate_facets(&token_scores, &search_params)
+                    .calculate_facets(token_scores, &search_params)
                     .await?,
             )
         } else {
