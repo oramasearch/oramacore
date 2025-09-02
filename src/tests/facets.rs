@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::json;
 
 use crate::tests::utils::{init_log, TestContext};
+use crate::types::FacetResult;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_facets_number() {
@@ -329,6 +330,123 @@ async fn test_facets_should_based_on_term() {
     assert_eq!(
         number_facet.values,
         HashMap::from_iter(vec![("0-10".to_string(), 2),])
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_facets_real_case() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "path": format!("path{}", i),
+                "siteSection": format!("Section {}", i),
+                "pageTitle": format!("The title {}", i),
+                "pageSectionTitle": format!("The page section title {}", i),
+                "pageSectionContent": format!("The page section content {}", i),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "title",
+                "facets": {
+                    "siteSection": {}
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        output.facets,
+        Some(HashMap::from([(
+            "siteSection".to_string(),
+            FacetResult {
+                count: 10,
+                values: HashMap::from([
+                    ("Section 0".to_string(), 1),
+                    ("Section 1".to_string(), 1),
+                    ("Section 2".to_string(), 1),
+                    ("Section 3".to_string(), 1),
+                    ("Section 4".to_string(), 1),
+                    ("Section 5".to_string(), 1),
+                    ("Section 6".to_string(), 1),
+                    ("Section 7".to_string(), 1),
+                    ("Section 8".to_string(), 1),
+                    ("Section 9".to_string(), 1),
+                ])
+            }
+        )]))
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_facets_with_filters() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "title": format!("title {}", i),
+                "category": if i % 2 == 0 { "A" } else { "B" },
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "where": {
+                    "category": "A",
+                },
+                "facets": {
+                    "category": {}
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        output.facets,
+        Some(HashMap::from([(
+            "category".to_string(),
+            FacetResult {
+                count: 2,
+                values: HashMap::from([("A".to_string(), 5), ("B".to_string(), 5),])
+            }
+        )]))
     );
 
     drop(test_context);

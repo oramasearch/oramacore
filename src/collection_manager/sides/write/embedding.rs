@@ -95,7 +95,9 @@ where
                 )
             })
             .collect::<Vec<_>>();
-        op_sender.send_batch(ops).await.unwrap();
+        if let Err(e) = op_sender.send_batch(ops).await {
+            error!(error = ?e, "Failed to send embedding batch");
+        }
     }
 
     info!("Embedding batch processed");
