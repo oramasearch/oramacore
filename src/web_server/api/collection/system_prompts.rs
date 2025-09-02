@@ -12,7 +12,12 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use crate::{
-    collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt, write::WriteSide},
+    ai::llms::LLMService,
+    collection_manager::sides::{
+        read::ReadSide,
+        system_prompts::{CollectionSystemPromptsInterface, SystemPrompt},
+        write::{WriteError, WriteSide},
+    },
     types::{
         ApiKey, CollectionId, DeleteSystemPromptParams, InsertSystemPromptParams,
         InteractionLLMConfig, UpdateSystemPromptParams, WriteApiKey,
@@ -161,24 +166,28 @@ async fn insert_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let system_prompt_id = params.id.unwrap_or(cuid2::create_id());
-
-    let system_prompt = SystemPrompt {
-        id: system_prompt_id,
-        name: params.name.clone(),
-        prompt: params.prompt.clone(),
-        usage_mode: params.usage_mode.clone(),
-    };
+    let llm_config =
+        handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
 
     let system_prompts_manager = write_side
         .get_system_prompts_manager(write_api_key, collection_id)
         .await?;
+
+    let system_prompt_id = params.id.unwrap_or(cuid2::create_id());
+
+    let system_prompt = SystemPrompt {
+        id: system_prompt_id,
+        name: params.name,
+        prompt: params.prompt,
+        usage_mode: params.usage_mode,
+    };
+
+    raise_on_invalid_prompt(&system_prompts_manager, &system_prompt, llm_config).await?;
+
     system_prompts_manager
         .insert_system_prompt(system_prompt.clone())
         .await
-        .map(|_| {
-            Json(json!({ "success": true, "id": system_prompt.id, "system_prompt": system_prompt }))
-        })
+        .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
 }
 
 async fn delete_system_prompt_v1(
@@ -203,19 +212,69 @@ async fn update_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,
 ) -> impl IntoResponse {
+    let llm_config =
+        handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
+
     let system_prompt = SystemPrompt {
-        id: params.id.clone(),
-        name: params.name.clone(),
-        prompt: params.prompt.clone(),
-        usage_mode: params.usage_mode.clone(),
+        id: params.id,
+        name: params.name,
+        prompt: params.prompt,
+        usage_mode: params.usage_mode,
     };
 
     let system_prompts_manager = write_side
         .get_system_prompts_manager(write_api_key, collection_id)
         .await?;
 
+    raise_on_invalid_prompt(&system_prompts_manager, &system_prompt, llm_config).await?;
+
     system_prompts_manager
         .update_system_prompt(system_prompt)
         .await
         .map(|_| (StatusCode::OK, Json(json!({ "success": true }))))
+}
+
+async fn handle_llm_config(
+    llm_service: &LLMService,
+    llm_config: Option<InteractionLLMConfig>,
+) -> Option<InteractionLLMConfig> {
+    if !llm_service.is_gpu_overloaded() {
+        return llm_config;
+    }
+
+    match llm_service.select_random_remote_llm_service() {
+        Some((provider, model)) => {
+            info!(
+                "GPU is overloaded. Switching to \"{}\" as a remote LLM provider for this request.",
+                provider
+            );
+            Some(InteractionLLMConfig { model, provider })
+        }
+        None => {
+            warn!("GPU is overloaded and no remote LLM is available. Using local LLM, but it's gonna be slow.");
+            llm_config
+        }
+    }
+}
+
+async fn raise_on_invalid_prompt(
+    system_prompts_manager: &CollectionSystemPromptsInterface,
+    system_prompt: &SystemPrompt,
+    llm_config: Option<InteractionLLMConfig>,
+) -> Result<(), WriteError> {
+    let validation_result = system_prompts_manager
+        .validate_system_prompt(system_prompt.clone(), llm_config)
+        .await?;
+
+    let is_valid = validation_result.overall_assessment.valid
+        && validation_result.security.valid
+        && validation_result.technical.valid;
+
+    if !is_valid {
+        return Err(WriteError::Generic(anyhow::anyhow!(
+            "System prompt is invalid"
+        )));
+    } else {
+        return Ok(());
+    }
 }
