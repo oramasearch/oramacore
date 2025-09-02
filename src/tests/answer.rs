@@ -422,7 +422,7 @@ export default { beforeAnswer }
 
     assert_eq!(v.len(), 2);
     // The first message contains the original question
-    assert!(v[0]
+    let message = v[0]
         .get("messages")
         .unwrap()
         .as_array()
@@ -432,11 +432,14 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains("How is Tommaso?"));
+        .unwrap();
+    assert!(
+        message.contains("How is Tommaso?"),
+        "Current message: {message:?}"
+    );
 
     // The second message contains the original question
-    assert!(v[1]
+    let message = v[1]
         .get("messages")
         .unwrap()
         .as_array()
@@ -446,10 +449,14 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains("How is Tommaso?"));
+        .unwrap();
+    assert!(
+        message.contains("How is Tommaso?"),
+        "Current message: {message:?}"
+    );
+
     // The second message contains also the search response
-    assert!(v[1]
+    let message = v[1]
         .get("messages")
         .unwrap()
         .as_array()
@@ -459,8 +466,11 @@ export default { beforeAnswer }
         .get("content")
         .unwrap()
         .as_str()
-        .unwrap()
-        .contains(r#""id":"1""#)); // Tommaso
+        .unwrap();
+    assert!(
+        message.contains(r#""id":"1""#),
+        "Current message: {message:?}"
+    ); // Tommaso
 
     let mut buffer = vec![];
     answer_receiver.recv_many(&mut buffer, 100).await;
