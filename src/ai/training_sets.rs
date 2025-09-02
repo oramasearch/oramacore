@@ -320,6 +320,7 @@ impl TrainingSet {
                 or: None,
                 not: None,
             },
+            group_by: None,
         };
 
         let random_search_results = self
