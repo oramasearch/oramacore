@@ -50,7 +50,10 @@ use crate::collection_manager::sides::read::notify::Notifier;
 use crate::metrics::operations::OPERATION_COUNT;
 use crate::metrics::search::SEARCH_CALCULATION_TIME;
 use crate::metrics::{Empty, SearchCollectionLabels};
-use crate::types::{ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode, SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore, WhereFilter};
+use crate::types::{
+    ApiKey, CollectionStatsRequest, GroupedResult, InteractionLLMConfig, SearchMode,
+    SearchModeResult, SearchParams, SearchResult, SearchResultHit, TokenScore, WhereFilter,
+};
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
 use fs::BufferedFile;
