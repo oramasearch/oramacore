@@ -1,12 +1,15 @@
-use std::{sync::Arc, time::Duration};
-
+use anyhow::anyhow;
+use futures::FutureExt;
 use hook_storage::HookType;
 use itertools::Itertools;
+use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     time::sleep,
 };
 
+use crate::collection_manager::sides::read::IndexFieldStatsType;
+use crate::tests::utils::wait_for;
 use crate::{
     ai::answer::{Answer, AnswerEvent},
     tests::utils::{create_ai_server_mock, create_oramacore_config, init_log, TestContext},
@@ -384,7 +387,28 @@ export default { beforeAnswer }
         .await
         .unwrap();
 
-    sleep(Duration::from_millis(2_000)).await;
+    wait_for(&collection_client, |collection_client| {
+        async {
+            let stats = collection_client.reader_stats().await.unwrap();
+            let index_stats = &stats.indexes_stats[0];
+            let field_stats = index_stats
+                .fields_stats
+                .iter()
+                .find(|fs| &fs.field_path == "___orama_auto_embedding")
+                .unwrap();
+            let IndexFieldStatsType::UncommittedVector(field_stats) = &field_stats.stats else {
+                panic!()
+            };
+            if field_stats.document_count == 2 {
+                Ok(())
+            } else {
+                Err(anyhow!("embedding not yet arrived"))
+            }
+        }
+        .boxed()
+    })
+    .await
+    .unwrap();
 
     let interaction = Interaction {
         conversation_id: "the-conversation-id".to_string(),
