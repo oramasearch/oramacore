@@ -1625,6 +1625,7 @@ pub struct UpdateSystemPromptParams {
     pub name: String,
     pub prompt: String,
     pub usage_mode: SystemPromptUsageMode,
+    pub llm_config: Option<InteractionLLMConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

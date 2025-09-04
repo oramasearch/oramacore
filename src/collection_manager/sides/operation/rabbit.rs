@@ -1,19 +1,21 @@
-use std::{
-    pin::Pin,
-    sync::{atomic::AtomicBool, Arc},
-    task::Poll,
-};
-
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use futures::{Stream, StreamExt};
+use rabbitmq_stream_client::error::{ClientError, ConsumerCreateError};
 use rabbitmq_stream_client::{
     error::{ProducerCreateError, ProducerPublishError, StreamCreateError},
     types::{ByteCapacity, Message, OffsetSpecification, ResponseCode},
     ClientOptions, Consumer, Environment, NoDedup, OnClosed, Producer,
 };
 use serde::Deserialize;
+use std::time::Duration;
+use std::{
+    pin::Pin,
+    sync::{atomic::AtomicBool, Arc},
+    task::Poll,
+};
 use tokio::sync::{Notify, RwLock};
-use tracing::{debug, error, info};
+use tokio::time::sleep;
+use tracing::{debug, error, info, warn};
 
 use crate::types::CollectionId;
 
@@ -422,19 +424,70 @@ async fn create_consumer(
     config: &RabbitMQConsumerConfig,
     starting_offset: Offset,
 ) -> Result<Consumer> {
+    create_consumer_attempt(environment, config, starting_offset, 0).await
+}
+
+async fn create_consumer_attempt(
+    environment: &Environment,
+    config: &RabbitMQConsumerConfig,
+    starting_offset: Offset,
+    attempt_count: u8,
+) -> Result<Consumer> {
+    if attempt_count > 5 {
+        warn!("RabbitMQ continue to have some problems. Attempts are greater than 5");
+    }
+    if attempt_count > u8::MAX / 2 {
+        // RabbitMQ has some internal problems and the reconnection mechanism doesn't work
+        error!(
+            "Stop retries at {}. RabbitMQ connection failure",
+            attempt_count
+        );
+        bail!("RabbitMQ continue to not accept the consumer");
+    }
     info!(
-        "Creating rabbitmq consumer {} - {:?}",
-        &config.stream_name, starting_offset
+        "Creating rabbitmq consumer {} - {:?}. Attempt {}",
+        &config.stream_name, starting_offset, attempt_count
     );
     let consumer = environment
         .consumer()
         .client_provided_name(&config.consumer_name)
         .offset(OffsetSpecification::Offset(starting_offset.0))
         .build(&config.stream_name)
-        .await
-        .context("Failed to create rabbit consumer")?;
+        .await;
+
+    let consumer = match consumer {
+        Ok(consumer) => consumer,
+        // RabbitMQ needs to stabilize the stream
+        // and it tooks time
+        // We need to put this code inside the rabbit SDK, but for now it is fine here
+        Err(ConsumerCreateError::Create { status, .. })
+        | Err(ConsumerCreateError::Client(ClientError::RequestError(status)))
+            if status == ResponseCode::StreamNotAvailable =>
+        {
+            let waiting_time = random_wait_with_backoff(attempt_count + 1);
+            sleep(Duration::from_secs(waiting_time)).await;
+            return Box::pin(create_consumer_attempt(
+                environment,
+                config,
+                starting_offset,
+                attempt_count + 1,
+            ))
+            .await;
+        }
+        Err(e) => {
+            return Err(e).context("Failed to create rabbit consumer");
+        }
+    };
+
     info!("Created rabbitmq consumer {}", &config.stream_name);
     Ok(consumer)
+}
+
+fn random_wait_with_backoff(attemp: u8) -> u64 {
+    let r: u64 = rand::random_range(0..8_000);
+    let base_wait = 3_000 + r;
+
+    (base_wait * (1 << (attemp - 1))).min(15_000)
 }
 
 async fn ensure_queue_exists(environment: &Environment, stream_name: &str) -> Result<()> {

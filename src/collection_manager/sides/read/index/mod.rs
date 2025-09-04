@@ -64,7 +64,7 @@ use crate::{
     },
     types::FieldId,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use debug_panic::debug_panic;
 use std::iter::Peekable;
 use std::{
@@ -1605,17 +1605,26 @@ impl Index {
 
         let mut all_variants = HashMap::<FieldId, HashMap<GroupValue, HashSet<DocumentId>>>::new();
         for (field_id, field_type) in &properties {
-            let groupable: Box<&dyn Groupable> = match field_type {
+            let uncommitted_groupable: Box<&dyn Groupable> = match field_type {
                 FieldType::Bool => {
-                    let f = uncommitted.bool_fields.get(field_id).unwrap();
+                    let f = uncommitted
+                        .bool_fields
+                        .get(field_id)
+                        .ok_or(anyhow!("Cannot find bool field {:?}", field_id))?;
                     Box::new(f)
                 }
                 FieldType::Number => {
-                    let f = uncommitted.number_fields.get(field_id).unwrap();
+                    let f = uncommitted
+                        .number_fields
+                        .get(field_id)
+                        .ok_or(anyhow!("Cannot find number field {:?}", field_id))?;
                     Box::new(f)
                 }
                 FieldType::StringFilter => {
-                    let f = uncommitted.string_filter_fields.get(field_id).unwrap();
+                    let f = uncommitted
+                        .string_filter_fields
+                        .get(field_id)
+                        .ok_or(anyhow!("Cannot find string filter field {:?}", field_id))?;
                     Box::new(f)
                 }
                 FieldType::GeoPoint => {
@@ -1627,7 +1636,7 @@ impl Index {
                 }
             };
 
-            let variants: Vec<_> = groupable.get_values().collect();
+            let variants: Vec<_> = uncommitted_groupable.get_values().collect();
             if variants.len() > 50 {
                 // Should we group by a field with more than 50 variant???
                 // TODO: think about it. For now, no.
@@ -1635,9 +1644,48 @@ impl Index {
             }
 
             for variant in &variants {
-                let docs: HashSet<_> = groupable.get_doc_ids(variant).collect();
+                let docs: HashSet<_> = uncommitted_groupable.get_doc_ids(variant)?.collect();
                 let doc_ids_per_variant = all_variants.entry(*field_id).or_default();
-                doc_ids_per_variant.insert(variant.clone(), docs);
+                let g = doc_ids_per_variant.entry(variant.clone()).or_default();
+                g.extend(docs);
+            }
+
+            let committed_groupable: Option<Box<&dyn Groupable>> = match field_type {
+                FieldType::Bool => committed
+                    .bool_fields
+                    .get(field_id)
+                    .map(|f| Box::<&dyn Groupable>::new(f)),
+                FieldType::Number => committed
+                    .number_fields
+                    .get(field_id)
+                    .map(|f| Box::<&dyn Groupable>::new(f)),
+                FieldType::StringFilter => committed
+                    .string_filter_fields
+                    .get(field_id)
+                    .map(|f| Box::<&dyn Groupable>::new(f)),
+                FieldType::GeoPoint => {
+                    bail!("Cannot calculate group on a GeoPoint field");
+                }
+                _ => {
+                    debug_panic!("Invalid field type {:?} for group", field_type);
+                    bail!("Cannot calculate group on {:?} field", field_type);
+                }
+            };
+
+            if let Some(committed_groupable) = committed_groupable {
+                let variants: Vec<_> = committed_groupable.get_values().collect();
+                if variants.len() > 50 {
+                    // Should we group by a field with more than 50 variant???
+                    // TODO: think about it. For now, no.
+                    bail!("Cannot calculate groups on a field with more than 50 variant");
+                }
+
+                for variant in &variants {
+                    let docs: HashSet<_> = committed_groupable.get_doc_ids(variant)?.collect();
+                    let doc_ids_per_variant = all_variants.entry(*field_id).or_default();
+                    let g = doc_ids_per_variant.entry(variant.clone()).or_default();
+                    g.extend(docs);
+                }
             }
         }
 
