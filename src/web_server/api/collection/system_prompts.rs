@@ -166,8 +166,7 @@ async fn insert_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<InsertSystemPromptParams>,
 ) -> impl IntoResponse {
-    let llm_config =
-        handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
+    let llm_config = handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
 
     let system_prompts_manager = write_side
         .get_system_prompts_manager(write_api_key, collection_id)
@@ -212,8 +211,7 @@ async fn update_system_prompt_v1(
     write_side: State<Arc<WriteSide>>,
     Json(params): Json<UpdateSystemPromptParams>,
 ) -> impl IntoResponse {
-    let llm_config =
-        handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
+    let llm_config = handle_llm_config(write_side.llm_service(), params.llm_config.clone()).await;
 
     let system_prompt = SystemPrompt {
         id: params.id,
@@ -271,10 +269,10 @@ async fn raise_on_invalid_prompt(
         && validation_result.technical.valid;
 
     if !is_valid {
-        return Err(WriteError::Generic(anyhow::anyhow!(
+        Err(WriteError::Generic(anyhow::anyhow!(
             "System prompt is invalid"
-        )));
+        )))
     } else {
-        return Ok(());
+        Ok(())
     }
 }
