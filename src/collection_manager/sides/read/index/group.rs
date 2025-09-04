@@ -1,7 +1,11 @@
+use crate::collection_manager::sides::read::index::committed_field::{
+    CommittedBoolField, CommittedNumberField, CommittedStringFilterField,
+};
 use crate::collection_manager::sides::read::index::uncommitted_field::{
     UncommittedBoolField, UncommittedNumberField, UncommittedStringFilterField,
 };
 use crate::types::{DocumentId, Number, NumberFilter};
+use anyhow::Result;
 use std::hash::Hash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +40,10 @@ impl From<GroupValue> for serde_json::Value {
 pub trait Groupable {
     fn get_values(&self) -> Box<dyn Iterator<Item = GroupValue> + '_>;
 
-    fn get_doc_ids(&self, variant: &GroupValue) -> Box<dyn Iterator<Item = DocumentId> + '_>;
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>>;
 }
 
 impl Groupable for UncommittedBoolField {
@@ -44,11 +51,30 @@ impl Groupable for UncommittedBoolField {
         Box::new(vec![true, false].into_iter().map(GroupValue::Bool))
     }
 
-    fn get_doc_ids(&self, variant: &GroupValue) -> Box<dyn Iterator<Item = DocumentId> + '_> {
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
         let GroupValue::Bool(b) = variant else {
             panic!()
         };
-        Box::new(self.filter(*b))
+        Ok(Box::new(self.filter(*b)))
+    }
+}
+
+impl Groupable for CommittedBoolField {
+    fn get_values(&self) -> Box<dyn Iterator<Item = GroupValue> + '_> {
+        Box::new(vec![true, false].into_iter().map(GroupValue::Bool))
+    }
+
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
+        let GroupValue::Bool(b) = variant else {
+            panic!()
+        };
+        Ok(Box::new(self.filter(*b)?))
     }
 }
 
@@ -57,11 +83,30 @@ impl Groupable for UncommittedNumberField {
         Box::new(self.iter().map(|(n, _)| n).map(GroupValue::Number))
     }
 
-    fn get_doc_ids(&self, variant: &GroupValue) -> Box<dyn Iterator<Item = DocumentId> + '_> {
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
         let GroupValue::Number(n) = variant else {
             panic!()
         };
-        Box::new(self.filter(&NumberFilter::Equal(*n)))
+        Ok(Box::new(self.filter(&NumberFilter::Equal(*n))))
+    }
+}
+
+impl Groupable for CommittedNumberField {
+    fn get_values(&self) -> Box<dyn Iterator<Item = GroupValue> + '_> {
+        Box::new(self.iter().map(|(n, _)| n.0).map(GroupValue::Number))
+    }
+
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
+        let GroupValue::Number(n) = variant else {
+            panic!()
+        };
+        Ok(Box::new(self.filter(&NumberFilter::Equal(*n))?))
     }
 }
 
@@ -70,10 +115,29 @@ impl Groupable for UncommittedStringFilterField {
         Box::new(self.iter().map(|(n, _)| n).map(GroupValue::String))
     }
 
-    fn get_doc_ids(&self, variant: &GroupValue) -> Box<dyn Iterator<Item = DocumentId> + '_> {
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
         let GroupValue::String(s) = variant else {
             panic!()
         };
-        Box::new(self.filter(s))
+        Ok(Box::new(self.filter(s)))
+    }
+}
+
+impl Groupable for CommittedStringFilterField {
+    fn get_values(&self) -> Box<dyn Iterator<Item = GroupValue> + '_> {
+        Box::new(self.iter().map(|(n, _)| n).map(GroupValue::String))
+    }
+
+    fn get_doc_ids(
+        &self,
+        variant: &GroupValue,
+    ) -> Result<Box<dyn Iterator<Item = DocumentId> + '_>> {
+        let GroupValue::String(s) = variant else {
+            panic!()
+        };
+        Ok(Box::new(self.filter(s)))
     }
 }

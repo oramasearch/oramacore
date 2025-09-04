@@ -6,7 +6,7 @@ use crate::tests::utils::{
 };
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_group_by() {
+async fn test_group_by_simple() {
     init_log();
 
     let test_context = TestContext::new().await;
@@ -167,6 +167,246 @@ async fn test_group_by() {
     );
     for g in groups {
         assert!(g.result.len() <= 5);
+    }
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_committed() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i % 5,
+                "bool": i % 2 == 0,
+                "string_filter": format!("s{}", i % 3),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "groupBy": {
+                    "properties": ["number"],
+                    "max_results": 5,
+                },
+                "limit": 0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let Some(groups) = output.groups else {
+        panic!("`groups` should be there");
+    };
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into()],
+            vec![3.into()],
+            vec![2.into()],
+            vec![1.into()],
+            vec![0.into()],
+        ])
+    );
+    for g in groups {
+        assert!(g.result.len() <= 5);
+    }
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "groupBy": {
+                    "properties": ["number", "bool"],
+                    "max_results": 5,
+                },
+                "limit": 0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let Some(groups) = output.groups else {
+        panic!("`groups` should be there");
+    };
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into(), true.into()],
+            vec![4.into(), false.into()],
+            vec![3.into(), true.into()],
+            vec![3.into(), false.into()],
+            vec![2.into(), true.into()],
+            vec![2.into(), false.into()],
+            vec![1.into(), true.into()],
+            vec![1.into(), false.into()],
+            vec![0.into(), true.into()],
+            vec![0.into(), false.into()],
+        ])
+    );
+    for g in groups {
+        assert!(g.result.len() <= 5);
+    }
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "groupBy": {
+                    "properties": ["number", "bool", "string_filter"],
+                    "max_results": 5,
+                },
+                "limit": 0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let Some(groups) = output.groups else {
+        panic!("`groups` should be there");
+    };
+    let values = groups
+        .iter()
+        .map(|g| g.values.clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        values,
+        HashSet::<Vec<Value>>::from([
+            vec![4.into(), true.into(), "s0".into()],
+            vec![4.into(), true.into(), "s1".into()],
+            vec![4.into(), true.into(), "s2".into()],
+            vec![4.into(), false.into(), "s0".into()],
+            vec![4.into(), false.into(), "s1".into()],
+            vec![4.into(), false.into(), "s2".into()],
+            vec![3.into(), true.into(), "s0".into()],
+            vec![3.into(), true.into(), "s1".into()],
+            vec![3.into(), true.into(), "s2".into()],
+            vec![3.into(), false.into(), "s0".into()],
+            vec![3.into(), false.into(), "s1".into()],
+            vec![3.into(), false.into(), "s2".into()],
+            vec![2.into(), true.into(), "s0".into()],
+            vec![2.into(), true.into(), "s1".into()],
+            vec![2.into(), true.into(), "s2".into()],
+            vec![2.into(), false.into(), "s0".into()],
+            vec![2.into(), false.into(), "s1".into()],
+            vec![2.into(), false.into(), "s2".into()],
+            vec![1.into(), true.into(), "s0".into()],
+            vec![1.into(), true.into(), "s1".into()],
+            vec![1.into(), true.into(), "s2".into()],
+            vec![1.into(), false.into(), "s0".into()],
+            vec![1.into(), false.into(), "s1".into()],
+            vec![1.into(), false.into(), "s2".into()],
+            vec![0.into(), true.into(), "s0".into()],
+            vec![0.into(), true.into(), "s1".into()],
+            vec![0.into(), true.into(), "s2".into()],
+            vec![0.into(), false.into(), "s0".into()],
+            vec![0.into(), false.into(), "s1".into()],
+            vec![0.into(), false.into(), "s2".into()],
+        ])
+    );
+    for g in groups {
+        assert!(g.result.len() <= 5);
+    }
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_group_by_uncommitted_and_committed() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+    let index_client = collection_client.create_index().await.unwrap();
+
+    let docs = (0..50)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i % 5,
+                "bool": i % 2 == 0,
+                "string_filter": format!("s{}", i % 3),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    test_context.commit_all().await.unwrap();
+
+    let docs = (50..100)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": "text ".repeat(i + 1),
+                "number": i % 5,
+                "bool": i % 2 == 0,
+                "string_filter": format!("s{}", i % 3),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "text",
+                "groupBy": {
+                    "properties": ["number"],
+                    "max_results": 100,
+                },
+                "limit": 0,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let Some(groups) = output.groups else {
+        panic!("`groups` should be there");
+    };
+
+    assert_eq!(groups.len(), 5);
+
+    // Results contain both, committed and uncommitted
+    for g in groups {
+        assert_eq!(g.result.len(), 20);
     }
 
     drop(test_context);
