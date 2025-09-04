@@ -16,8 +16,8 @@ use fastembed::{
 };
 use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
-use oramacore_lib::hook_storage::HookType;
 use http::uri::Scheme;
+use oramacore_lib::hook_storage::HookType;
 use tokio::{
     sync::{mpsc, RwLock},
     time::sleep,
@@ -26,7 +26,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
-use oramacore_lib::pin_rules::PinRule;
 use crate::types::SearchResultHit;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
@@ -52,6 +51,7 @@ use crate::{
     OramacoreConfig,
 };
 use anyhow::Context;
+use oramacore_lib::pin_rules::PinRule;
 
 pub fn init_log() {
     if let Ok(a) = std::env::var("LOG") {

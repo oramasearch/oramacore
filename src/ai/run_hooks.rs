@@ -1,11 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 use orama_js_pool::{ExecOption, JSExecutor, OutputChannel, TryIntoFunctionParameters};
+use oramacore_lib::hook_storage::{HookReader, HookReaderError, HookType};
 use tracing::info;
 
 use crate::{collection_manager::sides::system_prompts::SystemPrompt, types::SearchParams};
-use crate::types::DocumentId;
 
 pub async fn run_before_retrieval(
     hook_reader: &HookReader,

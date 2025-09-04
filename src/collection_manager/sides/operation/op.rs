@@ -1,17 +1,17 @@
-use oramacore_lib::pin_rules::PinRuleOperation;
-use oramacore_lib::hook_storage::HookOperation;
-use serde::{ser::SerializeTuple, Deserialize, Serialize};
-use serde_json::value::RawValue;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-use oramacore_lib::generic_kv::KVWriteOperation;
 use crate::{
     collection_manager::sides::write::{index::IndexedValue, OramaModelSerializable},
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
 };
+use oramacore_lib::generic_kv::KVWriteOperation;
+use oramacore_lib::hook_storage::HookOperation;
 use oramacore_lib::nlp::locales::Locale;
+use oramacore_lib::pin_rules::PinRuleOperation;
+use serde::{ser::SerializeTuple, Deserialize, Serialize};
+use serde_json::value::RawValue;
+use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Term(pub String);

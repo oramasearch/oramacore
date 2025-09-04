@@ -4,13 +4,13 @@ use committed_field::{
     CommittedStringFilterField, CommittedVectorField, NumberFieldInfo, StringFieldInfo,
     StringFilterFieldInfo, VectorFieldInfo,
 };
-use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use futures::join;
 use group::Groupable;
 use merge::{
     merge_bool_field, merge_number_field, merge_string_field, merge_string_filter_field,
     merge_vector_field,
 };
+use oramacore_lib::filters::{FilterResult, PlainFilterResult};
 use path_to_index_id_map::PathToIndexId;
 use search_context::FullTextSearchContext;
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,14 @@ use crate::{
     types::FieldId,
 };
 use anyhow::{anyhow, bail, Context, Result};
+pub use committed_field::{
+    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
+    CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
+    CommittedVectorFieldStats,
+};
 use debug_panic::debug_panic;
+pub use group::GroupValue;
+use oramacore_lib::pin_rules::PinRulesReader;
 use std::iter::Peekable;
 use std::{
     collections::{HashMap, HashSet},
@@ -75,13 +82,6 @@ use std::{
         Arc,
     },
 };
-use oramacore_lib::pin_rules::PinRulesReader;
-pub use committed_field::{
-    CommittedBoolFieldStats, CommittedDateFieldStats, CommittedGeoPointFieldStats,
-    CommittedNumberFieldStats, CommittedStringFieldStats, CommittedStringFilterFieldStats,
-    CommittedVectorFieldStats,
-};
-pub use group::GroupValue;
 pub use uncommitted_field::{
     UncommittedBoolFieldStats, UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
     UncommittedNumberFieldStats, UncommittedStringFieldStats, UncommittedStringFilterFieldStats,
@@ -2305,7 +2305,9 @@ impl Index {
         pin_rules_reader.get_rule_ids()
     }
 
-    pub async fn get_read_lock_on_pin_rules(&self) -> RwLockReadGuard<'_, PinRulesReader<DocumentId>> {
+    pub async fn get_read_lock_on_pin_rules(
+        &self,
+    ) -> RwLockReadGuard<'_, PinRulesReader<DocumentId>> {
         self.pin_rules_reader.read().await
     }
 }

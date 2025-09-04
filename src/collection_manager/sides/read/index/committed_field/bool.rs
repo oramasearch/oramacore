@@ -6,8 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::types::DocumentId;
 use oramacore_lib::data_structures::ordered_key::BoundedValue;
-use crate::{types::DocumentId};
 use oramacore_lib::fs::create_if_not_exists;
 
 #[derive(Debug)]

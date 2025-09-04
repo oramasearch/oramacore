@@ -5,9 +5,7 @@ use anyhow::{Context, Result};
 use oramacore_lib::data_structures::ordered_key::BoundedValue;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    types::{DocumentId, Number, NumberFilter, SerializableNumber},
-};
+use crate::types::{DocumentId, Number, NumberFilter, SerializableNumber};
 use oramacore_lib::fs::create_if_not_exists;
 
 #[derive(Debug)]

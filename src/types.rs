@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use crate::ai::training_sets::TrainingDestination;
 use crate::ai::RemoteLLMProvider;
 
@@ -16,15 +15,15 @@ use async_openai::types::{
 };
 
 use chrono::{DateTime, Utc};
+use oramacore_lib::nlp::locales::Locale;
 use redact::Secret;
-use schemars::{JsonSchema, SchemaGenerator};
+use schemars::JsonSchema;
 use serde::de::{Error, Visitor};
 use serde::{de, Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use oramacore_lib::nlp::locales::Locale;
 
 #[derive(Debug, Clone)]
 pub struct RawJSONDocument {

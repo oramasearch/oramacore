@@ -3,8 +3,8 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 pub use index::OramaModelSerializable;
+use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 use oramacore_lib::nlp::NLPService;
 use thiserror::Error;
 mod context;
@@ -21,7 +21,10 @@ use std::{
     time::Duration,
 };
 
-use super::{system_prompts::SystemPromptInterface, CollectionWriteOperation, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType};
+use super::{
+    system_prompts::SystemPromptInterface, Offset, OperationSender,
+    OperationSenderCreator, OutputSideChannelType,
+};
 
 use anyhow::{Context, Result};
 use document_storage::DocumentStorage;
@@ -42,7 +45,6 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
-use oramacore_lib::pin_rules::PinRulesWriterError;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -66,6 +68,7 @@ use crate::{
 };
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
+use oramacore_lib::pin_rules::PinRulesWriterError;
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -219,11 +222,9 @@ impl WriteSide {
         let kv_operation_cb = Box::new(move |op: KVWriteOperation| {
             let op_sender = kv_op_sender.clone();
             async move {
-                let _ = op_sender
-                    .send(WriteOperation::KV(op))
-                    .await;
+                let _ = op_sender.send(WriteOperation::KV(op)).await;
             }
-                .boxed()
+            .boxed()
         });
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),

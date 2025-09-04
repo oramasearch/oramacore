@@ -25,8 +25,8 @@ use oramacore_lib::fs::BufferedFile;
 
 use super::index::Index;
 use crate::collection_manager::sides::IndexWriteOperation;
-use oramacore_lib::pin_rules::{PinRule, PinRuleOperation};
 use oramacore_lib::nlp::{locales::Locale, TextParser};
+use oramacore_lib::pin_rules::{PinRule, PinRuleOperation};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 

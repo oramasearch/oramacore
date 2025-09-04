@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{types::ApiKey};
+use crate::types::ApiKey;
 use axum::{
     extract::{Query, State},
     response::IntoResponse,

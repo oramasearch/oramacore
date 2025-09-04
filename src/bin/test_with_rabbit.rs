@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use oramacore_lib::nlp::locales::Locale;
 use oramacore::{
     collection_manager::sides::{
         channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,
@@ -12,6 +11,7 @@ use oramacore::{
     },
     types::{ApiKey, CollectionId},
 };
+use oramacore_lib::nlp::locales::Locale;
 use rabbitmq_stream_client::ClientOptions;
 use tokio::time::sleep;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};

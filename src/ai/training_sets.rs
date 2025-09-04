@@ -2,8 +2,8 @@ use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use std::{collections::HashMap, sync::Arc};
 use oramacore_lib::generic_kv::KV;
+use std::{collections::HashMap, sync::Arc};
 use strum_macros::Display;
 
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;

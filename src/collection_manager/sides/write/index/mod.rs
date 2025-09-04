@@ -36,8 +36,8 @@ use crate::{
 use oramacore_lib::fs::BufferedFile;
 use oramacore_lib::nlp::{locales::Locale, TextParser};
 
-use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {
