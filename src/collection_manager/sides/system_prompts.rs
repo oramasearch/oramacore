@@ -29,15 +29,15 @@ pub struct SystemPromptValidationSecurity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPromptValidationTechnical {
-    valid: bool,
-    reason: String,
-    instruction_count: usize,
+    pub valid: bool,
+    pub reason: String,
+    pub instruction_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPromptValidationOverall {
-    valid: bool,
-    summary: String,
+    pub valid: bool,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
