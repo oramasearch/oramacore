@@ -486,7 +486,7 @@ async fn create_consumer_attempt(
 fn random_wait_with_backoff(attemp: u8) -> u64 {
     let r: u64 = rand::random_range(0..8_000);
     let base_wait = 3_000 + r;
-    
+
     (base_wait * (1 << (attemp - 1))).min(15_000)
 }
 
