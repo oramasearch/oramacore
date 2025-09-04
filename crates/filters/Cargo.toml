@@ -1,8 +1,0 @@
-[package]
-name = "filters"
-version = "0.1.0"
-edition = "2024"
-license = "Apache-2.0"
-
-[dependencies]
-fastbloom-rs = "0.5.9"

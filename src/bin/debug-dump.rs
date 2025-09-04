@@ -13,7 +13,7 @@ use oramacore::{
     OramacoreConfig,
 };
 
-use nlp::NLPService;
+use oramacore_lib::nlp::NLPService;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

@@ -1,4 +1,4 @@
-use bkd::{haversine_distance, BKDTree, Coord, Point};
+use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord, Point};
 use serde::Serialize;
 
 use crate::{

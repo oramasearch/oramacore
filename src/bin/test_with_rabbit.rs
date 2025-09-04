@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use nlp::locales::Locale;
+use oramacore_lib::nlp::locales::Locale;
 use oramacore::{
     collection_manager::sides::{
         channel_creator, InputRabbitMQConfig, InputSideChannelType, Offset, OutputRabbitMQConfig,

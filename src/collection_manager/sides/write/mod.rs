@@ -3,9 +3,9 @@ mod collections;
 pub mod document_storage;
 mod embedding;
 pub mod index;
-use hook_storage::{HookWriter, HookWriterError};
+use oramacore_lib::hook_storage::{HookWriter, HookWriterError};
 pub use index::OramaModelSerializable;
-use nlp::NLPService;
+use oramacore_lib::nlp::NLPService;
 use thiserror::Error;
 mod context;
 pub mod jwt_manager;
@@ -21,15 +21,12 @@ use std::{
     time::Duration,
 };
 
-use super::{
-    generic_kv::{KVConfig, KV},
-    system_prompts::SystemPromptInterface,
-    Offset, OperationSender, OperationSenderCreator, OutputSideChannelType,
-};
+use super::{system_prompts::SystemPromptInterface, CollectionWriteOperation, Offset, OperationSender, OperationSenderCreator, OutputSideChannelType};
 
 use anyhow::{Context, Result};
 use document_storage::DocumentStorage;
 use duration_str::deserialize_duration;
+use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::{
@@ -45,7 +42,7 @@ use embedding::{start_calculate_embedding_loop, MultiEmbeddingCalculationRequest
 
 pub use context::WriteSideContext;
 
-use crate::pin_rules::PinRulesWriterError;
+use oramacore_lib::pin_rules::PinRulesWriterError;
 use crate::{
     ai::{
         automatic_embeddings_selector::AutomaticEmbeddingsSelector,
@@ -67,7 +64,8 @@ use crate::{
         ReplaceIndexRequest, UpdateDocumentRequest, UpdateDocumentsResult, WriteApiKey,
     },
 };
-use fs::BufferedFile;
+use oramacore_lib::fs::BufferedFile;
+use oramacore_lib::generic_kv::{KVConfig, KVWriteOperation, KV};
 
 #[derive(Error, Debug)]
 pub enum WriteError {
@@ -217,9 +215,19 @@ impl WriteSide {
             llm_service,
         };
 
+        let kv_op_sender = context.op_sender.clone();
+        let kv_operation_cb = Box::new(move |op: KVWriteOperation| {
+            let op_sender = kv_op_sender.clone();
+            async move {
+                let _ = op_sender
+                    .send(WriteOperation::KV(op))
+                    .await;
+            }
+                .boxed()
+        });
         let kv = KV::try_load(KVConfig {
             data_dir: data_dir.join("kv"),
-            sender: Some(op_sender.clone()),
+            sender: Some(kv_operation_cb),
         })
         .context("Cannot load KV")?;
         let kv = Arc::new(kv);

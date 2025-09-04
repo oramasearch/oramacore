@@ -9,8 +9,8 @@ use crate::{
     types::{CollectionId, InteractionLLMConfig, SystemPromptUsageMode},
 };
 
-use super::generic_kv::{format_key, KV};
 use llm_json::repair_json;
+use oramacore_lib::generic_kv::{format_key, KV};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemPrompt {

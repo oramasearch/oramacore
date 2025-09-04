@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
 use crate::types::{Document, DocumentId, RawJSONDocument};
-use fs::{create_if_not_exists, read_file};
+use oramacore_lib::fs::{create_if_not_exists, read_file};
 
 // 1GB
 const PAGE_SIZE: u64 = 1024 * 1024 * 1024;

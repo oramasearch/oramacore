@@ -16,7 +16,7 @@ use fastembed::{
 };
 use futures::{future::BoxFuture, FutureExt};
 use grpc_def::Embedding;
-use hook_storage::HookType;
+use oramacore_lib::hook_storage::HookType;
 use http::uri::Scheme;
 use tokio::{
     sync::{mpsc, RwLock},
@@ -26,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Status};
 use tracing::warn;
 
-use crate::pin_rules::PinRule;
+use oramacore_lib::pin_rules::PinRule;
 use crate::types::SearchResultHit;
 use crate::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},

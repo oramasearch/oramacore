@@ -6,6 +6,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use oramacore_lib::data_structures::fst::FSTIndex;
+use oramacore_lib::data_structures::map::Map;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -22,11 +24,10 @@ use crate::{
             OffloadFieldConfig,
         },
     },
-    indexes::{fst::FSTIndex, map::Map},
     merger::MergedIterator,
     types::DocumentId,
 };
-use fs::create_if_not_exists;
+use oramacore_lib::fs::create_if_not_exists;
 
 const EXACT_MATCH_BOOST_MULTIPLIER: f32 = 3.0;
 

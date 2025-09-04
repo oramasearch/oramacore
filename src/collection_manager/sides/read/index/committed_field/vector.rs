@@ -6,7 +6,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use filters::FilterResult;
+use oramacore_lib::data_structures::hnsw2::HNSW2Index;
+use oramacore_lib::filters::FilterResult;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -19,10 +20,9 @@ use crate::{
         },
         write::OramaModelSerializable,
     },
-    indexes::hnsw2::HNSW2Index,
     types::DocumentId,
 };
-use fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedVectorField {
@@ -33,7 +33,7 @@ pub struct CommittedVectorField {
 
 pub struct LoadedCommittedVectorField {
     field_path: Box<[String]>,
-    inner: HNSW2Index,
+    inner: HNSW2Index<DocumentId>,
     data_dir: PathBuf,
     model: OramaModel,
 }
@@ -235,7 +235,7 @@ impl LoadedCommittedVectorField {
     ) -> Result<Self> {
         let dump_file_path = data_dir.join("index.hnsw");
 
-        let inner: HNSW2Index = BufferedFile::open(dump_file_path)
+        let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
             .context("Cannot open hnsw file")?
             .read_bincode_data()
             .context("Cannot read hnsw file")?;
@@ -272,7 +272,7 @@ impl LoadedCommittedVectorField {
     pub fn try_load(info: VectorFieldInfo) -> Result<Self> {
         let dump_file_path = info.data_dir.join("index.hnsw");
 
-        let inner: HNSW2Index = BufferedFile::open(dump_file_path)
+        let inner: HNSW2Index<DocumentId> = BufferedFile::open(dump_file_path)
             .map_err(|e| anyhow!("Cannot open hnsw file: {}", e))?
             .read_bincode_data()
             .map_err(|e| anyhow!("Cannot read hnsw file: {}", e))?;

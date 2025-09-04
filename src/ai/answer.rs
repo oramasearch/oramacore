@@ -1,5 +1,5 @@
 use futures::TryFutureExt;
-use hook_storage::HookReaderError;
+use oramacore_lib::hook_storage::HookReaderError;
 use llm_json::{repair_json, JsonRepairError};
 use orama_js_pool::{ExecOption, JSRunnerError, OutputChannel};
 use std::{

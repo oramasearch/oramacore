@@ -7,7 +7,7 @@ use tracing::{info, warn};
 use super::index::Index;
 use super::{GroupValue, SortedField};
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
-use crate::pin_rules::Consequence;
+use oramacore_lib::pin_rules::Consequence;
 use crate::types::{SearchMode, SearchParams};
 use crate::{
     capped_heap::CappedHeap,

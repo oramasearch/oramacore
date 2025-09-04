@@ -11,9 +11,9 @@ use crate::{
     types::{ApiKey, CollectionId},
 };
 
-use fs::{create_if_not_exists, create_if_not_exists_async, BufferedFile};
+use oramacore_lib::fs::{create_if_not_exists, create_if_not_exists_async, BufferedFile};
 
-use nlp::locales::Locale;
+use oramacore_lib::nlp::locales::Locale;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

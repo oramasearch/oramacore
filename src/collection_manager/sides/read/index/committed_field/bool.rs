@@ -6,8 +6,9 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{indexes::ordered_key::BoundedValue, types::DocumentId};
-use fs::create_if_not_exists;
+use oramacore_lib::data_structures::ordered_key::BoundedValue;
+use crate::{types::DocumentId};
+use oramacore_lib::fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedBoolField {
@@ -72,7 +73,7 @@ impl CommittedBoolField {
             Ok(file) => bincode::deserialize_from::<_, HashMap<bool, HashSet<DocumentId>>>(file)
                 .context("Failed to deserialize bool_map.bin")?,
             Err(_) => {
-                use crate::indexes::ordered_key::OrderedKeyIndex;
+                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
                 let inner = OrderedKeyIndex::<BoolWrapper, DocumentId>::load(data_dir.clone())?;
 
                 let false_count = inner

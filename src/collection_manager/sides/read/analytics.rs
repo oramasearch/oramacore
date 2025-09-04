@@ -2,7 +2,7 @@ use std::{io::Write, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;

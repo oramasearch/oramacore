@@ -12,13 +12,13 @@ use collection_manager::sides::{
     InputSideChannelType, OutputSideChannelType,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
+use oramacore_lib::nlp;
 use serde::Deserialize;
 use tracing::level_filters::LevelFilter;
 #[allow(unused_imports)]
 use tracing::{info, warn};
 use web_server::{HttpConfig, WebServer};
 
-pub mod indexes;
 pub mod types;
 
 pub mod code_parser;
@@ -32,7 +32,6 @@ mod capped_heap;
 mod metrics;
 
 mod merger;
-mod pin_rules;
 
 pub mod build_info;
 
@@ -225,3 +224,5 @@ pub async fn build_orama(
 
     Ok((write_side, read_side))
 }
+
+

@@ -12,7 +12,7 @@ use axum::extract::State;
 use chrono::Utc;
 use duration_string::DurationString;
 use futures::{Stream, StreamExt};
-use hook_storage::{HookReader, HookReaderError};
+use oramacore_lib::hook_storage::{HookReader, HookReaderError};
 pub use index::*;
 pub use sort::{sort_with_context, SortContext};
 
@@ -40,7 +40,6 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
-use crate::collection_manager::sides::generic_kv::{KVConfig, KV};
 use crate::collection_manager::sides::read::analytics::{
     AnalyticConfig, AnalyticSearchEvent, AnalyticsStorage,
 };
@@ -56,8 +55,9 @@ use crate::types::{
 };
 use crate::types::{IndexId, NLPSearchRequest};
 use crate::{ai::AIService, types::CollectionId};
-use fs::BufferedFile;
-use nlp::NLPService;
+use oramacore_lib::fs::BufferedFile;
+use oramacore_lib::generic_kv::{KVConfig, KV};
+use oramacore_lib::nlp::NLPService;
 
 use super::system_prompts::{SystemPrompt, SystemPromptInterface};
 use super::{
@@ -384,7 +384,7 @@ impl ReadSide {
             }
             WriteOperation::KV(op) => {
                 self.kv
-                    .update(offset, op)
+                    .update(offset.0, op)
                     .await
                     .context("Cannot insert into KV")?;
             }
