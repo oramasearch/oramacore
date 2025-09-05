@@ -22,7 +22,7 @@ use crate::{
     types::{CollectionId, DocumentId, FieldId, IndexId, Number, OramaDate, SerializableNumber},
 };
 
-use nlp::{
+use oramacore_lib::nlp::{
     chunker::{Chunker, ChunkerConfig},
     locales::Locale,
     TextParser,

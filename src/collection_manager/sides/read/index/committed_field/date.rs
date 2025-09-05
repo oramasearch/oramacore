@@ -5,10 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     collection_manager::sides::read::index::committed_field::number::get_iter,
-    indexes::ordered_key::BoundedValue,
     types::{DateFilter, DocumentId, OramaDate},
 };
-use fs::create_if_not_exists;
+use oramacore_lib::fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedDateField {
@@ -41,7 +40,7 @@ impl CommittedDateField {
             Ok(file) => bincode::deserialize_from::<_, Vec<(i64, HashSet<DocumentId>)>>(file)
                 .context("Failed to deserialize date_vec.bin")?,
             Err(_) => {
-                use crate::indexes::ordered_key::OrderedKeyIndex;
+                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
                 let inner = OrderedKeyIndex::<i64, DocumentId>::load(data_dir.clone())?;
 
                 let items = inner
@@ -136,16 +135,6 @@ impl CommittedDateField {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (i64, HashSet<DocumentId>)> + '_ {
         self.vec.iter().cloned()
-    }
-}
-
-impl BoundedValue for i64 {
-    fn max_value() -> Self {
-        i64::MAX
-    }
-
-    fn min_value() -> Self {
-        i64::MIN
     }
 }
 

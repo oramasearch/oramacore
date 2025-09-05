@@ -7,7 +7,7 @@ use fs_extra::dir::CopyOptions;
 
 use crate::merger::MergedIterator;
 use crate::types::{DocumentId, SerializableNumber};
-use fs::create_if_not_exists;
+use oramacore_lib::fs::create_if_not_exists;
 
 use super::super::OffloadFieldConfig;
 use super::committed_field::*;

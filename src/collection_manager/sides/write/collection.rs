@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Deref, path::PathBuf, sync::Arc};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use futures::FutureExt;
-use hook_storage::HookWriter;
+use oramacore_lib::hook_storage::HookWriter;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::{info, warn};
@@ -21,12 +21,12 @@ use crate::{
         IndexId, WriteApiKey,
     },
 };
-use fs::BufferedFile;
+use oramacore_lib::fs::BufferedFile;
 
 use super::index::Index;
 use crate::collection_manager::sides::IndexWriteOperation;
-use crate::pin_rules::{PinRule, PinRuleOperation};
-use nlp::{locales::Locale, TextParser};
+use oramacore_lib::nlp::{locales::Locale, TextParser};
+use oramacore_lib::pin_rules::{PinRule, PinRuleOperation};
 
 pub const DEFAULT_EMBEDDING_FIELD_NAME: &str = "___orama_auto_embedding";
 

@@ -28,17 +28,16 @@ use crate::{
         DocumentStorageWriteOperation, IndexWriteOperation, IndexWriteOperationFieldType,
         WriteOperation,
     },
-    pin_rules::PinRulesWriter,
     types::{
         CollectionId, DescribeCollectionIndexResponse, Document, DocumentId, DocumentList, FieldId,
         IndexEmbeddingsCalculation, IndexFieldType, IndexId, OramaDate,
     },
 };
-use fs::BufferedFile;
-use nlp::{locales::Locale, TextParser};
+use oramacore_lib::fs::BufferedFile;
+use oramacore_lib::nlp::{locales::Locale, TextParser};
 
-use crate::pin_rules::PinRuleOperation;
 pub use fields::{FieldType, GeoPoint, IndexedValue, OramaModelSerializable};
+use oramacore_lib::pin_rules::{PinRuleOperation, PinRulesWriter};
 
 #[derive(Clone)]
 pub enum EmbeddingStringCalculation {

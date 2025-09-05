@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use futures::FutureExt;
-use hook_storage::HookType;
 use itertools::Itertools;
+use oramacore_lib::hook_storage::HookType;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},

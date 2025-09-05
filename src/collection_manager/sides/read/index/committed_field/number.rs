@@ -2,13 +2,11 @@ use core::f32;
 use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
+use oramacore_lib::data_structures::ordered_key::BoundedValue;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    indexes::ordered_key::BoundedValue,
-    types::{DocumentId, Number, NumberFilter, SerializableNumber},
-};
-use fs::create_if_not_exists;
+use crate::types::{DocumentId, Number, NumberFilter, SerializableNumber};
+use oramacore_lib::fs::create_if_not_exists;
 
 #[derive(Debug)]
 pub struct CommittedNumberField {
@@ -43,7 +41,7 @@ impl CommittedNumberField {
                     .context("Failed to deserialize number_vec.bin")?
             }
             Err(_) => {
-                use crate::indexes::ordered_key::OrderedKeyIndex;
+                use oramacore_lib::data_structures::ordered_key::OrderedKeyIndex;
                 let inner =
                     OrderedKeyIndex::<SerializableNumber, DocumentId>::load(data_dir.clone())?;
 

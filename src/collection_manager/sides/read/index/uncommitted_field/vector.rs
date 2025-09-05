@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
-use filters::FilterResult;
+use oramacore_lib::filters::FilterResult;
 use serde::Serialize;
 
 use crate::{ai::OramaModel, types::DocumentId};

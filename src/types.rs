@@ -8,7 +8,6 @@ use crate::collection_manager::sides::write::OramaModelSerializable;
 use crate::collection_manager::sides::{deserialize_api_key, serialize_api_key};
 use anyhow::{bail, Context, Result};
 use arrayvec::ArrayString;
-use nlp::locales::Locale;
 
 use async_openai::types::{
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -16,6 +15,7 @@ use async_openai::types::{
 };
 
 use chrono::{DateTime, Utc};
+use oramacore_lib::nlp::locales::Locale;
 use redact::Secret;
 use schemars::JsonSchema;
 use serde::de::{Error, Visitor};
@@ -2217,8 +2217,8 @@ impl<const N: usize> schemars::JsonSchema for StackString<N> {
         "string".into()
     }
 
-    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        String::json_schema(_gen)
+    fn json_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(gen)
     }
 }
 

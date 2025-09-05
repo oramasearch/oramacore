@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::types::DocumentId;
-use fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedStringFilterField {

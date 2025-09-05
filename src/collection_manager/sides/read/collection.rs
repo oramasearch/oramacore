@@ -10,8 +10,8 @@ use std::{
 use axum::extract::State;
 use chrono::{DateTime, Utc};
 use debug_panic::debug_panic;
-use hook_storage::{HookReader, HookType};
 use orama_js_pool::OutputChannel;
+use oramacore_lib::hook_storage::{HookReader, HookType};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
@@ -43,8 +43,8 @@ use super::{
 };
 
 use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
-use fs::*;
-use nlp::locales::Locale;
+use oramacore_lib::fs::*;
+use oramacore_lib::nlp::locales::Locale;
 
 pub struct CollectionReader {
     data_dir: PathBuf,

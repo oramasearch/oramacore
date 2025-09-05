@@ -3,13 +3,14 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use async_openai::types::{ChatCompletionRequestMessage, FunctionObject, FunctionObjectArgs};
 use orama_js_pool::{ExecOption, JSExecutor, JSRunnerError};
+use oramacore_lib::generic_kv::KV;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
     code_parser::tool_parser::validate_js_exports,
-    collection_manager::sides::{generic_kv::KV, read::ReadError, write::WriteError},
+    collection_manager::sides::{read::ReadError, write::WriteError},
     types::{CollectionId, InteractionLLMConfig, InteractionMessage},
 };
 

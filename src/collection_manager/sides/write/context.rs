@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nlp::NLPService;
+use oramacore_lib::nlp::NLPService;
 use tokio::sync::mpsc::Sender;
 
 use crate::{

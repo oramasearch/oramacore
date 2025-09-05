@@ -18,8 +18,8 @@ use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
 use crate::types::{CollectionId, DocumentId};
 use crate::types::{CreateCollection, DescribeCollectionResponse, LanguageDTO};
-use fs::{create_if_not_exists, BufferedFile};
-use nlp::locales::Locale;
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::nlp::locales::Locale;
 
 use super::collection::CollectionWriter;
 use super::CollectionsWriterConfig;
