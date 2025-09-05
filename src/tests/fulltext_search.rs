@@ -1014,3 +1014,89 @@ async fn test_fulltext_tolerance() {
 
     drop(test_context);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fulltext_ignore_unknown_property_on_multi_index_collection() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client1 = collection_client.create_index().await.unwrap();
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "text": format!("text {}", i % 2 == 0),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client1
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    let index_client2 = collection_client.create_index().await.unwrap();
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": i.to_string(),
+                "content": format!("content {}", i % 2 == 0),
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client2
+        .insert_documents(json!(docs).try_into().unwrap())
+        .await
+        .unwrap();
+
+    // All docs
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "properties": ["text", "content"],
+                "limit": 20,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 20);
+    assert_eq!(output.hits.len(), 20);
+
+    // Only on a property defined only on the first index
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "properties": ["text"],
+                "limit": 20,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 10);
+    assert_eq!(output.hits.len(), 10);
+
+    // Only on a property defined only on the second index
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "properties": ["content"],
+                "limit": 20,
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.count, 10);
+    assert_eq!(output.hits.len(), 10);
+
+    drop(test_context);
+}

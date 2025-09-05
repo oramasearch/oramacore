@@ -527,8 +527,8 @@ async fn test_facets_with_different_shaped_index() {
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
 
-    let index_client1 = collection_client.create_index().await.unwrap();
     // index 1 is empty
+    let _ = collection_client.create_index().await.unwrap();
 
     let index_client2 = collection_client.create_index().await.unwrap();
     let docs = (0..10)

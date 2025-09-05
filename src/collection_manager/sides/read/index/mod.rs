@@ -2053,14 +2053,13 @@ impl Index {
             Properties::Specified(properties) => {
                 let mut field_ids = HashSet::new();
                 for field in properties {
-                    let (field_id, field_type) = match self.path_to_index_id_map.get(field) {
-                        None => {
-                            bail!("Cannot filter by \"{}\": unknown field", &field);
-                        }
-                        Some((field_id, field_type)) => (field_id, field_type),
+                    let Some((field_id, field_type)) = self.path_to_index_id_map.get(field) else {
+                        continue;
+                        // bail!("Cannot filter by \"{}\": unknown field", &field);
                     };
                     if !matches!(field_type, FieldType::String) {
-                        bail!("Cannot filter by \"{}\": wrong type", &field);
+                        continue;
+                        // bail!("Cannot filter by \"{}\": wrong type", &field);
                     }
                     field_ids.insert(field_id);
                 }
