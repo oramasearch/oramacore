@@ -1394,7 +1394,8 @@ impl Index {
             let Some((field_id, field_type)) =
                 self.path_to_index_id_map.get_filter_field(field_name)
             else {
-                bail!("Unknown field name '{}'", field_name);
+                warn!("Unknown field name '{}'", field_name);
+                continue;
             };
             let facet_definition =
                 res_facets

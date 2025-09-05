@@ -239,7 +239,10 @@ async fn test_facets_unknown_field() {
         )
         .await;
 
-    assert!(format!("{output:?}").contains("Unknown field name 'unknown'"));
+    assert!(
+        format!("{output:?}").contains("Some fields are not present in the collection for facets")
+    );
+    assert!(format!("{output:?}").contains("unknown"));
 
     drop(test_context);
 }
@@ -447,6 +450,124 @@ async fn test_facets_with_filters() {
                 values: HashMap::from([("A".to_string(), 5), ("B".to_string(), 5),])
             }
         )]))
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_facets_on_multiple_index_collection() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client1 = collection_client.create_index().await.unwrap();
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "title": format!("title {}", i),
+                "category": if i % 2 == 0 { "A" } else { "B" },
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client1
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let index_client2 = collection_client.create_index().await.unwrap();
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "title": format!("title {}", i),
+                "category": if i % 2 == 0 { "A" } else { "B" },
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client2
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "facets": {
+                    "category": {}
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let Some(facets) = output.facets else {
+        panic!("Facet should be there");
+    };
+    let category_facet = facets
+        .get("category")
+        .expect("Facet on field 'category' should be there");
+    assert_eq!(
+        category_facet.values,
+        HashMap::from([("A".to_string(), 10), ("B".to_string(), 10),])
+    );
+
+    drop(test_context);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_facets_with_different_shaped_index() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    let index_client1 = collection_client.create_index().await.unwrap();
+    // index 1 is empty
+
+    let index_client2 = collection_client.create_index().await.unwrap();
+    let docs = (0..10)
+        .map(|i| {
+            json!({
+                "id": format!("{}", i),
+                "title": format!("title {}", i),
+                "category": if i % 2 == 0 { "A" } else { "B" },
+            })
+        })
+        .collect::<Vec<_>>();
+    index_client2
+        .insert_documents(docs.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let output = collection_client
+        .search(
+            json!({
+                "term": "",
+                "facets": {
+                    "category": {}
+                }
+            })
+            .try_into()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let Some(facets) = output.facets else {
+        panic!("Facet should be there");
+    };
+    let category_facet = facets
+        .get("category")
+        .expect("Facet on field 'category' should be there");
+    assert_eq!(
+        category_facet.values,
+        HashMap::from([("A".to_string(), 5), ("B".to_string(), 5),])
     );
 
     drop(test_context);

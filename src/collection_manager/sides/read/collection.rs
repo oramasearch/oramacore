@@ -538,6 +538,21 @@ impl CollectionReader {
                 .await?;
         }
 
+        let expected_facets_count = search_params.facets.len();
+        if result.len() != expected_facets_count {
+            // The user asked for some facets that are not present in the collection
+            let present_facet_fields: Vec<&String> = result.keys().collect();
+            let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
+            let missing_facet_fields: Vec<&&String> = requested_facet_fields
+                .iter()
+                .filter(|f| !present_facet_fields.contains(f))
+                .collect();
+            bail!(
+                "Some fields are not present in the collection for facets: {:?}",
+                missing_facet_fields
+            );
+        }
+
         Ok(result)
     }
 
