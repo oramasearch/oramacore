@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nlp::NLPService;
+use oramacore_lib::nlp::NLPService;
 
 use crate::{
     ai::{llms::LLMService, AIService},

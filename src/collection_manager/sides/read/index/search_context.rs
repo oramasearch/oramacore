@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use filters::FilterResult;
+use oramacore_lib::filters::FilterResult;
 
 use crate::{
     collection_manager::global_info::GlobalInfo,

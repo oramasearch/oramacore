@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use hook_storage::HookType;
+use oramacore_lib::hook_storage::HookType;
 use serde::Deserialize;
 use serde_json::json;
 

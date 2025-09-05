@@ -7,12 +7,12 @@ use tracing::{info, warn};
 use super::index::Index;
 use super::{GroupValue, SortedField};
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
-use crate::pin_rules::Consequence;
 use crate::types::{SearchMode, SearchParams};
 use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, TokenScore},
 };
+use oramacore_lib::pin_rules::Consequence;
 
 /// Context structure that encapsulates all parameters needed for sorting operations
 pub struct SortContext<'a> {

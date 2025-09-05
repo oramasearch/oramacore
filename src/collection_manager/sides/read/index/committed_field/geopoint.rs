@@ -1,11 +1,12 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::{Context, Result};
-use bkd::{haversine_distance, BKDTree, Coord};
+use oramacore_lib::bkd;
+use oramacore_lib::bkd::{haversine_distance, BKDTree, Coord};
 use serde::{Deserialize, Serialize};
 
 use crate::types::{DocumentId, GeoSearchFilter};
-use fs::{create_if_not_exists, BufferedFile};
+use oramacore_lib::fs::{create_if_not_exists, BufferedFile};
 
 #[derive(Debug)]
 pub struct CommittedGeoPointField {

@@ -2,10 +2,10 @@ use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use oramacore_lib::generic_kv::KV;
 use std::{collections::HashMap, sync::Arc};
 use strum_macros::Display;
 
-use crate::collection_manager::sides::generic_kv::KV;
 use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 
 use crate::types::{

@@ -1,17 +1,17 @@
-use crate::pin_rules::PinRuleOperation;
-use hook_storage::HookOperation;
-use serde::{ser::SerializeTuple, Deserialize, Serialize};
-use serde_json::value::RawValue;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-
 use crate::{
     collection_manager::sides::write::{index::IndexedValue, OramaModelSerializable},
     types::{
         ApiKey, CollectionId, DocumentFields, DocumentId, FieldId, IndexId, Number, RawJSONDocument,
     },
 };
-use nlp::locales::Locale;
+use oramacore_lib::generic_kv::KVWriteOperation;
+use oramacore_lib::hook_storage::HookOperation;
+use oramacore_lib::nlp::locales::Locale;
+use oramacore_lib::pin_rules::PinRuleOperation;
+use serde::{ser::SerializeTuple, Deserialize, Serialize};
+use serde_json::value::RawValue;
+use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Term(pub String);
@@ -145,7 +145,7 @@ pub enum IndexWriteOperation {
     DeleteDocuments {
         doc_ids: Vec<DocumentId>,
     },
-    PinRule(PinRuleOperation),
+    PinRule(PinRuleOperation<DocumentId>),
 }
 
 pub type EmbeddingIndexData = Vec<(FieldId, Vec<(DocumentId, Vec<Vec<f32>>)>)>;
@@ -277,12 +277,6 @@ impl<'de> Deserialize<'de> for DocumentFieldsWrapper {
         };
         Ok(DocumentFieldsWrapper(doc))
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KVWriteOperation {
-    Create(String, String),
-    Delete(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -436,7 +430,7 @@ mod tests {
     use serde_json::value::RawValue;
 
     use crate::types::{CollectionId, DocumentId, RawJSONDocument, SerializableNumber};
-    use nlp::locales::Locale;
+    use oramacore_lib::nlp::locales::Locale;
 
     #[test]
     fn test_bincode() {

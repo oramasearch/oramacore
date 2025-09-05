@@ -1,4 +1,4 @@
-use hook_storage::HookType;
+use oramacore_lib::hook_storage::HookType;
 
 use crate::tests::utils::init_log;
 use crate::tests::utils::wait_for;
