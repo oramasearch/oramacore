@@ -19,6 +19,7 @@ mod hooks;
 // mod hurl;
 mod index_rebuild;
 mod list_documents;
+mod mcp_server;
 mod multi_index;
 mod offload_field;
 mod pin_rules;
