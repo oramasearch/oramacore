@@ -465,7 +465,7 @@ async fn create_consumer_attempt(
             if status == ResponseCode::StreamNotAvailable =>
         {
             let waiting_time = random_wait_with_backoff(attempt_count + 1);
-            sleep(Duration::from_secs(waiting_time)).await;
+            sleep(Duration::from_millis(waiting_time)).await;
             return Box::pin(create_consumer_attempt(
                 environment,
                 config,
