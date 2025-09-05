@@ -224,5 +224,3 @@ pub async fn build_orama(
 
     Ok((write_side, read_side))
 }
-
-

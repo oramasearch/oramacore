@@ -22,8 +22,8 @@ use std::{
 };
 
 use super::{
-    system_prompts::SystemPromptInterface, Offset, OperationSender,
-    OperationSenderCreator, OutputSideChannelType,
+    system_prompts::SystemPromptInterface, Offset, OperationSender, OperationSenderCreator,
+    OutputSideChannelType,
 };
 
 use anyhow::{Context, Result};

@@ -56,7 +56,7 @@ strum_macros = "0.26.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-oramacore_lib = { path = "../oramacore_lib" }
+oramacore_lib = "0.1.0"
 
 # JS
 oxc_parser = "0.47.1"
@@ -124,9 +124,9 @@ path = "src/bin/embeddings/embeddings.rs"
 # name = "phrase_match"
 # harness = false
 
-[[bench]]
-name = "hnsw"
-harness = false
+# [[bench]]
+# name = "hnsw"
+# harness = false
 
 [[bench]]
 name = "fulltext_search"
