@@ -4,11 +4,10 @@ use anyhow::{bail, Result};
 use ordered_float::NotNan;
 use tracing::{info, warn};
 
-use super::index::Index;
 use super::{GroupValue, SortedField};
 use crate::collection_manager::sides::read::collection::{CollectionReader, IndexReadLock};
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
-use crate::types::{IndexId, SearchMode, SearchParams};
+use crate::types::{IndexId, SearchParams};
 use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, TokenScore},
@@ -16,12 +15,30 @@ use crate::{
 use oramacore_lib::pin_rules::Consequence;
 
 /// Context structure that encapsulates all parameters needed for sorting operations
-pub struct SortContext<'a> {
-    pub indexes: &'a [Index],
-    pub token_scores: &'a HashMap<DocumentId, f32>,
-    pub search_params: &'a SearchParams,
-    pub limit: Limit,
-    pub offset: SearchOffset,
+pub struct SortContext<'collection, 'search> {
+    collection: &'collection CollectionReader,
+    index_ids: &'search [IndexId],
+    token_scores: &'search HashMap<DocumentId, f32>,
+    search_params: &'search SearchParams,
+    pin_rules: &'collection [Consequence<DocumentId>],
+}
+
+impl<'collection, 'search> SortContext<'collection, 'search> {
+    pub fn new(
+        collection: &'collection CollectionReader,
+        index_ids: &'search [IndexId],
+        token_scores: &'search HashMap<DocumentId, f32>,
+        search_params: &'search SearchParams,
+        pin_rules: &'collection [Consequence<DocumentId>],
+    ) -> Self {
+        Self {
+            collection,
+            index_ids,
+            token_scores,
+            search_params,
+            pin_rules,
+        }
+    }
 }
 
 /// Truncate results based on top_count, applying token scores
@@ -76,15 +93,13 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
         .collect()
 }
 
-async fn sort_and_truncate_documents_by_field<'search, 'index>(
+async fn sort_and_truncate_documents_by_field(
     sort_by: &SortBy,
-    relevant_indexes: &'search[&'index Index],
+    collection: &CollectionReader,
+    index_ids: &[IndexId],
     token_scores: &HashMap<DocumentId, f32>,
     top_count: usize,
-) -> Result<Vec<TokenScore>>
-where
-    'index: 'search,
-{
+) -> Result<Vec<TokenScore>> {
     fn process_sort_iterator(
         iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
         desiderata: usize,
@@ -109,37 +124,54 @@ where
         index_results
     }
 
-    let v = if relevant_indexes.len() == 1 {
+    let v = if index_ids.len() == 1 {
         // If there's only one index, use the existing optimized path
-        let sorted_field = relevant_indexes[0]
+        let Some(index) = collection.get_index(index_ids[0]).await else {
+            bail!("Index {:?} not found in collection", index_ids[0]);
+        };
+        let sorted_field = index
             .get_sort_iterator(&sort_by.property, sort_by.order)
             .await?;
         let output = process_sort_iterator(sorted_field.iter(), top_count);
 
         truncate(token_scores, output.into_iter(), top_count)
     } else {
-        let mut sorted_fields = Vec::with_capacity(relevant_indexes.len());
-        for index in relevant_indexes {
-            let sorted_field = index
+        let mut relevant_indexes: Vec<IndexReadLock<'_>> = Vec::with_capacity(index_ids.len());
+        for index_id in index_ids {
+            if let Some(index) = collection.get_index(*index_id).await {
+                if !index.is_deleted() && index.has_filter_field(&sort_by.property) {
+                    relevant_indexes.push(index);
+                }
+            }
+        }
+
+        let mut v: Vec<SortedField<'_>> = Vec::with_capacity(relevant_indexes.len());
+        for index in &relevant_indexes {
+            let index_results = index
                 .get_sort_iterator(&sort_by.property, sort_by.order)
                 .await?;
-            sorted_fields.push(sorted_field);
+            v.push(index_results);
         }
 
         let mut merge_sorted_iterator = MergeSortedIterator::new(sort_by.order);
-        for i in &sorted_fields {
+        for i in &v {
             merge_sorted_iterator.add(i.iter());
         }
 
-        // Get top
-        truncate(token_scores, merge_sorted_iterator, top_count)
+        let data = truncate(token_scores, merge_sorted_iterator, top_count);
+
+        drop(v);
+        drop(relevant_indexes);
+
+        data
     };
     Ok(v)
 }
 
 async fn sort_and_truncate_documents(
-    relevant_indexes: Option<(&SortBy, Vec<&Index>)>,
-    pins: Vec<Consequence<DocumentId>>,
+    collection: &CollectionReader,
+    relevant_indexes: Option<(&SortBy, Vec<IndexId>)>,
+    pins: &[Consequence<DocumentId>],
     token_scores: &HashMap<DocumentId, f32>,
     limit: Limit,
     offset: SearchOffset,
@@ -156,15 +188,21 @@ async fn sort_and_truncate_documents(
     };
 
     let top = if let Some((sort_by, relevant_indexes)) = relevant_indexes {
-        sort_and_truncate_documents_by_field(sort_by, &relevant_indexes, token_scores, top_count)
-            .await?
+        sort_and_truncate_documents_by_field(
+            sort_by,
+            collection,
+            &relevant_indexes,
+            token_scores,
+            top_count,
+        )
+        .await?
     } else {
         // No sorting requested - fall back to simple top-N selection based on token scores
         top_n(token_scores.iter(), top_count)
     };
 
     let top = if !pins.is_empty() {
-        apply_pin_rules(&pins, token_scores, top)
+        apply_pin_rules(pins, token_scores, top)
     } else {
         top
     };
@@ -284,39 +322,24 @@ fn apply_pin_rules_to_group(
     )
 }
 
-pub fn extract_term_from_search_mode(search_params: &SearchParams) -> &str {
-    match &search_params.mode {
-        SearchMode::FullText(f) | SearchMode::Default(f) => &f.term,
-        SearchMode::Hybrid(h) => &h.term,
-        SearchMode::Vector(v) => &v.term,
-        SearchMode::Auto(a) => &a.term,
-    }
-}
-
-async fn extract_pin_rules(context: &SortContext<'_>) -> Vec<Consequence<DocumentId>> {
-    let term = extract_term_from_search_mode(context.search_params);
-    let mut pins: Vec<_> = Vec::with_capacity(context.indexes.len());
-    for index in context.indexes {
-        let pin_rules = index.get_read_lock_on_pin_rules().await;
-        pins.extend(pin_rules.apply(term));
-    }
-    pins
-}
-
-pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScore>> {
+pub async fn sort_with_context(context: SortContext<'_, '_>) -> Result<Vec<TokenScore>> {
     let sort_by = context.search_params.sort_by.as_ref();
     info!(
         "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
-        context.limit, context.offset, sort_by
+        context.search_params.limit, context.search_params.offset, sort_by
     );
 
     // Identify relevant indexes for sorting
     let relevant_indexes_for_sorting: Option<(&SortBy, Vec<_>)> = if let Some(sort_by) = sort_by {
-        let indexes: Vec<_> = context
-            .indexes
-            .iter()
-            .filter(|index| !index.is_deleted() && index.has_filter_field(&sort_by.property))
-            .collect();
+        let mut indexes: Vec<_> = Vec::with_capacity(context.index_ids.len());
+        for index_id in context.index_ids {
+            if let Some(index) = context.collection.get_index(*index_id).await {
+                if index.has_filter_field(&sort_by.property) {
+                    indexes.push(*index_id);
+                }
+            }
+        }
+
         if indexes.is_empty() {
             bail!(
                 "Cannot sort by {:?}: no index has that field",
@@ -328,14 +351,13 @@ pub async fn sort_with_context(context: SortContext<'_>) -> Result<Vec<TokenScor
         None
     };
 
-    let pins = extract_pin_rules(&context).await;
-
     sort_and_truncate_documents(
+        context.collection,
         relevant_indexes_for_sorting,
-        pins,
+        context.pin_rules,
         context.token_scores,
-        context.limit,
-        context.offset,
+        context.search_params.limit,
+        context.search_params.offset,
     )
     .await
 }
@@ -451,7 +473,8 @@ where
             .take(expanded_limit)
             .collect()
     } else {
-        let mut relevant_indexes: Vec<IndexReadLock<'collection>> = Vec::with_capacity(index_ids.len());
+        let mut relevant_indexes: Vec<IndexReadLock<'collection>> =
+            Vec::with_capacity(index_ids.len());
         for index_id in index_ids {
             if let Some(index) = collection.get_index(*index_id).await {
                 if !index.is_deleted() && index.has_filter_field(&sort_by.property) {

@@ -21,7 +21,9 @@ use crate::types::{
 };
 
 use crate::ai::run_hooks::run_before_retrieval;
-use crate::collection_manager::sides::read::{CollectionStats, ReadSide, SearchAnalyticEventOrigin};
+use crate::collection_manager::sides::read::{
+    CollectionStats, ReadSide, SearchAnalyticEventOrigin,
+};
 
 // ==== SSE Event Types ====
 

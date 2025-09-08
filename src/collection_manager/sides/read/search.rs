@@ -1,16 +1,20 @@
 use std::{collections::HashMap, time::Instant};
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use futures::StreamExt;
-use oramacore_lib::pin_rules::{self, Consequence};
+use oramacore_lib::pin_rules::Consequence;
 
 use crate::{
     collection_manager::sides::read::{
-        GroupValue, ReadError, analytics::{OramaCoreAnalytics, SearchAnalyticEvent, SearchAnalyticEventOrigin}, document_storage::DocumentStorage, sort::sort_documents_in_groups
+        analytics::{OramaCoreAnalytics, SearchAnalyticEvent, SearchAnalyticEventOrigin},
+        document_storage::DocumentStorage,
+        sort::sort_documents_in_groups,
+        sort_with_context, GroupValue, ReadError, SortContext,
     },
-    metrics::{SearchCollectionLabels, search::SEARCH_CALCULATION_TIME},
+    metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupByConfig, GroupedResult, IndexId, SearchMode, SearchParams, SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter
+        DocumentId, FacetResult, GroupByConfig, GroupedResult, IndexId, SearchMode,
+        SearchParams, SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
     },
 };
 
@@ -63,8 +67,8 @@ impl<'collection, 'document_storage, 'analytics_storage>
 
         let has_filters = !search_params.where_filter.is_empty();
         let has_facets = !search_params.facets.is_empty();
-        let has_groups = !search_params.group_by.is_some();
-        let has_sorting = !search_params.sort_by.is_some();
+        let has_groups = search_params.group_by.is_none();
+        let has_sorting = search_params.sort_by.is_none();
 
         let m = SEARCH_CALCULATION_TIME.create(SearchCollectionLabels {
             collection: collection_id.to_string().into(),
@@ -112,12 +116,8 @@ impl<'collection, 'document_storage, 'analytics_storage>
                 &calculate_token_score_for_indexes(collection, &search_params, &index_ids).await?
             };
 
-            let facets = calculate_facets(
-                collection,
-                &index_ids,
-                &search_params,
-                token_scores,
-            ).await?;
+            let facets =
+                calculate_facets(collection, &index_ids, &search_params, token_scores).await?;
 
             Some(facets)
         } else {
@@ -135,7 +135,7 @@ impl<'collection, 'document_storage, 'analytics_storage>
                 search_params.sort_by.as_ref(),
                 &pin_rules,
             )
-                .await?;
+            .await?;
 
             let groups: Vec<_> = futures::stream::iter(groups.into_iter())
                 .filter_map(|(k, ids)| async {
@@ -179,9 +179,14 @@ impl<'collection, 'document_storage, 'analytics_storage>
 
         let count = token_scores.len();
 
-        let top_results: Vec<TokenScore> = collection
-            .sort_and_truncate(&token_scores, limit, offset, &search_params)
-            .await?;
+        let top_results: Vec<TokenScore> = sort_and_truncate(
+            collection,
+            &index_ids,
+            &token_scores,
+            &search_params,
+            &pin_rules,
+        )
+        .await?;
         trace!("Top results: {:?}", top_results);
 
         let result = top_results
@@ -297,51 +302,49 @@ async fn calculate_token_score_for_indexes(
         };
 
         index
-            .calculate_token_score(&search_params, &mut token_scores)
+            .calculate_token_score(search_params, &mut token_scores)
             .await?;
     }
 
     Ok(token_scores)
 }
 
-
 async fn calculate_facets(
     collection: &CollectionReader,
     index_ids: &[IndexId],
     search_params: &SearchParams,
     token_scores: &HashMap<DocumentId, f32>,
-) -> Result<HashMap<String, FacetResult>>{
-        let mut result: HashMap<String, FacetResult> = HashMap::new();
+) -> Result<HashMap<String, FacetResult>> {
+    let mut result: HashMap<String, FacetResult> = HashMap::new();
 
-        for index in index_ids {
-            let Some(index) = collection.get_index(*index).await else {
-                warn!(index_id = %index, "Index not found, skipping facets calculation");
-                continue;
-            };
+    for index in index_ids {
+        let Some(index) = collection.get_index(*index).await else {
+            warn!(index_id = %index, "Index not found, skipping facets calculation");
+            continue;
+        };
 
-            index
-                .calculate_facets(token_scores, &search_params.facets, &mut result)
-                .await?;
-        }
+        index
+            .calculate_facets(token_scores, &search_params.facets, &mut result)
+            .await?;
+    }
 
-        let expected_facets_count = search_params.facets.len();
-        if result.len() != expected_facets_count {
-            // The user asked for some facets that are not present in the collection
-            let present_facet_fields: Vec<&String> = result.keys().collect();
-            let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
-            let missing_facet_fields: Vec<&&String> = requested_facet_fields
-                .iter()
-                .filter(|f| !present_facet_fields.contains(f))
-                .collect();
-            bail!(
-                "Some fields are not present in the collection for facets: {:?}",
-                missing_facet_fields
-            );
-        }
+    let expected_facets_count = search_params.facets.len();
+    if result.len() != expected_facets_count {
+        // The user asked for some facets that are not present in the collection
+        let present_facet_fields: Vec<&String> = result.keys().collect();
+        let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
+        let missing_facet_fields: Vec<&&String> = requested_facet_fields
+            .iter()
+            .filter(|f| !present_facet_fields.contains(f))
+            .collect();
+        bail!(
+            "Some fields are not present in the collection for facets: {:?}",
+            missing_facet_fields
+        );
+    }
 
-        Ok(result)
+    Ok(result)
 }
-
 
 pub async fn calculate_groups(
     collection: &CollectionReader,
@@ -371,9 +374,29 @@ pub async fn calculate_groups(
         collection,
         index_ids,
         group_by_config.max_results,
-        &pin_rules,
+        pin_rules,
     )
     .await?;
 
     Ok(sorted_results)
+}
+
+pub async fn sort_and_truncate(
+    collection: &CollectionReader,
+    index_ids: &[IndexId],
+    token_scores: &HashMap<DocumentId, f32>,
+    search_params: &SearchParams,
+    pin_rules: &[Consequence<DocumentId>],
+) -> Result<Vec<TokenScore>> {
+    let context = SortContext::new(
+        collection,
+        index_ids,
+        token_scores,
+        search_params,
+        pin_rules,
+    );
+
+    let result = sort_with_context(context).await;
+
+    result
 }

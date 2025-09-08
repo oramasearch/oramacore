@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::{
-    collections::HashMap,
     io::ErrorKind,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -19,27 +18,28 @@ use tracing::{error, info, warn};
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
-        CollectionWriteOperation, Offset, ReplaceIndexReason, read::{
-            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats, analytics::SearchAnalyticEventOrigin, context::ReadSideContext
-        }
+        read::{
+            analytics::SearchAnalyticEventOrigin, context::ReadSideContext,
+            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError,
+            UncommittedDateFieldStats, UncommittedGeoPointFieldStats,
+        },
+        CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
-        InteractionMessage, Limit, Role, SearchOffset, SearchParams, TokenScore,
+        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId,
+        InteractionMessage, Role,
     },
 };
 
-use super::sort::{sort_documents_in_groups};
 use super::{
-    index::{Index, IndexStats},
-    sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
+    index::{Index, IndexStats}, CommittedBoolFieldStats, CommittedNumberFieldStats,
     CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
-    DeletionReason, GroupValue, OffloadFieldConfig, ReadSide, SortContext,
+    DeletionReason, OffloadFieldConfig, ReadSide,
     UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 
-use crate::types::{GroupByConfig, NLPSearchRequest, SortBy};
+use crate::types::NLPSearchRequest;
 use oramacore_lib::fs::*;
 use oramacore_lib::nlp::locales::Locale;
 
@@ -480,86 +480,6 @@ impl CollectionReader {
             .filter(|index| indexes_from_user.contains(index))
             .collect();
         Ok(res)
-    }
-
-    pub async fn search(
-        &self,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<DocumentId, f32>, anyhow::Error> {
-        let document_count_estimation = self
-            .document_count_estimation
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        // Let's suppose the number of matching document is 1/3 of the total number of documents
-        // This is a very rough estimation, but it is better than nothing
-        // This allows us to avoid reallocation of the result map
-        let mut result: HashMap<DocumentId, f32> =
-            HashMap::with_capacity((document_count_estimation / 3) as usize);
-        let indexes_lock = self.indexes.read().await;
-
-        let indexes_to_search_on =
-            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
-
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-            index
-                .calculate_token_score(search_params, &mut result)
-                .await?;
-        }
-
-        if result.is_empty() && !search_params.where_filter.is_empty() {
-            // We want to return an error if there's some filter on unknown field
-            // It is checked in this way because:
-            // - we don't want to affect the performance of the search
-            // - we want to return a meaningful error message
-            let fields_in_filter = search_params.where_filter.get_all_keys();
-
-            // We don't handle the case when the field type is different in different indexes
-            // We should dedicate a message error for that
-            // TODO: do it
-
-            for field_in_filter in fields_in_filter {
-                if indexes_lock
-                    .iter()
-                    .all(|index| !index.has_field(&field_in_filter))
-                {
-                    return Err(anyhow!(
-                        "Cannot filter by \"{}\": unknown field",
-                        field_in_filter
-                    ));
-                }
-            }
-        }
-
-        Ok(result)
-    }
-
-    pub async fn sort_and_truncate(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        limit: Limit,
-        offset: SearchOffset,
-        search_params: &SearchParams,
-    ) -> Result<Vec<TokenScore>> {
-        let indexes_lock = self.indexes.read().await;
-
-        let context = SortContext {
-            indexes: &indexes_lock,
-            token_scores,
-            search_params,
-            limit,
-            offset,
-        };
-
-        let result = sort_with_context(context).await;
-
-        drop(indexes_lock);
-        result
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {

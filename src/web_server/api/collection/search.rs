@@ -1,25 +1,18 @@
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    response::{sse::Event, IntoResponse, Sse},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
-use futures::Stream;
 use serde::Deserialize;
-use serde_json::json;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{
-    collection_manager::sides::read::SearchAnalyticEventOrigin, types::NLPSearchRequest
-};
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
-    web_server::api::util::print_error,
 };
+use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()

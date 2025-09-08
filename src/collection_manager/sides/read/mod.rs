@@ -430,7 +430,7 @@ impl ReadSide {
         collection.check_read_api_key(read_api_key, self.master_api_key)?;
 
         let search = Search::new(
-            &*collection,
+            &collection,
             &self.document_storage,
             self.analytics_storage.as_ref(),
             search_params,

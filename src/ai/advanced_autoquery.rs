@@ -648,7 +648,12 @@ impl AdvancedAutoQuery {
                 drop(lock);
 
                 let search_result = read_side
-                    .search(read_api_key, collection_id, search_params, Some(invocation_origin))
+                    .search(
+                        read_api_key,
+                        collection_id,
+                        search_params,
+                        Some(invocation_origin),
+                    )
                     .await
                     .context("Failed to execute search")?;
 

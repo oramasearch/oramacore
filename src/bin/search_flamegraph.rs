@@ -317,13 +317,9 @@ async fn main() -> Result<()> {
             .context("Failed to create search params")?;
 
             read_side
-                .search(
-                    read_api_key,
-                    collection_id,
-                    search_params,
-                    None,
-                )
-                .await.unwrap();
+                .search(read_api_key, collection_id, search_params, None)
+                .await
+                .unwrap();
         }
 
         println!("Warmup completed");
@@ -348,12 +344,7 @@ async fn main() -> Result<()> {
             let search_start = Instant::now();
 
             match read_side
-                .search(
-                    read_api_key,
-                    collection_id,
-                    search_params,
-                    None,
-                )
+                .search(read_api_key, collection_id, search_params, None)
                 .await
             {
                 Ok(results) => {
@@ -362,8 +353,13 @@ async fn main() -> Result<()> {
                     successful_searches += 1;
 
                     if i % 100 == 0 {
-                        println!("Completed {} searches, found {} results for '{}' in {:?}", 
-                            i + 1, results.count, search_term, search_duration);
+                        println!(
+                            "Completed {} searches, found {} results for '{}' in {:?}",
+                            i + 1,
+                            results.count,
+                            search_term,
+                            search_duration
+                        );
                     }
                 }
                 Err(e) => {
