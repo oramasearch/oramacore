@@ -8,11 +8,11 @@ use axum::{
 };
 use serde::Deserialize;
 
+use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 use crate::{
     collection_manager::sides::read::ReadSide,
     types::{ApiKey, CollectionId, CollectionStatsRequest, SearchParams},
 };
-use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 
 pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()

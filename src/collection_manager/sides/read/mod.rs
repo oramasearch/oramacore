@@ -105,6 +105,8 @@ pub enum ReadError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Hook error: {0:?}")]
     Hook(#[from] HookReaderError),
+    #[error("Unknown field: {0:?}")]
+    FilterFieldNotFound(String),
 }
 
 pub struct ReadSide {

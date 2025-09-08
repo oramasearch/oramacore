@@ -3,7 +3,6 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::time::sleep;
 
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
 use crate::tests::utils::create_oramacore_config;
 use crate::tests::utils::init_log;
 use crate::tests::utils::TestContext;
@@ -78,7 +77,7 @@ async fn test_write_api_key_to_search() {
             })
             .try_into()
             .unwrap(),
-            AnalyticSearchEventInvocationType::Direct,
+            None,
         )
         .await
         .unwrap();
@@ -126,7 +125,7 @@ async fn test_master_api_key_to_search() {
             })
             .try_into()
             .unwrap(),
-            AnalyticSearchEventInvocationType::Direct,
+            None,
         )
         .await
         .unwrap();

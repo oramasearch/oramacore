@@ -1106,6 +1106,7 @@ pub struct WhereFilter {
     pub or: Option<Vec<WhereFilter>>,
     pub not: Option<Box<WhereFilter>>,
 }
+
 impl<'de> Deserialize<'de> for WhereFilter {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

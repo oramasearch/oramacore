@@ -13,8 +13,8 @@ use crate::{
     },
     metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupByConfig, GroupedResult, IndexId, SearchMode,
-        SearchParams, SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
+        DocumentId, FacetResult, GroupByConfig, GroupedResult, IndexId, SearchMode, SearchParams,
+        SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
     },
 };
 
@@ -113,7 +113,12 @@ impl<'collection, 'document_storage, 'analytics_storage>
                     not: None,
                     or: None,
                 };
-                &calculate_token_score_for_indexes(collection, &search_params, &index_ids).await?
+                &calculate_token_score_for_indexes(
+                    collection,
+                    &search_params_without_filters,
+                    &index_ids,
+                )
+                .await?
             };
 
             let facets =
@@ -304,6 +309,28 @@ async fn calculate_token_score_for_indexes(
         index
             .calculate_token_score(search_params, &mut token_scores)
             .await?;
+    }
+
+    if token_scores.is_empty() {
+        // Test if at least one index have the filter properties
+        let all_keys: Vec<String> = search_params.where_filter.get_all_keys();
+        for k in all_keys {
+            let mut found = false;
+            for index_id in index_ids {
+                let Some(index) = collection.get_index(*index_id).await else {
+                    continue;
+                };
+
+                if index.has_filter_field(&k) {
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                return Err(ReadError::FilterFieldNotFound(k));
+            }
+        }
     }
 
     Ok(token_scores)

@@ -26,16 +26,15 @@ use crate::{
         CollectionWriteOperation, Offset, ReplaceIndexReason,
     },
     types::{
-        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId,
-        InteractionMessage, Role,
+        ApiKey, CollectionId, CollectionStatsRequest, FieldId, IndexId, InteractionMessage, Role,
     },
 };
 
 use super::{
-    index::{Index, IndexStats}, CommittedBoolFieldStats, CommittedNumberFieldStats,
-    CommittedStringFieldStats, CommittedStringFilterFieldStats, CommittedVectorFieldStats,
-    DeletionReason, OffloadFieldConfig, ReadSide,
-    UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
+    index::{Index, IndexStats},
+    CommittedBoolFieldStats, CommittedNumberFieldStats, CommittedStringFieldStats,
+    CommittedStringFilterFieldStats, CommittedVectorFieldStats, DeletionReason, OffloadFieldConfig,
+    ReadSide, UncommittedBoolFieldStats, UncommittedNumberFieldStats, UncommittedStringFieldStats,
     UncommittedStringFilterFieldStats, UncommittedVectorFieldStats,
 };
 

@@ -421,6 +421,11 @@ impl IntoResponse for ReadError {
                 format!("Index {index_id:?} not found in Collection {collection_id:?}"),
             )
                 .into_response(),
+            Self::FilterFieldNotFound(field_name) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot filter by \"{field_name}\": unknown field"),
+            )
+                .into_response(),
         }
     }
 }

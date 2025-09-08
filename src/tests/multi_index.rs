@@ -1,3 +1,5 @@
+use std::panic;
+
 use anyhow::Result;
 use serde_json::json;
 
@@ -388,11 +390,11 @@ async fn test_committed_only_field_filter_bug() -> Result<()> {
         }
         Err(e) => {
             // If this fails with "unknown field" error, it demonstrates the bug
-            let error_msg = e.to_string();
+            let error_msg = format!("{}", e);
             if error_msg.contains("unknown field") && error_msg.contains("status") {
                 panic!("BUG DETECTED: Field exists in committed data but filtering fails because it's not in uncommitted fields");
             } else {
-                return Err(e); // Some other error, re-throw it
+                panic!("Unexpected error: {}", e);
             }
         }
     }
