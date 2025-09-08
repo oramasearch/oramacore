@@ -95,8 +95,6 @@ impl<'collection, 'document_storage, 'analytics_storage>
         let indexes = collection.get_indexes_lock(&index_ids).await?;
         calculate_token_score_for_indexes(&indexes, &search_params, &mut token_scores).await?;
 
-        // TODO: before we returns an error if the user specify a non existing where filter
-
         let facets = if has_facets {
             // Orama provides a UI component that shows the search results
             // and the number of how many documents fall in each variant of field value (facets).
