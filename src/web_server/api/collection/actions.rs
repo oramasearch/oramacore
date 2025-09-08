@@ -9,7 +9,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::{
-    collection_manager::sides::read::{AnalyticSearchEventInvocationType, ReadSide},
+    collection_manager::sides::read::{ReadSide},
     types::{ApiKey, CollectionId, ExecuteActionPayload, ExecuteActionPayloadName, SearchParams},
 };
 
@@ -47,7 +47,7 @@ async fn execute_action_v0(
                     read_api_key,
                     collection_id,
                     search_context,
-                    AnalyticSearchEventInvocationType::Action,
+                    None,
                 )
                 .await
                 .map(Json)

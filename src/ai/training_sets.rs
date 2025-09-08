@@ -6,8 +6,7 @@ use oramacore_lib::generic_kv::KV;
 use std::{collections::HashMap, sync::Arc};
 use strum_macros::Display;
 
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
-
+use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 use crate::types::{
     InteractionLLMConfig, InteractionMessage, TrainingSetQueriesOptimizerQuerySet,
     TrainingSetsQueriesOptimizerResponse,
@@ -329,7 +328,7 @@ impl TrainingSet {
                 self.read_api_key,
                 self.collection_id,
                 search_params,
-                AnalyticSearchEventInvocationType::TrainingDataGen,
+                None,
             )
             .await?;
 

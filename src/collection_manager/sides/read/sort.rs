@@ -6,8 +6,9 @@ use tracing::{info, warn};
 
 use super::index::Index;
 use super::{GroupValue, SortedField};
+use crate::collection_manager::sides::read::collection::{CollectionReader, IndexReadLock};
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
-use crate::types::{SearchMode, SearchParams};
+use crate::types::{IndexId, SearchMode, SearchParams};
 use crate::{
     capped_heap::CappedHeap,
     types::{DocumentId, Limit, Number, SearchOffset, SortBy, TokenScore},
@@ -75,12 +76,15 @@ fn top_n<'s, I: Iterator<Item = (&'s DocumentId, &'s f32)>>(map: I, n: usize) ->
         .collect()
 }
 
-async fn sort_and_truncate_documents_by_field(
+async fn sort_and_truncate_documents_by_field<'search, 'index>(
     sort_by: &SortBy,
-    relevant_indexes: &[&Index],
+    relevant_indexes: &'search[&'index Index],
     token_scores: &HashMap<DocumentId, f32>,
     top_count: usize,
-) -> Result<Vec<TokenScore>> {
+) -> Result<Vec<TokenScore>>
+where
+    'index: 'search,
+{
     fn process_sort_iterator(
         iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
         desiderata: usize,
@@ -340,7 +344,8 @@ pub async fn sort_documents_in_groups(
     groups: HashMap<Vec<GroupValue>, HashSet<DocumentId>>,
     token_scores: &HashMap<DocumentId, f32>,
     sort_by: Option<&SortBy>,
-    relevant_indexes: &[&Index],
+    collection: &CollectionReader,
+    index_ids: &[IndexId],
     max_results: usize,
     pin_rules: &[Consequence<DocumentId>],
 ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
@@ -351,7 +356,8 @@ pub async fn sort_documents_in_groups(
             top_n_documents_in_group_by_field(
                 doc_set,
                 sort_by,
-                relevant_indexes,
+                collection,
+                index_ids,
                 token_scores,
                 max_results,
                 pin_rules,
@@ -411,14 +417,18 @@ fn top_n_documents_in_group_by_score(
         .collect()
 }
 
-async fn top_n_documents_in_group_by_field(
+async fn top_n_documents_in_group_by_field<'collection, 'search>(
     docs: HashSet<DocumentId>,
     sort_by: &SortBy,
-    relevant_indexes: &[&Index],
-    token_scores: &HashMap<DocumentId, f32>,
+    collection: &'collection CollectionReader,
+    index_ids: &'search [IndexId],
+    token_scores: &'search HashMap<DocumentId, f32>,
     max_results: usize,
     pin_rules: &[Consequence<DocumentId>],
-) -> Result<Vec<DocumentId>> {
+) -> Result<Vec<DocumentId>>
+where
+    'collection: 'search,
+{
     // Increase limit to account for potential pin rule insertions
     let expanded_limit = if pin_rules.is_empty() {
         max_results
@@ -426,8 +436,11 @@ async fn top_n_documents_in_group_by_field(
         max_results * 2 // Double the limit like we do in the main sort function
     };
 
-    let v: Vec<_> = if relevant_indexes.len() == 1 {
-        let output = relevant_indexes[0]
+    let v: Vec<_> = if index_ids.len() == 1 {
+        let Some(index) = collection.get_index(index_ids[0]).await else {
+            bail!("Index {:?} not found in collection", index_ids[0]);
+        };
+        let output = index
             .get_sort_iterator(&sort_by.property, sort_by.order)
             .await?;
 
@@ -438,9 +451,18 @@ async fn top_n_documents_in_group_by_field(
             .take(expanded_limit)
             .collect()
     } else {
-        let mut v: Vec<_> = Vec::with_capacity(relevant_indexes.len());
-        for index in relevant_indexes {
-            let index_results: SortedField = index
+        let mut relevant_indexes: Vec<IndexReadLock<'collection>> = Vec::with_capacity(index_ids.len());
+        for index_id in index_ids {
+            if let Some(index) = collection.get_index(*index_id).await {
+                if !index.is_deleted() && index.has_filter_field(&sort_by.property) {
+                    relevant_indexes.push(index);
+                }
+            }
+        }
+
+        let mut v: Vec<SortedField<'_>> = Vec::with_capacity(relevant_indexes.len());
+        for index in &relevant_indexes {
+            let index_results = index
                 .get_sort_iterator(&sort_by.property, sort_by.order)
                 .await?;
             v.push(index_results);
@@ -451,11 +473,16 @@ async fn top_n_documents_in_group_by_field(
             merge_sorted_iterator.add(i.iter());
         }
 
-        merge_sorted_iterator
+        let data: Vec<DocumentId> = merge_sorted_iterator
             .flat_map(|(_, h)| h.into_iter())
             .filter(|doc_id| docs.contains(doc_id) && token_scores.contains_key(doc_id))
             .take(expanded_limit)
-            .collect()
+            .collect();
+
+        drop(v);
+        drop(relevant_indexes);
+
+        data
     };
 
     // Apply pin rules if any exist

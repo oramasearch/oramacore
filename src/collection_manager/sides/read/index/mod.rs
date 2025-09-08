@@ -1066,7 +1066,7 @@ impl Index {
             .map(|f| f.get_model())
     }
 
-    pub async fn search(
+    pub async fn calculate_token_score(
         &self,
         search_params: &SearchParams,
         results: &mut HashMap<DocumentId, f32>,

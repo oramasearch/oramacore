@@ -19,12 +19,9 @@ use tracing::{error, info, warn};
 use crate::{
     ai::advanced_autoquery::{AdvancedAutoQuery, AdvancedAutoQuerySteps, QueryMappedSearchResult},
     collection_manager::sides::{
-        read::{
-            context::ReadSideContext, AnalyticSearchEventInvocationType, CommittedDateFieldStats,
-            CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats,
-            UncommittedGeoPointFieldStats,
-        },
-        CollectionWriteOperation, Offset, ReplaceIndexReason,
+        CollectionWriteOperation, Offset, ReplaceIndexReason, read::{
+            CommittedDateFieldStats, CommittedGeoPointFieldStats, ReadError, UncommittedDateFieldStats, UncommittedGeoPointFieldStats, analytics::SearchAnalyticEventOrigin, context::ReadSideContext
+        }
     },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, DocumentId, FacetResult, FieldId, IndexId,
@@ -32,7 +29,7 @@ use crate::{
     },
 };
 
-use super::sort::{extract_term_from_search_mode, sort_documents_in_groups};
+use super::sort::{sort_documents_in_groups};
 use super::{
     index::{Index, IndexStats},
     sort_with_context, CommittedBoolFieldStats, CommittedNumberFieldStats,
@@ -337,6 +334,11 @@ impl CollectionReader {
         self.deleted = true;
     }
 
+    pub fn get_document_count_estimation(&self) -> u64 {
+        self.document_count_estimation
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     #[inline]
     #[allow(clippy::result_large_err)]
     pub fn check_read_api_key(
@@ -396,7 +398,7 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
-                AnalyticSearchEventInvocationType::NLPSearch,
+                SearchAnalyticEventOrigin::NLP,
                 search_params.user_id.clone(),
             )
             .await?;
@@ -430,10 +432,54 @@ impl CollectionReader {
                 collection_id,
                 conversation,
                 log_sender,
-                AnalyticSearchEventInvocationType::NLPSearch,
+                SearchAnalyticEventOrigin::NLP,
                 search_params.user_id.clone(),
             )
             .await)
+    }
+
+    pub async fn get_all_index_ids(&self) -> Result<Vec<IndexId>> {
+        let lock = self.indexes.read().await;
+        let all_indexes = lock
+            .iter()
+            .filter(|index| !index.is_deleted())
+            .map(|i| i.id())
+            .collect::<Vec<_>>();
+        Ok(all_indexes)
+    }
+
+    pub async fn get_index_ids(
+        &self,
+        indexes_from_user: Option<&Vec<IndexId>>,
+    ) -> Result<Vec<IndexId>> {
+        let all_indexes = self.get_all_index_ids().await?;
+        // No indexes from user -> search on all indexes
+        let Some(indexes_from_user) = indexes_from_user else {
+            return Ok(all_indexes);
+        };
+        // Empty indexes from user -> search on all indexes
+        // It doens't make sense to search on empty indexes list
+        if indexes_from_user.is_empty() {
+            return Ok(all_indexes);
+        }
+
+        let unknown_indexes = indexes_from_user
+            .iter()
+            .filter(|index| !all_indexes.contains(index))
+            .collect::<Vec<_>>();
+        if !unknown_indexes.is_empty() {
+            bail!(
+                "Unknown indexes: {:?}. Available indexes: {:?}",
+                unknown_indexes,
+                all_indexes
+            )
+        }
+
+        let res = all_indexes
+            .into_iter()
+            .filter(|index| indexes_from_user.contains(index))
+            .collect();
+        Ok(res)
     }
 
     pub async fn search(
@@ -461,7 +507,9 @@ impl CollectionReader {
             if !indexes_to_search_on.contains(&index.id()) {
                 continue;
             }
-            index.search(search_params, &mut result).await?;
+            index
+                .calculate_token_score(search_params, &mut result)
+                .await?;
         }
 
         if result.is_empty() && !search_params.where_filter.is_empty() {
@@ -512,104 +560,6 @@ impl CollectionReader {
 
         drop(indexes_lock);
         result
-    }
-
-    pub async fn calculate_facets(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<String, FacetResult>> {
-        let mut result: HashMap<String, FacetResult> = HashMap::new();
-        let indexes_lock = self.indexes.read().await;
-
-        let indexes_to_search_on =
-            calculate_index_to_search_on(&indexes_lock, search_params.indexes.as_ref())?;
-
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-
-            index
-                .calculate_facets(token_scores, &search_params.facets, &mut result)
-                .await?;
-        }
-
-        let expected_facets_count = search_params.facets.len();
-        if result.len() != expected_facets_count {
-            // The user asked for some facets that are not present in the collection
-            let present_facet_fields: Vec<&String> = result.keys().collect();
-            let requested_facet_fields: Vec<&String> = search_params.facets.keys().collect();
-            let missing_facet_fields: Vec<&&String> = requested_facet_fields
-                .iter()
-                .filter(|f| !present_facet_fields.contains(f))
-                .collect();
-            bail!(
-                "Some fields are not present in the collection for facets: {:?}",
-                missing_facet_fields
-            );
-        }
-
-        Ok(result)
-    }
-
-    pub async fn calculate_groups(
-        &self,
-        token_scores: &HashMap<DocumentId, f32>,
-        user_index: Option<&Vec<IndexId>>,
-        group_by_config: &GroupByConfig,
-        sort_by: Option<&SortBy>,
-        search_params: &SearchParams,
-    ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
-        let indexes_lock = self.indexes.read().await;
-        let indexes_to_search_on = calculate_index_to_search_on(&indexes_lock, user_index)?;
-
-        let mut results = HashMap::new();
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-
-            index
-                .calculate_groups(&group_by_config.properties, &mut results)
-                .await?
-        }
-
-        // Extract pin rules from relevant indexes
-        let term = extract_term_from_search_mode(search_params);
-        let mut pin_rules = Vec::new();
-        for index in indexes_lock.iter() {
-            if index.is_deleted() {
-                continue;
-            }
-            if !indexes_to_search_on.contains(&index.id()) {
-                continue;
-            }
-            let pin_rules_reader = index.get_read_lock_on_pin_rules().await;
-            pin_rules.extend(pin_rules_reader.apply(term));
-        }
-
-        // Sort documents within each group
-        let sorted_results = sort_documents_in_groups(
-            results,
-            token_scores,
-            sort_by,
-            &indexes_lock
-                .iter()
-                .filter(|index| !index.is_deleted() && indexes_to_search_on.contains(&index.id()))
-                .collect::<Vec<_>>(),
-            group_by_config.max_results,
-            &pin_rules,
-        )
-        .await?;
-
-        Ok(sorted_results)
     }
 
     pub async fn get_index(&self, index_id: IndexId) -> Option<IndexReadLock<'_>> {

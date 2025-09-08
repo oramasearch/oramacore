@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
 use crate::{
-    ai::advanced_autoquery::QueryMappedSearchResult,
-    collection_manager::sides::read::AnalyticSearchEventInvocationType,
+    ai::advanced_autoquery::QueryMappedSearchResult, collection_manager::sides::read::SearchAnalyticEventOrigin,
 };
 
 use crate::{
@@ -51,7 +50,7 @@ impl StructuredOutputServer {
                 self.read_api_key,
                 self.collection_id,
                 search_params,
-                AnalyticSearchEventInvocationType::Action,
+                Some(SearchAnalyticEventOrigin::MCP)
             )
             .await
     }

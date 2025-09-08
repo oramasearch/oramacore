@@ -321,7 +321,7 @@ async fn main() -> Result<()> {
                     read_api_key,
                     collection_id,
                     search_params,
-                    oramacore::collection_manager::sides::read::AnalyticSearchEventInvocationType::Direct,
+                    None,
                 )
                 .await.unwrap();
         }
@@ -352,7 +352,7 @@ async fn main() -> Result<()> {
                     read_api_key,
                     collection_id,
                     search_params,
-                    oramacore::collection_manager::sides::read::AnalyticSearchEventInvocationType::Direct,
+                    None,
                 )
                 .await
             {

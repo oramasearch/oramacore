@@ -4275,12 +4275,11 @@ dependencies = [
 [[package]]
 name = "oramacore_lib"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65f8a396cf8b72a94a1285af77a26bcfaccc893c06e9c7313c5c04c73eea22da"
 dependencies = [
  "anyhow",
  "atomic-write-file",
  "bincode",
+ "chrono",
  "dashmap",
  "debug_panic",
  "fastbloom-rs",
@@ -4306,6 +4305,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tiktoken-rs",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

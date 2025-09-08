@@ -18,7 +18,7 @@ use crate::ai::run_hooks::{run_before_answer, run_before_retrieval};
 use crate::ai::state_machines::advanced_autoquery::{
     AdvancedAutoqueryConfig, AdvancedAutoqueryStateMachine,
 };
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 use crate::collection_manager::sides::{read::ReadSide, system_prompts::SystemPrompt};
 use crate::types::{
     ApiKey, CollectionId, IndexId, Interaction, InteractionLLMConfig, Limit, Properties,
@@ -1426,7 +1426,7 @@ impl AnswerStateMachine {
                     read_api_key,
                     collection_id,
                     params,
-                    AnalyticSearchEventInvocationType::Answer,
+                    Some(SearchAnalyticEventOrigin::RAG),
                 )
                 .await
                 .map_err(|e| AnswerError::SearchError(e.to_string()))?;
@@ -1578,7 +1578,7 @@ impl AnswerStateMachine {
                     user_id: None, // @todo: handle user_id if needed
                     group_by: None,
                 },
-                AnalyticSearchEventInvocationType::Answer,
+                Some(SearchAnalyticEventOrigin::RAG),
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;

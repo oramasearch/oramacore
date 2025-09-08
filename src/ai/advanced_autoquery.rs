@@ -12,7 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::llms::{KnownPrompts, LLMService};
 use crate::ai::run_hooks::run_before_retrieval;
-use crate::collection_manager::sides::read::AnalyticSearchEventInvocationType;
+use crate::collection_manager::sides::read::SearchAnalyticEventOrigin;
 use crate::{
     collection_manager::sides::read::{CollectionStats, ReadSide},
     types::{
@@ -308,7 +308,7 @@ impl AdvancedAutoQuery {
         read_api_key: ApiKey,
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
-        invocation_type: AnalyticSearchEventInvocationType,
+        invocation_origin: SearchAnalyticEventOrigin,
         user_id: Option<String>,
     ) -> Result<Vec<SearchResult>> {
         let mapped_results = self
@@ -318,7 +318,7 @@ impl AdvancedAutoQuery {
                 collection_id,
                 conversation,
                 None,
-                invocation_type,
+                invocation_origin,
                 user_id,
             )
             .await?;
@@ -339,7 +339,7 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-        invocation_type: AnalyticSearchEventInvocationType,
+        invocation_origin: SearchAnalyticEventOrigin,
         user_id: Option<String>,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let mut stream = self
@@ -349,7 +349,7 @@ impl AdvancedAutoQuery {
                 collection_id,
                 conversation,
                 log_sender,
-                invocation_type,
+                invocation_origin,
                 user_id,
             )
             .await;
@@ -382,7 +382,7 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         conversation: Vec<InteractionMessage>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-        invocation_type: AnalyticSearchEventInvocationType,
+        invocation_origin: SearchAnalyticEventOrigin,
         user_id: Option<String>,
     ) -> impl Stream<Item = Result<AdvancedAutoQuerySteps>> {
         let (tx, rx) = mpsc::channel(100);
@@ -441,7 +441,7 @@ impl AdvancedAutoQuery {
                         collection_id,
                         tracked_queries,
                         log_sender,
-                        invocation_type,
+                        invocation_origin,
                     )
                     .await?;
 
@@ -622,7 +622,7 @@ impl AdvancedAutoQuery {
         collection_id: CollectionId,
         tracked_queries: Vec<TrackedQuery>,
         log_sender: Option<Arc<tokio::sync::broadcast::Sender<(OutputChannel, String)>>>,
-        invocation_type: AnalyticSearchEventInvocationType,
+        invocation_origin: SearchAnalyticEventOrigin,
     ) -> Result<Vec<QueryMappedSearchResult>> {
         let search_futures = tracked_queries.iter().map(|tracked_query| {
             let read_side = read_side.clone();
@@ -648,7 +648,7 @@ impl AdvancedAutoQuery {
                 drop(lock);
 
                 let search_result = read_side
-                    .search(read_api_key, collection_id, search_params, invocation_type)
+                    .search(read_api_key, collection_id, search_params, Some(invocation_origin))
                     .await
                     .context("Failed to execute search")?;
 

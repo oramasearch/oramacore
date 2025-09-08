@@ -19,7 +19,7 @@ use crate::{
         run_hooks::{run_before_answer, run_before_retrieval},
     },
     collection_manager::sides::{
-        read::{AnalyticAnswerEvent, AnalyticSearchEventInvocationType, ReadError, ReadSide},
+        read::{ReadError, ReadSide, SearchAnalyticEventOrigin},
         system_prompts::SystemPrompt,
     },
     types::{
@@ -218,7 +218,7 @@ impl Answer {
                     self.read_api_key,
                     self.collection_id,
                     params,
-                    AnalyticSearchEventInvocationType::Answer,
+                    Some(SearchAnalyticEventOrigin::RAG),
                 )
                 .await?;
             result.hits
@@ -307,6 +307,8 @@ impl Answer {
         sender.send(AnswerEvent::AnswerResponse("".to_string()))?;
 
         if let Some(analytics_logs) = self.read_side.get_analytics_logs() {
+            panic!();
+            /*
             if let Err(e) = analytics_logs.add_event(AnalyticAnswerEvent {
                 at: chrono::Utc::now().timestamp_millis(),
                 collection_id: self.collection_id,
@@ -319,6 +321,7 @@ impl Answer {
             }) {
                 error!(error = ?e, "Failed to log analytic event");
             }
+            */
         }
 
         Ok(())
@@ -579,7 +582,7 @@ impl Answer {
                 self.read_api_key,
                 self.collection_id,
                 params,
-                AnalyticSearchEventInvocationType::Answer,
+                Some(SearchAnalyticEventOrigin::RAG),
             )
             .await
         {
@@ -741,7 +744,7 @@ impl Answer {
                     user_id: None, // @todo: handle user_id if needed
                     group_by: None,
                 },
-                AnalyticSearchEventInvocationType::Answer,
+                Some(SearchAnalyticEventOrigin::RAG),
             )
             .map_err(|_| GeneralRagAtError::ReadError)
             .await?;
