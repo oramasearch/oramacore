@@ -447,6 +447,26 @@ impl CollectionReader {
         Ok(all_indexes)
     }
 
+    pub async fn get_indexes_lock<'collection, 'search>(
+        &'collection self,
+        index_ids: &'search [IndexId],
+    ) -> Result<ReadIndexesLockGuard<'collection, 'search>> {
+        let lock = self.indexes.read().await;
+
+        let unknown_index = index_ids
+            .iter()
+            .filter(|id| {
+                lock.iter()
+                    .any(|index| !index.is_deleted() && index.id() == **id)
+            })
+            .next();
+        if let Some(unknown_index) = unknown_index {
+            bail!("Unknown index: {:?}", unknown_index);
+        }
+
+        Ok(ReadIndexesLockGuard::new(lock, index_ids))
+    }
+
     pub async fn get_index_ids(
         &self,
         indexes_from_user: Option<&Vec<IndexId>>,
@@ -845,40 +865,6 @@ fn get_index_in_vector(vec: &[Index], wanted: IndexId) -> Option<usize> {
     None
 }
 
-fn calculate_index_to_search_on(
-    indexes: &[Index],
-    indexes_from_user: Option<&Vec<IndexId>>,
-) -> Result<Vec<IndexId>> {
-    let all_indexes = indexes.iter().map(|i| i.id()).collect::<Vec<_>>();
-    // No indexes from user -> search on all indexes
-    let Some(indexes_from_user) = indexes_from_user else {
-        return Ok(all_indexes);
-    };
-    // Empty indexes from user -> search on all indexes
-    // It doens't make sense to search on empty indexes list
-    if indexes_from_user.is_empty() {
-        return Ok(all_indexes);
-    }
-
-    let unknown_indexes = indexes_from_user
-        .iter()
-        .filter(|index| !all_indexes.contains(index))
-        .collect::<Vec<_>>();
-    if !unknown_indexes.is_empty() {
-        bail!(
-            "Unknown indexes: {:?}. Available indexes: {:?}",
-            unknown_indexes,
-            all_indexes
-        )
-    }
-
-    let res = all_indexes
-        .into_iter()
-        .filter(|index| indexes_from_user.contains(index))
-        .collect();
-    Ok(res)
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct DumpV1 {
     id: CollectionId,
@@ -894,4 +880,46 @@ struct DumpV1 {
 #[derive(Debug, Serialize, Deserialize)]
 enum Dump {
     V1(DumpV1),
+}
+
+pub struct ReadIndexesLockGuard<'collection, 'search> {
+    lock: RwLockReadGuard<'collection, Vec<Index>>,
+    index_ids: &'search [IndexId],
+}
+impl<'collection, 'search> ReadIndexesLockGuard<'collection, 'search> {
+    pub fn new(
+        lock: RwLockReadGuard<'collection, Vec<Index>>,
+        index_ids: &'search [IndexId],
+    ) -> Self {
+        Self { lock, index_ids }
+    }
+
+    pub fn len(&self) -> usize {
+        self.index_ids.len()
+    }
+
+    pub fn get_index(&self, index_id: IndexId) -> Option<&Index> {
+        if !self.index_ids.contains(&index_id) {
+            debug_panic!(
+                "Index id {} not in the requested index ids {:?}",
+                index_id,
+                self.index_ids
+            );
+            warn!(
+                "Index id {} not in the requested index ids {:?}",
+                index_id, self.index_ids
+            );
+            return None;
+        }
+
+        self.lock
+            .iter()
+            .find(|index| !index.is_deleted() && index.id() == index_id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Index> {
+        self.lock
+            .iter()
+            .filter(|index| !index.is_deleted() && self.index_ids.contains(&index.id()))
+    }
 }

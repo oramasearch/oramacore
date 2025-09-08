@@ -14,7 +14,7 @@ use duration_string::DurationString;
 use futures::Stream;
 pub use index::*;
 use oramacore_lib::hook_storage::{HookReader, HookReaderError};
-pub use sort::{sort_with_context, SortContext};
+pub use sort::SortContext;
 
 pub use collection::CollectionStats;
 use duration_str::deserialize_duration;

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{borrow::Cow, collections::HashMap, time::Instant};
 
 use anyhow::{bail, Result};
 use futures::StreamExt;
@@ -7,20 +7,21 @@ use oramacore_lib::pin_rules::Consequence;
 use crate::{
     collection_manager::sides::read::{
         analytics::{OramaCoreAnalytics, SearchAnalyticEvent, SearchAnalyticEventOrigin},
+        collection::ReadIndexesLockGuard,
         document_storage::DocumentStorage,
         sort::sort_documents_in_groups,
-        sort_with_context, GroupValue, ReadError, SortContext,
+        GroupValue, ReadError, SortContext,
     },
     metrics::{search::SEARCH_CALCULATION_TIME, SearchCollectionLabels},
     types::{
-        DocumentId, FacetResult, GroupByConfig, GroupedResult, IndexId, SearchMode, SearchParams,
+        DocumentId, FacetResult, GroupByConfig, GroupedResult, SearchMode, SearchParams,
         SearchResult, SearchResultHit, SortBy, TokenScore, WhereFilter,
     },
 };
 
 use super::collection::CollectionReader;
 
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 pub struct Search<'collection, 'document_storage, 'analytics_storage> {
     collection: &'collection CollectionReader,
@@ -82,8 +83,17 @@ impl<'collection, 'document_storage, 'analytics_storage>
         let index_ids = collection
             .get_index_ids(search_params.indexes.as_ref())
             .await?;
-        let token_scores =
-            calculate_token_score_for_indexes(collection, &search_params, &index_ids).await?;
+
+        // Let's suppose the number of matching document is 1/3 of the total number of documents
+        // This is a very rough estimation, but it is better than nothing
+        // This allows us to avoid reallocation of the result map
+        // TODO: we can use an Area allocator to reuse the memory between searches
+        let document_count_estimation = collection.get_document_count_estimation();
+        let mut token_scores: HashMap<DocumentId, f32> =
+            HashMap::with_capacity((document_count_estimation / 3) as usize);
+
+        let indexes = collection.get_indexes_lock(&index_ids).await?;
+        calculate_token_score_for_indexes(&indexes, &search_params, &mut token_scores).await?;
 
         // TODO: before we returns an error if the user specify a non existing where filter
 
@@ -103,39 +113,43 @@ impl<'collection, 'document_storage, 'analytics_storage>
             // NB: This is not performant, but required for a good UI.
             //     The FE could reuse the facets calculation of the first call
             //     keeping the results in memory.
-            let token_scores = if search_params.where_filter.is_empty() {
-                &token_scores
-            } else {
-                let mut search_params_without_filters = search_params.clone();
-                search_params_without_filters.where_filter = WhereFilter {
-                    filter_on_fields: vec![],
-                    and: None,
-                    not: None,
-                    or: None,
-                };
-                &calculate_token_score_for_indexes(
-                    collection,
-                    &search_params_without_filters,
-                    &index_ids,
-                )
-                .await?
-            };
+            let token_scores: Cow<'_, HashMap<DocumentId, f32>> =
+                if search_params.where_filter.is_empty() {
+                    Cow::Borrowed(&token_scores)
+                } else {
+                    let mut token_scores: HashMap<DocumentId, f32> =
+                        HashMap::with_capacity((document_count_estimation / 3) as usize);
 
-            let facets =
-                calculate_facets(collection, &index_ids, &search_params, token_scores).await?;
+                    let mut search_params_without_filters = search_params.clone();
+                    search_params_without_filters.where_filter = WhereFilter {
+                        filter_on_fields: vec![],
+                        and: None,
+                        not: None,
+                        or: None,
+                    };
+                    calculate_token_score_for_indexes(
+                        &indexes,
+                        &search_params_without_filters,
+                        &mut token_scores,
+                    )
+                    .await?;
+
+                    Cow::Owned(token_scores)
+                };
+
+            let facets = calculate_facets(&indexes, &search_params, token_scores.as_ref()).await?;
 
             Some(facets)
         } else {
             None
         };
 
-        let pin_rules = extract_pin_rules(collection, &index_ids, &search_params).await;
+        let pin_rules = extract_pin_rules(&indexes, &search_params).await;
 
         let groups = if let Some(group_by) = &search_params.group_by {
             let groups = calculate_groups(
-                collection,
+                &indexes,
                 &token_scores,
-                &index_ids,
                 group_by,
                 search_params.sort_by.as_ref(),
                 &pin_rules,
@@ -184,14 +198,8 @@ impl<'collection, 'document_storage, 'analytics_storage>
 
         let count = token_scores.len();
 
-        let top_results: Vec<TokenScore> = sort_and_truncate(
-            collection,
-            &index_ids,
-            &token_scores,
-            &search_params,
-            &pin_rules,
-        )
-        .await?;
+        let top_results: Vec<TokenScore> =
+            sort_and_truncate(&indexes, &token_scores, &search_params, &pin_rules).await?;
         trace!("Top results: {:?}", top_results);
 
         let result = top_results
@@ -270,17 +278,12 @@ pub fn extract_term_from_search_mode(search_mode: &SearchMode) -> &str {
 }
 
 async fn extract_pin_rules(
-    collection: &CollectionReader,
-    index_ids: &[IndexId],
+    indexes: &ReadIndexesLockGuard<'_, '_>,
     search_params: &SearchParams,
 ) -> Vec<Consequence<DocumentId>> {
     let term = extract_term_from_search_mode(&search_params.mode);
-    let mut pins: Vec<_> = Vec::with_capacity(index_ids.len());
-    for index_id in index_ids {
-        let Some(index) = collection.get_index(*index_id).await else {
-            warn!(index_id = %index_id, "Index not found, skipping pin rules extraction");
-            continue;
-        };
+    let mut pins: Vec<_> = Vec::with_capacity(indexes.len());
+    for index in indexes.iter() {
         let pin_rules = index.get_read_lock_on_pin_rules().await;
         pins.extend(pin_rules.apply(term));
     }
@@ -288,26 +291,13 @@ async fn extract_pin_rules(
 }
 
 async fn calculate_token_score_for_indexes(
-    collection: &CollectionReader,
+    indexes: &ReadIndexesLockGuard<'_, '_>,
     search_params: &SearchParams,
-    index_ids: &[IndexId],
-) -> Result<HashMap<DocumentId, f32>, ReadError> {
-    // Let's suppose the number of matching document is 1/3 of the total number of documents
-    // This is a very rough estimation, but it is better than nothing
-    // This allows us to avoid reallocation of the result map
-    // TODO: we can use an Area allocator to reuse the memory between searches
-    let document_count_estimation = collection.get_document_count_estimation();
-    let mut token_scores: HashMap<DocumentId, f32> =
-        HashMap::with_capacity((document_count_estimation / 3) as usize);
-
-    for index_id in index_ids {
-        let Some(index) = collection.get_index(*index_id).await else {
-            warn!(index_id = %index_id, "Index not found, skipping");
-            continue;
-        };
-
+    token_scores: &mut HashMap<DocumentId, f32>,
+) -> Result<(), ReadError> {
+    for index in indexes.iter() {
         index
-            .calculate_token_score(search_params, &mut token_scores)
+            .calculate_token_score(search_params, token_scores)
             .await?;
     }
 
@@ -316,11 +306,7 @@ async fn calculate_token_score_for_indexes(
         let all_keys: Vec<String> = search_params.where_filter.get_all_keys();
         for k in all_keys {
             let mut found = false;
-            for index_id in index_ids {
-                let Some(index) = collection.get_index(*index_id).await else {
-                    continue;
-                };
-
+            for index in indexes.iter() {
                 if index.has_filter_field(&k) {
                     found = true;
                     break;
@@ -333,23 +319,17 @@ async fn calculate_token_score_for_indexes(
         }
     }
 
-    Ok(token_scores)
+    Ok(())
 }
 
 async fn calculate_facets(
-    collection: &CollectionReader,
-    index_ids: &[IndexId],
+    indexes: &ReadIndexesLockGuard<'_, '_>,
     search_params: &SearchParams,
     token_scores: &HashMap<DocumentId, f32>,
 ) -> Result<HashMap<String, FacetResult>> {
     let mut result: HashMap<String, FacetResult> = HashMap::new();
 
-    for index in index_ids {
-        let Some(index) = collection.get_index(*index).await else {
-            warn!(index_id = %index, "Index not found, skipping facets calculation");
-            continue;
-        };
-
+    for index in indexes.iter() {
         index
             .calculate_facets(token_scores, &search_params.facets, &mut result)
             .await?;
@@ -374,20 +354,14 @@ async fn calculate_facets(
 }
 
 pub async fn calculate_groups(
-    collection: &CollectionReader,
+    indexes: &ReadIndexesLockGuard<'_, '_>,
     token_scores: &HashMap<DocumentId, f32>,
-    index_ids: &[IndexId],
     group_by_config: &GroupByConfig,
     sort_by: Option<&SortBy>,
     pin_rules: &[Consequence<DocumentId>],
 ) -> Result<HashMap<Vec<GroupValue>, Vec<DocumentId>>> {
     let mut results = HashMap::new();
-    for index_id in index_ids {
-        let Some(index) = collection.get_index(*index_id).await else {
-            warn!(index_id = %index_id, "Index not found, skipping groups calculation");
-            continue;
-        };
-
+    for index in indexes.iter() {
         index
             .calculate_groups(&group_by_config.properties, &mut results)
             .await?
@@ -395,11 +369,10 @@ pub async fn calculate_groups(
 
     // Sort documents within each group
     let sorted_results = sort_documents_in_groups(
+        indexes,
         results,
         token_scores,
         sort_by,
-        collection,
-        index_ids,
         group_by_config.max_results,
         pin_rules,
     )
@@ -409,21 +382,11 @@ pub async fn calculate_groups(
 }
 
 pub async fn sort_and_truncate(
-    collection: &CollectionReader,
-    index_ids: &[IndexId],
+    indexes: &ReadIndexesLockGuard<'_, '_>,
     token_scores: &HashMap<DocumentId, f32>,
     search_params: &SearchParams,
     pin_rules: &[Consequence<DocumentId>],
 ) -> Result<Vec<TokenScore>> {
-    let context = SortContext::new(
-        collection,
-        index_ids,
-        token_scores,
-        search_params,
-        pin_rules,
-    );
-
-    let result = sort_with_context(context).await;
-
-    result
+    let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
+    context.execute().await
 }
