@@ -17,9 +17,7 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{
-            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSideConfig,
-        },
+        read::{IndexesConfig, OffloadFieldConfig, ReadSideConfig},
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig,
             WriteSideConfig,
@@ -245,12 +243,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
         b.to_async(&rt).iter(|| async {
             let search_params = black_box(json!({"term": "RPG"}).try_into().unwrap());
             let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
-                )
+                .search(read_api_key, collection_id, search_params, None)
                 .await
                 .expect("Search failed");
             black_box(result);
@@ -262,12 +255,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
         b.to_async(&rt).iter(|| async {
             let search_params = black_box(json!({"term": "adventure indie"}).try_into().unwrap());
             let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
-                )
+                .search(read_api_key, collection_id, search_params, None)
                 .await
                 .expect("Search failed");
             black_box(result);
@@ -285,12 +273,7 @@ fn bench_fulltext_fast(c: &mut Criterion) {
         b.to_async(&rt).iter(|| async {
             let search_params = black_box(json!({"term": "platform"}).try_into().unwrap());
             let result = reader
-                .search(
-                    read_api_key,
-                    collection_id,
-                    search_params,
-                    AnalyticSearchEventInvocationType::Direct,
-                )
+                .search(read_api_key, collection_id, search_params, None)
                 .await
                 .expect("Search failed");
             black_box(result);

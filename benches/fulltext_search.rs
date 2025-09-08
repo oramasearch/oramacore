@@ -18,10 +18,7 @@ use oramacore::{
     ai::{AIServiceConfig, AIServiceLLMConfig, OramaModel},
     build_orama,
     collection_manager::sides::{
-        read::{
-            AnalyticSearchEventInvocationType, IndexesConfig, OffloadFieldConfig, ReadSide,
-            ReadSideConfig,
-        },
+        read::{IndexesConfig, OffloadFieldConfig, ReadSide, ReadSideConfig},
         write::{
             CollectionsWriterConfig, OramaModelSerializable, TempIndexCleanupConfig, WriteSide,
             WriteSideConfig,
@@ -301,12 +298,7 @@ impl TestCollectionClient {
 
     pub async fn search(&self, search_params: SearchParams) -> Result<SearchResult> {
         self.reader
-            .search(
-                self.read_api_key,
-                self.collection_id,
-                search_params,
-                AnalyticSearchEventInvocationType::Direct,
-            )
+            .search(self.read_api_key, self.collection_id, search_params, None)
             .await
             .context("")
     }
