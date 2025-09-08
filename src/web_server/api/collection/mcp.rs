@@ -19,7 +19,9 @@ use crate::{
 
 use crate::{
     collection_manager::sides::read::{ReadError, ReadSide},
-    types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams, SearchResult},
+    types::{
+        ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
+    },
 };
 
 #[derive(Clone)]
@@ -188,15 +190,39 @@ async fn mcp_endpoint(
     let search_params_schema = schemars::schema_for!(SearchParams);
     let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
 
+    let collection_info = read_side
+        .collection_stats(
+            api_key,
+            collection_id,
+            CollectionStatsRequest { with_keys: false },
+        )
+        .await
+        .ok();
+
+    let collection_description = collection_info
+        .as_ref()
+        .and_then(|stats| stats.description.as_ref())
+        .map(String::as_str)
+        .unwrap_or("the collection");
+
+    let search_description = format!(
+        "Perform a full-text, vector, or hybrid search operation on {}",
+        collection_description
+    );
+    let nlp_search_description = format!(
+        "Perform complex search queries using natural language on {}",
+        collection_description
+    );
+
     let tools = serde_json::json!([
         {
             "name": "search",
-            "description": "Perform a full-text, vector, or hybrid search operation",
+            "description": search_description,
             "input_schema": search_params_schema
         },
         {
             "name": "nlp_search",
-            "description": "Perform an advanced NLP search powered by AI",
+            "description": nlp_search_description,
             "input_schema": nlp_search_params_schema
         }
     ]);
