@@ -56,7 +56,7 @@ strum_macros = "0.26.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-oramacore_lib = { version = "0.1.0", path = "../oramacore_lib" }
+oramacore_lib = { version = "0.1.1" }
 
 # JS
 oxc_parser = "0.47.1"
