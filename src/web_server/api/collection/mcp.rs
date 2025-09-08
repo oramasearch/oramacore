@@ -90,7 +90,7 @@ struct McpQueryParams {
 #[derive(Deserialize)]
 struct JsonRpcRequest {
     #[serde(rename = "jsonrpc")]
-    _jsonrpc: String,
+    jsonrpc: String,
     id: Option<serde_json::Value>,
     method: String,
     params: Option<serde_json::Value>,
@@ -169,7 +169,38 @@ async fn mcp_endpoint(
         }
     };
 
-    // Handle different MCP methods
+    if request.jsonrpc != "2.0" {
+        let error_response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: request.id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32600,
+                message: "Invalid Request. JSON-RPC version must be 2.0".to_string(),
+            }),
+        };
+        return (StatusCode::BAD_REQUEST, Json(error_response));
+    }
+
+    // IMPORTANT:
+    // For notifications (requests without id), we still process but don't send a response
+
+    let search_params_schema = schemars::schema_for!(SearchParams);
+    let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
+
+    let tools = serde_json::json!([
+        {
+            "name": "search",
+            "description": "Perform a full-text, vector, or hybrid search operation",
+            "input_schema": search_params_schema
+        },
+        {
+            "name": "nlp_search",
+            "description": "Perform an advanced NLP search powered by AI",
+            "input_schema": nlp_search_params_schema
+        }
+    ]);
+
     let result = match request.method.as_str() {
         "initialize" => {
             serde_json::json!({
@@ -184,33 +215,17 @@ async fn mcp_endpoint(
             })
         }
         "tools/list" => {
-            let search_params_schema = schemars::schema_for!(SearchParams);
-            let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
             serde_json::json!({
-                "tools": [
-                    {
-                        "name": "search",
-                        "description": "Perform a full-text, vector, or hybrid search operation",
-                        "inputSchema": search_params_schema
-                    },
-                    {
-                        "name": "nlp_search",
-                        "description": "Perform an advanced NLP search powered by AI",
-                        "inputSchema": nlp_search_params_schema
-                    }
-                ]
+                "tools": tools
             })
         }
         "tools/call" => {
-            // Create MCP server instance and handle tool call
             let server = StructuredOutputServer::new(read_side.clone(), api_key, collection_id);
 
-            // Extract tool name and arguments from request params
             if let Some(params) = request.params.as_ref() {
                 if let Some(tool_name) = params.get("name").and_then(|v| v.as_str()) {
                     match tool_name {
                         "search" => {
-                            // Extract search parameters from the arguments
                             let search_params = if let Some(args) = params.get("arguments") {
                                 match serde_json::from_value(args.clone()) {
                                     Ok(params) => params,
@@ -404,6 +419,19 @@ async fn mcp_endpoint(
             return (StatusCode::OK, Json(error_response));
         }
     };
+
+    // For notifications (requests without id), don't send a response body
+    if request.id.is_none() {
+        return (
+            StatusCode::NO_CONTENT,
+            Json(JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: None,
+                result: None,
+                error: None,
+            }),
+        );
+    }
 
     let response = JsonRpcResponse {
         jsonrpc: "2.0".to_string(),
