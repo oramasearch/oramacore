@@ -846,7 +846,6 @@ impl CollectionReader {
     }
 
     async fn persist_collection_metadata(&self) -> Result<()> {
-        // Create index_ids from current indexes
         let indexes_lock = self.indexes.read().await;
         let index_ids: Vec<IndexId> = indexes_lock
             .iter()
@@ -855,7 +854,6 @@ impl CollectionReader {
             .collect();
         drop(indexes_lock);
 
-        // Create temp_index_ids from temp indexes
         let temp_indexes_lock = self.temp_indexes.read().await;
         let temp_index_ids: Vec<IndexId> = temp_indexes_lock
             .iter()

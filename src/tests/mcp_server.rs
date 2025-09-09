@@ -278,12 +278,10 @@ async fn test_mcp_update_endpoint() {
     let test_context = TestContext::new().await;
     let collection_client = test_context.create_collection().await.unwrap();
 
-    // Test updating MCP description
     let update_request = UpdateCollectionMcpRequest {
         mcp_description: Some("Updated MCP server for testing collection operations".to_string()),
     };
 
-    // Update the MCP description using the client's write API
     let result = collection_client
         .writer
         .update_collection_mcp_description(
@@ -299,10 +297,8 @@ async fn test_mcp_update_endpoint() {
         result
     );
 
-    // Commit all changes to ensure they're persisted
     test_context.commit_all().await.unwrap();
 
-    // Verify the description was updated by checking collection stats
     let stats = collection_client
         .reader
         .collection_stats(
@@ -318,7 +314,6 @@ async fn test_mcp_update_endpoint() {
         "MCP description was not updated correctly"
     );
 
-    // Test updating with None to clear the description
     let clear_request = UpdateCollectionMcpRequest {
         mcp_description: None,
     };
@@ -338,10 +333,8 @@ async fn test_mcp_update_endpoint() {
         result
     );
 
-    // Commit all changes to ensure they're persisted
     test_context.commit_all().await.unwrap();
 
-    // Verify the description was cleared
     let stats = collection_client
         .reader
         .collection_stats(
