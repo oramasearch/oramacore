@@ -384,7 +384,6 @@ impl CollectionReader {
         *updated_at_lock = Utc::now();
         drop(updated_at_lock);
 
-        self.persist_collection_metadata().await?;
         Ok(())
     }
 
@@ -849,44 +848,6 @@ impl CollectionReader {
     async fn get_temp_index_mut(&self, index_id: IndexId) -> Option<IndexWriteLock<'_>> {
         let indexes_lock = self.temp_indexes.write().await;
         IndexWriteLock::try_new(indexes_lock, index_id)
-    }
-
-    async fn persist_collection_metadata(&self) -> Result<()> {
-        let indexes_lock = self.indexes.read().await;
-        let index_ids: Vec<IndexId> = indexes_lock
-            .iter()
-            .filter(|index| index.get_deletion_reason().is_none())
-            .map(|index| index.id())
-            .collect();
-        drop(indexes_lock);
-
-        let temp_indexes_lock = self.temp_indexes.read().await;
-        let temp_index_ids: Vec<IndexId> = temp_indexes_lock
-            .iter()
-            .filter(|index| index.get_deletion_reason().is_none())
-            .map(|index| index.id())
-            .collect();
-        drop(temp_indexes_lock);
-
-        let dump = Dump::V1(DumpV1 {
-            id: self.id,
-            description: self.description.clone(),
-            mcp_description: self.mcp_description.read().await.clone(),
-            default_locale: self.default_locale,
-            read_api_key: self.read_api_key,
-            write_api_key: self.write_api_key,
-            index_ids,
-            temp_index_ids,
-            created_at: self.created_at,
-            updated_at: *self.updated_at.read().await,
-        });
-
-        BufferedFile::create_or_overwrite(self.data_dir.join("collection.json"))
-            .context("Cannot create collection.json")?
-            .write_json_data(&dump)
-            .context("Cannot write collection.json")?;
-
-        Ok(())
     }
 }
 

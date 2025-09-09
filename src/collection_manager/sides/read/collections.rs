@@ -231,24 +231,6 @@ impl CollectionsReader {
         Ok(())
     }
 
-    pub async fn update_collection_mcp_description(
-        &self,
-        id: CollectionId,
-        mcp_description: Option<String>,
-    ) -> Result<()> {
-        info!(collection_id=?id, "ReadSide: Updating collection MCP description {:?}", id);
-
-        let mut guard = self.collections.write().await;
-        if let Some(collection) = guard.get_mut(&id) {
-            collection.update_mcp_description(mcp_description).await?;
-            info!(collection_id=?id, "Collection MCP description updated {:?}", id);
-        } else {
-            return Err(anyhow::anyhow!("Collection not found"));
-        }
-
-        Ok(())
-    }
-
     /*
     pub async fn remove_collection(&self, id: CollectionId) -> Result<()> {
         let mut guard = self.collections.write().await;
