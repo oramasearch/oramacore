@@ -384,7 +384,7 @@ pub async fn sort_and_truncate(
     token_scores: &HashMap<DocumentId, f32>,
     search_params: &SearchParams,
     pin_rules: &[Consequence<DocumentId>],
-) -> Result<Vec<TokenScore>> {
+) -> Result<Vec<TokenScore>, ReadError> {
     let context = SortContext::new(indexes, token_scores, search_params, pin_rules);
     context.execute().await
 }

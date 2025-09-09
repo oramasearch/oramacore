@@ -7,6 +7,7 @@ use tracing::{info, warn};
 use super::{GroupValue, SortedField};
 use crate::collection_manager::sides::read::collection::ReadIndexesLockGuard;
 use crate::collection_manager::sides::read::sort::sort_iter::MergeSortedIterator;
+use crate::collection_manager::sides::read::ReadError;
 use crate::types::SearchParams;
 use crate::{
     capped_heap::CappedHeap,
@@ -37,7 +38,7 @@ impl<'collection, 'search> SortContext<'collection, 'search> {
         }
     }
 
-    pub async fn execute(self) -> Result<Vec<TokenScore>> {
+    pub async fn execute(self) -> Result<Vec<TokenScore>, ReadError> {
         let sort_by = self.search_params.sort_by.as_ref();
         info!(
             "Sorting and truncating results: limit = {:?}, offset = {:?}, sort_by = {:?}",
@@ -105,7 +106,7 @@ async fn sort_and_truncate_documents_by_field(
     sort_by: &SortBy,
     token_scores: &HashMap<DocumentId, f32>,
     top_count: usize,
-) -> Result<Vec<TokenScore>> {
+) -> Result<Vec<TokenScore>, ReadError> {
     fn process_sort_iterator(
         iter: Box<dyn Iterator<Item = (Number, HashSet<DocumentId>)> + '_>,
         desiderata: usize,
@@ -162,7 +163,9 @@ async fn sort_and_truncate_documents_by_field(
     Ok(v)
 }
 
-async fn sort_and_truncate_documents(context: SortContext<'_, '_>) -> Result<Vec<TokenScore>> {
+async fn sort_and_truncate_documents(
+    context: SortContext<'_, '_>,
+) -> Result<Vec<TokenScore>, ReadError> {
     let top_count = if context.pin_rules.is_empty() {
         context.search_params.limit.0 + context.search_params.offset.0
     } else {

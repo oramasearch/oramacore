@@ -456,7 +456,8 @@ impl CollectionReader {
         let unknown_index = index_ids
             .iter()
             .filter(|id| {
-                lock.iter()
+                !lock
+                    .iter()
                     .any(|index| !index.is_deleted() && index.id() == **id)
             })
             .next();

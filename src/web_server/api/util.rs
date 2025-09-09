@@ -400,7 +400,7 @@ impl IntoResponse for ToolError {
 impl IntoResponse for ReadError {
     fn into_response(self) -> Response {
         match self {
-            ReadError::Generic(e) => {
+            Self::Generic(e) => {
                 print_error(&e, "Unhandled error in read side");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -408,7 +408,7 @@ impl IntoResponse for ReadError {
                 )
                     .into_response()
             }
-            ReadError::NotFound(collection_id) => (
+            Self::NotFound(collection_id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Collection {collection_id} not found"),
             )
@@ -424,6 +424,16 @@ impl IntoResponse for ReadError {
             Self::FilterFieldNotFound(field_name) => (
                 StatusCode::BAD_REQUEST,
                 format!("Cannot filter by \"{field_name}\": unknown field"),
+            )
+                .into_response(),
+            Self::InvalidSortField(field_name, field_type) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot sort by \"{field_name}\": only number, date or boolean fields are supported for sorting, but got {field_type}"),
+            )
+                .into_response(),
+            Self::SortFieldNotFound(field_name) => (
+                StatusCode::BAD_REQUEST,
+                format!("Cannot sort by \"{field_name}\": no index has that field"),
             )
                 .into_response(),
         }

@@ -105,8 +105,12 @@ pub enum ReadError {
     IndexNotFound(CollectionId, IndexId),
     #[error("Hook error: {0:?}")]
     Hook(#[from] HookReaderError),
-    #[error("Unknown field: {0:?}")]
+    #[error("Unknown field for filter: {0:?}")]
     FilterFieldNotFound(String),
+    #[error("Unknown field for sort: {0:?}")]
+    SortFieldNotFound(String),
+    #[error("Cannot sort by {0:?}. Only number, date or boolean fields are supported for sorting, but got {1:?} for property {0:?}")]
+    InvalidSortField(String, String),
 }
 
 pub struct ReadSide {
@@ -439,9 +443,7 @@ impl ReadSide {
             search_analytics_event_origin,
         );
 
-        let result = search.execute().await;
-
-        result
+        search.execute().await
     }
 
     pub async fn nlp_search(
