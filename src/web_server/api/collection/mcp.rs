@@ -15,6 +15,7 @@ use tracing::{debug, error};
 use crate::{
     ai::advanced_autoquery::QueryMappedSearchResult,
     collection_manager::sides::read::AnalyticSearchEventInvocationType,
+    types::{HybridMode, Similarity, Threshold, VectorMode},
 };
 
 use crate::{
@@ -184,10 +185,6 @@ async fn mcp_endpoint(
         return (StatusCode::BAD_REQUEST, Json(error_response));
     }
 
-    // IMPORTANT:
-    // For notifications (requests without id), we still process but don't send a response
-
-    // Create simplified schemas that are more compatible with Claude Code
     let search_params_schema = serde_json::json!({
         "type": "object",
         "properties": {
@@ -199,6 +196,11 @@ async fn mcp_endpoint(
                 "type": "integer",
                 "description": "Maximum number of results to return",
                 "default": 10
+            },
+            "mode": {
+                "type": "string",
+                "description": "Search mode. Can be 'fulltext', 'vector', or 'hybrid'",
+                "default": "fulltext"
             }
         },
         "required": ["term"]
@@ -281,24 +283,39 @@ async fn mcp_endpoint(
                                 debug!("Attempting to deserialize search arguments: {:?}", args);
 
                                 // @todo: check if we can get rid of this simplified version of SearchParams
-                                let search_params = if let (Some(term), limit) = (
+                                let search_params = if let (Some(term), limit, mode) = (
                                     args.get("term").and_then(|v| v.as_str()),
                                     args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10),
+                                    args.get("mode").and_then(|v| v.as_str()),
                                 ) {
-                                    // Create SearchParams from simplified MCP arguments
                                     use crate::types::{
                                         FulltextMode, Limit, Properties, SearchMode, SearchOffset,
                                         SearchParams, WhereFilter,
                                     };
                                     use std::collections::HashMap;
 
-                                    SearchParams {
-                                        mode: SearchMode::FullText(FulltextMode {
+                                    let search_mode = match mode {
+                                        Some("vector") => SearchMode::Vector(VectorMode {
+                                            term: term.to_string(),
+                                            similarity: Similarity(0.6),
+                                        }),
+                                        Some("hybrid") => SearchMode::Hybrid(HybridMode {
+                                            term: term.to_string(),
+                                            similarity: Similarity(0.6),
+                                            threshold: Some(Threshold(1.0)),
+                                            exact: false,
+                                            tolerance: None,
+                                        }),
+                                        _ => SearchMode::FullText(FulltextMode {
                                             term: term.to_string(),
                                             threshold: None,
                                             exact: false,
                                             tolerance: None,
                                         }),
+                                    };
+
+                                    SearchParams {
+                                        mode: search_mode,
                                         limit: Limit(limit as usize),
                                         offset: SearchOffset(0),
                                         boost: HashMap::new(),
