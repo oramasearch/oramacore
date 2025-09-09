@@ -187,8 +187,33 @@ async fn mcp_endpoint(
     // IMPORTANT:
     // For notifications (requests without id), we still process but don't send a response
 
-    let search_params_schema = schemars::schema_for!(SearchParams);
-    let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
+    // Create simplified schemas that are more compatible with Claude Code
+    let search_params_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "term": {
+                "type": "string",
+                "description": "The search term to look for"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results to return",
+                "default": 10
+            }
+        },
+        "required": ["term"]
+    });
+
+    let nlp_search_params_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Natural language query to search with"
+            }
+        },
+        "required": ["query"]
+    });
 
     let collection_info = read_side
         .collection_stats(
@@ -218,12 +243,12 @@ async fn mcp_endpoint(
         {
             "name": "search",
             "description": search_description,
-            "input_schema": search_params_schema
+            "inputSchema": search_params_schema
         },
         {
             "name": "nlp_search",
             "description": nlp_search_description,
-            "input_schema": nlp_search_params_schema
+            "inputSchema": nlp_search_params_schema
         }
     ]);
 
@@ -253,25 +278,62 @@ async fn mcp_endpoint(
                     match tool_name {
                         "search" => {
                             let search_params = if let Some(args) = params.get("arguments") {
-                                match serde_json::from_value(args.clone()) {
-                                    Ok(params) => params,
-                                    Err(err) => {
-                                        return (
-                                            StatusCode::BAD_REQUEST,
-                                            Json(JsonRpcResponse {
-                                                jsonrpc: "2.0".to_string(),
-                                                id: request.id,
-                                                result: None,
-                                                error: Some(JsonRpcError {
-                                                    code: -32602,
-                                                    message: format!(
-                                                        "Invalid search parameters: {err}"
-                                                    ),
-                                                }),
-                                            }),
-                                        );
+                                debug!("Attempting to deserialize search arguments: {:?}", args);
+
+                                // @todo: check if we can get rid of this simplified version of SearchParams
+                                let search_params = if let (Some(term), limit) = (
+                                    args.get("term").and_then(|v| v.as_str()),
+                                    args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10),
+                                ) {
+                                    // Create SearchParams from simplified MCP arguments
+                                    use crate::types::{
+                                        FulltextMode, Limit, Properties, SearchMode, SearchOffset,
+                                        SearchParams, WhereFilter,
+                                    };
+                                    use std::collections::HashMap;
+
+                                    SearchParams {
+                                        mode: SearchMode::FullText(FulltextMode {
+                                            term: term.to_string(),
+                                            threshold: None,
+                                            exact: false,
+                                            tolerance: None,
+                                        }),
+                                        limit: Limit(limit as usize),
+                                        offset: SearchOffset(0),
+                                        boost: HashMap::new(),
+                                        properties: Properties::Star,
+                                        where_filter: WhereFilter::default(),
+                                        facets: HashMap::new(),
+                                        indexes: None,
+                                        sort_by: None,
+                                        group_by: None,
+                                        user_id: None,
                                     }
-                                }
+                                } else {
+                                    // Try full SearchParams deserialization as fallback
+                                    match serde_json::from_value(args.clone()) {
+                                        Ok(params) => params,
+                                        Err(err) => {
+                                            error!("Failed to deserialize search parameters: {err}, args: {:?}", args);
+                                            return (
+                                                StatusCode::BAD_REQUEST,
+                                                Json(JsonRpcResponse {
+                                                    jsonrpc: "2.0".to_string(),
+                                                    id: request.id,
+                                                    result: None,
+                                                    error: Some(JsonRpcError {
+                                                        code: -32602,
+                                                        message: format!(
+                                                            "Invalid search parameters: {err}. Arguments received: {:?}", args
+                                                        ),
+                                                    }),
+                                                }),
+                                            );
+                                        }
+                                    }
+                                };
+                                search_params
                             } else {
                                 return (
                                     StatusCode::BAD_REQUEST,
