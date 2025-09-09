@@ -220,7 +220,6 @@ impl RabbitOperationSender {
                 WriteOperation::DeleteCollection(id) => Some(*id),
                 WriteOperation::CreateCollection { id, .. } => Some(*id),
                 WriteOperation::CreateCollection2 { id, .. } => Some(*id),
-                WriteOperation::UpdateCollection { id, .. } => Some(*id),
                 WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
             };
 
@@ -265,7 +264,6 @@ impl RabbitOperationSender {
             WriteOperation::DeleteCollection(id) => Some(*id),
             WriteOperation::CreateCollection { id, .. } => Some(*id),
             WriteOperation::CreateCollection2 { id, .. } => Some(*id),
-            WriteOperation::UpdateCollection { id, .. } => Some(*id),
             WriteOperation::KV(_) | WriteOperation::DocumentStorage(_) => None,
         };
 

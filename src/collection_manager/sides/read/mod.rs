@@ -375,14 +375,6 @@ impl ReadSide {
                     )
                     .await?;
             }
-            WriteOperation::UpdateCollection {
-                id,
-                mcp_description,
-            } => {
-                self.collections
-                    .update_collection_mcp_description(id, mcp_description)
-                    .await?;
-            }
             WriteOperation::DeleteCollection(collection_id) => {
                 self.collections.delete_collection(collection_id).await?;
             }

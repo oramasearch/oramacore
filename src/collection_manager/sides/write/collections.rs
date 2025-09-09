@@ -13,7 +13,7 @@ use crate::ai::OramaModel;
 use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
 use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
-use crate::collection_manager::sides::{OperationSender, WriteOperation};
+use crate::collection_manager::sides::{CollectionWriteOperation, OperationSender, WriteOperation};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
 use crate::types::{CollectionId, DocumentId};
@@ -153,7 +153,7 @@ impl CollectionsWriter {
         Ok(())
     }
 
-    pub async fn update_collection(
+    pub async fn update_collection_mcp_description(
         &self,
         collection_id: CollectionId,
         mcp_description: Option<String>,
@@ -168,10 +168,10 @@ impl CollectionsWriter {
         drop(collections);
 
         sender
-            .send(WriteOperation::UpdateCollection {
-                id: collection_id,
-                mcp_description,
-            })
+            .send(WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::UpdateMcpDescription { mcp_description },
+            ))
             .await
             .context("Cannot send update collection")?;
 

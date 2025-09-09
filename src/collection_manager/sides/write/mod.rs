@@ -387,7 +387,11 @@ impl WriteSide {
         self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
         let res = self
             .collections
-            .update_collection(collection_id, mcp_description, self.op_sender.clone())
+            .update_collection_mcp_description(
+                collection_id,
+                mcp_description,
+                self.op_sender.clone(),
+            )
             .await;
         self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
 
