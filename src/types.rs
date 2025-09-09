@@ -619,6 +619,7 @@ pub struct DeleteIndex {
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
+    pub mcp_description: Option<String>,
 
     #[serde(
         deserialize_with = "deserialize_api_key",

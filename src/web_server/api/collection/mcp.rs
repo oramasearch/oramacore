@@ -201,7 +201,7 @@ async fn mcp_endpoint(
 
     let collection_description = collection_info
         .as_ref()
-        .and_then(|stats| stats.description.as_ref())
+        .and_then(|stats| stats.mcp_description.as_ref())
         .map(String::as_str)
         .unwrap_or("the collection");
 

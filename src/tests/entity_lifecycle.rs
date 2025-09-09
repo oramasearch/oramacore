@@ -29,6 +29,7 @@ async fn test_collection_id_already_exists() {
                     _ => panic!(),
                 },
                 description: None,
+                mcp_description: None,
                 embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
                 language: None,
             },

@@ -192,6 +192,9 @@ async fn main() -> Result<()> {
                 CreateCollection {
                     id: collection_id,
                     description: Some("Search performance test collection".to_string()),
+                    mcp_description: Some(
+                        "Performance test collection for search benchmarking".to_string(),
+                    ),
                     language: Some(LanguageDTO::English),
                     read_api_key,
                     write_api_key: match write_api_key {
