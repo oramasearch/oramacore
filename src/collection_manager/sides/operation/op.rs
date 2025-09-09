@@ -217,6 +217,9 @@ pub enum CollectionWriteOperation {
         temp_index_id: IndexId,
     },
     IndexWriteOperation(IndexId, IndexWriteOperation),
+    UpdateMcpDescription {
+        mcp_description: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +344,10 @@ impl WriteOperation {
                     IndexWriteOperation::CreateField2 { .. },
                 ),
             ) => "create_field_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::UpdateMcpDescription { .. },
+            ) => "update_mcp_description",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::Index { .. }),

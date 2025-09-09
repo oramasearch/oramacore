@@ -28,6 +28,7 @@ pub fn apis(write_side: Option<Arc<WriteSide>>, read_side: Option<Arc<ReadSide>>
             .merge(system_prompts::write_apis(write_side.clone()))
             .merge(training_sets::write_apis(write_side.clone()))
             .merge(pin_rules::write_apis(write_side.clone()))
+            .merge(mcp::write_apis(write_side.clone()))
     } else {
         collection_router
     };

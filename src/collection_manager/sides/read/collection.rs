@@ -50,7 +50,7 @@ pub struct CollectionReader {
     data_dir: PathBuf,
     id: CollectionId,
     description: Option<String>,
-    mcp_description: Option<String>,
+    mcp_description: RwLock<Option<String>>,
     default_locale: Locale,
     deleted: bool,
 
@@ -86,7 +86,7 @@ impl CollectionReader {
         Ok(Self {
             id,
             description,
-            mcp_description,
+            mcp_description: RwLock::new(mcp_description),
             default_locale,
             deleted: false,
 
@@ -148,7 +148,7 @@ impl CollectionReader {
         let s = Self {
             id: dump.id,
             description: dump.description,
-            mcp_description: dump.mcp_description,
+            mcp_description: RwLock::new(dump.mcp_description),
             default_locale: dump.default_locale,
             deleted: false,
 
@@ -266,7 +266,7 @@ impl CollectionReader {
         let dump = Dump::V1(DumpV1 {
             id: self.id,
             description: self.description.clone(),
-            mcp_description: self.mcp_description.clone(),
+            mcp_description: self.mcp_description.read().await.clone(),
             default_locale: self.default_locale,
             read_api_key: self.read_api_key,
             write_api_key: self.write_api_key,
@@ -373,6 +373,14 @@ impl CollectionReader {
 
     pub fn get_hook_storage(&self) -> &RwLock<HookReader> {
         &self.hook
+    }
+
+    pub async fn update_mcp_description(&self, mcp_description: Option<String>) -> Result<()> {
+        let mut mcp_description_lock = self.mcp_description.write().await;
+        *mcp_description_lock = mcp_description;
+        drop(mcp_description_lock);
+
+        Ok(())
     }
 
     pub async fn nlp_search(
@@ -765,6 +773,9 @@ impl CollectionReader {
                 lock.update(op)?;
                 drop(lock);
             }
+            CollectionWriteOperation::UpdateMcpDescription { mcp_description } => {
+                self.update_mcp_description(mcp_description).await?;
+            }
         }
 
         Ok(())
@@ -815,7 +826,7 @@ impl CollectionReader {
                 .map(|i| i.document_count)
                 .sum::<usize>(),
             description: self.description.clone(),
-            mcp_description: self.mcp_description.clone(),
+            mcp_description: self.mcp_description.read().await.clone(),
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
