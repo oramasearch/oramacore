@@ -199,7 +199,7 @@ async fn mcp_endpoint(
             },
             "mode": {
                 "type": "string",
-                "description": "Search mode. Can be 'fulltext', 'vector', or 'hybrid'",
+                "description": "Search mode. Can be 'fulltext', 'vector', or 'hybrid'. Use 'fulltext' for standard keyword search, 'vector' for semantic search, and 'hybrid' for a combination of both.",
                 "default": "fulltext"
             }
         },
@@ -211,7 +211,7 @@ async fn mcp_endpoint(
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Natural language query to search with"
+                "description": "Natural language query to search with. Useful for complex queries that may not be easily expressed with keywords, or for queries that needs complex filtering, sorting, etc."
             }
         },
         "required": ["query"]
