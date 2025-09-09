@@ -58,6 +58,7 @@ async fn main2() -> Result<()> {
             read_api_key: ApiKey::try_new("too").unwrap(),
             default_locale: Locale::EN,
             description: None,
+            mcp_description: None,
         })
         .await?;
 

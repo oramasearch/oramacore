@@ -343,9 +343,17 @@ impl ReadSide {
                 read_api_key,
                 default_locale,
                 description,
+                mcp_description,
             } => {
                 self.collections
-                    .create_collection(id, description, default_locale, read_api_key, None)
+                    .create_collection(
+                        id,
+                        description,
+                        mcp_description,
+                        default_locale,
+                        read_api_key,
+                        None,
+                    )
                     .await?;
             }
             WriteOperation::CreateCollection2 {
@@ -354,11 +362,13 @@ impl ReadSide {
                 write_api_key,
                 default_locale,
                 description,
+                mcp_description,
             } => {
                 self.collections
                     .create_collection(
                         id,
                         description,
+                        mcp_description,
                         default_locale,
                         read_api_key,
                         Some(write_api_key),

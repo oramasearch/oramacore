@@ -106,6 +106,7 @@ impl CollectionsWriter {
         let CreateCollection {
             id,
             description,
+            mcp_description,
             language,
             embeddings_model,
             write_api_key,
@@ -143,6 +144,7 @@ impl CollectionsWriter {
                 read_api_key,
                 write_api_key,
                 description,
+                mcp_description,
                 default_locale,
             })
             .await

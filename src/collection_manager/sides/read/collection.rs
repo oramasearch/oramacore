@@ -50,6 +50,7 @@ pub struct CollectionReader {
     data_dir: PathBuf,
     id: CollectionId,
     description: Option<String>,
+    mcp_description: Option<String>,
     default_locale: Locale,
     deleted: bool,
 
@@ -75,6 +76,7 @@ impl CollectionReader {
         data_dir: PathBuf,
         id: CollectionId,
         description: Option<String>,
+        mcp_description: Option<String>,
         default_locale: Locale,
         read_api_key: ApiKey,
         write_api_key: Option<ApiKey>,
@@ -84,6 +86,7 @@ impl CollectionReader {
         Ok(Self {
             id,
             description,
+            mcp_description,
             default_locale,
             deleted: false,
 
@@ -145,6 +148,7 @@ impl CollectionReader {
         let s = Self {
             id: dump.id,
             description: dump.description,
+            mcp_description: dump.mcp_description,
             default_locale: dump.default_locale,
             deleted: false,
 
@@ -262,6 +266,7 @@ impl CollectionReader {
         let dump = Dump::V1(DumpV1 {
             id: self.id,
             description: self.description.clone(),
+            mcp_description: self.mcp_description.clone(),
             default_locale: self.default_locale,
             read_api_key: self.read_api_key,
             write_api_key: self.write_api_key,
@@ -810,6 +815,7 @@ impl CollectionReader {
                 .map(|i| i.document_count)
                 .sum::<usize>(),
             description: self.description.clone(),
+            mcp_description: self.mcp_description.clone(),
             default_locale: self.default_locale,
             embedding_model,
             indexes_stats,
@@ -887,6 +893,7 @@ pub struct CollectionStats {
     pub id: CollectionId,
     pub document_count: usize,
     pub description: Option<String>,
+    pub mcp_description: Option<String>,
     pub default_locale: Locale,
     pub embedding_model: Option<String>,
     pub indexes_stats: Vec<IndexStats>,
@@ -1014,6 +1021,7 @@ fn calculate_index_to_search_on(
 struct DumpV1 {
     id: CollectionId,
     description: Option<String>,
+    mcp_description: Option<String>,
     default_locale: Locale,
     read_api_key: ApiKey,
     write_api_key: Option<ApiKey>,
