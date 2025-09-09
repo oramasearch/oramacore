@@ -380,10 +380,6 @@ impl CollectionReader {
         *mcp_description_lock = mcp_description;
         drop(mcp_description_lock);
 
-        let mut updated_at_lock = self.updated_at.write().await;
-        *updated_at_lock = Utc::now();
-        drop(updated_at_lock);
-
         Ok(())
     }
 
