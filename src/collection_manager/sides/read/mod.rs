@@ -26,7 +26,7 @@ use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::time::{Instant, MissedTickBehavior};
 
-pub use analytics::SearchAnalyticEventOrigin;
+pub use analytics::{OramaCoreAnalyticConfig, SearchAnalyticEventOrigin};
 
 use anyhow::{Context, Result};
 pub use collection::{IndexFieldStats, IndexFieldStatsType};
@@ -42,9 +42,7 @@ use crate::ai::llms::{self, KnownPrompts, LLMService};
 use crate::ai::tools::{CollectionToolsRuntime, ToolError, ToolsRuntime};
 use crate::ai::training_sets::{TrainingDestination, TrainingSetInterface};
 use crate::ai::RemoteLLMProvider;
-use crate::collection_manager::sides::read::analytics::{
-    OramaCoreAnalyticConfig, OramaCoreAnalytics,
-};
+use crate::collection_manager::sides::read::analytics::OramaCoreAnalytics;
 pub use crate::collection_manager::sides::read::context::ReadSideContext;
 use crate::collection_manager::sides::read::logs::HookLogs;
 use crate::collection_manager::sides::read::notify::Notifier;

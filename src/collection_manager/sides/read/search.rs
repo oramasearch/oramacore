@@ -6,7 +6,7 @@ use oramacore_lib::pin_rules::Consequence;
 
 use crate::{
     collection_manager::sides::read::{
-        analytics::{OramaCoreAnalytics, SearchAnalyticEvent, SearchAnalyticEventOrigin},
+        analytics::{OramaCoreAnalytics, SearchAnalyticEventOrigin, SearchAnalyticEventV1},
         collection::ReadIndexesLockGuard,
         document_storage::DocumentStorage,
         sort::sort_documents_in_groups,
@@ -241,7 +241,7 @@ impl<'collection, 'document_storage, 'analytics_storage>
 
         if let Some(analytics_storage) = analytics_storage.as_ref() {
             if let Some(search_analytics_event_origin) = search_analytics_event_origin {
-                match SearchAnalyticEvent::try_new(
+                match SearchAnalyticEventV1::try_new(
                     collection_id,
                     &search_params,
                     &result,

@@ -52,38 +52,55 @@ pub enum SearchAnalyticEventOrigin {
 
 #[derive(Serialize, Deserialize)]
 pub enum SearchAnalyticEventSearchType {
-    #[serde(rename = "fulltext")]
+    #[serde(rename = "f")]
     Fulltext,
-    #[serde(rename = "hybrid")]
+    #[serde(rename = "h")]
     Hybrid,
-    #[serde(rename = "vector")]
+    #[serde(rename = "v")]
     Vector,
-    #[serde(rename = "auto")]
+    #[serde(rename = "a")]
     Auto,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SearchAnalyticEvent {
+pub struct SearchAnalyticEventV1 {
+    #[serde(rename = "ts")]
     pub timestamp: DateTime<Utc>,
+    #[serde(rename = "coll")]
     pub collection_id: CollectionId,
+    #[serde(rename = "o")]
     pub origin: SearchAnalyticEventOrigin,
+    #[serde(rename = "st")]
     pub search_type: SearchAnalyticEventSearchType,
+    #[serde(rename = "v_id", skip_serializing_if = "Option::is_none")]
     pub visitor_id: Option<String>,
+    #[serde(rename = "rst")]
     pub raw_search_term: String,
+    #[serde(rename = "rq")]
     pub raw_query: String,
+    #[serde(rename = "hflt", serialize_with = "serialize_bool_as_int")]
     pub has_filters: bool,
+    #[serde(rename = "hg", serialize_with = "serialize_bool_as_int")]
     pub has_groups: bool,
+    #[serde(rename = "hs", serialize_with = "serialize_bool_as_int")]
     pub has_sorting: bool,
+    #[serde(rename = "hfct", serialize_with = "serialize_bool_as_int")]
     pub has_facets: bool,
+    #[serde(rename = "hpr", serialize_with = "serialize_bool_as_int")]
     pub has_pins_rules: bool,
+    #[serde(rename = "hpres", serialize_with = "serialize_bool_as_int")]
     pub has_pinned_results: bool,
+    #[serde(rename = "rc")]
     pub results_count: usize,
+    #[serde(rename = "sd")]
     pub search_duration: Duration,
+    #[serde(rename = "r")]
     pub results: String,
+    #[serde(rename = "md", skip_serializing_if = "HashMap::is_empty")]
     pub metadata: HashMap<String, String>,
 }
 
-impl SearchAnalyticEvent {
+impl SearchAnalyticEventV1 {
     pub fn try_new(
         collection_id: CollectionId,
         search_params: &SearchParams,
@@ -129,19 +146,28 @@ impl SearchAnalyticEvent {
             search_duration,
             results,
             search_type,
-            visitor_id: None,
+            visitor_id: search_params.user_id.clone(),
             metadata: HashMap::new(),
         })
     }
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "t")]
 pub enum AnalyticEvent {
-    Search(SearchAnalyticEvent),
+    #[serde(rename = "sv1")]
+    SearchV1(SearchAnalyticEventV1),
 }
 
-impl From<SearchAnalyticEvent> for AnalyticEvent {
-    fn from(event: SearchAnalyticEvent) -> Self {
-        AnalyticEvent::Search(event)
+impl From<SearchAnalyticEventV1> for AnalyticEvent {
+    fn from(event: SearchAnalyticEventV1) -> Self {
+        AnalyticEvent::SearchV1(event)
     }
+}
+
+fn serialize_bool_as_int<S>(b: &bool, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.serialize_u8(if *b { 1 } else { 0 })
 }
