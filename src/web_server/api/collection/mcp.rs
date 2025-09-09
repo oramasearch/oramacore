@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::post,
+    routing::{post, put},
     Json, Router,
 };
 
@@ -19,9 +19,13 @@ use crate::{
 };
 
 use crate::{
-    collection_manager::sides::read::{ReadError, ReadSide},
+    collection_manager::sides::{
+        read::{ReadError, ReadSide},
+        write::{WriteError, WriteSide},
+    },
     types::{
         ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
+        UpdateCollectionMcpRequest, WriteApiKey,
     },
 };
 
@@ -82,6 +86,15 @@ pub fn apis(read_side: Arc<ReadSide>) -> Router {
     Router::new()
         .route("/v1/collections/{collection_id}/mcp", post(mcp_endpoint))
         .with_state(read_side)
+}
+
+pub fn write_apis(write_side: Arc<WriteSide>) -> Router {
+    Router::new()
+        .route(
+            "/v1/collections/{collection_id}/mcp/update",
+            put(update_mcp_endpoint),
+        )
+        .with_state(write_side)
 }
 
 #[derive(Deserialize)]
@@ -546,4 +559,33 @@ async fn mcp_endpoint(
     };
 
     (StatusCode::OK, Json(response))
+}
+
+async fn update_mcp_endpoint(
+    Path(collection_id): Path<CollectionId>,
+    State(write_side): State<Arc<WriteSide>>,
+    write_api_key: WriteApiKey,
+    Json(request): Json<UpdateCollectionMcpRequest>,
+) -> impl IntoResponse {
+    match write_side
+        .update_collection_mcp_description(write_api_key, collection_id, request.mcp_description)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "message": "MCP description updated successfully" })),
+        ),
+        Err(WriteError::CollectionNotFound(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Collection not found" })),
+        ),
+        Err(WriteError::InvalidWriteApiKey(_)) => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "Unauthorized" })),
+        ),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Internal server error: {}", err) })),
+        ),
+    }
 }

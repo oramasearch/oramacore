@@ -321,6 +321,10 @@ pub enum WriteOperation {
         mcp_description: Option<String>,
         default_locale: Locale,
     },
+    UpdateCollection {
+        id: CollectionId,
+        mcp_description: Option<String>,
+    },
     DeleteCollection(CollectionId),
     Collection(CollectionId, CollectionWriteOperation),
     DocumentStorage(DocumentStorageWriteOperation),
@@ -331,6 +335,7 @@ impl WriteOperation {
         match self {
             WriteOperation::CreateCollection { .. } => "create_collection",
             WriteOperation::CreateCollection2 { .. } => "create_collection2",
+            WriteOperation::UpdateCollection { .. } => "update_collection",
             WriteOperation::DeleteCollection(_) => "delete_collection",
             WriteOperation::KV(KVWriteOperation::Create(_, _)) => "kv_create",
             WriteOperation::KV(KVWriteOperation::Delete(_)) => "kv_delete",

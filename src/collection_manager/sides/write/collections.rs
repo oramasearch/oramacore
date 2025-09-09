@@ -153,6 +153,31 @@ impl CollectionsWriter {
         Ok(())
     }
 
+    pub async fn update_collection(
+        &self,
+        collection_id: CollectionId,
+        mcp_description: Option<String>,
+        sender: OperationSender,
+    ) -> Result<(), WriteError> {
+        info!("Updating collection {:?}", collection_id);
+
+        let collections = self.collections.read().await;
+        if !collections.contains_key(&collection_id) {
+            return Err(WriteError::CollectionNotFound(collection_id));
+        }
+        drop(collections);
+
+        sender
+            .send(WriteOperation::UpdateCollection {
+                id: collection_id,
+                mcp_description,
+            })
+            .await
+            .context("Cannot send update collection")?;
+
+        Ok(())
+    }
+
     pub async fn list(&self) -> Vec<DescribeCollectionResponse> {
         let collections = self.collections.read().await;
 

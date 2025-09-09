@@ -665,6 +665,11 @@ pub struct SwapCollections {
     pub reference: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateCollectionMcpRequest {
+    pub mcp_description: Option<String>,
+}
+
 impl TryFrom<serde_json::Value> for CreateCollection {
     type Error = anyhow::Error;
 

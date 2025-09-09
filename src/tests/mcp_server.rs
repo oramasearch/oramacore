@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tests::utils::init_log;
+use crate::{
+    tests::utils::{init_log, TestContext},
+    types::UpdateCollectionMcpRequest,
+};
 
 #[derive(Serialize)]
 struct JsonRpcRequest {
@@ -266,4 +269,91 @@ fn test_mcp_success_response_structures() {
     let content = result["content"].as_array().unwrap();
     assert_eq!(content[0]["type"], "text");
     assert!(content[0]["text"].is_string());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mcp_update_endpoint() {
+    init_log();
+
+    let test_context = TestContext::new().await;
+    let collection_client = test_context.create_collection().await.unwrap();
+
+    // Test updating MCP description
+    let update_request = UpdateCollectionMcpRequest {
+        mcp_description: Some("Updated MCP server for testing collection operations".to_string()),
+    };
+
+    // Update the MCP description using the client's write API
+    let result = collection_client
+        .writer
+        .update_collection_mcp_description(
+            collection_client.write_api_key,
+            collection_client.collection_id,
+            update_request.mcp_description.clone(),
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "Failed to update MCP description: {:?}",
+        result
+    );
+
+    // Commit all changes to ensure they're persisted
+    test_context.commit_all().await.unwrap();
+
+    // Verify the description was updated by checking collection stats
+    let stats = collection_client
+        .reader
+        .collection_stats(
+            collection_client.read_api_key,
+            collection_client.collection_id,
+            crate::types::CollectionStatsRequest { with_keys: false },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stats.mcp_description, update_request.mcp_description,
+        "MCP description was not updated correctly"
+    );
+
+    // Test updating with None to clear the description
+    let clear_request = UpdateCollectionMcpRequest {
+        mcp_description: None,
+    };
+
+    let result = collection_client
+        .writer
+        .update_collection_mcp_description(
+            collection_client.write_api_key,
+            collection_client.collection_id,
+            clear_request.mcp_description.clone(),
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "Failed to clear MCP description: {:?}",
+        result
+    );
+
+    // Commit all changes to ensure they're persisted
+    test_context.commit_all().await.unwrap();
+
+    // Verify the description was cleared
+    let stats = collection_client
+        .reader
+        .collection_stats(
+            collection_client.read_api_key,
+            collection_client.collection_id,
+            crate::types::CollectionStatsRequest { with_keys: false },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stats.mcp_description, None,
+        "MCP description was not cleared correctly"
+    );
 }
