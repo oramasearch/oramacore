@@ -15,11 +15,14 @@ use tracing::{debug, error};
 use crate::{
     ai::advanced_autoquery::QueryMappedSearchResult,
     collection_manager::sides::read::AnalyticSearchEventInvocationType,
+    types::{HybridMode, Similarity, Threshold, VectorMode},
 };
 
 use crate::{
     collection_manager::sides::read::{ReadError, ReadSide},
-    types::{ApiKey, CollectionId, NLPSearchRequest, SearchParams, SearchResult},
+    types::{
+        ApiKey, CollectionId, CollectionStatsRequest, NLPSearchRequest, SearchParams, SearchResult,
+    },
 };
 
 #[derive(Clone)]
@@ -182,22 +185,72 @@ async fn mcp_endpoint(
         return (StatusCode::BAD_REQUEST, Json(error_response));
     }
 
-    // IMPORTANT:
-    // For notifications (requests without id), we still process but don't send a response
+    let search_params_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "term": {
+                "type": "string",
+                "description": "The search term to look for"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results to return",
+                "default": 10
+            },
+            "mode": {
+                "type": "string",
+                "description": "Search mode. Can be 'fulltext', 'vector', or 'hybrid'. Use 'fulltext' for standard keyword search, 'vector' for semantic search, and 'hybrid' for a combination of both.",
+                "default": "fulltext"
+            }
+        },
+        "required": ["term"]
+    });
 
-    let search_params_schema = schemars::schema_for!(SearchParams);
-    let nlp_search_params_schema = schemars::schema_for!(NLPSearchRequest);
+    let nlp_search_params_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Natural language query to search with. Useful for complex queries that may not be easily expressed with keywords, or for queries that needs complex filtering, sorting, etc."
+            }
+        },
+        "required": ["query"]
+    });
+
+    let collection_info = read_side
+        .collection_stats(
+            api_key,
+            collection_id,
+            CollectionStatsRequest { with_keys: false },
+        )
+        .await
+        .ok();
+
+    let collection_description = collection_info
+        .as_ref()
+        .and_then(|stats| stats.mcp_description.as_ref())
+        .map(String::as_str)
+        .unwrap_or("the collection");
+
+    let search_description = format!(
+        "Perform a full-text, vector, or hybrid search operation on {}",
+        collection_description
+    );
+    let nlp_search_description = format!(
+        "Perform complex search queries using natural language on {}",
+        collection_description
+    );
 
     let tools = serde_json::json!([
         {
             "name": "search",
-            "description": "Perform a full-text, vector, or hybrid search operation",
-            "input_schema": search_params_schema
+            "description": search_description,
+            "inputSchema": search_params_schema
         },
         {
             "name": "nlp_search",
-            "description": "Perform an advanced NLP search powered by AI",
-            "input_schema": nlp_search_params_schema
+            "description": nlp_search_description,
+            "inputSchema": nlp_search_params_schema
         }
     ]);
 
@@ -227,25 +280,77 @@ async fn mcp_endpoint(
                     match tool_name {
                         "search" => {
                             let search_params = if let Some(args) = params.get("arguments") {
-                                match serde_json::from_value(args.clone()) {
-                                    Ok(params) => params,
-                                    Err(err) => {
-                                        return (
-                                            StatusCode::BAD_REQUEST,
-                                            Json(JsonRpcResponse {
-                                                jsonrpc: "2.0".to_string(),
-                                                id: request.id,
-                                                result: None,
-                                                error: Some(JsonRpcError {
-                                                    code: -32602,
-                                                    message: format!(
-                                                        "Invalid search parameters: {err}"
-                                                    ),
-                                                }),
-                                            }),
-                                        );
+                                debug!("Attempting to deserialize search arguments: {:?}", args);
+
+                                // @todo: check if we can get rid of this simplified version of SearchParams
+                                let search_params = if let (Some(term), limit, mode) = (
+                                    args.get("term").and_then(|v| v.as_str()),
+                                    args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10),
+                                    args.get("mode").and_then(|v| v.as_str()),
+                                ) {
+                                    use crate::types::{
+                                        FulltextMode, Limit, Properties, SearchMode, SearchOffset,
+                                        SearchParams, WhereFilter,
+                                    };
+                                    use std::collections::HashMap;
+
+                                    let search_mode = match mode {
+                                        Some("vector") => SearchMode::Vector(VectorMode {
+                                            term: term.to_string(),
+                                            similarity: Similarity(0.6),
+                                        }),
+                                        Some("hybrid") => SearchMode::Hybrid(HybridMode {
+                                            term: term.to_string(),
+                                            similarity: Similarity(0.6),
+                                            threshold: Some(Threshold(1.0)),
+                                            exact: false,
+                                            tolerance: None,
+                                        }),
+                                        _ => SearchMode::FullText(FulltextMode {
+                                            term: term.to_string(),
+                                            threshold: None,
+                                            exact: false,
+                                            tolerance: None,
+                                        }),
+                                    };
+
+                                    SearchParams {
+                                        mode: search_mode,
+                                        limit: Limit(limit as usize),
+                                        offset: SearchOffset(0),
+                                        boost: HashMap::new(),
+                                        properties: Properties::Star,
+                                        where_filter: WhereFilter::default(),
+                                        facets: HashMap::new(),
+                                        indexes: None,
+                                        sort_by: None,
+                                        group_by: None,
+                                        user_id: None,
                                     }
-                                }
+                                } else {
+                                    // Try full SearchParams deserialization as fallback
+                                    match serde_json::from_value(args.clone()) {
+                                        Ok(params) => params,
+                                        Err(err) => {
+                                            error!("Failed to deserialize search parameters: {err}, args: {:?}", args);
+                                            return (
+                                                StatusCode::BAD_REQUEST,
+                                                Json(JsonRpcResponse {
+                                                    jsonrpc: "2.0".to_string(),
+                                                    id: request.id,
+                                                    result: None,
+                                                    error: Some(JsonRpcError {
+                                                        code: -32602,
+                                                        message: format!(
+                                                            "Invalid search parameters: {err}. Arguments received: {:?}", args
+                                                        ),
+                                                    }),
+                                                }),
+                                            );
+                                        }
+                                    }
+                                };
+                                search_params
                             } else {
                                 return (
                                     StatusCode::BAD_REQUEST,

@@ -302,6 +302,7 @@ pub enum WriteOperation {
         )]
         read_api_key: ApiKey,
         description: Option<String>,
+        mcp_description: Option<String>,
         default_locale: Locale,
     },
     CreateCollection2 {
@@ -317,6 +318,7 @@ pub enum WriteOperation {
         )]
         write_api_key: ApiKey,
         description: Option<String>,
+        mcp_description: Option<String>,
         default_locale: Locale,
     },
     DeleteCollection(CollectionId),
@@ -445,6 +447,7 @@ mod tests {
                 id: collection_id,
                 read_api_key: ApiKey::try_new("foo").unwrap(),
                 description: Some("bar".to_string()),
+                mcp_description: None,
                 default_locale: locale,
             },
             WriteOperation::DeleteCollection(collection_id),
