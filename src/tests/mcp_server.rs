@@ -293,8 +293,7 @@ async fn test_mcp_update_endpoint() {
 
     assert!(
         result.is_ok(),
-        "Failed to update MCP description: {:?}",
-        result
+        "Failed to update MCP description: {result:?}"
     );
 
     test_context.commit_all().await.unwrap();
@@ -329,8 +328,7 @@ async fn test_mcp_update_endpoint() {
 
     assert!(
         result.is_ok(),
-        "Failed to clear MCP description: {:?}",
-        result
+        "Failed to clear MCP description: {result:?}"
     );
 
     test_context.commit_all().await.unwrap();
