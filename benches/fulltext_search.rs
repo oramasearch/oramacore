@@ -185,6 +185,7 @@ impl TestContext {
                     read_api_key,
                     write_api_key,
                     language: None,
+                    mcp_description: None,
                     embeddings_model: Some(OramaModelSerializable(OramaModel::BgeSmall)),
                 },
             )
