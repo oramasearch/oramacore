@@ -334,7 +334,7 @@ impl Index {
     }
 
     pub async fn commit(&self, data_dir: PathBuf, offset: Offset) -> Result<()> {
-        warn!("Committing index {:?}", self.id);
+        debug!("Starting to commit index {:?}", self.id);
 
         let data_dir_with_offset = data_dir.join(format!("offset-{}", offset.0));
 

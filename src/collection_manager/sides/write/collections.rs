@@ -13,7 +13,7 @@ use crate::ai::OramaModel;
 use crate::collection_manager::sides::write::collection::CreateEmptyCollection;
 use crate::collection_manager::sides::write::context::WriteSideContext;
 use crate::collection_manager::sides::write::WriteError;
-use crate::collection_manager::sides::{OperationSender, WriteOperation};
+use crate::collection_manager::sides::{CollectionWriteOperation, OperationSender, WriteOperation};
 use crate::metrics::commit::COMMIT_CALCULATION_TIME;
 use crate::metrics::Empty;
 use crate::types::{CollectionId, DocumentId};
@@ -106,6 +106,7 @@ impl CollectionsWriter {
         let CreateCollection {
             id,
             description,
+            mcp_description,
             language,
             embeddings_model,
             write_api_key,
@@ -143,10 +144,36 @@ impl CollectionsWriter {
                 read_api_key,
                 write_api_key,
                 description,
+                mcp_description,
                 default_locale,
             })
             .await
             .context("Cannot send create collection")?;
+
+        Ok(())
+    }
+
+    pub async fn update_collection_mcp_description(
+        &self,
+        collection_id: CollectionId,
+        mcp_description: Option<String>,
+        sender: OperationSender,
+    ) -> Result<(), WriteError> {
+        info!("Updating collection {:?}", collection_id);
+
+        let collections = self.collections.read().await;
+        if !collections.contains_key(&collection_id) {
+            return Err(WriteError::CollectionNotFound(collection_id));
+        }
+        drop(collections);
+
+        sender
+            .send(WriteOperation::Collection(
+                collection_id,
+                CollectionWriteOperation::UpdateMcpDescription { mcp_description },
+            ))
+            .await
+            .context("Cannot send update collection")?;
 
         Ok(())
     }

@@ -375,6 +375,29 @@ impl WriteSide {
         Ok(CollectionCreated { collection_id })
     }
 
+    pub async fn update_collection_mcp_description(
+        &self,
+        write_api_key: WriteApiKey,
+        collection_id: CollectionId,
+        mcp_description: Option<String>,
+    ) -> Result<(), WriteError> {
+        // Verify the collection exists and we have write access
+        let _collection = self.get_collection(collection_id, write_api_key).await?;
+
+        self.write_operation_counter.fetch_add(1, Ordering::Relaxed);
+        let res = self
+            .collections
+            .update_collection_mcp_description(
+                collection_id,
+                mcp_description,
+                self.op_sender.clone(),
+            )
+            .await;
+        self.write_operation_counter.fetch_sub(1, Ordering::Relaxed);
+
+        res
+    }
+
     pub async fn create_index(
         &self,
         write_api_key: WriteApiKey,

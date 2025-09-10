@@ -619,6 +619,7 @@ pub struct DeleteIndex {
 pub struct CreateCollection {
     pub id: CollectionId,
     pub description: Option<String>,
+    pub mcp_description: Option<String>,
 
     #[serde(
         deserialize_with = "deserialize_api_key",
@@ -662,6 +663,11 @@ pub struct SwapCollections {
     pub from: CollectionId,
     pub to: CollectionId,
     pub reference: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateCollectionMcpRequest {
+    pub mcp_description: Option<String>,
 }
 
 impl TryFrom<serde_json::Value> for CreateCollection {

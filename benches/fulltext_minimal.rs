@@ -155,6 +155,7 @@ impl BenchContext {
                 CreateCollection {
                     id: collection_id,
                     description: None,
+                    mcp_description: None,
                     read_api_key,
                     write_api_key,
                     language: None,

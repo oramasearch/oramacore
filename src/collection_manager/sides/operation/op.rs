@@ -217,6 +217,9 @@ pub enum CollectionWriteOperation {
         temp_index_id: IndexId,
     },
     IndexWriteOperation(IndexId, IndexWriteOperation),
+    UpdateMcpDescription {
+        mcp_description: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +305,7 @@ pub enum WriteOperation {
         )]
         read_api_key: ApiKey,
         description: Option<String>,
+        mcp_description: Option<String>,
         default_locale: Locale,
     },
     CreateCollection2 {
@@ -317,6 +321,7 @@ pub enum WriteOperation {
         )]
         write_api_key: ApiKey,
         description: Option<String>,
+        mcp_description: Option<String>,
         default_locale: Locale,
     },
     DeleteCollection(CollectionId),
@@ -339,6 +344,10 @@ impl WriteOperation {
                     IndexWriteOperation::CreateField2 { .. },
                 ),
             ) => "create_field_2",
+            WriteOperation::Collection(
+                _,
+                CollectionWriteOperation::UpdateMcpDescription { .. },
+            ) => "update_mcp_description",
             WriteOperation::Collection(
                 _,
                 CollectionWriteOperation::IndexWriteOperation(_, IndexWriteOperation::Index { .. }),
@@ -445,6 +454,7 @@ mod tests {
                 id: collection_id,
                 read_api_key: ApiKey::try_new("foo").unwrap(),
                 description: Some("bar".to_string()),
+                mcp_description: None,
                 default_locale: locale,
             },
             WriteOperation::DeleteCollection(collection_id),
