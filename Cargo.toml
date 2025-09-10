@@ -2,6 +2,7 @@
 name = "oramacore"
 version = "1.1.88"
 edition = "2021"
+publish = false
 
 [dependencies]
 config = { version = "0.15.6", features = ["json5"] }
