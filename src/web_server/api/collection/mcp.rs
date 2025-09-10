@@ -246,12 +246,10 @@ async fn mcp_endpoint(
         .unwrap_or("the collection");
 
     let search_description = format!(
-        "Perform a full-text, vector, or hybrid search operation on {}",
-        collection_description
+        "Perform a full-text, vector, or hybrid search operation on {collection_description}"
     );
     let nlp_search_description = format!(
-        "Perform complex search queries using natural language on {}",
-        collection_description
+        "Perform complex search queries using natural language on {collection_description}"
     );
 
     let tools = serde_json::json!([
@@ -355,7 +353,7 @@ async fn mcp_endpoint(
                                                     error: Some(JsonRpcError {
                                                         code: -32602,
                                                         message: format!(
-                                                            "Invalid search parameters: {err}. Arguments received: {:?}", args
+                                                            "Invalid search parameters: {err}. Arguments received: {args:?}"
                                                         ),
                                                     }),
                                                 }),
