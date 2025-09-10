@@ -1,6 +1,9 @@
 use itertools::Itertools;
-use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
-use tokio::sync::RwLock;
+use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
+use tokio::{
+    sync::RwLock,
+    time::{sleep, timeout},
+};
 use tracing::{debug, error, info, trace, warn};
 use zebo::{Zebo, ZeboInfo};
 
@@ -51,6 +54,8 @@ impl CommittedDiskDocumentStorage {
             .get_documents(doc_ids.to_vec())
             .context("Cannot get documents from zebo")?;
         let output: Result<Vec<_>, zebo::ZeboError> = output.collect();
+        drop(zebo);
+
         let output = output.context("Failed to got documents")?;
         let mut output: Vec<_> = output
             .into_iter()
@@ -82,8 +87,33 @@ impl CommittedDiskDocumentStorage {
             new_docs.len(),
             to_delete.len()
         );
+        trace!("New documents: {:?}", new_docs);
+        trace!("To delete documents: {:?}", to_delete);
+        self.apply_inner(new_docs, to_delete, 10).await?;
+        info!("Documents committed");
 
-        let mut zebo = self.zebo.write().await;
+        Ok(())
+    }
+
+    async fn apply_inner(
+        &self,
+        new_docs: Vec<(DocumentId, Arc<RawJSONDocument>)>,
+        to_delete: Vec<DocumentId>,
+        retry: u8,
+    ) -> Result<()> {
+        let result = timeout(Duration::from_secs(5), self.zebo.write()).await;
+        let mut zebo = match result {
+            Ok(zebo) => zebo,
+            Err(_) => {
+                if retry == 0 {
+                    return Err(anyhow::anyhow!("Cannot acquire zebo lock"));
+                }
+                warn!("Zebo lock is held, retrying in 1 second...");
+                sleep(Duration::from_secs(1)).await;
+                return Box::pin(self.apply_inner(new_docs, to_delete, retry.saturating_sub(1)))
+                    .await;
+            }
+        };
         zebo.add_documents_batch(
             new_docs
                 .into_iter()
@@ -95,6 +125,8 @@ impl CommittedDiskDocumentStorage {
 
         zebo.remove_documents(to_delete, false)
             .context("Cannot remove documents")?;
+
+        drop(zebo);
 
         Ok(())
     }
